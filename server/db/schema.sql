@@ -7,6 +7,34 @@ create table if not exists workspace (
   created_at  timestamptz not null default now()
 );
 
+-- акаунти коучів (multi-tenant): кожен юзер має власний workspace
+create table if not exists app_user (
+  id             uuid primary key default gen_random_uuid(),
+  email          text not null unique,
+  password_hash  text not null,
+  email_verified boolean not null default false,
+  workspace_id   uuid not null references workspace(id) on delete cascade,
+  created_at     timestamptz not null default now()
+);
+
+-- сесії (cookie -> token у БД, відкликається)
+create table if not exists user_session (
+  token       text primary key,
+  user_id     uuid not null references app_user(id) on delete cascade,
+  expires_at  timestamptz not null,
+  created_at  timestamptz not null default now()
+);
+
+-- токени для верифікації пошти / скидання пароля
+create table if not exists email_token (
+  token       text primary key,
+  user_id     uuid not null references app_user(id) on delete cascade,
+  kind        text not null,                 -- verify|reset
+  expires_at  timestamptz not null,
+  used        boolean not null default false,
+  created_at  timestamptz not null default now()
+);
+
 -- редаговані глобальні блоки: marketing_context | tone_of_voice | deai_rules | content_strategy
 create table if not exists settings_block (
   id           uuid primary key default gen_random_uuid(),

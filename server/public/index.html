@@ -3,454 +3,418 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>socialio.rozum.one — кишка контенту</title>
+<title>socialio by ROZUM — контент на автопілоті, у твоєму голосі</title>
+<meta name="description" content="socialio перетворює твої дзвінки, сесії, нотатки й новини ніші на готові пости у твоєму голосі — без AI-сліду — і публікує автоматично в Telegram та Instagram.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --line:#2a3340;
-    --txt:#e6edf3; --muted:#8b98a8; --accent:#4f8cff; --accent2:#6fe3c2;
-    --warn:#f5b54a; --stale:#f5704a; --ok:#3fb950; --radius:14px;
+    --bg:#0a0c12; --bg2:#0e1119; --panel:#12161f; --panel2:#171c27; --line:#232a38;
+    --txt:#eef2f8; --muted:#9aa6b8; --accent:#5b8cff; --cyan:#5be3c2; --violet:#a982ff;
+    --warn:#f5b54a; --ok:#3fd07a; --radius:16px; --maxw:1120px;
   }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.5 -apple-system,Segoe UI,Roboto,Inter,sans-serif}
-  a{color:var(--accent)}
-  .wrap{max-width:900px;margin:0 auto;padding:28px 20px 130px}
-  header.top{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:8px}
-  h1{font-size:22px;margin:0;letter-spacing:.2px}
-  h1 .v{color:var(--muted);font-weight:500;font-size:14px}
-  .sub{color:var(--muted);font-size:13px;margin:2px 0 22px}
-  .keybar{display:flex;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--stale)}
-  .dot.on{background:var(--ok)}
-  .keybar small{color:var(--muted);font-size:12px}
-  .settings{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:26px;overflow:hidden}
-  .settings>summary{cursor:pointer;list-style:none;padding:14px 18px;font-weight:600;display:flex;align-items:center;gap:8px}
-  .settings>summary::-webkit-details-marker{display:none}
-  .settings .body{padding:0 18px 18px;display:grid;gap:14px}
-  .fld label{display:block;font-size:12px;color:var(--muted);margin:0 0 5px;text-transform:uppercase;letter-spacing:.5px}
-  textarea,select,input.txt{width:100%;background:#0b0e13;border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:10px 12px;font:13px/1.5 inherit;resize:vertical}
-  textarea{min-height:64px}
-  .pipe{position:relative;display:grid;gap:0}
-  .step{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;margin:0 0 0 34px}
-  .step+.step{margin-top:26px}
-  .step::before{content:"";position:absolute;left:-34px;top:24px;width:18px;height:18px;border-radius:50%;background:var(--panel2);border:2px solid var(--accent);z-index:2}
-  .step::after{content:"";position:absolute;left:-26px;top:42px;width:2px;height:calc(100% + 26px);background:var(--line);z-index:1}
-  .step:last-child::after{display:none}
-  .step.done::before{background:var(--accent);box-shadow:0 0 0 4px rgba(79,140,255,.15)}
-  .step.stale::before{border-color:var(--stale);background:var(--panel2)}
-  .shead{display:flex;align-items:center;gap:10px;justify-content:space-between}
-  .shead .t{font-weight:600;font-size:15px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
-  .num{font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:1px 7px}
-  .badge{font-size:11px;padding:2px 8px;border-radius:20px;border:1px solid var(--line);color:var(--muted)}
-  .badge.stale{color:var(--stale);border-color:var(--stale)}
-  .badge.ok{color:var(--ok);border-color:var(--ok)}
-  .badge.run{color:var(--accent);border-color:var(--accent)}
-  .badge.soon{color:var(--warn);border-color:var(--warn)}
-  .ctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0 0}
-  button{cursor:pointer;border:1px solid var(--line);background:var(--panel2);color:var(--txt);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;transition:.15s}
-  button:hover{border-color:var(--accent)}
-  button.primary{background:var(--accent);border-color:var(--accent);color:#06122b}
-  button.ghost{background:transparent}
-  button:disabled{opacity:.45;cursor:not-allowed}
-  .out{margin-top:13px;display:grid;gap:10px}
-  .card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 13px}
-  .idea{display:flex;gap:10px;align-items:flex-start}
-  .idea input[type=checkbox]{margin-top:4px;width:16px;height:16px;accent-color:var(--accent)}
-  .idea .it{flex:1}
-  .idea .it .ang{color:var(--muted);font-size:12px;margin-top:3px}
-  .post{white-space:pre-wrap}
-  .tg{background:#17212b;border:1px solid #233140;border-left:3px solid #4f8cff;border-radius:10px;padding:12px 14px;white-space:pre-wrap;position:relative}
-  .tg .copy{position:absolute;top:8px;right:8px;font-size:11px;padding:4px 9px}
-  .empty{color:var(--muted);font-size:13px;font-style:italic}
-  .tray{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
-  .chip{background:#17212b;border:1px solid #2c3a4a;border-left:3px solid var(--accent2);border-radius:9px;padding:8px 10px;font-size:12px;max-width:230px;cursor:grab}
-  .chip b{display:block;font-size:12px;margin-bottom:2px}
-  .chip small{color:var(--muted)}
-  .chip.placed{opacity:.4}
-  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:14px}
-  .cal .dow{font-size:11px;color:var(--muted);text-align:center;padding:2px 0}
-  .day{min-height:84px;background:#0b0e13;border:1px solid var(--line);border-radius:9px;padding:5px;font-size:11px}
-  .day.over{border-color:var(--accent);background:#101826}
-  .day .dn{color:var(--muted);font-size:10px;margin-bottom:4px}
-  .day .pchip{background:#17212b;border:1px solid #2c3a4a;border-radius:6px;padding:4px 6px;margin-bottom:4px;font-size:10px;cursor:grab;position:relative}
-  .day .pchip .x{position:absolute;top:1px;right:4px;color:var(--muted);cursor:pointer}
-  .runall{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transparent,var(--bg) 38%);padding:22px 20px;display:flex;justify-content:center;gap:10px;z-index:20}
-  .runall .inner{display:flex;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
-  .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:s .7s linear infinite;vertical-align:-2px}
-  @keyframes s{to{transform:rotate(360deg)}}
-  .hint{font-size:11px;color:var(--muted);margin-top:6px}
-  #saved{font-size:11px;color:var(--ok);opacity:0;transition:.3s}
-  #saved.show{opacity:1}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--txt);font-family:Inter,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6;overflow-x:hidden}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 22px}
+  section{position:relative}
+  h1,h2,h3{line-height:1.12;letter-spacing:-.02em;font-weight:800}
+  h2{font-size:clamp(26px,4vw,42px)}
+  .muted{color:var(--muted)}
+  .grad{background:linear-gradient(100deg,var(--accent),var(--cyan) 55%,var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .btn{display:inline-flex;align-items:center;gap:8px;border-radius:12px;padding:13px 22px;font-weight:700;font-size:15px;border:1px solid var(--line);background:var(--panel2);color:var(--txt);cursor:pointer;transition:.18s;white-space:nowrap}
+  .btn:hover{transform:translateY(-1px);border-color:var(--accent)}
+  .btn.primary{background:linear-gradient(100deg,var(--accent),var(--violet));border:none;color:#0a0c12;box-shadow:0 8px 30px -8px rgba(91,140,255,.6)}
+  .btn.primary:hover{box-shadow:0 12px 40px -8px rgba(91,140,255,.8)}
+  .btn.lg{padding:16px 30px;font-size:16px}
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--cyan);background:rgba(91,227,194,.08);border:1px solid rgba(91,227,194,.25);padding:6px 14px;border-radius:30px}
+
+  /* glow blobs */
+  .blob{position:absolute;border-radius:50%;filter:blur(90px);opacity:.5;z-index:0;pointer-events:none}
+  .blob.b1{width:480px;height:480px;background:radial-gradient(circle,rgba(91,140,255,.55),transparent 70%);top:-120px;left:-80px;animation:drift 18s ease-in-out infinite}
+  .blob.b2{width:420px;height:420px;background:radial-gradient(circle,rgba(169,130,255,.45),transparent 70%);top:200px;right:-120px;animation:drift 22s ease-in-out infinite reverse}
+  @keyframes drift{0%,100%{transform:translate(0,0)}50%{transform:translate(40px,50px)}}
+
+  /* nav */
+  nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(12px);background:rgba(10,12,18,.72);border-bottom:1px solid transparent;transition:.3s}
+  nav.scrolled{border-bottom:1px solid var(--line);background:rgba(10,12,18,.9)}
+  .nav-in{display:flex;align-items:center;justify-content:space-between;height:66px}
+  .logo{display:flex;align-items:center;gap:9px;font-weight:800;font-size:19px;letter-spacing:-.02em}
+  .logo .mark{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--violet));display:grid;place-items:center;font-size:15px}
+  .logo .by{font-size:11px;color:var(--muted);font-weight:600;border:1px solid var(--line);border-radius:6px;padding:2px 6px;letter-spacing:.04em}
+  .nav-links{display:flex;align-items:center;gap:26px;font-size:14px;font-weight:500}
+  .nav-links a.lnk{color:var(--muted);transition:.15s}
+  .nav-links a.lnk:hover{color:var(--txt)}
+  .nav-cta{display:flex;align-items:center;gap:12px}
+  @media(max-width:780px){.nav-links .lnk{display:none}}
+
+  /* hero */
+  .hero{padding:70px 0 40px;text-align:center}
+  .hero h1{font-size:clamp(34px,6vw,62px);max-width:880px;margin:18px auto 0}
+  .hero p.lead{font-size:clamp(16px,2.2vw,21px);color:var(--muted);max-width:660px;margin:20px auto 0}
+  .hero-cta{display:flex;gap:14px;justify-content:center;margin-top:30px;flex-wrap:wrap}
+  .trust{margin-top:18px;font-size:13px;color:var(--muted)}
+
+  /* animated product demo */
+  .demo{max-width:920px;margin:48px auto 0;background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:20px;padding:0;position:relative;overflow:hidden;box-shadow:0 40px 120px -40px rgba(91,140,255,.35)}
+  .demo-bar{display:flex;align-items:center;gap:7px;padding:13px 16px;border-bottom:1px solid var(--line)}
+  .demo-bar i{width:11px;height:11px;border-radius:50%;background:#2c3442;display:inline-block}
+  .demo-bar .url{margin-left:10px;font-size:12px;color:var(--muted)}
+  .flow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;min-height:330px}
+  @media(max-width:720px){.flow{grid-template-columns:1fr;min-height:auto}}
+  .flow .col{padding:20px;border-right:1px solid var(--line)}
+  .flow .col:last-child{border-right:none}
+  .flow h4{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:12px;font-weight:700}
+  .src{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:12.5px;margin-bottom:8px;opacity:0;transform:translateY(8px);display:flex;align-items:center;gap:8px}
+  .src.in{animation:pop .5s forwards}
+  .src .ic{font-size:15px}
+  .idea-line{font-size:12.5px;color:var(--muted);padding:7px 10px;border-left:2px solid var(--cyan);margin-bottom:7px;opacity:0;transform:translateX(-6px)}
+  .idea-line.in{animation:slidein .5s forwards}
+  .postcard{background:#0f1521;border:1px solid #233140;border-left:3px solid var(--accent);border-radius:10px;padding:12px;font-size:12.5px;min-height:120px;white-space:pre-wrap}
+  .tgline{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--cyan);margin-top:10px;opacity:0}
+  .tgline.in{animation:pop .5s forwards}
+  .cursor{display:inline-block;width:7px;height:14px;background:var(--accent);vertical-align:-2px;animation:blink .8s steps(2) infinite}
+  @keyframes blink{50%{opacity:0}}
+  @keyframes pop{to{opacity:1;transform:translateY(0)}}
+  @keyframes slidein{to{opacity:1;transform:translateX(0)}}
+
+  /* reveal */
+  .reveal{opacity:0;transform:translateY(24px);transition:.7s cubic-bezier(.2,.7,.2,1)}
+  .reveal.in{opacity:1;transform:none}
+
+  /* generic section spacing */
+  .sec{padding:88px 0}
+  .sec h2{text-align:center;max-width:760px;margin:0 auto}
+  .sec .sub{text-align:center;color:var(--muted);max-width:620px;margin:14px auto 0;font-size:17px}
+
+  /* pains */
+  .pains{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-top:44px}
+  @media(max-width:720px){.pains{grid-template-columns:1fr}}
+  .pain{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px;display:flex;gap:14px}
+  .pain .x{font-size:22px;flex-shrink:0}
+  .pain b{display:block;margin-bottom:4px}
+  .pain p{font-size:14px;color:var(--muted)}
+
+  /* steps */
+  .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:48px}
+  @media(max-width:900px){.steps{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:520px){.steps{grid-template-columns:1fr}}
+  .step{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:var(--radius);padding:24px;position:relative}
+  .step .n{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--violet));display:grid;place-items:center;font-weight:800;color:#0a0c12;margin-bottom:14px}
+  .step h3{font-size:18px;margin-bottom:6px}
+  .step p{font-size:14px;color:var(--muted)}
+
+  /* bento sources */
+  .bento{display:grid;grid-template-columns:repeat(6,1fr);gap:16px;margin-top:48px}
+  .cell{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px;transition:.2s}
+  .cell:hover{border-color:var(--accent);transform:translateY(-3px)}
+  .cell .ic{font-size:26px;margin-bottom:10px}
+  .cell h3{font-size:17px;margin-bottom:5px}
+  .cell p{font-size:13.5px;color:var(--muted)}
+  .cell .soon{font-size:11px;color:var(--warn);border:1px solid var(--warn);border-radius:20px;padding:1px 9px;display:inline-block;margin-top:8px}
+  .c-2{grid-column:span 2}.c-3{grid-column:span 3}
+  @media(max-width:860px){.bento{grid-template-columns:repeat(2,1fr)}.c-2,.c-3{grid-column:span 1}}
+
+  /* compare */
+  .cmp{margin-top:44px;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+  .cmp-row{display:grid;grid-template-columns:2fr 1fr 1fr;align-items:center}
+  .cmp-row>div{padding:15px 18px;font-size:14.5px;border-bottom:1px solid var(--line)}
+  .cmp-row.head>div{background:var(--panel2);font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+  .cmp-row .us{color:var(--cyan);font-weight:700;text-align:center}
+  .cmp-row .them{color:var(--muted);text-align:center}
+  .cmp-row:last-child>div{border-bottom:none}
+  .cmp .feat{color:var(--txt)}
+
+  /* use cases tabs */
+  .tabs{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:40px}
+  .tab{padding:10px 18px;border:1px solid var(--line);border-radius:30px;font-size:14px;font-weight:600;color:var(--muted);cursor:pointer;transition:.15s;background:var(--panel)}
+  .tab.active{color:#0a0c12;background:linear-gradient(100deg,var(--accent),var(--violet));border-color:transparent}
+  .usecase{max-width:720px;margin:26px auto 0;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:28px;text-align:center}
+  .usecase h3{font-size:20px;margin-bottom:8px}
+  .usecase p{color:var(--muted)}
+
+  /* pricing */
+  .prices{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:48px}
+  @media(max-width:820px){.prices{grid-template-columns:1fr}}
+  .price{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:28px}
+  .price.featured{border-color:var(--accent);background:linear-gradient(180deg,rgba(91,140,255,.08),var(--panel));position:relative}
+  .price.featured::before{content:"Найпопулярніше";position:absolute;top:-11px;left:24px;background:linear-gradient(100deg,var(--accent),var(--violet));color:#0a0c12;font-size:11px;font-weight:700;padding:3px 12px;border-radius:20px}
+  .price h3{font-size:18px}
+  .price .amt{font-size:38px;font-weight:800;margin:12px 0 2px}
+  .price .amt span{font-size:15px;color:var(--muted);font-weight:500}
+  .price ul{list-style:none;margin:18px 0;display:grid;gap:9px}
+  .price li{font-size:14px;color:var(--muted);display:flex;gap:9px}
+  .price li::before{content:"✓";color:var(--ok);font-weight:800}
+  .price .btn{width:100%;justify-content:center;margin-top:6px}
+
+  /* faq */
+  .faq{max-width:760px;margin:44px auto 0}
+  .qa{border:1px solid var(--line);border-radius:12px;margin-bottom:12px;background:var(--panel);overflow:hidden}
+  .qa summary{cursor:pointer;list-style:none;padding:18px 20px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
+  .qa summary::-webkit-details-marker{display:none}
+  .qa summary .plus{color:var(--accent);font-size:20px;transition:.2s}
+  .qa[open] summary .plus{transform:rotate(45deg)}
+  .qa .a{padding:0 20px 18px;color:var(--muted);font-size:14.5px}
+
+  /* final cta */
+  .final{text-align:center;padding:96px 0;position:relative}
+  .final .card{max-width:760px;margin:0 auto;background:linear-gradient(135deg,rgba(91,140,255,.14),rgba(169,130,255,.12));border:1px solid var(--line);border-radius:24px;padding:54px 30px}
+  .final h2{margin-bottom:14px}
+
+  footer{border-top:1px solid var(--line);padding:38px 0;color:var(--muted);font-size:13.5px}
+  .foot-in{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px}
+
+  @media(prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important}
+    .reveal{opacity:1;transform:none}
+    .src,.idea-line,.tgline{opacity:1;transform:none}
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
 
-  <header class="top">
-    <div>
-      <h1>socialio <span class="v">· кишка контенту</span></h1>
-      <div class="sub">Транскрипт → ідеї → пости → tone of voice → Telegram → де-AI → контент-стратегія → календар.</div>
+<!-- NAV -->
+<nav id="nav"><div class="wrap nav-in">
+  <a class="logo" href="#"><span class="mark">◎</span> socialio <span class="by">by ROZUM</span></a>
+  <div class="nav-links">
+    <a class="lnk" href="#how">Як працює</a>
+    <a class="lnk" href="#sources">Джерела</a>
+    <a class="lnk" href="#why">Чому ми</a>
+    <a class="lnk" href="#pricing">Ціни</a>
+    <div class="nav-cta">
+      <a class="lnk" href="/login">Увійти</a>
+      <a class="btn primary" href="/register">Спробувати</a>
     </div>
-    <div class="keybar">
-      <span class="dot" id="srvDot"></span>
-      <small id="runLabel">новий прогін</small>
-      <span id="saved">збережено ✓</span>
-    </div>
-  </header>
-
-  <details class="settings" open>
-    <summary>⚙️ Глобальні блоки (зберігаються на сервері, тягнуться кроками)</summary>
-    <div class="body">
-      <div class="fld"><label>Marketing Context · крок 1</label><textarea id="mkt"></textarea></div>
-      <div class="fld"><label>Tone of Voice · крок 4</label><textarea id="tov"></textarea></div>
-      <div class="fld"><label>De-AI Rules · крок 6</label><textarea id="deai"></textarea></div>
-      <div class="fld"><label>Content Strategy · крок 7</label><textarea id="strat"></textarea></div>
-    </div>
-  </details>
-
-  <details class="settings" id="tgPanel">
-    <summary>🔌 Інтеграція: Telegram (публікація постів)</summary>
-    <div class="body">
-      <div class="hint" style="font-size:13px;line-height:1.7">
-        <b>Як підключити (одноразово):</b><br>
-        1. У Telegram відкрий <b>@BotFather</b> → команда <code>/newbot</code> → дай ім'я → отримаєш <b>токен</b> (вигляд <code>123456:ABC-...</code>).<br>
-        2. Додай свого бота <b>адміністратором</b> у свій канал (з правом «Publish messages») і у свою групу.<br>
-        3. Встав токен нижче. Канал — <code>@username</code> (публічний) або числовий id; група — числовий id (напр. <code>-1001234567890</code>).<br>
-        4. Тисни <b>«Перевірити з'єднання»</b> — покаже, чи бот бачить канал/групу і чи він адмін.<br>
-        <small>Не знаєш id? Додай бота у канал/групу й скористайся ботом <code>@getidsbot</code> або <code>@username_to_id_bot</code>.</small>
-      </div>
-      <div class="fld"><label>Bot Token</label><input class="txt" type="password" id="tgToken" placeholder="123456:ABC-..."></div>
-      <div class="fld"><label>Канал (chat id або @username)</label><input class="txt" id="tgChannel" placeholder="@my_channel або -1001234567890"></div>
-      <div class="fld"><label>Група (chat id)</label><input class="txt" id="tgGroup" placeholder="-1001234567890"></div>
-      <div class="ctl">
-        <button class="primary" id="tgSave">Зберегти</button>
-        <button class="ghost" id="tgTest">Перевірити з'єднання</button>
-      </div>
-      <div id="tgResult" class="out"></div>
-    </div>
-  </details>
-
-  <div class="pipe" id="pipe">
-
-    <section class="step" id="s0">
-      <div class="shead"><div class="t"><span class="num">0</span> Транскрипт сесії</div><span class="badge" id="b0">джерело</span></div>
-      <div class="fld" style="margin-top:12px"><label>Вставте транскрипт коуч-сесії</label>
-        <textarea id="transcript" style="min-height:120px"></textarea>
-        <div class="ctl"><button class="ghost" id="sampleBtn">Підставити приклад</button></div>
-        <div class="hint" id="lockHint"></div>
-      </div>
-    </section>
-
-    <section class="step" id="s1">
-      <div class="shead"><div class="t"><span class="num">1</span> Витяг ідей</div><span class="badge" id="b1">очікує</span></div>
-      <div class="ctl"><button class="primary" data-run="1">▷ Запустити</button>
-        <button class="ghost" data-from="1">↻ Звідси донизу</button></div>
-      <div class="out" id="o1"><div class="empty">Ідеї з'являться тут — кожну можна вимкнути перед чернетками.</div></div>
-    </section>
-
-    <section class="step" id="s3">
-      <div class="shead"><div class="t"><span class="num">2–3</span> Чорнові пости</div><span class="badge" id="b3">очікує</span></div>
-      <div class="ctl"><button class="primary" data-run="3">▷ Запустити</button>
-        <button class="ghost" data-from="3">↻ Звідси донизу</button></div>
-      <div class="out" id="o3"><div class="empty">Спершу відбери ідеї на кроці 1.</div></div>
-    </section>
-
-    <section class="step" id="s4">
-      <div class="shead"><div class="t"><span class="num">4</span> Tone of Voice</div><span class="badge" id="b4">очікує</span></div>
-      <div class="ctl"><button class="primary" data-run="4">▷ Запустити</button>
-        <button class="ghost" data-from="4">↻ Звідси донизу</button></div>
-      <div class="out" id="o4"><div class="empty">—</div></div>
-    </section>
-
-    <section class="step" id="s5">
-      <div class="shead"><div class="t"><span class="num">5</span> Формат під Telegram <span class="badge soon">IG / FB — скоро</span></div><span class="badge" id="b5">очікує</span></div>
-      <div class="ctl"><button class="primary" data-run="5">▷ Запустити</button>
-        <button class="ghost" data-from="5">↻ Звідси донизу</button></div>
-      <div class="out" id="o5"><div class="empty">—</div></div>
-    </section>
-
-    <section class="step" id="s6">
-      <div class="shead"><div class="t"><span class="num">6</span> Де-AI</div><span class="badge" id="b6">очікує</span></div>
-      <div class="ctl"><button class="primary" data-run="6">▷ Запустити</button>
-        <button class="ghost" data-from="6">↻ Звідси донизу</button></div>
-      <div class="out" id="o6"><div class="empty">Готові Telegram-пости з кнопкою копіювання.</div></div>
-    </section>
-
-    <section class="step" id="s7">
-      <div class="shead"><div class="t"><span class="num">7</span> Контент-стратегія</div><span class="badge" id="b7">очікує</span></div>
-      <div class="ctl"><button class="primary" data-run="7">▷ Запустити</button>
-        <button class="ghost" data-from="7">↻ Звідси донизу</button></div>
-      <div class="out" id="o7"><div class="empty">План публікацій з'явиться тут.</div></div>
-    </section>
-
-    <section class="step" id="s8">
-      <div class="shead"><div class="t"><span class="num">8</span> Календар <span class="badge soon">автопостинг — далі</span></div><span class="badge" id="b8">план</span></div>
-      <div class="ctl">
-        <button class="primary" id="recoBtn">✨ Рекомендувати дати</button>
-        <button class="ghost" id="clearCal">Очистити календар</button>
-      </div>
-      <div class="hint">Перетягуй картки з лотка на дні. Або тисни «Рекомендувати» — розставить за рекомендованим зсувом зі стратегії. (Поки локально у браузері.)</div>
-      <div class="tray" id="tray"></div>
-      <div class="cal" id="cal"></div>
-    </section>
-
   </div>
-</div>
+</div></nav>
 
-<div class="runall"><div class="inner">
-  <button class="primary" id="runAll">⚡ Прогнати всю кишку</button>
-  <button class="ghost" id="newRun">＋ Новий прогін</button>
-</div></div>
+<!-- HERO -->
+<section class="hero">
+  <div class="blob b1"></div><div class="blob b2"></div>
+  <div class="wrap" style="position:relative;z-index:2">
+    <span class="eyebrow reveal">✨ AI-контент у твоєму голосі · українською</span>
+    <h1 class="reveal">Ти проводиш дзвінки й сесії. <span class="grad">socialio робить з них контент</span> — поки ти працюєш.</h1>
+    <p class="lead reveal">Транскрипти, нотатки, новини твоєї ніші, фото з Google Drive — socialio перетворює це на готові пости у <b>твоєму голосі</b>, без AI-сліду, і публікує сам у Telegram та Instagram.</p>
+    <div class="hero-cta reveal">
+      <a class="btn primary lg" href="/register">Спробувати безкоштовно →</a>
+      <a class="btn lg" href="#how">Подивитись, як працює</a>
+    </div>
+    <div class="trust reveal">Без картки • Перший контент за 5 хвилин • Дані не передаються третім</div>
+
+    <!-- ANIMATED DEMO -->
+    <div class="demo reveal" id="demo">
+      <div class="demo-bar"><i></i><i></i><i></i><span class="url">socialio.rozum.one</span></div>
+      <div class="flow">
+        <div class="col">
+          <h4>1 · Джерела</h4>
+          <div class="src" data-d="0"><span class="ic">🎙️</span> Транскрипт сесії</div>
+          <div class="src" data-d="1"><span class="ic">🏢</span> База знань компанії</div>
+          <div class="src" data-d="2"><span class="ic">📰</span> Новини ніші</div>
+          <div class="src" data-d="3"><span class="ic">🖼️</span> Фото з Google Drive</div>
+        </div>
+        <div class="col">
+          <h4>2 · Ідеї + твій голос</h4>
+          <div class="idea-line" data-d="4">Перфекціонізм ≠ лінь</div>
+          <div class="idea-line" data-d="5">«Погана перша версія»</div>
+          <div class="idea-line" data-d="6">Ранок без новин</div>
+          <div class="idea-line" data-d="7" style="color:var(--cyan)">→ tone of voice · де-AI</div>
+        </div>
+        <div class="col">
+          <h4>3 · Готовий пост</h4>
+          <div class="postcard" id="typed"></div>
+          <div class="tgline" data-d="x">✓ Опубліковано в Telegram о 10:00</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PAINS -->
+<section class="sec" id="pains">
+  <div class="wrap">
+    <h2 class="reveal">Знайомо?</h2>
+    <p class="sub reveal">Ти експерт, а не контент-завод. Але соцмережі вимагають постити — і тут починається.</p>
+    <div class="pains">
+      <div class="pain reveal"><span class="x">😮‍💨</span><div><b>Години в ChatGPT щотижня</b><p>Вбиваєш ідеї руками, переписуєш, доводиш до свого стилю, копіюєш у кожну мережу. Знову. І знову.</p></div></div>
+      <div class="pain reveal"><span class="x">🤖</span><div><b>Пости звучать як робот</b><p>Ті самі тире, ті самі звороти. Аудиторія відчуває AI за версту — і це бʼє по довірі до тебе як експерта.</p></div></div>
+      <div class="pain reveal"><span class="x">🫥</span><div><b>«Не знаю, про що писати»</b><p>А насправді золото вже лежить у твоїх дзвінках, сесіях і нотатках. Ти просто не встигаєш його дістати.</p></div></div>
+      <div class="pain reveal"><span class="x">💸</span><div><b>SMM-ник коштує $400–600/міс</b><p>І все одно не знає твою тему так, як ти. А ти хочеш просто стабільно бути в стрічці — без цього бюджету.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW -->
+<section class="sec" id="how" style="background:var(--bg2)">
+  <div class="wrap">
+    <span class="eyebrow reveal" style="display:block;width:max-content;margin:0 auto">Як працює</span>
+    <h2 class="reveal" style="margin-top:14px">Від сирого матеріалу до опублікованого поста — на автопілоті</h2>
+    <div class="steps">
+      <div class="step reveal"><div class="n">1</div><h3>Підключи джерела</h3><p>Транскрипти дзвінків, база знань про тебе/компанію, новини ніші, RSS, фото з Google Drive.</p></div>
+      <div class="step reveal"><div class="n">2</div><h3>AI дістає ідеї</h3><p>Система знаходить у матеріалі готові теми постів і показує їх тобі — ти лиш обираєш.</p></div>
+      <div class="step reveal"><div class="n">3</div><h3>Твій голос, без AI-сліду</h3><p>Пише у твоєму tone of voice і прибирає роботизовані ознаки. Звучить як ти, не як ChatGPT.</p></div>
+      <div class="step reveal"><div class="n">4</div><h3>Планує і постить сам</h3><p>Розкладає по календарю й автоматично публікує в Telegram (далі Instagram, Facebook, Threads).</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- SOURCES BENTO -->
+<section class="sec" id="sources">
+  <div class="wrap">
+    <h2 class="reveal">Один контент — багато джерел</h2>
+    <p class="sub reveal">socialio не прив'язаний до однієї речі. Що більше джерел — то релевантніший і «твій» контент.</p>
+    <div class="bento">
+      <div class="cell c-3 reveal"><div class="ic">🎙️</div><h3>Транскрипти дзвінків і сесій</h3><p>Коуч-сесії, консультації, робочі та інвесторські дзвінки — у кожному вже є десяток тем для постів.</p></div>
+      <div class="cell c-3 reveal"><div class="ic">🏢</div><h3>База знань про тебе</h3><p>Заливаєш місію, історію, тексти, позиціювання компанії — і пости спираються на це, а не на вигадки AI.</p></div>
+      <div class="cell c-2 reveal"><div class="ic">📰</div><h3>Новини ніші</h3><p>Шукає актуальне у світі по твоїй темі й адаптує під твій контент.</p></div>
+      <div class="cell c-2 reveal"><div class="ic">📡</div><h3>RSS-стрічки</h3><p>Підключаєш інфоканали — система бере, опрацьовує й постить.</p></div>
+      <div class="cell c-2 reveal"><div class="ic">🖼️</div><h3>Google Drive</h3><p>Бере твій фото-контент і одразу вставляє в пости.</p></div>
+      <div class="cell c-3 reveal"><div class="ic">🎬</div><h3>Відеоконтент</h3><p>Генерація відео під короткі формати.</p><span class="soon">скоро</span></div>
+      <div class="cell c-3 reveal"><div class="ic">🧩</div><h3>Твоє джерело</h3><p>Архітектура відкрита до нових джерел — додаємо під твій кейс.</p><span class="soon">за запитом</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- WHY / COMPARE -->
+<section class="sec" id="why" style="background:var(--bg2)">
+  <div class="wrap">
+    <h2 class="reveal">Чому не просто ChatGPT?</h2>
+    <p class="sub reveal">ChatGPT дає текст. socialio дає опублікований контент у твоєму голосі — без ручної роботи.</p>
+    <div class="cmp reveal">
+      <div class="cmp-row head"><div>Що важливо</div><div class="us">socialio</div><div class="them">ChatGPT + руки</div></div>
+      <div class="cmp-row"><div class="feat">Пише у твоєму tone of voice</div><div class="us">Так, з памʼяттю</div><div class="them">Щоразу заново</div></div>
+      <div class="cmp-row"><div class="feat">Прибирає AI-слід</div><div class="us">Окремий крок</div><div class="them">Ні</div></div>
+      <div class="cmp-row"><div class="feat">Багато джерел (дзвінки, новини, Drive)</div><div class="us">Так</div><div class="them">Копіюєш вручну</div></div>
+      <div class="cmp-row"><div class="feat">Планування + автопостинг у Telegram</div><div class="us">Так</div><div class="them">Ні</div></div>
+      <div class="cmp-row"><div class="feat">Українською, для української аудиторії</div><div class="us">В ядрі</div><div class="them">Як вийде</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- USE CASES -->
+<section class="sec" id="cases">
+  <div class="wrap">
+    <h2 class="reveal">Для кого</h2>
+    <p class="sub reveal">Якщо ти проводиш онлайн-розмови й маєш що сказати — socialio зробить з цього контент.</p>
+    <div class="tabs reveal">
+      <div class="tab active" data-uc="0">Психологи</div>
+      <div class="tab" data-uc="1">Коучі</div>
+      <div class="tab" data-uc="2">Консультанти</div>
+      <div class="tab" data-uc="3">Бізнес і готелі</div>
+    </div>
+    <div class="usecase reveal" id="uc">
+      <h3 id="uc-h"></h3><p id="uc-p"></p>
+    </div>
+  </div>
+</section>
+
+<!-- PRICING -->
+<section class="sec" id="pricing" style="background:var(--bg2)">
+  <div class="wrap">
+    <h2 class="reveal">Простіше за SMM-ника. Дешевше за час, який ти втрачаєш.</h2>
+    <p class="sub reveal">Ранній доступ. Ціни фіксуються для перших користувачів.</p>
+    <div class="prices">
+      <div class="price reveal"><h3>Тест</h3><div class="amt">0 <span>/ 7 днів</span></div><p class="muted" style="font-size:14px">Спробувати на своєму матеріалі</p>
+        <ul><li>1 джерело</li><li>До 10 постів</li><li>Telegram-публікація</li></ul>
+        <a class="btn" href="/register">Почати безкоштовно</a></div>
+      <div class="price featured reveal"><h3>Pro</h3><div class="amt">€29 <span>/ міс</span></div><p class="muted" style="font-size:14px">Для активного експерта</p>
+        <ul><li>Усі джерела</li><li>Tone of voice + де-AI</li><li>Календар і автопостинг</li><li>Telegram + Instagram</li></ul>
+        <a class="btn primary" href="/register">Спробувати Pro</a></div>
+      <div class="price reveal"><h3>Команда / бізнес</h3><div class="amt">Інд. <span></span></div><p class="muted" style="font-size:14px">Кілька брендів, готель, агенція</p>
+        <ul><li>Кілька робочих просторів</li><li>База знань компанії</li><li>Пріоритетна підтримка</li></ul>
+        <a class="btn" href="/register">Поговорити з нами</a></div>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section class="sec" id="faq">
+  <div class="wrap">
+    <h2 class="reveal">Часті запитання</h2>
+    <div class="faq">
+      <details class="qa reveal"><summary>А мої дзвінки й дані не витечуть? <span class="plus">+</span></summary><div class="a">Транскрипти й база знань зберігаються у твоєму просторі й не передаються третім особам для реклами чи навчання моделей. Ти контролюєш, що заливаєш, і можеш видалити будь-коли.</div></details>
+      <details class="qa reveal"><summary>Пости реально звучатимуть як я, а не як AI? <span class="plus">+</span></summary><div class="a">Так — це ядро продукту. Ти задаєш tone of voice (приклади своїх постів), а окремий крок прибирає типові AI-ознаки. Чим більше прикладів — то ближче до твого голосу.</div></details>
+      <details class="qa reveal"><summary>Які соцмережі підтримуються? <span class="plus">+</span></summary><div class="a">Старт — автопостинг у Telegram. Далі Instagram, Facebook і Threads. Контент одразу адаптується під кожен канал.</div></details>
+      <details class="qa reveal"><summary>Мені треба щось налаштовувати чи писати промпти? <span class="plus">+</span></summary><div class="a">Ні. Заливаєш джерело — отримуєш готові пости. Уся логіка прозора: за бажання можна підкоригувати кожен крок, але за замовчуванням усе працює само.</div></details>
+      <details class="qa reveal"><summary>Я не коуч — підійде для мого бізнесу? <span class="plus">+</span></summary><div class="a">Так. socialio працює з будь-яким матеріалом: робочі дзвінки, інвесторські зустрічі, новини галузі. Якщо є що сказати — буде контент.</div></details>
+    </div>
+  </div>
+</section>
+
+<!-- FINAL CTA -->
+<section class="final">
+  <div class="blob b2" style="left:50%;top:0;transform:translateX(-50%)"></div>
+  <div class="wrap" style="position:relative;z-index:2"><div class="card reveal">
+    <h2>Твій наступний пост уже є у твоєму останньому дзвінку</h2>
+    <p class="muted" style="max-width:520px;margin:0 auto 26px">Залий перший матеріал — і подивись, як socialio зробить із нього тиждень контенту у твоєму голосі.</p>
+    <a class="btn primary lg" href="/register">Спробувати безкоштовно →</a>
+  </div></div>
+</section>
+
+<footer><div class="wrap foot-in">
+  <div><span class="logo" style="font-size:16px"><span class="mark" style="width:22px;height:22px;font-size:12px">◎</span> socialio <span class="by">by ROZUM</span></span></div>
+  <div>© 2026 ROZUM · socialio.rozum.one · <a href="#" style="color:var(--muted)">Політика даних</a></div>
+</div></footer>
 
 <script>
-const $ = id => document.getElementById(id);
-const esc = s => String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+// nav shadow
+const nav=document.getElementById('nav');
+addEventListener('scroll',()=>nav.classList.toggle('scrolled',scrollY>10));
 
-// UI step number -> backend step key
-const STEP  = {1:'extract_ideas',3:'drafts',4:'tone',5:'format',6:'deai',7:'strategy'};
-const ORDER = [1,3,4,5,6,7];
-// settings textarea id -> backend key
-const SET = {mkt:'marketing_context', tov:'tone_of_voice', deai:'deai_rules', strat:'content_strategy'};
-const STATUS_BADGE = {fresh:['ok','готово'], stale:['stale','застаріло'], running:['run','<span class="spin"></span> генерую'], error:['stale','помилка'], idle:['','очікує']};
+// reveal on scroll
+const io=new IntersectionObserver((es)=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}}),{threshold:.15});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
 
-const SAMPLE = `Клієнт: я постійно відкладаю важливі справи, сідаю за роботу і одразу лізу в телефон.
-Коуч: давай подивимось, що відбувається в момент перед тим, як ти береш телефон. Який це стан?
-Клієнт: тривога. Ніби боюся почати, бо раптом не вийде ідеально.
-Коуч: тобто телефон - це спосіб втекти від тривоги, а не лінь. Перфекціонізм часто маскується під прокрастинацію.
-Клієнт: так, я ніколи так не думав. Я себе просто вважав лінивим.
-Коуч: спробуй наступного разу домовитись із собою про «погану першу версію» - дозволь зробити неідеально за 10 хвилин. Маленький поріг входу знімає тривогу.
-Клієнт: о, це звучить реально. І ще я помітив, що зранку легше, коли я не дивлюся новини відразу.
-Коуч: чудове спостереження. Ранковий простір без шуму - це ресурс. Зробимо це твоїм експериментом на тиждень.`;
+// hero demo animation (loops, slow-motion)
+const POST="Ти не лінивий. Ти боїшся почати, бо хочеш ідеально.\n\nПрокрастинація часто це перфекціонізм у масці. Спробуй «погану першу версію» - дозволь собі зробити неідеально за 10 хвилин.\n\nПоріг входу падає, тривога відпускає. Перевір сьогодні 👇";
+const typed=document.getElementById('typed');
+const demo=document.getElementById('demo');
+let demoRan=false;
+function runDemo(){
+  // reset
+  document.querySelectorAll('.src,.idea-line,.tgline').forEach(e=>e.classList.remove('in'));
+  typed.innerHTML='<span class="cursor"></span>';
+  const seq=document.querySelectorAll('[data-d]');
+  // stagger sources + ideas
+  let t=300;
+  document.querySelectorAll('.src').forEach((el,i)=>setTimeout(()=>el.classList.add('in'),t+i*420));
+  t=300+4*420+250;
+  document.querySelectorAll('.idea-line').forEach((el,i)=>setTimeout(()=>el.classList.add('in'),t+i*380));
+  // type the post
+  const typeStart=t+4*380+400;
+  setTimeout(()=>typeText(),typeStart);
+}
+function typeText(){
+  let i=0;typed.textContent='';
+  const cur=document.createElement('span');cur.className='cursor';
+  const tick=()=>{
+    typed.textContent=POST.slice(0,i);
+    typed.appendChild(cur);
+    i++;
+    if(i<=POST.length){setTimeout(tick,18);}
+    else{document.querySelector('.tgline').classList.add('in');
+      setTimeout(()=>{if(prefersMotion())runDemo();},3800);}
+  };
+  tick();
+}
+function prefersMotion(){return !matchMedia('(prefers-reduced-motion:reduce)').matches;}
+const demoIO=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting&&!demoRan){demoRan=true;if(prefersMotion())runDemo();else{typed.textContent=POST;document.querySelectorAll('.src,.idea-line,.tgline').forEach(x=>x.classList.add('in'));}}}),{threshold:.3});
+demoIO.observe(demo);
 
-let runId = localStorage.getItem('kg_run') || null;
-let S = {plan:[], schedule:{}};
-let busy = false;
+// use case tabs
+const UC=[
+ ["Психологи й терапевти","Із записів консультацій (знеособлено) і твоєї бази знань socialio робить дбайливі, етичні пости про твій підхід — і ти стабільно в стрічці, не порушуючи приватності клієнтів."],
+ ["Коучі","Кожна сесія - це теми на тиждень. socialio дістає інсайти, пише у твоєму голосі й публікує, поки ти ведеш наступного клієнта."],
+ ["Консультанти й експерти","База знань + новини галузі = пости, що показують твою експертизу. LinkedIn і Telegram наповнюються самі, на фактах, а не на воді."],
+ ["Бізнес і готелі","Робочі та інвесторські дзвінки, апдейти команди, новини індустрії - усе перетворюється на контент бренду. Один акаунт - багато просторів."]
+];
+const ucH=document.getElementById('uc-h'),ucP=document.getElementById('uc-p');
+function setUC(i){ucH.textContent=UC[i][0];ucP.textContent=UC[i][1];document.querySelectorAll('.tab').forEach((t,j)=>t.classList.toggle('active',i===j));}
+document.querySelectorAll('.tab').forEach((t,i)=>t.onclick=()=>setUC(i));
+setUC(0);
 
-async function api(path, opts){
-  const r = await fetch('/api'+path, opts||{});
-  if(!r.ok){ const t = await r.text(); throw new Error(r.status+': '+t.slice(0,200)); }
-  const ct = r.headers.get('content-type')||'';
-  return ct.includes('json') ? r.json() : r.text();
-}
-
-// ---------- settings ----------
-async function loadSettings(){
-  try{
-    const rows = await api('/settings');
-    const map = Object.fromEntries(rows.map(r=>[r.key, r.content]));
-    for(const [tid,key] of Object.entries(SET)){ if(map[key]!=null) $(tid).value = map[key]; }
-    $('srvDot').classList.add('on');
-  }catch(e){ $('srvDot').classList.remove('on'); }
-}
-let saveT;
-function flashSaved(){ const s=$('saved'); s.classList.add('show'); clearTimeout(flashSaved._t); flashSaved._t=setTimeout(()=>s.classList.remove('show'),1200); }
-for(const tid of Object.keys(SET)){
-  $(tid).addEventListener('input', ()=>{
-    clearTimeout(saveT);
-    saveT = setTimeout(async ()=>{
-      try{ await api('/settings/'+SET[tid], {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({content:$(tid).value})}); flashSaved(); }catch(e){}
-    }, 700);
-  });
-}
-
-// ---------- render ----------
-const badge=(n,cls,txt)=>{const b=$('b'+n); if(b){ b.className='badge '+(cls||''); b.innerHTML=txt; }};
-const stepEl=n=>$('s'+n);
-
-function applyState(d){
-  const byKey = Object.fromEntries((d.steps||[]).map(s=>[s.step_key,s]));
-  for(const n of ORDER){
-    const s = byKey[STEP[n]];
-    if(s){
-      const [c,t] = STATUS_BADGE[s.status] || ['','очікує'];
-      badge(n,c,t);
-      stepEl(n).classList.toggle('done', s.status==='fresh');
-      stepEl(n).classList.toggle('stale', s.status==='stale' || s.status==='error');
-    } else { badge(n,'','очікує'); stepEl(n).classList.remove('done','stale'); }
-  }
-  renderIdeas(d.ideas||[]);
-  const byStage = {draft:[], toned:[], formatted:[], final:[]};
-  (d.posts||[]).forEach(p=>{ if(byStage[p.stage]) byStage[p.stage].push(p); });
-  renderPosts('o3', byStage.draft, 'Спершу відбери ідеї на кроці 1.');
-  renderPosts('o4', byStage.toned);
-  renderPosts('o5', byStage.formatted);
-  renderFinals(byStage.final, d.published||[]);
-  S.plan = (d.plan||[]).map(p=>({id:p.id, title:p.title, type:p.type, dayOffset:p.day_offset||0}));
-  renderPlan(); renderCalendar();
-}
-function renderIdeas(ideas){
-  const o=$('o1');
-  if(!ideas.length){ o.innerHTML='<div class="empty">Ідеї з\'являться тут після кроку 1.</div>'; return; }
-  o.innerHTML='';
-  ideas.forEach(it=>{
-    const d=document.createElement('div'); d.className='card idea';
-    d.innerHTML='<input type="checkbox" '+(it.selected?'checked':'')+' data-id="'+it.id+'"><div class="it"><b>'+esc(it.idea)+'</b>'+(it.angle?'<div class="ang">↳ '+esc(it.angle)+'</div>':'')+'</div>';
-    o.appendChild(d);
-  });
-  o.querySelectorAll('input').forEach(c=>c.onchange=saveSelection);
-}
-async function saveSelection(){
-  if(!runId) return;
-  const ids=[...$('o1').querySelectorAll('input:checked')].map(c=>c.dataset.id);
-  try{ await api('/runs/'+runId+'/ideas/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({selectedIds:ids})}); flashSaved(); }catch(e){}
-}
-function renderPosts(oid, posts, emptyTxt){
-  const o=$(oid); if(!o) return;
-  if(!posts || !posts.length){ o.innerHTML='<div class="empty">'+(emptyTxt||'—')+'</div>'; return; }
-  o.innerHTML = posts.map(p => '<div class="card post">'+esc(p.content)+'</div>').join('');
-}
-function bindCopy(){document.querySelectorAll('.copy').forEach(b=>b.onclick=()=>{navigator.clipboard.writeText(decodeURIComponent(b.dataset.c));b.textContent='✓';setTimeout(()=>b.textContent='копіювати',1000);});}
-function renderFinals(posts, published){
-  const o=$('o6');
-  if(!posts || !posts.length){ o.innerHTML='<div class="empty">Готові пости з кнопками публікації в Telegram.</div>'; return; }
-  const isPub=(pid,t)=>published.some(x=>x.post_id===pid && x.target===t);
-  o.innerHTML = posts.map(p=>'<div class="tg">'
-    +'<button class="copy" data-c="'+encodeURIComponent(p.content)+'">копіювати</button>'
-    +esc(p.content)
-    +'<div class="ctl" style="margin-top:10px">'
-    +'<button class="pub" data-post="'+p.id+'" data-t="channel">'+(isPub(p.id,'channel')?'✓ у каналі':'→ Канал')+'</button>'
-    +'<button class="pub" data-post="'+p.id+'" data-t="group">'+(isPub(p.id,'group')?'✓ у групі':'→ Група')+'</button>'
-    +'<span class="pubmsg" data-for="'+p.id+'" style="font-size:12px"></span>'
-    +'</div></div>').join('');
-  bindCopy();
-  o.querySelectorAll('.pub').forEach(b=>b.onclick=()=>publish(b));
-}
-async function publish(btn){
-  const postId=btn.dataset.post, target=btn.dataset.t;
-  const msg=$('o6').querySelector('.pubmsg[data-for="'+postId+'"]');
-  const old=btn.textContent; btn.disabled=true; btn.innerHTML='<span class="spin"></span>';
-  if(msg) msg.textContent='';
-  try{
-    const r=await api('/posts/'+postId+'/publish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({targets:[target]})});
-    const res=(r.results||[]).find(x=>x.target===target)||{};
-    if(res.status==='sent'){ btn.textContent=(target==='channel'?'✓ у каналі':'✓ у групі'); }
-    else { btn.disabled=false; btn.textContent=old; if(msg){ msg.style.color='var(--stale)'; msg.textContent=' ⚠ '+(res.error||'помилка'); } }
-  }catch(e){ btn.disabled=false; btn.textContent=old; if(msg){ msg.style.color='var(--stale)'; msg.textContent=' ⚠ '+e.message; } }
-}
-
-function updRunLabel(){ $('runLabel').textContent = runId ? ('прогін '+runId.slice(0,8)) : 'новий прогін'; $('lockHint').textContent = runId ? 'Прогін створено з цього транскрипту. «Новий прогін», щоб почати з іншого тексту.' : ''; }
-
-async function refresh(){ if(!runId) return; const d = await api('/runs/'+runId); applyState(d); }
-
-async function ensureRun(){
-  if(runId) return runId;
-  const transcript = $('transcript').value.trim();
-  if(!transcript) throw new Error('Спершу вставте транскрипт.');
-  const r = await api('/sources', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({transcript})});
-  runId = r.runId; localStorage.setItem('kg_run', runId); updRunLabel();
-  return runId;
-}
-
-// ---------- run ----------
-function setBusy(b){ busy=b; document.querySelectorAll('button').forEach(x=>{ if(x.id!=='newRun') x.disabled=b; }); }
-async function run(n){
-  if(busy) return; setBusy(true);
-  try{
-    await ensureRun();
-    badge(n,'run','<span class="spin"></span> генерую'); stepEl(n).classList.remove('stale');
-    await api('/runs/'+runId+'/steps/'+STEP[n]+'/run', {method:'POST'});
-    await refresh();
-  }catch(e){ badge(n,'stale','помилка'); const o=$('o'+n); if(o) o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
-  finally{ setBusy(false); }
-}
-async function runFrom(startN){
-  if(busy) return; setBusy(true);
-  try{
-    await ensureRun();
-    for(const k of ORDER.slice(ORDER.indexOf(startN))) badge(k,'run','<span class="spin"></span> у черзі');
-    await api('/runs/'+runId+'/run-from/'+STEP[startN], {method:'POST'});
-  }catch(e){ alert('Помилка: '+e.message); }
-  finally{ try{ await refresh(); }catch(_){} setBusy(false); }
-}
-
-// ---------- calendar (client-side view of the plan) ----------
-function renderPlan(){
-  const o=$('o7');
-  if(!S.plan.length){ o.innerHTML='<div class="empty">План публікацій з\'явиться тут.</div>'; return; }
-  o.innerHTML='';
-  S.plan.forEach((p,i)=>{ o.innerHTML+='<div class="card"><b>'+esc(p.title)+'</b> <small style="color:var(--muted)">· '+esc(p.type||'')+' · рек. день +'+(p.dayOffset||0)+'</small></div>'; });
-}
-function startMonday(){const d=new Date();const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day+7);d.setHours(0,0,0,0);return d;}
-const DOW=['Пн','Вт','Ср','Чт','Пт','Сб','Нд'];
-function dateISO(off){const d=startMonday();d.setDate(d.getDate()+off);return d.toISOString().slice(0,10);}
-function renderTray(){
-  const tray=$('tray'); tray.innerHTML='';
-  S.plan.forEach((p,i)=>{
-    const placed=Object.values(S.schedule).flat().includes(i);
-    const c=document.createElement('div'); c.className='chip'+(placed?' placed':''); c.draggable=!placed; c.dataset.i=i;
-    c.innerHTML='<b>'+esc(p.title)+'</b><small>'+esc(p.type||'')+'</small>';
-    c.addEventListener('dragstart',ev=>ev.dataTransfer.setData('text/plain',i));
-    tray.appendChild(c);
-  });
-}
-function renderCalendar(){
-  renderTray();
-  const cal=$('cal'); cal.innerHTML='';
-  DOW.forEach(d=>{const h=document.createElement('div');h.className='dow';h.textContent=d;cal.appendChild(h);});
-  for(let off=0;off<28;off++){
-    const iso=dateISO(off); const cell=document.createElement('div'); cell.className='day'; cell.dataset.iso=iso;
-    const dt=new Date(iso); cell.innerHTML='<div class="dn">'+dt.getDate()+'.'+(dt.getMonth()+1)+'</div>';
-    (S.schedule[iso]||[]).forEach(pi=>{const p=S.plan[pi];const ch=document.createElement('div');ch.className='pchip';ch.draggable=true;ch.dataset.i=pi;ch.innerHTML=esc(p?p.title:'?')+'<span class="x" data-rm="'+pi+'" data-iso="'+iso+'">✕</span>';ch.addEventListener('dragstart',ev=>ev.dataTransfer.setData('text/plain',pi));cell.appendChild(ch);});
-    cell.addEventListener('dragover',ev=>{ev.preventDefault();cell.classList.add('over');});
-    cell.addEventListener('dragleave',()=>cell.classList.remove('over'));
-    cell.addEventListener('drop',ev=>{ev.preventDefault();cell.classList.remove('over');const pi=+ev.dataTransfer.getData('text/plain');Object.keys(S.schedule).forEach(k=>S.schedule[k]=S.schedule[k].filter(x=>x!==pi));(S.schedule[iso]=S.schedule[iso]||[]).push(pi);renderCalendar();});
-    cal.appendChild(cell);
-  }
-  cal.querySelectorAll('[data-rm]').forEach(x=>x.onclick=e=>{e.stopPropagation();const pi=+x.dataset.rm,iso=x.dataset.iso;S.schedule[iso]=(S.schedule[iso]||[]).filter(v=>v!==pi);renderCalendar();});
-}
-
-// ---------- wiring ----------
-document.querySelectorAll('[data-run]').forEach(b=>b.onclick=()=>run(+b.dataset.run));
-document.querySelectorAll('[data-from]').forEach(b=>b.onclick=()=>runFrom(+b.dataset.from));
-$('runAll').onclick=()=>runFrom(1);
-$('sampleBtn').onclick=()=>{ $('transcript').value=SAMPLE; };
-$('recoBtn').onclick=()=>{ if(!S.plan.length){alert('Спершу запусти крок 7');return;} S.schedule={}; S.plan.forEach((p,i)=>{const iso=dateISO(Math.min(27,p.dayOffset||i*2));(S.schedule[iso]=S.schedule[iso]||[]).push(i);}); renderCalendar(); };
-$('clearCal').onclick=()=>{ S.schedule={}; renderCalendar(); };
-
-// ---------- Telegram integration ----------
-async function loadTelegram(){
-  try{
-    const c=await api('/integrations/telegram');
-    $('tgChannel').value=c.channelChatId||''; $('tgGroup').value=c.groupChatId||'';
-    if(c.hasToken) $('tgToken').placeholder='•••••••• (токен збережено — лиши порожнім, щоб не міняти)';
-  }catch(e){}
-}
-$('tgSave').onclick=async()=>{
-  try{
-    await api('/integrations/telegram',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({botToken:$('tgToken').value,channelChatId:$('tgChannel').value,groupChatId:$('tgGroup').value})});
-    $('tgToken').value=''; $('tgToken').placeholder='•••••••• (токен збережено)';
-    $('tgResult').innerHTML='<div class="card" style="color:var(--ok)">Збережено ✓</div>';
-  }catch(e){ $('tgResult').innerHTML='<div class="card" style="color:var(--stale)">⚠ '+esc(e.message)+'</div>'; }
-};
-$('tgTest').onclick=async()=>{
-  $('tgResult').innerHTML='<div class="empty"><span class="spin"></span> перевіряю…</div>';
-  try{
-    const r=await api('/integrations/telegram/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({botToken:$('tgToken').value,channelChatId:$('tgChannel').value,groupChatId:$('tgGroup').value})});
-    const line=(label,c)=>{
-      if(!c) return '<div class="card"><b>'+label+':</b> <span style="color:var(--muted)">не вказано</span></div>';
-      if(!c.ok) return '<div class="card"><b>'+label+':</b> <span style="color:var(--stale)">⚠ '+esc(c.error||'недоступно')+'</span></div>';
-      return '<div class="card"><b>'+label+':</b> <span style="color:var(--ok)">✓ '+esc(c.title)+'</span> '+(c.isAdmin?'<span style="color:var(--ok)">· бот адмін</span>':'<span style="color:var(--warn)">· бот НЕ адмін (додай у адміни)</span>')+'</div>';
-    };
-    $('tgResult').innerHTML='<div class="card" style="color:var(--ok)">Бот: @'+esc(r.bot.username||'?')+' ✓</div>'+line('Канал',r.channel)+line('Група',r.group);
-  }catch(e){ $('tgResult').innerHTML='<div class="card" style="color:var(--stale)">⚠ '+esc(e.message)+'</div>'; }
-};
-$('newRun').onclick=()=>{
-  if(busy) return;
-  if(runId && !confirm('Почати новий прогін? Поточні результати лишаться на сервері, але зникнуть з екрана.')) return;
-  runId=null; localStorage.removeItem('kg_run'); S={plan:[],schedule:{}};
-  ['o1','o3','o4','o5','o6','o7'].forEach(id=>$(id).innerHTML='<div class="empty">—</div>');
-  $('tray').innerHTML=''; $('cal').innerHTML='';
-  [1,3,4,5,6,7].forEach(n=>{badge(n,'','очікує');stepEl(n).classList.remove('done','stale');});
-  updRunLabel();
-};
-
-// ---------- init ----------
-(async()=>{
-  await loadSettings();
-  await loadTelegram();
-  updRunLabel();
-  if(runId){ try{ await refresh(); }catch(e){ runId=null; localStorage.removeItem('kg_run'); updRunLabel(); } }
-  renderCalendar();
-})();
+// signup stub
 </script>
 </body>
 </html>

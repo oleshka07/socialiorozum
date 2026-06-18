@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="uk"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>socialio — вхід</title>
+<style>
+:root{--bg:#0a0c12;--panel:#12161f;--line:#232a38;--txt:#eef2f8;--muted:#9aa6b8;--accent:#5b8cff;--violet:#a982ff;--ok:#3fd07a;--stale:#f5704a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:Inter,-apple-system,Segoe UI,Roboto,sans-serif;display:grid;place-items:center;min-height:100vh;padding:20px}
+.card{width:100%;max-width:400px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px}
+.logo{font-weight:800;font-size:22px}
+.logo .by{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:2px 6px;margin-left:4px}
+h1{font-size:20px;margin:16px 0 4px}
+.sub{color:var(--muted);font-size:13px;margin-bottom:14px}
+label{display:block;font-size:12px;color:var(--muted);margin:12px 0 5px;text-transform:uppercase;letter-spacing:.5px}
+input{width:100%;background:#0b0e13;border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:11px 13px;font-size:15px}
+button{width:100%;margin-top:18px;cursor:pointer;border:none;border-radius:10px;padding:13px;font-size:15px;font-weight:700;background:linear-gradient(100deg,var(--accent),var(--violet));color:#0a0c12}
+button:disabled{opacity:.5}
+.alt{margin-top:16px;font-size:13px;color:var(--muted);text-align:center}
+.alt a{color:var(--accent);text-decoration:none}
+.msg{margin-top:14px;padding:11px 13px;border-radius:10px;font-size:14px;display:none}
+.msg.err{display:block;background:rgba(245,112,74,.1);border:1px solid var(--stale);color:#ffb4a0}
+.msg.ok{display:block;background:rgba(63,208,122,.1);border:1px solid var(--ok);color:#a6f0c6}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(0,0,0,.3);border-top-color:#0a0c12;border-radius:50%;animation:s .7s linear infinite;vertical-align:-2px}
+@keyframes s{to{transform:rotate(360deg)}}
+.back{display:block;text-align:center;margin-top:18px;font-size:12px;color:var(--muted)}
+</style></head>
+<body>
+<div class="card">
+  <div class="logo">◎ socialio <span class="by">by ROZUM</span></div>
+  <h1 id="title">Вхід</h1>
+  <div class="sub" id="sub"></div>
+  <form id="form">
+    <div id="fEmail"><label>Email</label><input id="email" type="email" autocomplete="email" placeholder="you@example.com"></div>
+    <div id="fPass"><label id="passLabel">Пароль</label><input id="password" type="password" autocomplete="current-password" placeholder="••••••••"></div>
+    <button id="submit" type="submit">Увійти</button>
+  </form>
+  <div class="msg" id="msg"></div>
+  <div class="alt" id="alt"></div>
+  <a class="back" href="/">← на головну</a>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const path=location.pathname, params=new URLSearchParams(location.search), token=params.get('token');
+let mode = path.indexOf('/register')===0?'register' : path.indexOf('/forgot')===0?'forgot' : path.indexOf('/reset')===0?'reset' : 'login';
+
+async function api(p,body){
+  const r=await fetch('/api'+p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.error||('HTTP '+r.status));
+  return j;
+}
+function show(cls,text){ const m=$('msg'); m.className='msg '+cls; m.textContent=text; }
+
+const CFG={
+  login:   {title:'Вхід',            sub:'Увійдіть у свій кабінет',                 btn:'Увійти',              email:1,pass:1,passLabel:'Пароль',
+            alt:'Немає акаунта? <a href="/register">Реєстрація</a> · <a href="/forgot">Забули пароль?</a>'},
+  register:{title:'Реєстрація',      sub:'Створіть акаунт коуча',                  btn:'Зареєструватись',     email:1,pass:1,passLabel:'Пароль (мін. 8 символів)',
+            alt:'Вже є акаунт? <a href="/login">Увійти</a>'},
+  forgot:  {title:'Скидання пароля', sub:'Введіть email — надішлемо посилання',    btn:'Надіслати посилання', email:1,pass:0,passLabel:'',
+            alt:'Згадали? <a href="/login">Увійти</a>'},
+  reset:   {title:'Новий пароль',    sub:'Введіть новий пароль',                   btn:'Зберегти пароль',     email:0,pass:1,passLabel:'Новий пароль (мін. 8)',
+            alt:'<a href="/login">До входу</a>'},
+};
+(function(){
+  const c=CFG[mode];
+  $('title').textContent=c.title; $('sub').textContent=c.sub; $('submit').textContent=c.btn;
+  $('fEmail').style.display=c.email?'block':'none';
+  $('fPass').style.display=c.pass?'block':'none';
+  if(c.passLabel)$('passLabel').textContent=c.passLabel;
+  $('alt').innerHTML=c.alt;
+  if(mode==='reset'&&!token) show('err','Посилання недійсне (немає токена). Запросіть скидання ще раз.');
+  if(params.get('verified')) show('ok','Пошту підтверджено! Тепер увійдіть.');
+  if(params.get('error')==='verify') show('err','Посилання верифікації недійсне або застаріле.');
+})();
+
+$('form').onsubmit=async(e)=>{
+  e.preventDefault();
+  const btn=$('submit'), old=btn.textContent; btn.disabled=true; btn.innerHTML='<span class="spin"></span>';
+  try{
+    const email=$('email').value.trim(), password=$('password').value;
+    if(mode==='login'){ await api('/auth/login',{email,password}); location.href='/app'; return; }
+    if(mode==='register'){ const r=await api('/auth/register',{email,password}); show('ok', r.message||'Перевірте пошту.'); $('email').value=''; $('password').value=''; }
+    if(mode==='forgot'){ const r=await api('/auth/request-reset',{email}); show('ok', r.message||'Перевірте пошту.'); }
+    if(mode==='reset'){ await api('/auth/reset',{token,password}); show('ok','Пароль змінено! Перенаправляю на вхід…'); setTimeout(()=>location.href='/login',1500); }
+  }catch(err){ show('err', err.message); }
+  finally{ btn.disabled=false; btn.textContent=old; }
+};
+</script>
+</body></html>
