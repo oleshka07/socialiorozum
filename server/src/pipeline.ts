@@ -15,10 +15,11 @@ export const DEFAULT_PROMPTS: Record<StepKey, { model: string; content: string }
       'Поверни ЛИШЕ JSON-масив: [{"idea":"...","angle":"..."}]',
   },
   drafts: {
-    model: "openai/gpt-4o-mini",
+    model: "anthropic/claude-sonnet-4.5",
     content:
-      "З ідеї зроби чорновий пост: гачок, 2-4 абзаци користі, м'який заклик. " +
-      "Marketing Context: {{marketing_context}}. Пиши українською. Поверни лише текст.",
+      "Зроби пост СУВОРО на основі змісту сесії (першоджерело нижче) — використовуй конкретні приклади, думки й формулювання саме з неї, НЕ вигадуй загальних порад «з повітря». " +
+      "Структура: гачок, 2-4 абзаци користі, м'який заклик. " +
+      "Marketing Context: {{marketing_context}}. Пиши українською. Поверни лише текст поста.",
   },
   tone: {
     model: "anthropic/claude-sonnet-4.5",
@@ -30,7 +31,7 @@ export const DEFAULT_PROMPTS: Record<StepKey, { model: string; content: string }
   },
   deai: {
     model: "anthropic/claude-sonnet-4.5",
-    content: "Прибери ознаки AI за правилами: {{deai_rules}}. Збережи зміст і голос. Поверни лише текст.",
+    content: "Прибери ознаки AI за правилами: {{deai_rules}}. ЗБЕРЕЖИ зміст, голос ТА формат — абзаци, емодзі, хештеги. Поверни лише текст.",
   },
   strategy: {
     model: "openai/gpt-4o-mini",
@@ -135,7 +136,8 @@ export async function executeStep(runId: string, step: StepKey) {
       await q(`delete from post where run_id=$1 and stage='draft'`, [runId]);
       const outs: string[] = [];
       for (const it of ideas) {
-        const txt = await chat(tpl.model, system, `Ідея: ${it.idea}\nКут: ${it.angle}`);
+        const txt = await chat(tpl.model, system,
+          `Зміст сесії (першоджерело):\n---\n${transcript}\n---\nЗроби пост за цією ідеєю, спираючись на конкретику сесії вище:\nІдея: ${it.idea}\nКут: ${it.angle}`);
         outs.push(txt);
         await q(`insert into post(run_id, idea_id, stage, content) values($1,$2,'draft',$3)`,
           [runId, it.id, txt]);
