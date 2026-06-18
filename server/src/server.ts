@@ -423,6 +423,8 @@ app.post("/api/posts/:postId/publish", async (req: any, reply) => {
 
 // ===================== СТОРІНКИ =====================
 app.get("/app", (_req, reply) => reply.sendFile("app.html"));
+app.get("/B", (_req, reply) => reply.sendFile("b.html"));
+app.get("/b", (_req, reply) => reply.sendFile("b.html"));
 app.get("/login", (_req, reply) => reply.sendFile("auth.html"));
 app.get("/register", (_req, reply) => reply.sendFile("auth.html"));
 app.get("/forgot", (_req, reply) => reply.sendFile("auth.html"));

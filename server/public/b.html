@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>socialio by ROZUM — контент на автопілоті, у твоєму голосі</title>
+<meta name="description" content="socialio перетворює твої дзвінки, нотатки, новини ніші та фото на готові пости у твоєму голосі — без AI-сліду — і публікує автоматично в Telegram та Instagram.">
+<meta property="og:title" content="socialio by ROZUM — контент на автопілоті">
+<meta property="og:description" content="Твої дзвінки, нотатки й новини ніші стають готовими постами у твоєму голосі.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0c12; --bg2:#0e1119; --panel:#12161f; --panel2:#171c27; --line:#232a38;
+    --txt:#eef2f8; --muted:#9aa6b8; --accent:#5b8cff; --cyan:#5be3c2; --violet:#a982ff;
+    --warn:#f5b54a; --ok:#3fd07a; --radius:16px; --maxw:1140px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+  body{background:var(--bg);color:var(--txt);font-family:Inter,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .wrap{width:100%;max-width:var(--maxw);margin:0 auto;padding:0 18px}
+  h1,h2,h3{line-height:1.14;letter-spacing:-.02em;font-weight:800}
+  h1{font-size:32px} h2{font-size:25px} h3{font-size:18px}
+  .muted{color:var(--muted)}
+  .grad{background:linear-gradient(100deg,var(--accent),var(--cyan) 55%,var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .ico{width:20px;height:20px;flex-shrink:0}
+  .ico-lg{width:36px;height:36px}
+
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:12px;padding:14px 20px;font-weight:700;font-size:15px;border:1px solid var(--line);background:var(--panel2);color:var(--txt);cursor:pointer;transition:.18s;white-space:nowrap}
+  .btn:active{transform:scale(.98)}
+  .btn.primary{background:linear-gradient(100deg,var(--accent),var(--violet));border:none;color:#0a0c12;box-shadow:0 8px 26px -8px rgba(91,140,255,.6)}
+  .btn.block{display:flex;width:100%}
+  .pulse{animation:pulse 2.6s ease-in-out infinite}
+  @keyframes pulse{0%,100%{box-shadow:0 8px 26px -8px rgba(91,140,255,.55)}50%{box-shadow:0 10px 40px -4px rgba(91,140,255,.95)}}
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--cyan);background:rgba(91,227,194,.08);border:1px solid rgba(91,227,194,.25);padding:6px 13px;border-radius:30px}
+
+  .blob{position:absolute;border-radius:50%;filter:blur(80px);opacity:.45;z-index:0;pointer-events:none}
+  .blob.b1{width:320px;height:320px;background:radial-gradient(circle,rgba(91,140,255,.55),transparent 70%);top:-80px;left:-90px;animation:drift 18s ease-in-out infinite}
+  .blob.b2{width:300px;height:300px;background:radial-gradient(circle,rgba(169,130,255,.5),transparent 70%);top:160px;right:-110px;animation:drift 22s ease-in-out infinite reverse}
+  @keyframes drift{0%,100%{transform:translate(0,0)}50%{transform:translate(30px,40px)}}
+
+  nav{position:sticky;top:0;z-index:60;backdrop-filter:blur(12px);background:rgba(10,12,18,.8);border-bottom:1px solid transparent;transition:.3s}
+  nav.scrolled{border-bottom:1px solid var(--line)}
+  .nav-in{display:flex;align-items:center;justify-content:space-between;height:62px}
+  .logo{display:flex;align-items:center;gap:9px;font-weight:800;font-size:18px}
+  .logo .mark{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--accent),var(--violet));display:grid;place-items:center}
+  .logo .mark svg{width:18px;height:18px}
+  .logo .by{font-size:10px;color:var(--muted);font-weight:600;border:1px solid var(--line);border-radius:5px;padding:2px 5px;letter-spacing:.04em}
+  .nav-links{display:none}
+  .burger{display:flex;flex-direction:column;gap:5px;background:none;border:none;cursor:pointer;padding:8px}
+  .burger span{width:22px;height:2px;background:var(--txt);border-radius:2px;transition:.25s}
+  .burger.open span:nth-child(1){transform:translateY(7px) rotate(45deg)}
+  .burger.open span:nth-child(2){opacity:0}
+  .burger.open span:nth-child(3){transform:translateY(-7px) rotate(-45deg)}
+  .mmenu{position:fixed;inset:62px 0 0;background:rgba(10,12,18,.98);backdrop-filter:blur(10px);z-index:55;transform:translateX(100%);transition:.3s;display:flex;flex-direction:column;padding:24px 22px;gap:6px}
+  .mmenu.open{transform:none}
+  .mmenu a{padding:15px 6px;font-size:17px;font-weight:600;border-bottom:1px solid var(--line)}
+  .mmenu .btn{margin-top:16px}
+
+  .hero{padding:44px 0 24px;text-align:center;position:relative}
+  .hero h1{margin:16px auto 0}
+  .rot{display:inline-block;color:var(--cyan);transition:opacity .25s;min-width:2ch}
+  .hero .lead{font-size:16px;color:var(--muted);margin:16px auto 0;max-width:640px}
+  .hero-cta{display:flex;flex-direction:column;gap:12px;margin-top:26px}
+  .trust{margin-top:16px;font-size:12.5px;color:var(--muted)}
+
+  .demo{margin:34px auto 0;background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:0 30px 90px -40px rgba(91,140,255,.4);position:relative;z-index:2}
+  .demo-bar{display:flex;align-items:center;gap:7px;padding:12px 14px;border-bottom:1px solid var(--line)}
+  .demo-bar i{width:10px;height:10px;border-radius:50%;background:#2c3442}
+  .demo-bar .url{margin-left:8px;font-size:11px;color:var(--muted)}
+  .flow{display:grid;grid-template-columns:1fr}
+  .flow .col{padding:16px;border-bottom:1px solid var(--line)}
+  .flow .col:last-child{border-bottom:none}
+  .flow h4{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:10px;font-weight:700}
+  .src{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-size:12.5px;margin-bottom:7px;opacity:0;transform:translateY(8px);display:flex;align-items:center;gap:9px;color:var(--muted)}
+  .src.in{animation:pop .5s forwards}
+  .src .ico{color:var(--cyan)}
+  .idea-line{font-size:12.5px;color:var(--muted);padding:6px 10px;border-left:2px solid var(--cyan);margin-bottom:6px;opacity:0;transform:translateX(-6px)}
+  .idea-line.in{animation:slidein .5s forwards}
+  .postcard{background:#0f1521;border:1px solid #233140;border-left:3px solid var(--accent);border-radius:10px;padding:11px;font-size:12.5px;min-height:118px;white-space:pre-wrap}
+  .tgline{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--cyan);margin-top:9px;opacity:0}
+  .tgline.in{animation:pop .5s forwards}
+  .cursor{display:inline-block;width:7px;height:13px;background:var(--accent);vertical-align:-2px;animation:blink .8s steps(2) infinite}
+  @keyframes blink{50%{opacity:0}}
+  @keyframes pop{to{opacity:1;transform:translateY(0)}}
+  @keyframes slidein{to{opacity:1;transform:translateX(0)}}
+
+  .reveal{opacity:0;transform:translateY(22px);transition:.7s cubic-bezier(.2,.7,.2,1)}
+  .reveal.in{opacity:1;transform:none}
+
+  .sec{padding:56px 0;position:relative}
+  .sec h2{text-align:center}
+  .sec .sub{text-align:center;color:var(--muted);margin:12px auto 0;font-size:15.5px;max-width:600px}
+
+  .strip{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--bg2);padding:22px 0}
+  .strip .lbl{text-align:center;font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:14px}
+  .chips{display:flex;gap:10px;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch}
+  .chips::-webkit-scrollbar{display:none}
+  .chipx{flex:0 0 auto;background:var(--panel);border:1px solid var(--line);border-radius:30px;padding:9px 15px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+
+  .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:8px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px 16px;text-align:center}
+  .stat .num{font-size:30px;font-weight:800;letter-spacing:-.02em}
+  .stat .lbl{font-size:12.5px;color:var(--muted);margin-top:4px}
+
+  .pains{display:grid;grid-template-columns:1fr;gap:14px;margin-top:30px}
+  .pain{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px;display:flex;gap:13px}
+  .pain .x{font-size:22px;flex-shrink:0}
+  .pain b{display:block;margin-bottom:3px}
+  .pain p{font-size:14px;color:var(--muted)}
+
+  .steps{display:grid;grid-template-columns:1fr;gap:14px;margin-top:32px}
+  .step{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:var(--radius);padding:22px}
+  .step .n{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--violet));display:grid;place-items:center;font-weight:800;color:#0a0c12;margin-bottom:12px}
+  .step h3{margin-bottom:5px} .step p{font-size:14px;color:var(--muted)}
+
+  .feat{display:grid;grid-template-columns:1fr;gap:22px;margin-top:40px;align-items:center}
+  .feat .txt .eyebrow{margin-bottom:12px}
+  .feat .txt h3{font-size:22px;margin-bottom:10px}
+  .feat .txt p{color:var(--muted);font-size:15px}
+  .feat .txt ul{list-style:none;margin-top:14px;display:grid;gap:8px}
+  .feat .txt li{font-size:14px;display:flex;gap:9px}
+  .feat .txt li::before{content:"✓";color:var(--cyan);font-weight:800}
+  .mock{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 24px 60px -40px rgba(0,0,0,.8)}
+
+  .ba{display:grid;gap:10px}
+  .ba .lab{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:4px}
+  .ba .card{border-radius:10px;padding:11px;font-size:13px;white-space:pre-wrap}
+  .ba .bad{background:#1a1410;border:1px solid #3a2a1a;color:#d8c4a8}
+  .ba .good{background:#0f1521;border:1px solid #233140;border-left:3px solid var(--cyan)}
+
+  /* realistic month calendar */
+  .calhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+  .calhead .mn{font-weight:700;font-size:14px}
+  .calhead .lg{display:flex;gap:10px;font-size:10px;color:var(--muted)}
+  .calhead .lg span{display:flex;align-items:center;gap:4px}
+  .dotc{width:7px;height:7px;border-radius:50%;display:inline-block}
+  .dot-tg{background:#229ED9}.dot-ig{background:#d6249f}.dot-fb{background:#1877F2}
+  .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+  .calgrid .dh{font-size:9px;color:var(--muted);text-align:center;padding-bottom:2px}
+  .calgrid .cd{aspect-ratio:1;background:var(--bg2);border:1px solid var(--line);border-radius:7px;font-size:10px;color:var(--muted);padding:4px 0 0 5px;position:relative;overflow:hidden}
+  .calgrid .cd.dim{opacity:.4}
+  .calgrid .cd .dots{position:absolute;bottom:5px;left:5px;display:flex;gap:3px}
+
+  .intg{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:32px}
+  .intg .i{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 14px;text-align:center;transition:.2s;display:flex;flex-direction:column;align-items:center;gap:8px}
+  .intg .i:hover{border-color:var(--accent);transform:translateY(-3px)}
+  .intg .i .nm{font-size:13.5px;font-weight:600}
+  .intg .i .st{font-size:11px;color:var(--warn)}
+
+  .cmp{margin-top:30px;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+  .cmp-row{display:grid;grid-template-columns:1.6fr .7fr .7fr;align-items:center}
+  .cmp-row>div{padding:13px 12px;font-size:13px;border-bottom:1px solid var(--line)}
+  .cmp-row.head>div{background:var(--panel2);font-weight:700;font-size:11px;text-transform:uppercase}
+  .cmp-row .us{color:var(--cyan);font-weight:700;text-align:center}
+  .cmp-row .them{color:var(--muted);text-align:center}
+  .cmp-row:last-child>div{border-bottom:none}
+
+  /* interactive playground */
+  .play{margin-top:30px;background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:18px;padding:18px}
+  .picker{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+  .pick{padding:9px 13px;border:1px solid var(--line);border-radius:30px;font-size:13px;font-weight:600;background:var(--panel2);color:var(--muted);cursor:pointer;transition:.15s;display:flex;align-items:center;gap:7px}
+  .pick.active{color:#0a0c12;background:linear-gradient(100deg,var(--accent),var(--violet));border-color:transparent}
+  .toggles{display:flex;gap:16px;flex-wrap:wrap;margin:12px 0}
+  .tg-sw{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);cursor:pointer;user-select:none}
+  .sw{width:38px;height:22px;border-radius:20px;background:var(--line);position:relative;transition:.2s;flex-shrink:0}
+  .sw::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.2s}
+  .tg-sw.on .sw{background:linear-gradient(100deg,var(--accent),var(--violet))}
+  .tg-sw.on .sw::after{transform:translateX(16px)}
+  .play .result{background:#0f1521;border:1px solid #233140;border-left:3px solid var(--accent);border-radius:10px;padding:14px;font-size:14px;white-space:pre-wrap;min-height:96px;transition:.15s}
+  .play .meta{font-size:12px;color:var(--muted);margin-top:8px}
+
+  .dnd{margin-top:16px}
+  .tray2{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .pchip2{background:#17212b;border:1px solid #2c3a4a;border-left:3px solid var(--cyan);border-radius:9px;padding:9px 12px;font-size:12px;cursor:grab;touch-action:none;transition:.15s}
+  .pchip2.sel{outline:2px solid var(--cyan)}
+  .pchip2.drag{opacity:.45}
+  .week{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+  .week .wd{min-height:64px;background:var(--bg2);border:1px dashed var(--line);border-radius:8px;padding:5px;font-size:10px;color:var(--muted)}
+  .week .wd.over{border-color:var(--accent);background:#101826}
+  .week .wd .mini{background:linear-gradient(135deg,rgba(91,140,255,.32),rgba(169,130,255,.26));border-radius:5px;padding:3px 5px;margin-top:3px;font-size:9px;color:var(--txt);line-height:1.3}
+
+  .tabs{display:flex;gap:8px;overflow-x:auto;margin-top:30px;padding-bottom:4px}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{flex:0 0 auto;padding:10px 16px;border:1px solid var(--line);border-radius:30px;font-size:13.5px;font-weight:600;color:var(--muted);cursor:pointer;background:var(--panel)}
+  .tab.active{color:#0a0c12;background:linear-gradient(100deg,var(--accent),var(--violet));border-color:transparent}
+  .usecase{margin:20px auto 0;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:24px;text-align:center}
+  .usecase h3{margin-bottom:8px} .usecase p{color:var(--muted);font-size:14.5px}
+
+  .vals{display:grid;grid-template-columns:1fr;gap:14px;margin-top:32px}
+  .val{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px}
+  .val .ic{font-size:24px;margin-bottom:8px}
+  .val h3{font-size:16px;margin-bottom:5px} .val p{font-size:14px;color:var(--muted)}
+  .founder{margin-top:26px;background:linear-gradient(135deg,rgba(91,140,255,.1),rgba(169,130,255,.08));border:1px solid var(--line);border-radius:var(--radius);padding:24px;font-size:15px}
+  .founder .who{margin-top:12px;font-size:13px;color:var(--muted)}
+
+  .prices{display:grid;grid-template-columns:1fr;gap:16px;margin-top:34px}
+  .price{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:26px}
+  .price.featured{border-color:var(--accent);background:linear-gradient(180deg,rgba(91,140,255,.08),var(--panel));position:relative}
+  .price.featured::before{content:"Найпопулярніше";position:absolute;top:-11px;left:22px;background:linear-gradient(100deg,var(--accent),var(--violet));color:#0a0c12;font-size:11px;font-weight:700;padding:3px 12px;border-radius:20px}
+  .price .amt{font-size:34px;font-weight:800;margin:10px 0 2px}
+  .price .amt span{font-size:14px;color:var(--muted);font-weight:500}
+  .price ul{list-style:none;margin:16px 0;display:grid;gap:8px}
+  .price li{font-size:14px;color:var(--muted);display:flex;gap:9px}
+  .price li::before{content:"✓";color:var(--ok);font-weight:800}
+
+  .faq{margin-top:30px}
+  .qa{border:1px solid var(--line);border-radius:12px;margin-bottom:10px;background:var(--panel);overflow:hidden}
+  .qa summary{cursor:pointer;list-style:none;padding:16px 18px;font-weight:600;display:flex;justify-content:space-between;gap:12px;align-items:center;font-size:15px}
+  .qa summary::-webkit-details-marker{display:none}
+  .qa summary .plus{color:var(--accent);font-size:20px;transition:.2s;flex-shrink:0}
+  .qa[open] summary .plus{transform:rotate(45deg)}
+  .qa .a{padding:0 18px 16px;color:var(--muted);font-size:14px}
+
+  .final{text-align:center;padding:64px 0}
+  .final .card{background:linear-gradient(135deg,rgba(91,140,255,.14),rgba(169,130,255,.12));border:1px solid var(--line);border-radius:22px;padding:40px 22px}
+  .final h2{margin-bottom:12px} .final p{color:var(--muted);margin-bottom:22px}
+
+  footer{border-top:1px solid var(--line);padding:40px 0 110px}
+  .foot-grid{display:grid;grid-template-columns:1fr 1fr;gap:26px 16px}
+  .foot-grid .col h5{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:12px}
+  .foot-grid .col a{display:block;font-size:14px;color:var(--muted);padding:5px 0}
+  .foot-brand{grid-column:1/-1}
+  .foot-soc{display:flex;gap:12px;margin-top:14px}
+  .foot-soc a{width:34px;height:34px;border:1px solid var(--line);border-radius:9px;display:grid;place-items:center}
+  .foot-bottom{margin-top:26px;padding-top:18px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between}
+
+  .sticky-cta{position:fixed;left:0;right:0;bottom:0;z-index:50;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--bg) 30%)}
+
+  @media(min-width:680px){
+    .wrap{padding:0 24px} h1{font-size:48px}h2{font-size:34px}
+    .hero .lead{font-size:19px}
+    .hero-cta{flex-direction:row;justify-content:center}.hero-cta .btn{width:auto}
+    .pains{grid-template-columns:1fr 1fr}.steps{grid-template-columns:1fr 1fr}
+    .stats{grid-template-columns:repeat(4,1fr)}.intg{grid-template-columns:repeat(4,1fr)}
+    .vals{grid-template-columns:repeat(3,1fr)}.prices{grid-template-columns:repeat(3,1fr)}
+    .flow{grid-template-columns:1fr 1fr 1fr}
+    .flow .col{border-bottom:none;border-right:1px solid var(--line)}.flow .col:last-child{border-right:none}
+    .foot-grid{grid-template-columns:2fr 1fr 1fr 1fr}.foot-brand{grid-column:auto}
+  }
+  @media(min-width:960px){
+    h1{font-size:60px} .hero{padding:74px 0 40px}
+    .nav-links{display:flex;align-items:center;gap:24px;font-size:14px;font-weight:500}
+    .nav-links a.lnk{color:var(--muted)}.nav-links a.lnk:hover{color:var(--txt)}
+    .burger{display:none} .demo{max-width:940px} .sec{padding:88px 0}
+    .feat{grid-template-columns:1fr 1fr;gap:48px}.feat.rev .txt{order:2}
+    .sticky-cta{display:none} footer{padding-bottom:40px}
+    .blob.b1{width:480px;height:480px}.blob.b2{width:440px;height:440px}
+  }
+  @media(prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important}
+    .reveal,.src,.idea-line,.tgline{opacity:1!important;transform:none!important}
+  }
+</style>
+</head>
+<body>
+
+<!-- BRAND/ICON SVG SPRITE -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <radialGradient id="igGrad" cx="30%" cy="107%" r="140%">
+    <stop offset="0" stop-color="#fdf497"/><stop offset=".25" stop-color="#fdf497"/><stop offset=".45" stop-color="#fd5949"/><stop offset=".6" stop-color="#d6249f"/><stop offset=".9" stop-color="#285AEB"/>
+  </radialGradient>
+  <symbol id="i-telegram" viewBox="0 0 48 48"><circle cx="24" cy="24" r="24" fill="#229ED9"/><path d="M10.5 23.2 35 13.6c1.3-.5 2.45.32 2 2.05l-4.17 19.7c-.3 1.4-1.16 1.74-2.35 1.08l-6.5-4.8-3.13 3.02c-.35.34-.64.63-1.3.63l.46-6.66 12.2-11.02c.53-.47-.12-.74-.82-.27L16.1 24.7l-5.1-1.6c-1.1-.34-1.12-1.1.5-1.9z" fill="#fff"/></symbol>
+  <symbol id="i-facebook" viewBox="0 0 48 48"><circle cx="24" cy="24" r="24" fill="#1877F2"/><path d="M30 24h-4v14h-6V24h-3.2v-5H20v-3.1c0-4.2 2-6.4 6-6.4 1.8 0 3 .15 3 .15V14h-2.2c-1.7 0-2.1.8-2.1 2v3h4.3z" fill="#fff"/></symbol>
+  <symbol id="i-instagram" viewBox="0 0 48 48"><rect x="2" y="2" width="44" height="44" rx="13" fill="url(#igGrad)"/><rect x="11" y="11" width="26" height="26" rx="8" fill="none" stroke="#fff" stroke-width="3"/><circle cx="24" cy="24" r="6.5" fill="none" stroke="#fff" stroke-width="3"/><circle cx="33.5" cy="14.5" r="2.3" fill="#fff"/></symbol>
+  <symbol id="i-threads" viewBox="0 0 48 48"><rect x="2" y="2" width="44" height="44" rx="13" fill="#000"/><circle cx="24" cy="24" r="6" fill="none" stroke="#fff" stroke-width="3"/><path d="M30 24v2.6c0 2 1.5 3.6 3.6 3.6 2.3 0 3.7-1.9 3.7-4.3C37.3 17.6 31.5 12 24 12 16.4 12 11 17.6 11 25.6 11 33.2 16.3 38 24 38c2.7 0 5-.7 6.8-1.9" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-youtube" viewBox="0 0 48 48"><rect x="2" y="9" width="44" height="30" rx="9" fill="#FF0000"/><path d="M20 17l12 7-12 7z" fill="#fff"/></symbol>
+  <symbol id="i-rss" viewBox="0 0 48 48"><rect width="48" height="48" rx="12" fill="#EE802F"/><circle cx="15" cy="33" r="4" fill="#fff"/><path d="M12 20a16 16 0 0 1 16 16h-5a11 11 0 0 0-11-11z" fill="#fff"/><path d="M12 11a25 25 0 0 1 25 25h-5A20 20 0 0 0 12 16z" fill="#fff"/></symbol>
+  <symbol id="i-gdrive" viewBox="0 0 87.3 78"><path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/><path d="M43.65 25 29.9 1.2c-1.35.8-2.5 1.9-3.3 3.3L1.2 48.5C.4 49.9 0 51.45 0 53h27.5z" fill="#00ac47"/><path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.7l5.85 11.5z" fill="#ea4335"/><path d="M43.65 25 57.4 1.2C56.05.4 54.5 0 52.9 0H34.4c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/><path d="M59.8 53H27.5L13.75 76.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/><path d="M73.4 26.5 60.75 4.5c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25 59.8 53h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M6 11a6 6 0 0 0 12 0M12 17v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-building" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 8h3M8 12h3M8 16h3M14 8h2M14 12h2M14 16h2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-news" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 9h6M7 13h10M7 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 10l5-3v10l-5-3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+  <symbol id="i-api" viewBox="0 0 24 24"><path d="M5 9V6a2 2 0 0 1 2-2h3a2 2 0 1 1 4 0h3a2 2 0 0 1 2 2v3a2 2 0 1 1 0 4v3a2 2 0 0 1-2 2h-3a2 2 0 1 0-4 0H7a2 2 0 0 1-2-2v-3a2 2 0 1 0 0-4z" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+  <symbol id="i-mark" viewBox="0 0 100 100"><circle cx="34" cy="50" r="7" fill="#fff"/><path d="M34 50 m22 -22 a30 30 0 0 1 0 44" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" opacity=".9"/><path d="M34 50 m13 -13 a18 18 0 0 1 0 26" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round"/></symbol>
+</svg>
+
+<!-- NAV -->
+<nav id="nav"><div class="wrap nav-in">
+  <a class="logo" href="#"><span class="mark"><svg viewBox="0 0 100 100"><use href="#i-mark"/></svg></span> socialio <span class="by">by ROZUM</span></a>
+  <div class="nav-links">
+    <a class="lnk" href="#how">Як працює</a>
+    <a class="lnk" href="#try">Демо</a>
+    <a class="lnk" href="#integrations">Інтеграції</a>
+    <a class="lnk" href="#pricing">Ціни</a>
+    <a class="lnk" href="/login">Увійти</a>
+    <a class="btn primary" href="/register">Спробувати</a>
+  </div>
+  <button class="burger" id="burger" aria-label="Меню"><span></span><span></span><span></span></button>
+</div></nav>
+<div class="mmenu" id="mmenu">
+  <a href="#how">Як працює</a><a href="#try">Демо</a><a href="#integrations">Інтеграції</a>
+  <a href="#cases">Для кого</a><a href="#pricing">Ціни</a><a href="/login">Увійти</a>
+  <a class="btn primary block" href="/register">Спробувати безкоштовно</a>
+</div>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="blob b1"></div><div class="blob b2"></div>
+  <div class="wrap" style="position:relative;z-index:2">
+    <span class="eyebrow reveal">✨ AI-контент у твоєму голосі · українською</span>
+    <h1 class="reveal">Твої <span class="rot" id="rot">дзвінки</span> стають <span class="grad">контентом</span> — поки ти працюєш</h1>
+    <p class="lead reveal">socialio бере твої дзвінки, нотатки, новини ніші й фото — і робить готові пости у твоєму голосі, без AI-сліду. Далі публікує сам у Telegram та Instagram.</p>
+    <div class="hero-cta reveal">
+      <a class="btn primary lg pulse" href="/register">Спробувати безкоштовно</a>
+      <a class="btn lg" href="#try">Спробувати в демо →</a>
+    </div>
+    <div class="trust reveal">Без картки · Перший контент за 5 хвилин · Дані не передаються третім</div>
+
+    <div class="demo reveal" id="demo">
+      <div class="demo-bar"><i></i><i></i><i></i><span class="url">socialio.rozum.one</span></div>
+      <div class="flow">
+        <div class="col">
+          <h4>1 · Джерела</h4>
+          <div class="src" data-d><svg class="ico"><use href="#i-mic"/></svg> Транскрипт дзвінка</div>
+          <div class="src" data-d><svg class="ico"><use href="#i-building"/></svg> База знань компанії</div>
+          <div class="src" data-d><svg class="ico"><use href="#i-news"/></svg> Новини ніші</div>
+          <div class="src" data-d><svg class="ico"><use href="#i-gdrive"/></svg> Фото з Google Drive</div>
+        </div>
+        <div class="col">
+          <h4>2 · Ідеї + твій голос</h4>
+          <div class="idea-line" data-i>Перфекціонізм ≠ лінь</div>
+          <div class="idea-line" data-i>«Погана перша версія»</div>
+          <div class="idea-line" data-i>Ранок без новин</div>
+          <div class="idea-line" data-i style="color:var(--cyan)">→ tone of voice · де-AI</div>
+        </div>
+        <div class="col">
+          <h4>3 · Готовий пост</h4>
+          <div class="postcard" id="typed"></div>
+          <div class="tgline" data-tg><svg class="ico"><use href="#i-telegram"/></svg> Опубліковано в Telegram о 10:00</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SOURCES STRIP -->
+<div class="strip">
+  <div class="wrap">
+    <div class="lbl">Працює з твоїми джерелами та каналами</div>
+    <div class="chips">
+      <div class="chipx"><svg class="ico"><use href="#i-mic"/></svg> Транскрипти</div>
+      <div class="chipx"><svg class="ico"><use href="#i-building"/></svg> База знань</div>
+      <div class="chipx"><svg class="ico"><use href="#i-news"/></svg> Новини ніші</div>
+      <div class="chipx"><svg class="ico"><use href="#i-rss"/></svg> RSS</div>
+      <div class="chipx"><svg class="ico"><use href="#i-gdrive"/></svg> Google Drive</div>
+      <div class="chipx"><svg class="ico"><use href="#i-telegram"/></svg> Telegram</div>
+      <div class="chipx"><svg class="ico"><use href="#i-instagram"/></svg> Instagram</div>
+      <div class="chipx"><svg class="ico"><use href="#i-youtube"/></svg> YouTube</div>
+    </div>
+  </div>
+</div>
+
+<!-- STATS -->
+<section class="sec" style="padding-top:48px">
+  <div class="wrap"><div class="stats">
+    <div class="stat reveal"><div class="num grad" data-c="5">5</div><div class="lbl">хвилин до першого поста</div></div>
+    <div class="stat reveal"><div class="num grad" data-c="7">7</div><div class="lbl">типів джерел контенту</div></div>
+    <div class="stat reveal"><div class="num">0</div><div class="lbl">ручного постингу</div></div>
+    <div class="stat reveal"><div class="num grad" data-c="100" data-suf="%">100%</div><div class="lbl">українською</div></div>
+  </div></div>
+</section>
+
+<!-- PAINS -->
+<section class="sec" id="pains" style="padding-top:8px">
+  <div class="wrap">
+    <h2 class="reveal">Знайомо?</h2>
+    <p class="sub reveal">Ти експерт, а не контент-завод. Але соцмережі вимагають постити — і тут починається.</p>
+    <div class="pains">
+      <div class="pain reveal"><span class="x">😮‍💨</span><div><b>Години в ChatGPT щотижня</b><p>Вбиваєш ідеї руками, переписуєш, копіюєш у кожну мережу. Знову і знову.</p></div></div>
+      <div class="pain reveal"><span class="x">🤖</span><div><b>Пости звучать як робот</b><p>Ті самі тире, ті самі звороти. Аудиторія відчуває AI — і це бʼє по довірі.</p></div></div>
+      <div class="pain reveal"><span class="x">🫥</span><div><b>«Не знаю, про що писати»</b><p>А золото вже лежить у твоїх дзвінках і сесіях. Ти просто не встигаєш його дістати.</p></div></div>
+      <div class="pain reveal"><span class="x">💸</span><div><b>SMM-ник коштує $400–600/міс</b><p>І все одно не знає твою тему так, як ти. А ти хочеш просто стабільно бути в стрічці.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW -->
+<section class="sec" id="how" style="background:var(--bg2)">
+  <div class="wrap">
+    <h2 class="reveal" style="margin-bottom:4px">Як працює</h2>
+    <p class="sub reveal">Від сирого матеріалу до опублікованого поста — на автопілоті.</p>
+    <div class="steps">
+      <div class="step reveal"><div class="n">1</div><h3>Підключи джерела</h3><p>Транскрипти, база знань про тебе, новини ніші, RSS, фото з Google Drive.</p></div>
+      <div class="step reveal"><div class="n">2</div><h3>AI дістає ідеї</h3><p>Знаходить у матеріалі готові теми постів — ти лиш обираєш.</p></div>
+      <div class="step reveal"><div class="n">3</div><h3>Твій голос, без AI-сліду</h3><p>Пише у твоєму tone of voice і прибирає роботизовані ознаки.</p></div>
+      <div class="step reveal"><div class="n">4</div><h3>Планує і постить сам</h3><p>Розкладає по календарю й публікує в Telegram (далі Instagram, FB, Threads).</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="sec" id="features">
+  <div class="wrap">
+    <h2 class="reveal">Можливості</h2>
+    <p class="sub reveal">Не просто генератор тексту. Повний конвеєр контенту.</p>
+
+    <div class="feat reveal">
+      <div class="txt">
+        <span class="eyebrow">Багато джерел</span>
+        <h3>Контент з усього, що в тебе вже є</h3>
+        <p>socialio не прив'язаний до однієї речі. Що більше джерел — то релевантніший і «твій» контент.</p>
+        <ul><li>Транскрипти дзвінків і сесій</li><li>База знань про тебе й компанію</li><li>Новини ніші та RSS-стрічки</li><li>Фото з Google Drive</li></ul>
+      </div>
+      <div class="mock"><div style="display:grid;gap:8px">
+        <div class="src in"><svg class="ico"><use href="#i-mic"/></svg> Коуч-сесія · 42 хв</div>
+        <div class="src in"><svg class="ico"><use href="#i-building"/></svg> Про компанію · місія</div>
+        <div class="src in"><svg class="ico"><use href="#i-news"/></svg> Тренд тижня в ніші</div>
+        <div class="src in" style="border-color:var(--accent);color:var(--txt)">→ 6 ідей для постів</div>
+      </div></div>
+    </div>
+
+    <div class="feat rev reveal">
+      <div class="txt">
+        <span class="eyebrow">Tone of voice</span>
+        <h3>Звучить як ти, а не як ChatGPT</h3>
+        <p>Задаєш приклади своїх постів — і socialio пише в твоєму ритмі. Окремий крок прибирає AI-сліди.</p>
+        <ul><li>Памʼятає твій голос між постами</li><li>Прибирає типові AI-ознаки й штампи</li><li>Без роботизованих тире й «отже»</li></ul>
+      </div>
+      <div class="mock ba">
+        <div><div class="lab">Звичайний AI</div><div class="card bad">Отже, прокрастинація — це важлива тема, яку варто розглянути...</div></div>
+        <div><div class="lab">socialio · твій голос</div><div class="card good">Ти не лінивий. Ти боїшся почати, бо хочеш ідеально. І це нормально 👇</div></div>
+      </div>
+    </div>
+
+    <div class="feat reveal">
+      <div class="txt">
+        <span class="eyebrow">Планування + автопостинг</span>
+        <h3>Постить за тебе, поки ти працюєш</h3>
+        <p>Контент-стратегія розкладає пости по тижнях, а бот публікує автоматично. Хочеш — перетягуєш дати вручну.</p>
+        <ul><li>Авто-розклад на місяць</li><li>Drag-and-drop календар</li><li>Авто-публіка в Telegram, Instagram, FB</li></ul>
+      </div>
+      <div class="mock">
+        <div class="calhead">
+          <div class="mn">Червень 2026</div>
+          <div class="lg"><span><i class="dotc dot-tg"></i>TG</span><span><i class="dotc dot-ig"></i>IG</span><span><i class="dotc dot-fb"></i>FB</span></div>
+        </div>
+        <div class="calgrid" id="calMonth"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- INTERACTIVE PLAYGROUND -->
+<section class="sec" id="try" style="background:var(--bg2)">
+  <div class="wrap">
+    <h2 class="reveal">Спробуй прямо тут 👇</h2>
+    <p class="sub reveal">Обери джерело, увімкни «свій голос» і «без AI» — дивись, як міняється пост. Потім перетягни пости по календарю.</p>
+
+    <div class="play reveal">
+      <div class="picker" id="picker">
+        <button class="pick active" data-s="0"><svg class="ico"><use href="#i-mic"/></svg> Транскрипт</button>
+        <button class="pick" data-s="1"><svg class="ico"><use href="#i-news"/></svg> Новина ніші</button>
+        <button class="pick" data-s="2"><svg class="ico"><use href="#i-building"/></svg> Нотатка</button>
+      </div>
+      <div class="toggles">
+        <div class="tg-sw on" id="swTone"><span class="sw"></span> Мій tone of voice</div>
+        <div class="tg-sw on" id="swDeai"><span class="sw"></span> Прибрати AI-слід</div>
+      </div>
+      <div class="result" id="playResult"></div>
+      <div class="meta" id="playMeta"></div>
+    </div>
+
+    <div class="play dnd reveal">
+      <div style="font-size:13.5px;font-weight:600;margin-bottom:3px">📅 Перетягни пости на дні тижня</div>
+      <div class="meta" style="margin:0 0 11px">Так працює планувальник: хапаєш пост — кидаєш на дату (на телефоні — тап по посту, тоді тап по дню).</div>
+      <div class="tray2" id="tray2">
+        <div class="pchip2" draggable="true">Перфекціонізм</div>
+        <div class="pchip2" draggable="true">Ранок без новин</div>
+        <div class="pchip2" draggable="true">«Погана версія»</div>
+      </div>
+      <div class="week" id="week"></div>
+    </div>
+  </div>
+</section>
+
+<!-- INTEGRATIONS -->
+<section class="sec" id="integrations">
+  <div class="wrap">
+    <h2 class="reveal">Інтеграції</h2>
+    <p class="sub reveal">Підключається до того, чим ти вже користуєшся.</p>
+    <div class="intg">
+      <div class="i reveal"><svg class="ico-lg"><use href="#i-telegram"/></svg><div class="nm">Telegram</div></div>
+      <div class="i reveal"><svg class="ico-lg"><use href="#i-instagram"/></svg><div class="nm">Instagram</div><div class="st">скоро</div></div>
+      <div class="i reveal"><svg class="ico-lg"><use href="#i-gdrive"/></svg><div class="nm">Google Drive</div></div>
+      <div class="i reveal"><svg class="ico-lg"><use href="#i-rss"/></svg><div class="nm">RSS</div></div>
+      <div class="i reveal"><svg class="ico-lg"><use href="#i-facebook"/></svg><div class="nm">Facebook</div><div class="st">скоро</div></div>
+      <div class="i reveal"><svg class="ico-lg"><use href="#i-threads"/></svg><div class="nm">Threads</div><div class="st">скоро</div></div>
+      <div class="i reveal"><svg class="ico-lg"><use href="#i-video"/></svg><div class="nm">Відео</div><div class="st">скоро</div></div>
+      <div class="i reveal"><svg class="ico-lg"><use href="#i-api"/></svg><div class="nm">API / твоє</div><div class="st">за запитом</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- COMPARE -->
+<section class="sec" id="why" style="background:var(--bg2)">
+  <div class="wrap">
+    <h2 class="reveal">Чому не просто ChatGPT?</h2>
+    <p class="sub reveal">ChatGPT дає текст. socialio дає опублікований контент у твоєму голосі.</p>
+    <div class="cmp reveal">
+      <div class="cmp-row head"><div>Що важливо</div><div class="us">socialio</div><div class="them">ChatGPT</div></div>
+      <div class="cmp-row"><div>Твій tone of voice із памʼяттю</div><div class="us">Так</div><div class="them">Щоразу заново</div></div>
+      <div class="cmp-row"><div>Прибирає AI-слід</div><div class="us">Так</div><div class="them">Ні</div></div>
+      <div class="cmp-row"><div>Багато джерел (дзвінки, новини, Drive)</div><div class="us">Так</div><div class="them">Вручну</div></div>
+      <div class="cmp-row"><div>Планування + автопостинг</div><div class="us">Так</div><div class="them">Ні</div></div>
+      <div class="cmp-row"><div>Для української аудиторії</div><div class="us">В ядрі</div><div class="them">Як вийде</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- USE CASES -->
+<section class="sec" id="cases">
+  <div class="wrap">
+    <h2 class="reveal">Для кого</h2>
+    <p class="sub reveal">Якщо ти проводиш онлайн-розмови й маєш що сказати.</p>
+    <div class="tabs reveal">
+      <div class="tab active" data-uc="0">Психологи</div><div class="tab" data-uc="1">Коучі</div>
+      <div class="tab" data-uc="2">Консультанти</div><div class="tab" data-uc="3">Бізнес і готелі</div>
+    </div>
+    <div class="usecase reveal"><h3 id="uc-h"></h3><p id="uc-p"></p></div>
+  </div>
+</section>
+
+<!-- VALUE -->
+<section class="sec" id="value" style="background:var(--bg2)">
+  <div class="wrap">
+    <h2 class="reveal">Чому socialio</h2>
+    <div class="vals">
+      <div class="val reveal"><div class="ic">⏱️</div><h3>Економить твій час</h3><p>Те, що займало години в ChatGPT, стається саме — поки ти ведеш клієнтів.</p></div>
+      <div class="val reveal"><div class="ic">🫶</div><h3>Зберігає твій голос</h3><p>Контент звучить як ти. Аудиторія довіряє, бо не відчуває робота.</p></div>
+      <div class="val reveal"><div class="ic">🇺🇦</div><h3>Українською в ядрі</h3><p>Зроблено для української аудиторії, а не «підтримує українську як вийде».</p></div>
+    </div>
+    <div class="founder reveal">
+      «Я будую socialio для себе теж — у мене готель, і з робочих та інвесторських дзвінків виходить чудовий контент. Хотів інструмент, який робить це сам, у нашому голосі. Тепер ділюся ним.»
+      <div class="who">— Команда ROZUM · ранній доступ</div>
+    </div>
+  </div>
+</section>
+
+<!-- PRICING -->
+<section class="sec" id="pricing">
+  <div class="wrap">
+    <h2 class="reveal">Простіше за SMM-ника. Дешевше за твій час.</h2>
+    <p class="sub reveal">Ранній доступ — ціни фіксуються для перших користувачів.</p>
+    <div class="prices">
+      <div class="price reveal"><h3>Тест</h3><div class="amt">0 <span>/ 7 днів</span></div>
+        <ul><li>1 джерело</li><li>До 10 постів</li><li>Telegram-публікація</li></ul>
+        <a class="btn block" href="/register">Почати безкоштовно</a></div>
+      <div class="price featured reveal"><h3>Pro</h3><div class="amt">€29 <span>/ міс</span></div>
+        <ul><li>Усі джерела</li><li>Tone of voice + де-AI</li><li>Календар і автопостинг</li><li>Telegram + Instagram</li></ul>
+        <a class="btn primary block" href="/register">Спробувати Pro</a></div>
+      <div class="price reveal"><h3>Бізнес</h3><div class="amt">Інд.</div>
+        <ul><li>Кілька просторів/брендів</li><li>База знань компанії</li><li>Пріоритетна підтримка</li></ul>
+        <a class="btn block" href="/register">Поговорити з нами</a></div>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section class="sec" id="faq" style="background:var(--bg2)">
+  <div class="wrap">
+    <h2 class="reveal">Часті запитання</h2>
+    <div class="faq">
+      <details class="qa reveal"><summary>А мої дзвінки й дані не витечуть? <span class="plus">+</span></summary><div class="a">Транскрипти й база знань зберігаються у твоєму просторі й не передаються третім для реклами чи навчання моделей. Можеш видалити будь-коли.</div></details>
+      <details class="qa reveal"><summary>Пости реально звучатимуть як я? <span class="plus">+</span></summary><div class="a">Так — це ядро продукту. Ти задаєш tone of voice прикладами своїх постів, а окремий крок прибирає AI-ознаки.</div></details>
+      <details class="qa reveal"><summary>Які соцмережі підтримуються? <span class="plus">+</span></summary><div class="a">Старт — автопостинг у Telegram. Далі Instagram, Facebook і Threads. Контент адаптується під кожен канал.</div></details>
+      <details class="qa reveal"><summary>Треба писати промпти чи налаштовувати? <span class="plus">+</span></summary><div class="a">Ні. Заливаєш джерело — отримуєш готові пости. За бажання можна підкоригувати кожен крок.</div></details>
+      <details class="qa reveal"><summary>Я не коуч — підійде для бізнесу? <span class="plus">+</span></summary><div class="a">Так. Працює з будь-яким матеріалом: робочі дзвінки, інвесторські зустрічі, новини галузі.</div></details>
+    </div>
+  </div>
+</section>
+
+<!-- FINAL -->
+<section class="final">
+  <div class="wrap"><div class="card reveal">
+    <h2>Твій наступний пост уже є в останньому дзвінку</h2>
+    <p>Залий перший матеріал — і подивись, як socialio зробить тиждень контенту у твоєму голосі.</p>
+    <a class="btn primary lg pulse" href="/register">Спробувати безкоштовно</a>
+  </div></div>
+</section>
+
+<footer><div class="wrap">
+  <div class="foot-grid">
+    <div class="col foot-brand">
+      <a class="logo" href="#"><span class="mark"><svg viewBox="0 0 100 100"><use href="#i-mark"/></svg></span> socialio <span class="by">by ROZUM</span></a>
+      <p class="muted" style="font-size:13.5px;margin-top:12px;max-width:300px">Контент на автопілоті — у твоєму голосі. Для експертів, що проводять онлайн-розмови.</p>
+      <div class="foot-soc">
+        <a href="#" aria-label="Telegram"><svg class="ico"><use href="#i-telegram"/></svg></a>
+        <a href="#" aria-label="Instagram"><svg class="ico"><use href="#i-instagram"/></svg></a>
+        <a href="#" aria-label="Facebook"><svg class="ico"><use href="#i-facebook"/></svg></a>
+        <a href="#" aria-label="YouTube"><svg class="ico"><use href="#i-youtube"/></svg></a>
+      </div>
+    </div>
+    <div class="col"><h5>Продукт</h5><a href="#how">Як працює</a><a href="#try">Демо</a><a href="#integrations">Інтеграції</a><a href="#pricing">Ціни</a></div>
+    <div class="col"><h5>Компанія</h5><a href="#">Про ROZUM</a><a href="#">Блог</a><a href="#">Контакти</a></div>
+    <div class="col"><h5>Правове</h5><a href="#">Політика даних</a><a href="#">Умови</a><a href="#">Приватність</a></div>
+  </div>
+  <div class="foot-bottom"><span>© 2026 ROZUM · socialio.rozum.one</span><span>Зроблено в Україні 🇺🇦</span></div>
+</div></footer>
+
+<div class="sticky-cta"><a class="btn primary block pulse" href="/register">Спробувати безкоштовно</a></div>
+
+<script>
+const nav=document.getElementById('nav');
+addEventListener('scroll',()=>nav.classList.toggle('scrolled',scrollY>10));
+const motion=()=>!matchMedia('(prefers-reduced-motion:reduce)').matches;
+
+// burger
+const burger=document.getElementById('burger'),mmenu=document.getElementById('mmenu');
+burger.onclick=()=>{const o=mmenu.classList.toggle('open');burger.classList.toggle('open',o);document.body.style.overflow=o?'hidden':'';};
+mmenu.querySelectorAll('a').forEach(a=>a.onclick=()=>{mmenu.classList.remove('open');burger.classList.remove('open');document.body.style.overflow='';});
+
+// reveal
+const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}}),{threshold:.12});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+
+// counters
+const cio=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){const el=e.target,to=+el.dataset.c,suf=el.dataset.suf||'';let n=0;const st=Math.max(1,Math.round(to/30));const t=setInterval(()=>{n+=st;if(n>=to){n=to;clearInterval(t);}el.textContent=n+suf;},30);cio.unobserve(el);}}),{threshold:.5});
+document.querySelectorAll('[data-c]').forEach(el=>cio.observe(el));
+
+// hero word rotator
+const ROT=['дзвінки','сесії','нотатки','новини ніші'];let ri=0;
+if(motion())setInterval(()=>{ri=(ri+1)%ROT.length;const el=document.getElementById('rot');el.style.opacity=0;setTimeout(()=>{el.textContent=ROT[ri];el.style.opacity=1;},250);},2400);
+
+// hero demo
+const POST="Ти не лінивий. Ти боїшся почати, бо хочеш ідеально.\n\nПрокрастинація часто це перфекціонізм у масці. Спробуй «погану першу версію» - неідеально за 10 хвилин.\n\nПоріг входу падає, тривога відпускає 👇";
+const typed=document.getElementById('typed'),demo=document.getElementById('demo');let ran=false;
+function runDemo(){
+  document.querySelectorAll('[data-d],[data-i],[data-tg]').forEach(e=>e.classList.remove('in'));typed.innerHTML='';
+  document.querySelectorAll('[data-d]').forEach((el,i)=>setTimeout(()=>el.classList.add('in'),300+i*380));
+  let t=300+4*380+200;
+  document.querySelectorAll('[data-i]').forEach((el,i)=>setTimeout(()=>el.classList.add('in'),t+i*340));
+  setTimeout(typeText,t+4*340+350);
+}
+function typeText(){let i=0;const cur=document.createElement('span');cur.className='cursor';
+  const tick=()=>{typed.textContent=POST.slice(0,i);typed.appendChild(cur);i++;
+    if(i<=POST.length)setTimeout(tick,18);
+    else{document.querySelector('[data-tg]').classList.add('in');setTimeout(()=>{if(motion())runDemo();},4000);}};tick();}
+new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting&&!ran){ran=true;if(motion())runDemo();else{typed.textContent=POST;document.querySelectorAll('[data-d],[data-i],[data-tg]').forEach(x=>x.classList.add('in'));}}}),{threshold:.25}).observe(demo);
+
+// month calendar viz (June 2026 starts Monday)
+const calM=document.getElementById('calMonth');
+['Пн','Вт','Ср','Чт','Пт','Сб','Нд'].forEach(d=>{const h=document.createElement('div');h.className='dh';h.textContent=d;calM.appendChild(h);});
+const posts={3:['tg'],5:['tg','ig'],9:['ig'],11:['tg'],16:['fb'],18:['tg','ig'],23:['tg'],25:['ig','fb'],30:['tg']};
+for(let d=1;d<=30;d++){const c=document.createElement('div');c.className='cd';c.textContent=d;
+  if(posts[d]){const w=document.createElement('div');w.className='dots';posts[d].forEach(p=>{const dot=document.createElement('i');dot.className='dotc dot-'+p;w.appendChild(dot);});c.appendChild(w);}
+  calM.appendChild(c);}
+
+// playground
+const SRC=[
+ {ideas:"Транскрипт коуч-сесії → 6 ідей",base:"Прокрастинація - це часто перфекціонізм, а не лінь. Дозволь собі погану першу версію."},
+ {ideas:"Новина ніші → 3 ідеї",base:"Нове дослідження про вигорання. Адаптував головне для тебе простими словами."},
+ {ideas:"Нотатка з думками → 4 ідеї",base:"Записав думку між сесіями: клієнти бояться не помилки, а осуду."}
+];
+let curS=0;
+function renderPlay(){
+  const tone=document.getElementById('swTone').classList.contains('on');
+  const deai=document.getElementById('swDeai').classList.contains('on');
+  let txt=SRC[curS].base;
+  txt = tone ? ("Ти не один такий 👋\n\n"+txt+"\n\nПеревір сьогодні 👇")
+             : ("Отже, варто зазначити: "+txt+" Це важлива тема, яку необхідно розглянути.");
+  txt = deai ? txt.replace(/—/g,'-') : txt.replace(/(\w) - (\w)/g,'$1 — $2');
+  document.getElementById('playResult').textContent=txt;
+  document.getElementById('playMeta').textContent=SRC[curS].ideas+(tone?" · твій голос":" · нейтрально")+(deai?" · без AI-сліду":" · з AI-слідом");
+}
+document.querySelectorAll('#picker .pick').forEach(b=>b.onclick=()=>{document.querySelectorAll('#picker .pick').forEach(x=>x.classList.remove('active'));b.classList.add('active');curS=+b.dataset.s;renderPlay();});
+document.getElementById('swTone').onclick=function(){this.classList.toggle('on');renderPlay();};
+document.getElementById('swDeai').onclick=function(){this.classList.toggle('on');renderPlay();};
+renderPlay();
+
+// drag-drop week (+ tap fallback for touch)
+const week=document.getElementById('week');let dragEl=null,sel=null;
+function placeInto(cell,chip){const m=document.createElement('div');m.className='mini';m.textContent=chip.textContent;cell.appendChild(m);chip.style.display='none';}
+['Пн','Вт','Ср','Чт','Пт','Сб','Нд'].forEach(d=>{const c=document.createElement('div');c.className='wd';c.innerHTML=d;
+  c.addEventListener('dragover',e=>{e.preventDefault();c.classList.add('over');});
+  c.addEventListener('dragleave',()=>c.classList.remove('over'));
+  c.addEventListener('drop',e=>{e.preventDefault();c.classList.remove('over');if(dragEl)placeInto(c,dragEl);});
+  c.addEventListener('click',()=>{if(sel){placeInto(c,sel);sel.classList.remove('sel');sel=null;}});
+  week.appendChild(c);});
+document.querySelectorAll('.pchip2').forEach(p=>{
+  p.addEventListener('dragstart',()=>{dragEl=p;p.classList.add('drag');});
+  p.addEventListener('dragend',()=>{p.classList.remove('drag');dragEl=null;});
+  p.addEventListener('click',()=>{if(sel)sel.classList.remove('sel');sel=p;p.classList.add('sel');});
+});
+
+// use cases
+const UC=[
+ ["Психологи й терапевти","Із записів консультацій (знеособлено) і твоєї бази знань socialio робить дбайливі, етичні пости про твій підхід — стабільно, не порушуючи приватності клієнтів."],
+ ["Коучі","Кожна сесія - теми на тиждень. socialio дістає інсайти, пише у твоєму голосі й публікує, поки ти ведеш наступного клієнта."],
+ ["Консультанти","База знань + новини галузі = пости, що показують твою експертизу. LinkedIn і Telegram наповнюються самі, на фактах."],
+ ["Бізнес і готелі","Робочі та інвесторські дзвінки, апдейти, новини індустрії - усе стає контентом бренду. Один акаунт - багато просторів."]
+];
+const ucH=document.getElementById('uc-h'),ucP=document.getElementById('uc-p');
+function setUC(i){ucH.textContent=UC[i][0];ucP.textContent=UC[i][1];document.querySelectorAll('.tab').forEach((t,j)=>t.classList.toggle('active',i===j));}
+document.querySelectorAll('.tab').forEach((t,i)=>t.onclick=()=>setUC(i));
+setUC(0);
+
+</script>
+</body>
+</html>
