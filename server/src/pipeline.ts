@@ -118,11 +118,12 @@ export async function executeStep(runId: string, step: StepKey) {
   const tpl = await resolvePrompt(workspace_id, step);
   const lang = (settings.output_language || "Українська").trim();
   const system = fillPrompt(tpl.content, settings) + `\n\nМова всього тексту у відповіді: ${lang}.`;
+  const ctx = { workspaceId: workspace_id, step };
   await upsertStepRun(runId, step, { status: "running", model: tpl.model, prompt_version: tpl.version });
 
   try {
     if (step === "extract_ideas") {
-      const out = await chat(tpl.model, system, `Транскрипт:\n---\n${transcript}`);
+      const out = await chat(tpl.model, system, `Транскрипт:\n---\n${transcript}`, ctx);
       const ideas = extractJsonArray<{ idea: string; angle?: string }>(out);
       await q(`delete from idea where run_id=$1`, [runId]);
       for (let i = 0; i < ideas.length; i++)
@@ -138,7 +139,7 @@ export async function executeStep(runId: string, step: StepKey) {
       const outs: string[] = [];
       for (const it of ideas) {
         const txt = await chat(tpl.model, system,
-          `Зміст сесії (першоджерело):\n---\n${transcript}\n---\nЗроби пост за цією ідеєю, спираючись на конкретику сесії вище:\nІдея: ${it.idea}\nКут: ${it.angle}`);
+          `Зміст сесії (першоджерело):\n---\n${transcript}\n---\nЗроби пост за цією ідеєю, спираючись на конкретику сесії вище:\nІдея: ${it.idea}\nКут: ${it.angle}`, ctx);
         outs.push(txt);
         await q(`insert into post(run_id, idea_id, stage, content) values($1,$2,'draft',$3)`,
           [runId, it.id, txt]);
@@ -152,7 +153,7 @@ export async function executeStep(runId: string, step: StepKey) {
       await q(`delete from post where run_id=$1 and stage=$2`, [runId, stage]);
       const outs: string[] = [];
       for (const p of src) {
-        const txt = await chat(tpl.model, system, `---\n${p.content}`);
+        const txt = await chat(tpl.model, system, `---\n${p.content}`, ctx);
         outs.push(txt);
         await q(`insert into post(run_id, stage, content) values($1,$2,$3)`, [runId, stage, txt]);
       }
@@ -162,7 +163,7 @@ export async function executeStep(runId: string, step: StepKey) {
       if (!finals.length) throw new Error("немає фінальних постів");
       // AI радить лише тип і день для КОЖНОГО готового поста (по порядку) — самі пости не змінюємо
       const out = await chat(tpl.model, system,
-        "Готові пости (по порядку):\n" + finals.map((p, i) => `[${i}] ${p.content}`).join("\n\n"));
+        "Готові пости (по порядку):\n" + finals.map((p, i) => `[${i}] ${p.content}`).join("\n\n"), ctx);
       let advice: { type?: string; dayOffset?: number }[] = [];
       try { advice = extractJsonArray<{ type?: string; dayOffset?: number }>(out); } catch { advice = []; }
       await q(`delete from content_plan where run_id=$1`, [runId]);
@@ -182,4 +183,13 @@ export async function executeStep(runId: string, step: StepKey) {
     await upsertStepRun(runId, step, { status: "error", error: e.message, model: tpl.model });
     throw e;
   }
+}
+
+/** Перегенерувати один текст через промпт/модель заданого кроку (для кнопки «Перегенерувати»). */
+export async function rewriteWithStep(workspaceId: string, step: StepKey, text: string): Promise<string> {
+  const settings = await loadSettings(workspaceId);
+  const tpl = await resolvePrompt(workspaceId, step);
+  const lang = (settings.output_language || "Українська").trim();
+  const system = fillPrompt(tpl.content, settings) + `\n\nМова всього тексту у відповіді: ${lang}.`;
+  return chat(tpl.model, system, `---\n${text}`, { workspaceId, step });
 }

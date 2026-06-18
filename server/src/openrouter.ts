@@ -1,6 +1,9 @@
 import { env } from "./env.js";
+import { q } from "./db.js";
 
-export async function chat(model: string, system: string, user: string): Promise<string> {
+export type ChatCtx = { workspaceId: string; step?: string };
+
+export async function chat(model: string, system: string, user: string, ctx?: ChatCtx): Promise<string> {
   if (!env.openrouter.apiKey) throw new Error("OPENROUTER_API_KEY не заданий");
   const headers: Record<string, string> = {
     Authorization: `Bearer ${env.openrouter.apiKey}`,
@@ -22,6 +25,7 @@ export async function chat(model: string, system: string, user: string): Promise
         model,
         temperature: 0.7,
         max_tokens: 1500,
+        usage: { include: true },
         messages: [
           { role: "system", content: system },
           { role: "user", content: user },
@@ -40,6 +44,15 @@ export async function chat(model: string, system: string, user: string): Promise
     throw new Error(`OpenRouter ${res.status}: ${t.slice(0, 300)}`);
   }
   const j: any = await res.json();
+  if (ctx?.workspaceId) {
+    const u = j.usage || {};
+    try {
+      await q(
+        `insert into llm_usage(workspace_id, step, model, prompt_tokens, completion_tokens, cost) values($1,$2,$3,$4,$5,$6)`,
+        [ctx.workspaceId, ctx.step ?? null, model, u.prompt_tokens || 0, u.completion_tokens || 0, u.cost || 0]
+      );
+    } catch { /* облік не критичний */ }
+  }
   return j.choices?.[0]?.message?.content ?? "";
 }
 

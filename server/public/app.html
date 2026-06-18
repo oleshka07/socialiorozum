@@ -189,8 +189,8 @@
     </section>
 
     <section class="viewsec" data-view="analytics">
-      <div class="pagehead"><h1>Аналітика</h1><p>Скоро: лічильник токенів і вартості згенерованого контенту, ефективність постів.</p></div>
-      <div class="settings"><div class="body"><div class="empty">Додаємо у наступній хвилі (R2).</div></div></div>
+      <div class="pagehead"><h1>Аналітика</h1><p>Витрати на генерацію. Ефективність постів — після підключення статистики.</p></div>
+      <div class="settings"><div class="body" id="usageBox"><div class="empty">Завантаження…</div></div></div>
     </section>
 
     <section class="viewsec" data-view="settings">
@@ -248,7 +248,15 @@ document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>{
   document.querySelectorAll('.viewsec').forEach(x=>x.classList.remove('active'));
   n.classList.add('active');
   const v=document.querySelector('.viewsec[data-view="'+n.dataset.view+'"]'); if(v) v.classList.add('active');
+  if(n.dataset.view==='analytics') loadUsage();
 });
+async function loadUsage(){
+  try{ const u=await api('/usage'); const toks=((u.prompt_tokens||0)+(u.completion_tokens||0));
+    $('usageBox').innerHTML='<div class="card" style="font-size:18px"><b>$'+(Number(u.cost)||0).toFixed(4)+'</b> витрачено на генерацію</div>'
+      +'<div class="card">'+toks.toLocaleString('uk')+' токенів · '+(u.calls||0)+' AI-викликів</div>'
+      +'<div class="hint">Підрахунок із OpenRouter по вашому акаунту (усі прогони).</div>';
+  }catch(e){ $('usageBox').innerHTML='<div class="empty">Не вдалося завантажити лічильник.</div>'; }
+}
 
 // ---------- settings ----------
 async function loadSettings(){
@@ -313,29 +321,50 @@ function renderPosts(oid,posts,emptyTxt){
   if(!posts||!posts.length){ o.innerHTML='<div class="empty">'+(emptyTxt||'—')+'</div>'; return; }
   o.innerHTML=posts.map(p=>'<div class="card post">'+esc(p.content)+'</div>').join('');
 }
-function bindCopy(){document.querySelectorAll('.copy').forEach(b=>b.onclick=()=>{navigator.clipboard.writeText(decodeURIComponent(b.dataset.c));b.textContent='✓';setTimeout(()=>b.textContent='копіювати',1000);});}
 function renderFinals(posts,published){
   const o=$('o6');
-  if(!posts||!posts.length){ o.innerHTML='<div class="empty">Готові пости з кнопками публікації в Telegram.</div>'; return; }
+  const visible=(posts||[]).filter(p=>p.review!=='archived');
+  if(!visible.length){ o.innerHTML='<div class="empty">Готові пости з\'являться тут — з діями (затвердити / редагувати / перегенерувати / архів / у Telegram).</div>'; return; }
   const isPub=(pid,t)=>published.some(x=>x.post_id===pid && x.target===t);
-  o.innerHTML=posts.map(p=>'<div class="tg"><button class="copy" data-c="'+encodeURIComponent(p.content)+'">копіювати</button>'+esc(p.content)
-    +'<div class="ctl" style="margin-top:10px">'
-    +'<button class="pub" data-post="'+p.id+'" data-t="channel">'+(isPub(p.id,'channel')?'✓ у каналі':'→ Канал')+'</button>'
-    +'<button class="pub" data-post="'+p.id+'" data-t="group">'+(isPub(p.id,'group')?'✓ у групі':'→ Група')+'</button>'
-    +'<span class="pubmsg" data-for="'+p.id+'" style="font-size:12px"></span></div></div>').join('');
-  bindCopy();
-  o.querySelectorAll('.pub').forEach(b=>b.onclick=()=>publish(b));
+  o.innerHTML=visible.map(p=>{
+    const st=p.review==='approved'?'<span class="badge ok">✓ затверджено</span>':p.review==='needs_work'?'<span class="badge soon">доопрацювати</span>':'';
+    return '<div class="tg" data-post="'+p.id+'"><div class="pcontent">'+esc(p.content)+'</div>'
+      +'<div class="ctl" style="margin-top:10px">'+st
+      +'<button class="act" data-a="edit">✎ Редагувати</button>'
+      +'<button class="act" data-a="approve">✓ Затвердити</button>'
+      +'<button class="act" data-a="needs">Доопрацювати</button>'
+      +'<button class="act" data-a="regen">↻ Перегенерувати</button>'
+      +'<button class="act" data-a="archive">🗄 Архів</button>'
+      +'<button class="act" data-a="copy">Копіювати</button>'
+      +'<button class="pub" data-t="channel">'+(isPub(p.id,'channel')?'✓ канал':'→ Канал')+'</button>'
+      +'<button class="pub" data-t="group">'+(isPub(p.id,'group')?'✓ група':'→ Група')+'</button>'
+      +'<span class="pubmsg" style="font-size:12px"></span></div></div>';
+  }).join('');
+  o.querySelectorAll('.tg').forEach(card=>{ const id=card.dataset.post;
+    card.querySelectorAll('.act').forEach(b=>b.onclick=()=>postAction(card,id,b.dataset.a));
+    card.querySelectorAll('.pub').forEach(b=>b.onclick=()=>publishUnit(card,id,b.dataset.t,b));
+  });
 }
-async function publish(btn){
-  const postId=btn.dataset.post,target=btn.dataset.t;
-  const msg=$('o6').querySelector('.pubmsg[data-for="'+postId+'"]');
-  const old=btn.textContent; btn.disabled=true; btn.innerHTML='<span class="spin"></span>'; if(msg) msg.textContent='';
-  try{
-    const r=await api('/posts/'+postId+'/publish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({targets:[target]})});
-    const res=(r.results||[]).find(x=>x.target===target)||{};
-    if(res.status==='sent'){ btn.textContent=(target==='channel'?'✓ у каналі':'✓ у групі'); }
-    else { btn.disabled=false; btn.textContent=old; if(msg){ msg.style.color='var(--stale)'; msg.textContent=' ⚠ '+(res.error||'помилка'); } }
-  }catch(e){ btn.disabled=false; btn.textContent=old; if(msg){ msg.style.color='var(--stale)'; msg.textContent=' ⚠ '+e.message; } }
+async function postAction(card,id,a){
+  const cont=card.querySelector('.pcontent');
+  if(a==='copy'){ navigator.clipboard.writeText(cont.textContent); flashSaved(); return; }
+  if(a==='edit'){
+    const cur=cont.textContent;
+    cont.innerHTML='<textarea class="editta" style="min-height:130px"></textarea><div class="ctl"><button class="primary doSave">Зберегти</button><button class="ghost doCancel">Скасувати</button></div>';
+    cont.querySelector('.editta').value=cur;
+    cont.querySelector('.doSave').onclick=async()=>{ try{ await api('/posts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:cont.querySelector('.editta').value})}); await refresh(); flashSaved(); }catch(e){ alert('Помилка: '+e.message); } };
+    cont.querySelector('.doCancel').onclick=()=>refresh();
+    return;
+  }
+  if(a==='regen'){ cont.innerHTML='<span class="spin"></span> перегенерація…'; try{ await api('/posts/'+id+'/regenerate',{method:'POST'}); await refresh(); flashSaved(); }catch(e){ alert('Помилка: '+e.message); await refresh(); } return; }
+  const map={approve:'approved',needs:'needs_work',archive:'archived'};
+  if(map[a]){ try{ await api('/posts/'+id+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:map[a]})}); await refresh(); flashSaved(); }catch(e){ alert('Помилка: '+e.message); } }
+}
+async function publishUnit(card,id,target,btn){
+  const msg=card.querySelector('.pubmsg'); const old=btn.textContent; btn.disabled=true; btn.innerHTML='<span class="spin"></span>'; if(msg) msg.textContent='';
+  try{ const r=await api('/posts/'+id+'/publish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({targets:[target]})}); const res=(r.results||[]).find(x=>x.target===target)||{};
+    if(res.status==='sent'){ btn.textContent=(target==='channel'?'✓ канал':'✓ група'); } else { btn.disabled=false; btn.textContent=old; if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+(res.error||'помилка');} }
+  }catch(e){ btn.disabled=false; btn.textContent=old; if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+e.message;} }
 }
 
 function updRunLabel(){ $('runLabel').textContent = runId ? ('· прогін '+runId.slice(0,8)) : '· новий прогін'; $('lockHint').textContent = runId ? 'Прогін створено з цього транскрипту. «Новий прогін», щоб почати з іншого тексту.' : ''; }
@@ -489,6 +518,7 @@ async function savePrompt(step){
   await loadSettings();
   await loadTelegram();
   await loadPrompts();
+  loadUsage();
   updRunLabel();
   if(runId){ try{ await refresh(); }catch(e){ runId=null; localStorage.removeItem('kg_run'); updRunLabel(); } }
   renderCalendar();

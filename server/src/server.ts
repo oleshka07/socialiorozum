@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, rewriteWithStep } from "./pipeline.js";
 import * as tg from "./telegram.js";
 import * as auth from "./auth.js";
 import { sendVerifyEmail, sendResetEmail } from "./email.js";
@@ -255,7 +255,7 @@ app.get("/api/runs/:id", async (req: any, reply) => {
   const [steps, ideas, posts, plan, published, schedule] = await Promise.all([
     q(`select step_key,status,model,prompt_version,output,error,updated_at from step_run where run_id=$1`, [id]),
     q(`select id,idx,idea,angle,selected from idea where run_id=$1 order by idx`, [id]),
-    q(`select id,stage,channel_type,content from post where run_id=$1 order by created_at`, [id]),
+    q(`select id,stage,channel_type,content,review from post where run_id=$1 order by created_at`, [id]),
     q(`select pi.*, p.content as post_content from plan_item pi
         join content_plan cp on cp.id=pi.plan_id
         left join post p on p.id=pi.post_id
@@ -419,6 +419,48 @@ app.post("/api/posts/:postId/publish", async (req: any, reply) => {
     }
   }
   return { ok: true, results };
+});
+
+// ===================== POST-ЮНІТИ (банк публікацій) =====================
+async function postOwned(postId: string, ws: string) {
+  return one<{ content: string }>(
+    `select p.content from post p
+       join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+     where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
+}
+
+app.put("/api/posts/:postId", async (req: any, reply) => {
+  if (!(await postOwned(req.params.postId, req.user.workspace_id))) return reply.code(404).send({ error: "пост не знайдено" });
+  await q(`update post set content=$2 where id=$1`, [req.params.postId, String(req.body?.content ?? "")]);
+  return { ok: true };
+});
+
+app.post("/api/posts/:postId/review", async (req: any, reply) => {
+  if (!(await postOwned(req.params.postId, req.user.workspace_id))) return reply.code(404).send({ error: "пост не знайдено" });
+  const status = String(req.body?.status ?? "");
+  if (!["approved", "needs_work", "archived", ""].includes(status)) return reply.code(400).send({ error: "невідомий статус" });
+  await q(`update post set review=nullif($2,'') where id=$1`, [req.params.postId, status]);
+  return { ok: true };
+});
+
+app.post("/api/posts/:postId/regenerate", async (req: any, reply) => {
+  const post = await postOwned(req.params.postId, req.user.workspace_id);
+  if (!post) return reply.code(404).send({ error: "пост не знайдено" });
+  try {
+    const fresh = await rewriteWithStep(req.user.workspace_id, "deai", post.content);
+    await q(`update post set content=$2, review=null where id=$1`, [req.params.postId, fresh]);
+    return { ok: true, content: fresh };
+  } catch (e: any) {
+    await logEvent("error", "regenerate", e.message, null, req.user.id);
+    return reply.code(500).send({ error: e.message });
+  }
+});
+
+app.get("/api/usage", async (req: any) => {
+  return one(`select coalesce(sum(prompt_tokens),0)::int as prompt_tokens,
+                     coalesce(sum(completion_tokens),0)::int as completion_tokens,
+                     coalesce(sum(cost),0)::float as cost, count(*)::int as calls
+              from llm_usage where workspace_id=$1`, [req.user.workspace_id]);
 });
 
 // ===================== СТОРІНКИ =====================

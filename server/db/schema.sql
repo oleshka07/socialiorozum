@@ -175,6 +175,22 @@ alter table app_user add column if not exists google_id text;
 create index if not exists idx_run_source on pipeline_run(source_id);
 create index if not exists idx_tgpub_post on telegram_publish(post_id);
 create index if not exists idx_applog_created on app_log(created_at desc);
+
+-- статус рев'ю поста (банк публікацій): null | approved | needs_work | archived
+alter table post add column if not exists review text;
+
+-- облік токенів/вартості LLM (для лічильника в Аналітиці)
+create table if not exists llm_usage (
+  id                uuid primary key default gen_random_uuid(),
+  workspace_id      uuid references workspace(id) on delete cascade,
+  step              text,
+  model             text,
+  prompt_tokens     int default 0,
+  completion_tokens int default 0,
+  cost              numeric default 0,
+  created_at        timestamptz not null default now()
+);
+create index if not exists idx_llmusage_ws on llm_usage(workspace_id, created_at desc);
 create index if not exists idx_steprun_run on step_run(run_id);
 create index if not exists idx_post_run on post(run_id);
 create index if not exists idx_idea_run on idea(run_id);
