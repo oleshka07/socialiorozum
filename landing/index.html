@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>socialio by ROZUM — контент на автопілоті, у твоєму голосі</title>
+<meta name="description" content="socialio перетворює твої дзвінки, сесії, нотатки й новини ніші на готові пости у твоєму голосі — без AI-сліду — і публікує автоматично в Telegram та Instagram.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0c12; --bg2:#0e1119; --panel:#12161f; --panel2:#171c27; --line:#232a38;
+    --txt:#eef2f8; --muted:#9aa6b8; --accent:#5b8cff; --cyan:#5be3c2; --violet:#a982ff;
+    --warn:#f5b54a; --ok:#3fd07a; --radius:16px; --maxw:1120px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--txt);font-family:Inter,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6;overflow-x:hidden}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 22px}
+  section{position:relative}
+  h1,h2,h3{line-height:1.12;letter-spacing:-.02em;font-weight:800}
+  h2{font-size:clamp(26px,4vw,42px)}
+  .muted{color:var(--muted)}
+  .grad{background:linear-gradient(100deg,var(--accent),var(--cyan) 55%,var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .btn{display:inline-flex;align-items:center;gap:8px;border-radius:12px;padding:13px 22px;font-weight:700;font-size:15px;border:1px solid var(--line);background:var(--panel2);color:var(--txt);cursor:pointer;transition:.18s;white-space:nowrap}
+  .btn:hover{transform:translateY(-1px);border-color:var(--accent)}
+  .btn.primary{background:linear-gradient(100deg,var(--accent),var(--violet));border:none;color:#0a0c12;box-shadow:0 8px 30px -8px rgba(91,140,255,.6)}
+  .btn.primary:hover{box-shadow:0 12px 40px -8px rgba(91,140,255,.8)}
+  .btn.lg{padding:16px 30px;font-size:16px}
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--cyan);background:rgba(91,227,194,.08);border:1px solid rgba(91,227,194,.25);padding:6px 14px;border-radius:30px}
+
+  /* glow blobs */
+  .blob{position:absolute;border-radius:50%;filter:blur(90px);opacity:.5;z-index:0;pointer-events:none}
+  .blob.b1{width:480px;height:480px;background:radial-gradient(circle,rgba(91,140,255,.55),transparent 70%);top:-120px;left:-80px;animation:drift 18s ease-in-out infinite}
+  .blob.b2{width:420px;height:420px;background:radial-gradient(circle,rgba(169,130,255,.45),transparent 70%);top:200px;right:-120px;animation:drift 22s ease-in-out infinite reverse}
+  @keyframes drift{0%,100%{transform:translate(0,0)}50%{transform:translate(40px,50px)}}
+
+  /* nav */
+  nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(12px);background:rgba(10,12,18,.72);border-bottom:1px solid transparent;transition:.3s}
+  nav.scrolled{border-bottom:1px solid var(--line);background:rgba(10,12,18,.9)}
+  .nav-in{display:flex;align-items:center;justify-content:space-between;height:66px}
+  .logo{display:flex;align-items:center;gap:9px;font-weight:800;font-size:19px;letter-spacing:-.02em}
+  .logo .mark{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--violet));display:grid;place-items:center;font-size:15px}
+  .logo .by{font-size:11px;color:var(--muted);font-weight:600;border:1px solid var(--line);border-radius:6px;padding:2px 6px;letter-spacing:.04em}
+  .nav-links{display:flex;align-items:center;gap:26px;font-size:14px;font-weight:500}
+  .nav-links a.lnk{color:var(--muted);transition:.15s}
+  .nav-links a.lnk:hover{color:var(--txt)}
+  .nav-cta{display:flex;align-items:center;gap:12px}
+  @media(max-width:780px){.nav-links .lnk{display:none}}
+
+  /* hero */
+  .hero{padding:70px 0 40px;text-align:center}
+  .hero h1{font-size:clamp(34px,6vw,62px);max-width:880px;margin:18px auto 0}
+  .hero p.lead{font-size:clamp(16px,2.2vw,21px);color:var(--muted);max-width:660px;margin:20px auto 0}
+  .hero-cta{display:flex;gap:14px;justify-content:center;margin-top:30px;flex-wrap:wrap}
+  .trust{margin-top:18px;font-size:13px;color:var(--muted)}
+
+  /* animated product demo */
+  .demo{max-width:920px;margin:48px auto 0;background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:20px;padding:0;position:relative;overflow:hidden;box-shadow:0 40px 120px -40px rgba(91,140,255,.35)}
+  .demo-bar{display:flex;align-items:center;gap:7px;padding:13px 16px;border-bottom:1px solid var(--line)}
+  .demo-bar i{width:11px;height:11px;border-radius:50%;background:#2c3442;display:inline-block}
+  .demo-bar .url{margin-left:10px;font-size:12px;color:var(--muted)}
+  .flow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;min-height:330px}
+  @media(max-width:720px){.flow{grid-template-columns:1fr;min-height:auto}}
+  .flow .col{padding:20px;border-right:1px solid var(--line)}
+  .flow .col:last-child{border-right:none}
+  .flow h4{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:12px;font-weight:700}
+  .src{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:12.5px;margin-bottom:8px;opacity:0;transform:translateY(8px);display:flex;align-items:center;gap:8px}
+  .src.in{animation:pop .5s forwards}
+  .src .ic{font-size:15px}
+  .idea-line{font-size:12.5px;color:var(--muted);padding:7px 10px;border-left:2px solid var(--cyan);margin-bottom:7px;opacity:0;transform:translateX(-6px)}
+  .idea-line.in{animation:slidein .5s forwards}
+  .postcard{background:#0f1521;border:1px solid #233140;border-left:3px solid var(--accent);border-radius:10px;padding:12px;font-size:12.5px;min-height:120px;white-space:pre-wrap}
+  .tgline{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--cyan);margin-top:10px;opacity:0}
+  .tgline.in{animation:pop .5s forwards}
+  .cursor{display:inline-block;width:7px;height:14px;background:var(--accent);vertical-align:-2px;animation:blink .8s steps(2) infinite}
+  @keyframes blink{50%{opacity:0}}
+  @keyframes pop{to{opacity:1;transform:translateY(0)}}
+  @keyframes slidein{to{opacity:1;transform:translateX(0)}}
+
+  /* reveal */
+  .reveal{opacity:0;transform:translateY(24px);transition:.7s cubic-bezier(.2,.7,.2,1)}
+  .reveal.in{opacity:1;transform:none}
+
+  /* generic section spacing */
+  .sec{padding:88px 0}
+  .sec h2{text-align:center;max-width:760px;margin:0 auto}
+  .sec .sub{text-align:center;color:var(--muted);max-width:620px;margin:14px auto 0;font-size:17px}
+
+  /* pains */
+  .pains{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-top:44px}
+  @media(max-width:720px){.pains{grid-template-columns:1fr}}
+  .pain{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px;display:flex;gap:14px}
+  .pain .x{font-size:22px;flex-shrink:0}
+  .pain b{display:block;margin-bottom:4px}
+  .pain p{font-size:14px;color:var(--muted)}
+
+  /* steps */
+  .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:48px}
+  @media(max-width:900px){.steps{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:520px){.steps{grid-template-columns:1fr}}
+  .step{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:var(--radius);padding:24px;position:relative}
+  .step .n{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--violet));display:grid;place-items:center;font-weight:800;color:#0a0c12;margin-bottom:14px}
+  .step h3{font-size:18px;margin-bottom:6px}
+  .step p{font-size:14px;color:var(--muted)}
+
+  /* bento sources */
+  .bento{display:grid;grid-template-columns:repeat(6,1fr);gap:16px;margin-top:48px}
+  .cell{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px;transition:.2s}
+  .cell:hover{border-color:var(--accent);transform:translateY(-3px)}
+  .cell .ic{font-size:26px;margin-bottom:10px}
+  .cell h3{font-size:17px;margin-bottom:5px}
+  .cell p{font-size:13.5px;color:var(--muted)}
+  .cell .soon{font-size:11px;color:var(--warn);border:1px solid var(--warn);border-radius:20px;padding:1px 9px;display:inline-block;margin-top:8px}
+  .c-2{grid-column:span 2}.c-3{grid-column:span 3}
+  @media(max-width:860px){.bento{grid-template-columns:repeat(2,1fr)}.c-2,.c-3{grid-column:span 1}}
+
+  /* compare */
+  .cmp{margin-top:44px;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+  .cmp-row{display:grid;grid-template-columns:2fr 1fr 1fr;align-items:center}
+  .cmp-row>div{padding:15px 18px;font-size:14.5px;border-bottom:1px solid var(--line)}
+  .cmp-row.head>div{background:var(--panel2);font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+  .cmp-row .us{color:var(--cyan);font-weight:700;text-align:center}
+  .cmp-row .them{color:var(--muted);text-align:center}
+  .cmp-row:last-child>div{border-bottom:none}
+  .cmp .feat{color:var(--txt)}
+
+  /* use cases tabs */
+  .tabs{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:40px}
+  .tab{padding:10px 18px;border:1px solid var(--line);border-radius:30px;font-size:14px;font-weight:600;color:var(--muted);cursor:pointer;transition:.15s;background:var(--panel)}
+  .tab.active{color:#0a0c12;background:linear-gradient(100deg,var(--accent),var(--violet));border-color:transparent}
+  .usecase{max-width:720px;margin:26px auto 0;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:28px;text-align:center}
+  .usecase h3{font-size:20px;margin-bottom:8px}
+  .usecase p{color:var(--muted)}
+
+  /* pricing */
+  .prices{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:48px}
+  @media(max-width:820px){.prices{grid-template-columns:1fr}}
+  .price{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:28px}
+  .price.featured{border-color:var(--accent);background:linear-gradient(180deg,rgba(91,140,255,.08),var(--panel));position:relative}
+  .price.featured::before{content:"Найпопулярніше";position:absolute;top:-11px;left:24px;background:linear-gradient(100deg,var(--accent),var(--violet));color:#0a0c12;font-size:11px;font-weight:700;padding:3px 12px;border-radius:20px}
+  .price h3{font-size:18px}
+  .price .amt{font-size:38px;font-weight:800;margin:12px 0 2px}
+  .price .amt span{font-size:15px;color:var(--muted);font-weight:500}
+  .price ul{list-style:none;margin:18px 0;display:grid;gap:9px}
+  .price li{font-size:14px;color:var(--muted);display:flex;gap:9px}
+  .price li::before{content:"✓";color:var(--ok);font-weight:800}
+  .price .btn{width:100%;justify-content:center;margin-top:6px}
+
+  /* faq */
+  .faq{max-width:760px;margin:44px auto 0}
+  .qa{border:1px solid var(--line);border-radius:12px;margin-bottom:12px;background:var(--panel);overflow:hidden}
+  .qa summary{cursor:pointer;list-style:none;padding:18px 20px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
+  .qa summary::-webkit-details-marker{display:none}
+  .qa summary .plus{color:var(--accent);font-size:20px;transition:.2s}
+  .qa[open] summary .plus{transform:rotate(45deg)}
+  .qa .a{padding:0 20px 18px;color:var(--muted);font-size:14.5px}
+
+  /* final cta */
+  .final{text-align:center;padding:96px 0;position:relative}
+  .final .card{max-width:760px;margin:0 auto;background:linear-gradient(135deg,rgba(91,140,255,.14),rgba(169,130,255,.12));border:1px solid var(--line);border-radius:24px;padding:54px 30px}
+  .final h2{margin-bottom:14px}
+
+  footer{border-top:1px solid var(--line);padding:38px 0;color:var(--muted);font-size:13.5px}
+  .foot-in{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px}
+
+  @media(prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important}
+    .reveal{opacity:1;transform:none}
+    .src,.idea-line,.tgline{opacity:1;transform:none}
+  }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav id="nav"><div class="wrap nav-in">
+  <a class="logo" href="#"><span class="mark">◎</span> socialio <span class="by">by ROZUM</span></a>
+  <div class="nav-links">
+    <a class="lnk" href="#how">Як працює</a>
+    <a class="lnk" href="#sources">Джерела</a>
+    <a class="lnk" href="#why">Чому ми</a>
+    <a class="lnk" href="#pricing">Ціни</a>
+    <div class="nav-cta">
+      <a class="lnk" href="#login" onclick="alert('Тут буде вхід у кабінет')">Увійти</a>
+      <a class="btn primary" href="#signup" onclick="goSignup(event)">Спробувати</a>
+    </div>
+  </div>
+</div></nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="blob b1"></div><div class="blob b2"></div>
+  <div class="wrap" style="position:relative;z-index:2">
+    <span class="eyebrow reveal">✨ AI-контент у твоєму голосі · українською</span>
+    <h1 class="reveal">Ти проводиш дзвінки й сесії. <span class="grad">socialio робить з них контент</span> — поки ти працюєш.</h1>
+    <p class="lead reveal">Транскрипти, нотатки, новини твоєї ніші, фото з Google Drive — socialio перетворює це на готові пости у <b>твоєму голосі</b>, без AI-сліду, і публікує сам у Telegram та Instagram.</p>
+    <div class="hero-cta reveal">
+      <a class="btn primary lg" href="#signup" onclick="goSignup(event)">Спробувати безкоштовно →</a>
+      <a class="btn lg" href="#how">Подивитись, як працює</a>
+    </div>
+    <div class="trust reveal">Без картки • Перший контент за 5 хвилин • Дані не передаються третім</div>
+
+    <!-- ANIMATED DEMO -->
+    <div class="demo reveal" id="demo">
+      <div class="demo-bar"><i></i><i></i><i></i><span class="url">socialio.rozum.one</span></div>
+      <div class="flow">
+        <div class="col">
+          <h4>1 · Джерела</h4>
+          <div class="src" data-d="0"><span class="ic">🎙️</span> Транскрипт сесії</div>
+          <div class="src" data-d="1"><span class="ic">🏢</span> База знань компанії</div>
+          <div class="src" data-d="2"><span class="ic">📰</span> Новини ніші</div>
+          <div class="src" data-d="3"><span class="ic">🖼️</span> Фото з Google Drive</div>
+        </div>
+        <div class="col">
+          <h4>2 · Ідеї + твій голос</h4>
+          <div class="idea-line" data-d="4">Перфекціонізм ≠ лінь</div>
+          <div class="idea-line" data-d="5">«Погана перша версія»</div>
+          <div class="idea-line" data-d="6">Ранок без новин</div>
+          <div class="idea-line" data-d="7" style="color:var(--cyan)">→ tone of voice · де-AI</div>
+        </div>
+        <div class="col">
+          <h4>3 · Готовий пост</h4>
+          <div class="postcard" id="typed"></div>
+          <div class="tgline" data-d="x">✓ Опубліковано в Telegram о 10:00</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PAINS -->
+<section class="sec" id="pains">
+  <div class="wrap">
+    <h2 class="reveal">Знайомо?</h2>
+    <p class="sub reveal">Ти експерт, а не контент-завод. Але соцмережі вимагають постити — і тут починається.</p>
+    <div class="pains">
+      <div class="pain reveal"><span class="x">😮‍💨</span><div><b>Години в ChatGPT щотижня</b><p>Вбиваєш ідеї руками, переписуєш, доводиш до свого стилю, копіюєш у кожну мережу. Знову. І знову.</p></div></div>
+      <div class="pain reveal"><span class="x">🤖</span><div><b>Пости звучать як робот</b><p>Ті самі тире, ті самі звороти. Аудиторія відчуває AI за версту — і це бʼє по довірі до тебе як експерта.</p></div></div>
+      <div class="pain reveal"><span class="x">🫥</span><div><b>«Не знаю, про що писати»</b><p>А насправді золото вже лежить у твоїх дзвінках, сесіях і нотатках. Ти просто не встигаєш його дістати.</p></div></div>
+      <div class="pain reveal"><span class="x">💸</span><div><b>SMM-ник коштує $400–600/міс</b><p>І все одно не знає твою тему так, як ти. А ти хочеш просто стабільно бути в стрічці — без цього бюджету.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW -->
+<section class="sec" id="how" style="background:var(--bg2)">
+  <div class="wrap">
+    <span class="eyebrow reveal" style="display:block;width:max-content;margin:0 auto">Як працює</span>
+    <h2 class="reveal" style="margin-top:14px">Від сирого матеріалу до опублікованого поста — на автопілоті</h2>
+    <div class="steps">
+      <div class="step reveal"><div class="n">1</div><h3>Підключи джерела</h3><p>Транскрипти дзвінків, база знань про тебе/компанію, новини ніші, RSS, фото з Google Drive.</p></div>
+      <div class="step reveal"><div class="n">2</div><h3>AI дістає ідеї</h3><p>Система знаходить у матеріалі готові теми постів і показує їх тобі — ти лиш обираєш.</p></div>
+      <div class="step reveal"><div class="n">3</div><h3>Твій голос, без AI-сліду</h3><p>Пише у твоєму tone of voice і прибирає роботизовані ознаки. Звучить як ти, не як ChatGPT.</p></div>
+      <div class="step reveal"><div class="n">4</div><h3>Планує і постить сам</h3><p>Розкладає по календарю й автоматично публікує в Telegram (далі Instagram, Facebook, Threads).</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- SOURCES BENTO -->
+<section class="sec" id="sources">
+  <div class="wrap">
+    <h2 class="reveal">Один контент — багато джерел</h2>
+    <p class="sub reveal">socialio не прив'язаний до однієї речі. Що більше джерел — то релевантніший і «твій» контент.</p>
+    <div class="bento">
+      <div class="cell c-3 reveal"><div class="ic">🎙️</div><h3>Транскрипти дзвінків і сесій</h3><p>Коуч-сесії, консультації, робочі та інвесторські дзвінки — у кожному вже є десяток тем для постів.</p></div>
+      <div class="cell c-3 reveal"><div class="ic">🏢</div><h3>База знань про тебе</h3><p>Заливаєш місію, історію, тексти, позиціювання компанії — і пости спираються на це, а не на вигадки AI.</p></div>
+      <div class="cell c-2 reveal"><div class="ic">📰</div><h3>Новини ніші</h3><p>Шукає актуальне у світі по твоїй темі й адаптує під твій контент.</p></div>
+      <div class="cell c-2 reveal"><div class="ic">📡</div><h3>RSS-стрічки</h3><p>Підключаєш інфоканали — система бере, опрацьовує й постить.</p></div>
+      <div class="cell c-2 reveal"><div class="ic">🖼️</div><h3>Google Drive</h3><p>Бере твій фото-контент і одразу вставляє в пости.</p></div>
+      <div class="cell c-3 reveal"><div class="ic">🎬</div><h3>Відеоконтент</h3><p>Генерація відео під короткі формати.</p><span class="soon">скоро</span></div>
+      <div class="cell c-3 reveal"><div class="ic">🧩</div><h3>Твоє джерело</h3><p>Архітектура відкрита до нових джерел — додаємо під твій кейс.</p><span class="soon">за запитом</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- WHY / COMPARE -->
+<section class="sec" id="why" style="background:var(--bg2)">
+  <div class="wrap">
+    <h2 class="reveal">Чому не просто ChatGPT?</h2>
+    <p class="sub reveal">ChatGPT дає текст. socialio дає опублікований контент у твоєму голосі — без ручної роботи.</p>
+    <div class="cmp reveal">
+      <div class="cmp-row head"><div>Що важливо</div><div class="us">socialio</div><div class="them">ChatGPT + руки</div></div>
+      <div class="cmp-row"><div class="feat">Пише у твоєму tone of voice</div><div class="us">Так, з памʼяттю</div><div class="them">Щоразу заново</div></div>
+      <div class="cmp-row"><div class="feat">Прибирає AI-слід</div><div class="us">Окремий крок</div><div class="them">Ні</div></div>
+      <div class="cmp-row"><div class="feat">Багато джерел (дзвінки, новини, Drive)</div><div class="us">Так</div><div class="them">Копіюєш вручну</div></div>
+      <div class="cmp-row"><div class="feat">Планування + автопостинг у Telegram</div><div class="us">Так</div><div class="them">Ні</div></div>
+      <div class="cmp-row"><div class="feat">Українською, для української аудиторії</div><div class="us">В ядрі</div><div class="them">Як вийде</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- USE CASES -->
+<section class="sec" id="cases">
+  <div class="wrap">
+    <h2 class="reveal">Для кого</h2>
+    <p class="sub reveal">Якщо ти проводиш онлайн-розмови й маєш що сказати — socialio зробить з цього контент.</p>
+    <div class="tabs reveal">
+      <div class="tab active" data-uc="0">Психологи</div>
+      <div class="tab" data-uc="1">Коучі</div>
+      <div class="tab" data-uc="2">Консультанти</div>
+      <div class="tab" data-uc="3">Бізнес і готелі</div>
+    </div>
+    <div class="usecase reveal" id="uc">
+      <h3 id="uc-h"></h3><p id="uc-p"></p>
+    </div>
+  </div>
+</section>
+
+<!-- PRICING -->
+<section class="sec" id="pricing" style="background:var(--bg2)">
+  <div class="wrap">
+    <h2 class="reveal">Простіше за SMM-ника. Дешевше за час, який ти втрачаєш.</h2>
+    <p class="sub reveal">Ранній доступ. Ціни фіксуються для перших користувачів.</p>
+    <div class="prices">
+      <div class="price reveal"><h3>Тест</h3><div class="amt">0 <span>/ 7 днів</span></div><p class="muted" style="font-size:14px">Спробувати на своєму матеріалі</p>
+        <ul><li>1 джерело</li><li>До 10 постів</li><li>Telegram-публікація</li></ul>
+        <a class="btn" href="#signup" onclick="goSignup(event)">Почати безкоштовно</a></div>
+      <div class="price featured reveal"><h3>Pro</h3><div class="amt">€29 <span>/ міс</span></div><p class="muted" style="font-size:14px">Для активного експерта</p>
+        <ul><li>Усі джерела</li><li>Tone of voice + де-AI</li><li>Календар і автопостинг</li><li>Telegram + Instagram</li></ul>
+        <a class="btn primary" href="#signup" onclick="goSignup(event)">Спробувати Pro</a></div>
+      <div class="price reveal"><h3>Команда / бізнес</h3><div class="amt">Інд. <span></span></div><p class="muted" style="font-size:14px">Кілька брендів, готель, агенція</p>
+        <ul><li>Кілька робочих просторів</li><li>База знань компанії</li><li>Пріоритетна підтримка</li></ul>
+        <a class="btn" href="#signup" onclick="goSignup(event)">Поговорити з нами</a></div>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section class="sec" id="faq">
+  <div class="wrap">
+    <h2 class="reveal">Часті запитання</h2>
+    <div class="faq">
+      <details class="qa reveal"><summary>А мої дзвінки й дані не витечуть? <span class="plus">+</span></summary><div class="a">Транскрипти й база знань зберігаються у твоєму просторі й не передаються третім особам для реклами чи навчання моделей. Ти контролюєш, що заливаєш, і можеш видалити будь-коли.</div></details>
+      <details class="qa reveal"><summary>Пости реально звучатимуть як я, а не як AI? <span class="plus">+</span></summary><div class="a">Так — це ядро продукту. Ти задаєш tone of voice (приклади своїх постів), а окремий крок прибирає типові AI-ознаки. Чим більше прикладів — то ближче до твого голосу.</div></details>
+      <details class="qa reveal"><summary>Які соцмережі підтримуються? <span class="plus">+</span></summary><div class="a">Старт — автопостинг у Telegram. Далі Instagram, Facebook і Threads. Контент одразу адаптується під кожен канал.</div></details>
+      <details class="qa reveal"><summary>Мені треба щось налаштовувати чи писати промпти? <span class="plus">+</span></summary><div class="a">Ні. Заливаєш джерело — отримуєш готові пости. Уся логіка прозора: за бажання можна підкоригувати кожен крок, але за замовчуванням усе працює само.</div></details>
+      <details class="qa reveal"><summary>Я не коуч — підійде для мого бізнесу? <span class="plus">+</span></summary><div class="a">Так. socialio працює з будь-яким матеріалом: робочі дзвінки, інвесторські зустрічі, новини галузі. Якщо є що сказати — буде контент.</div></details>
+    </div>
+  </div>
+</section>
+
+<!-- FINAL CTA -->
+<section class="final">
+  <div class="blob b2" style="left:50%;top:0;transform:translateX(-50%)"></div>
+  <div class="wrap" style="position:relative;z-index:2"><div class="card reveal">
+    <h2>Твій наступний пост уже є у твоєму останньому дзвінку</h2>
+    <p class="muted" style="max-width:520px;margin:0 auto 26px">Залий перший матеріал — і подивись, як socialio зробить із нього тиждень контенту у твоєму голосі.</p>
+    <a class="btn primary lg" href="#signup" onclick="goSignup(event)">Спробувати безкоштовно →</a>
+  </div></div>
+</section>
+
+<footer><div class="wrap foot-in">
+  <div><span class="logo" style="font-size:16px"><span class="mark" style="width:22px;height:22px;font-size:12px">◎</span> socialio <span class="by">by ROZUM</span></span></div>
+  <div>© 2026 ROZUM · socialio.rozum.one · <a href="#" style="color:var(--muted)">Політика даних</a></div>
+</div></footer>
+
+<script>
+// nav shadow
+const nav=document.getElementById('nav');
+addEventListener('scroll',()=>nav.classList.toggle('scrolled',scrollY>10));
+
+// reveal on scroll
+const io=new IntersectionObserver((es)=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}}),{threshold:.15});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+
+// hero demo animation (loops, slow-motion)
+const POST="Ти не лінивий. Ти боїшся почати, бо хочеш ідеально.\n\nПрокрастинація часто це перфекціонізм у масці. Спробуй «погану першу версію» - дозволь собі зробити неідеально за 10 хвилин.\n\nПоріг входу падає, тривога відпускає. Перевір сьогодні 👇";
+const typed=document.getElementById('typed');
+const demo=document.getElementById('demo');
+let demoRan=false;
+function runDemo(){
+  // reset
+  document.querySelectorAll('.src,.idea-line,.tgline').forEach(e=>e.classList.remove('in'));
+  typed.innerHTML='<span class="cursor"></span>';
+  const seq=document.querySelectorAll('[data-d]');
+  // stagger sources + ideas
+  let t=300;
+  document.querySelectorAll('.src').forEach((el,i)=>setTimeout(()=>el.classList.add('in'),t+i*420));
+  t=300+4*420+250;
+  document.querySelectorAll('.idea-line').forEach((el,i)=>setTimeout(()=>el.classList.add('in'),t+i*380));
+  // type the post
+  const typeStart=t+4*380+400;
+  setTimeout(()=>typeText(),typeStart);
+}
+function typeText(){
+  let i=0;typed.textContent='';
+  const cur=document.createElement('span');cur.className='cursor';
+  const tick=()=>{
+    typed.textContent=POST.slice(0,i);
+    typed.appendChild(cur);
+    i++;
+    if(i<=POST.length){setTimeout(tick,18);}
+    else{document.querySelector('.tgline').classList.add('in');
+      setTimeout(()=>{if(prefersMotion())runDemo();},3800);}
+  };
+  tick();
+}
+function prefersMotion(){return !matchMedia('(prefers-reduced-motion:reduce)').matches;}
+const demoIO=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting&&!demoRan){demoRan=true;if(prefersMotion())runDemo();else{typed.textContent=POST;document.querySelectorAll('.src,.idea-line,.tgline').forEach(x=>x.classList.add('in'));}}}),{threshold:.3});
+demoIO.observe(demo);
+
+// use case tabs
+const UC=[
+ ["Психологи й терапевти","Із записів консультацій (знеособлено) і твоєї бази знань socialio робить дбайливі, етичні пости про твій підхід — і ти стабільно в стрічці, не порушуючи приватності клієнтів."],
+ ["Коучі","Кожна сесія - це теми на тиждень. socialio дістає інсайти, пише у твоєму голосі й публікує, поки ти ведеш наступного клієнта."],
+ ["Консультанти й експерти","База знань + новини галузі = пости, що показують твою експертизу. LinkedIn і Telegram наповнюються самі, на фактах, а не на воді."],
+ ["Бізнес і готелі","Робочі та інвесторські дзвінки, апдейти команди, новини індустрії - усе перетворюється на контент бренду. Один акаунт - багато просторів."]
+];
+const ucH=document.getElementById('uc-h'),ucP=document.getElementById('uc-p');
+function setUC(i){ucH.textContent=UC[i][0];ucP.textContent=UC[i][1];document.querySelectorAll('.tab').forEach((t,j)=>t.classList.toggle('active',i===j));}
+document.querySelectorAll('.tab').forEach((t,i)=>t.onclick=()=>setUC(i));
+setUC(0);
+
+// signup stub
+function goSignup(e){e.preventDefault();alert('Тут буде форма реєстрації / редірект у кабінет socialio.\n\n(заглушка лендинга)');}
+</script>
+</body>
+</html>

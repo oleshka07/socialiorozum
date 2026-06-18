@@ -107,6 +107,28 @@
     </div>
   </details>
 
+  <details class="settings" id="tgPanel">
+    <summary>🔌 Інтеграція: Telegram (публікація постів)</summary>
+    <div class="body">
+      <div class="hint" style="font-size:13px;line-height:1.7">
+        <b>Як підключити (одноразово):</b><br>
+        1. У Telegram відкрий <b>@BotFather</b> → команда <code>/newbot</code> → дай ім'я → отримаєш <b>токен</b> (вигляд <code>123456:ABC-...</code>).<br>
+        2. Додай свого бота <b>адміністратором</b> у свій канал (з правом «Publish messages») і у свою групу.<br>
+        3. Встав токен нижче. Канал — <code>@username</code> (публічний) або числовий id; група — числовий id (напр. <code>-1001234567890</code>).<br>
+        4. Тисни <b>«Перевірити з'єднання»</b> — покаже, чи бот бачить канал/групу і чи він адмін.<br>
+        <small>Не знаєш id? Додай бота у канал/групу й скористайся ботом <code>@getidsbot</code> або <code>@username_to_id_bot</code>.</small>
+      </div>
+      <div class="fld"><label>Bot Token</label><input class="txt" type="password" id="tgToken" placeholder="123456:ABC-..."></div>
+      <div class="fld"><label>Канал (chat id або @username)</label><input class="txt" id="tgChannel" placeholder="@my_channel або -1001234567890"></div>
+      <div class="fld"><label>Група (chat id)</label><input class="txt" id="tgGroup" placeholder="-1001234567890"></div>
+      <div class="ctl">
+        <button class="primary" id="tgSave">Зберегти</button>
+        <button class="ghost" id="tgTest">Перевірити з'єднання</button>
+      </div>
+      <div id="tgResult" class="out"></div>
+    </div>
+  </details>
+
   <div class="pipe" id="pipe">
 
     <section class="step" id="s0">
@@ -248,10 +270,10 @@ function applyState(d){
   renderIdeas(d.ideas||[]);
   const byStage = {draft:[], toned:[], formatted:[], final:[]};
   (d.posts||[]).forEach(p=>{ if(byStage[p.stage]) byStage[p.stage].push(p); });
-  renderPosts('o3', byStage.draft, false, 'Спершу відбери ідеї на кроці 1.');
-  renderPosts('o4', byStage.toned, false);
-  renderPosts('o5', byStage.formatted, false);
-  renderPosts('o6', byStage.final, true, 'Готові Telegram-пости з кнопкою копіювання.');
+  renderPosts('o3', byStage.draft, 'Спершу відбери ідеї на кроці 1.');
+  renderPosts('o4', byStage.toned);
+  renderPosts('o5', byStage.formatted);
+  renderFinals(byStage.final, d.published||[]);
   S.plan = (d.plan||[]).map(p=>({id:p.id, title:p.title, type:p.type, dayOffset:p.day_offset||0}));
   renderPlan(); renderCalendar();
 }
@@ -271,14 +293,39 @@ async function saveSelection(){
   const ids=[...$('o1').querySelectorAll('input:checked')].map(c=>c.dataset.id);
   try{ await api('/runs/'+runId+'/ideas/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({selectedIds:ids})}); flashSaved(); }catch(e){}
 }
-function renderPosts(oid, posts, tg, emptyTxt){
+function renderPosts(oid, posts, emptyTxt){
   const o=$(oid); if(!o) return;
   if(!posts || !posts.length){ o.innerHTML='<div class="empty">'+(emptyTxt||'—')+'</div>'; return; }
-  o.innerHTML = posts.map(p => tg ? tgCard(p.content) : '<div class="card post">'+esc(p.content)+'</div>').join('');
-  if(tg) bindCopy();
+  o.innerHTML = posts.map(p => '<div class="card post">'+esc(p.content)+'</div>').join('');
 }
-const tgCard=t=>'<div class="tg"><button class="copy" data-c="'+encodeURIComponent(t)+'">копіювати</button>'+esc(t)+'</div>';
 function bindCopy(){document.querySelectorAll('.copy').forEach(b=>b.onclick=()=>{navigator.clipboard.writeText(decodeURIComponent(b.dataset.c));b.textContent='✓';setTimeout(()=>b.textContent='копіювати',1000);});}
+function renderFinals(posts, published){
+  const o=$('o6');
+  if(!posts || !posts.length){ o.innerHTML='<div class="empty">Готові пости з кнопками публікації в Telegram.</div>'; return; }
+  const isPub=(pid,t)=>published.some(x=>x.post_id===pid && x.target===t);
+  o.innerHTML = posts.map(p=>'<div class="tg">'
+    +'<button class="copy" data-c="'+encodeURIComponent(p.content)+'">копіювати</button>'
+    +esc(p.content)
+    +'<div class="ctl" style="margin-top:10px">'
+    +'<button class="pub" data-post="'+p.id+'" data-t="channel">'+(isPub(p.id,'channel')?'✓ у каналі':'→ Канал')+'</button>'
+    +'<button class="pub" data-post="'+p.id+'" data-t="group">'+(isPub(p.id,'group')?'✓ у групі':'→ Група')+'</button>'
+    +'<span class="pubmsg" data-for="'+p.id+'" style="font-size:12px"></span>'
+    +'</div></div>').join('');
+  bindCopy();
+  o.querySelectorAll('.pub').forEach(b=>b.onclick=()=>publish(b));
+}
+async function publish(btn){
+  const postId=btn.dataset.post, target=btn.dataset.t;
+  const msg=$('o6').querySelector('.pubmsg[data-for="'+postId+'"]');
+  const old=btn.textContent; btn.disabled=true; btn.innerHTML='<span class="spin"></span>';
+  if(msg) msg.textContent='';
+  try{
+    const r=await api('/posts/'+postId+'/publish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({targets:[target]})});
+    const res=(r.results||[]).find(x=>x.target===target)||{};
+    if(res.status==='sent'){ btn.textContent=(target==='channel'?'✓ у каналі':'✓ у групі'); }
+    else { btn.disabled=false; btn.textContent=old; if(msg){ msg.style.color='var(--stale)'; msg.textContent=' ⚠ '+(res.error||'помилка'); } }
+  }catch(e){ btn.disabled=false; btn.textContent=old; if(msg){ msg.style.color='var(--stale)'; msg.textContent=' ⚠ '+e.message; } }
+}
 
 function updRunLabel(){ $('runLabel').textContent = runId ? ('прогін '+runId.slice(0,8)) : 'новий прогін'; $('lockHint').textContent = runId ? 'Прогін створено з цього транскрипту. «Новий прогін», щоб почати з іншого тексту.' : ''; }
 
@@ -358,6 +405,34 @@ $('runAll').onclick=()=>runFrom(1);
 $('sampleBtn').onclick=()=>{ $('transcript').value=SAMPLE; };
 $('recoBtn').onclick=()=>{ if(!S.plan.length){alert('Спершу запусти крок 7');return;} S.schedule={}; S.plan.forEach((p,i)=>{const iso=dateISO(Math.min(27,p.dayOffset||i*2));(S.schedule[iso]=S.schedule[iso]||[]).push(i);}); renderCalendar(); };
 $('clearCal').onclick=()=>{ S.schedule={}; renderCalendar(); };
+
+// ---------- Telegram integration ----------
+async function loadTelegram(){
+  try{
+    const c=await api('/integrations/telegram');
+    $('tgChannel').value=c.channelChatId||''; $('tgGroup').value=c.groupChatId||'';
+    if(c.hasToken) $('tgToken').placeholder='•••••••• (токен збережено — лиши порожнім, щоб не міняти)';
+  }catch(e){}
+}
+$('tgSave').onclick=async()=>{
+  try{
+    await api('/integrations/telegram',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({botToken:$('tgToken').value,channelChatId:$('tgChannel').value,groupChatId:$('tgGroup').value})});
+    $('tgToken').value=''; $('tgToken').placeholder='•••••••• (токен збережено)';
+    $('tgResult').innerHTML='<div class="card" style="color:var(--ok)">Збережено ✓</div>';
+  }catch(e){ $('tgResult').innerHTML='<div class="card" style="color:var(--stale)">⚠ '+esc(e.message)+'</div>'; }
+};
+$('tgTest').onclick=async()=>{
+  $('tgResult').innerHTML='<div class="empty"><span class="spin"></span> перевіряю…</div>';
+  try{
+    const r=await api('/integrations/telegram/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({botToken:$('tgToken').value,channelChatId:$('tgChannel').value,groupChatId:$('tgGroup').value})});
+    const line=(label,c)=>{
+      if(!c) return '<div class="card"><b>'+label+':</b> <span style="color:var(--muted)">не вказано</span></div>';
+      if(!c.ok) return '<div class="card"><b>'+label+':</b> <span style="color:var(--stale)">⚠ '+esc(c.error||'недоступно')+'</span></div>';
+      return '<div class="card"><b>'+label+':</b> <span style="color:var(--ok)">✓ '+esc(c.title)+'</span> '+(c.isAdmin?'<span style="color:var(--ok)">· бот адмін</span>':'<span style="color:var(--warn)">· бот НЕ адмін (додай у адміни)</span>')+'</div>';
+    };
+    $('tgResult').innerHTML='<div class="card" style="color:var(--ok)">Бот: @'+esc(r.bot.username||'?')+' ✓</div>'+line('Канал',r.channel)+line('Група',r.group);
+  }catch(e){ $('tgResult').innerHTML='<div class="card" style="color:var(--stale)">⚠ '+esc(e.message)+'</div>'; }
+};
 $('newRun').onclick=()=>{
   if(busy) return;
   if(runId && !confirm('Почати новий прогін? Поточні результати лишаться на сервері, але зникнуть з екрана.')) return;
@@ -371,6 +446,7 @@ $('newRun').onclick=()=>{
 // ---------- init ----------
 (async()=>{
   await loadSettings();
+  await loadTelegram();
   updRunLabel();
   if(runId){ try{ await refresh(); }catch(e){ runId=null; localStorage.removeItem('kg_run'); updRunLabel(); } }
   renderCalendar();

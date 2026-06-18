@@ -106,7 +106,31 @@ create table if not exists schedule_slot (
   status        text not null default 'planned' -- planned|posted|failed
 );
 
+-- інтеграція Telegram (per-workspace; bot token лише на сервері, не в git)
+create table if not exists telegram_config (
+  workspace_id    uuid primary key references workspace(id) on delete cascade,
+  bot_token       text,
+  channel_chat_id text,
+  channel_title   text,
+  group_chat_id   text,
+  group_title     text,
+  updated_at      timestamptz not null default now()
+);
+
+-- лог публікацій у Telegram (основа для автопостингу)
+create table if not exists telegram_publish (
+  id          uuid primary key default gen_random_uuid(),
+  post_id     uuid references post(id) on delete cascade,
+  target      text not null,             -- channel|group
+  chat_id     text,
+  message_id  bigint,
+  status      text not null,             -- sent|error
+  error       text,
+  created_at  timestamptz not null default now()
+);
+
 create index if not exists idx_run_source on pipeline_run(source_id);
+create index if not exists idx_tgpub_post on telegram_publish(post_id);
 create index if not exists idx_steprun_run on step_run(run_id);
 create index if not exists idx_post_run on post(run_id);
 create index if not exists idx_idea_run on idea(run_id);
