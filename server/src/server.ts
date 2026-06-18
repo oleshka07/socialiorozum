@@ -11,6 +11,7 @@ import * as tg from "./telegram.js";
 import * as auth from "./auth.js";
 import { sendVerifyEmail, sendResetEmail } from "./email.js";
 import { logEvent } from "./log.js";
+import { startAutopost } from "./autopost.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = Fastify({ logger: true, trustProxy: true });
@@ -228,15 +229,18 @@ app.get("/api/runs/:id", async (req: any, reply) => {
   const { id } = req.params;
   if (!(await runOwned(id, req.user.workspace_id))) return reply.code(404).send({ error: "run не знайдено" });
   const run = await one(`select * from pipeline_run where id=$1`, [id]);
-  const [steps, ideas, posts, plan, published] = await Promise.all([
+  const [steps, ideas, posts, plan, published, schedule] = await Promise.all([
     q(`select step_key,status,model,prompt_version,output,error,updated_at from step_run where run_id=$1`, [id]),
     q(`select id,idx,idea,angle,selected from idea where run_id=$1 order by idx`, [id]),
     q(`select id,stage,channel_type,content from post where run_id=$1 order by created_at`, [id]),
     q(`select pi.* from plan_item pi join content_plan cp on cp.id=pi.plan_id where cp.run_id=$1`, [id]),
     q(`select tp.post_id, tp.target, tp.status, tp.message_id from telegram_publish tp
         join post p on p.id=tp.post_id where p.run_id=$1 and tp.status='sent'`, [id]),
+    q(`select ss.id, ss.plan_item_id, ss.scheduled_at, ss.status from schedule_slot ss
+        join plan_item pi on pi.id=ss.plan_item_id join content_plan cp on cp.id=pi.plan_id
+        where cp.run_id=$1`, [id]),
   ]);
-  return { run, steps, ideas, posts, plan, published };
+  return { run, steps, ideas, posts, plan, published, schedule };
 });
 
 app.post("/api/runs/:id/steps/:step/run", async (req: any, reply) => {
@@ -264,13 +268,27 @@ app.post("/api/runs/:id/ideas/select", async (req: any, reply) => {
 });
 
 app.post("/api/runs/:id/schedule", async (req: any, reply) => {
-  if (!(await runOwned(req.params.id, req.user.workspace_id))) return reply.code(404).send({ error: "run не знайдено" });
+  const id = req.params.id;
+  if (!(await runOwned(id, req.user.workspace_id))) return reply.code(404).send({ error: "run не знайдено" });
   const slots = req.body?.slots ?? [];
+  // перезаписуємо лише ще не опубліковані слоти цього прогону
+  await q(
+    `delete from schedule_slot where status in ('planned','failed')
+       and plan_item_id in (select pi.id from plan_item pi join content_plan cp on cp.id=pi.plan_id where cp.run_id=$1)`,
+    [id]
+  );
+  let count = 0;
   for (const s of slots) {
+    const owned = await one(
+      `select 1 from plan_item pi join content_plan cp on cp.id=pi.plan_id where pi.id=$1 and cp.run_id=$2`,
+      [s.planItemId, id]
+    );
+    if (!owned) continue; // IDOR-захист: plan_item має належати цьому прогону
     await q(`insert into schedule_slot(plan_item_id, scheduled_at, status) values($1,$2,'planned')`,
       [s.planItemId, s.scheduledAt ?? null]);
+    count++;
   }
-  return { ok: true, count: slots.length };
+  return { ok: true, count };
 });
 
 // ===================== TELEGRAM =====================
@@ -384,4 +402,7 @@ app.get("/register", (_req, reply) => reply.sendFile("auth.html"));
 app.get("/forgot", (_req, reply) => reply.sendFile("auth.html"));
 app.get("/reset", (_req, reply) => reply.sendFile("auth.html"));
 
-app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => app.log.info(`socialio на ${addr}`));
+app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
+  app.log.info(`socialio на ${addr}`);
+  startAutopost();
+});

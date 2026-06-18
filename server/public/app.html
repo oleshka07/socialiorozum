@@ -185,12 +185,14 @@
     </section>
 
     <section class="step" id="s8">
-      <div class="shead"><div class="t"><span class="num">8</span> Календар <span class="badge soon">автопостинг — далі</span></div><span class="badge" id="b8">план</span></div>
+      <div class="shead"><div class="t"><span class="num">8</span> Календар <span class="badge ok">автопостинг ✓</span></div><span class="badge" id="b8">план</span></div>
       <div class="ctl">
         <button class="primary" id="recoBtn">✨ Рекомендувати дати</button>
+        <button id="saveCal">💾 Зберегти календар</button>
         <button class="ghost" id="clearCal">Очистити календар</button>
+        <span id="calMsg" style="font-size:12px;color:var(--muted)"></span>
       </div>
-      <div class="hint">Перетягуй картки з лотка на дні. Або тисни «Рекомендувати» — розставить за рекомендованим зсувом зі стратегії. (Поки локально у браузері.)</div>
+      <div class="hint">Перетягуй картки на дні (або «Рекомендувати»), тоді «Зберегти». Заплановані пости автоматично опублікуються в Telegram у призначений час (≈09:00 UTC того дня).</div>
       <div class="tray" id="tray"></div>
       <div class="cal" id="cal"></div>
     </section>
@@ -277,6 +279,14 @@ function applyState(d){
   renderPosts('o5', byStage.formatted);
   renderFinals(byStage.final, d.published||[]);
   S.plan = (d.plan||[]).map(p=>({id:p.id, title:p.title, type:p.type, dayOffset:p.day_offset||0}));
+  S.schedule = {};
+  (d.schedule||[]).forEach(s=>{
+    if(!s.scheduled_at) return;
+    const idx = S.plan.findIndex(p=>p.id===s.plan_item_id);
+    if(idx<0) return;
+    const iso = String(s.scheduled_at).slice(0,10);
+    (S.schedule[iso]=S.schedule[iso]||[]).push(idx);
+  });
   renderPlan(); renderCalendar();
 }
 function renderIdeas(ideas){
@@ -371,7 +381,7 @@ function renderPlan(){
   o.innerHTML='';
   S.plan.forEach((p,i)=>{ o.innerHTML+='<div class="card"><b>'+esc(p.title)+'</b> <small style="color:var(--muted)">· '+esc(p.type||'')+' · рек. день +'+(p.dayOffset||0)+'</small></div>'; });
 }
-function startMonday(){const d=new Date();const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day+7);d.setHours(0,0,0,0);return d;}
+function startMonday(){const d=new Date();const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);d.setHours(0,0,0,0);return d;} // понеділок поточного тижня
 const DOW=['Пн','Вт','Ср','Чт','Пт','Сб','Нд'];
 function dateISO(off){const d=startMonday();d.setDate(d.getDate()+off);return d.toISOString().slice(0,10);}
 function renderTray(){
@@ -407,6 +417,14 @@ $('runAll').onclick=()=>runFrom(1);
 $('sampleBtn').onclick=()=>{ $('transcript').value=SAMPLE; };
 $('recoBtn').onclick=()=>{ if(!S.plan.length){alert('Спершу запусти крок 7');return;} S.schedule={}; S.plan.forEach((p,i)=>{const iso=dateISO(Math.min(27,p.dayOffset||i*2));(S.schedule[iso]=S.schedule[iso]||[]).push(i);}); renderCalendar(); };
 $('clearCal').onclick=()=>{ S.schedule={}; renderCalendar(); };
+$('saveCal').onclick=async()=>{
+  if(!runId){ alert('Спершу запусти кишку (потрібен прогін зі стратегією).'); return; }
+  const slots=[];
+  for(const iso in S.schedule){ for(const idx of S.schedule[iso]){ const p=S.plan[idx]; if(p) slots.push({ planItemId:p.id, scheduledAt: iso+'T09:00:00.000Z' }); } }
+  const m=$('calMsg'); m.style.color='var(--muted)'; m.textContent='збереження…';
+  try{ const r=await api('/runs/'+runId+'/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slots})}); m.style.color='var(--ok)'; m.textContent='збережено: '+r.count+' — автопостинг увімкнено'; }
+  catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; }
+};
 
 // ---------- Telegram integration ----------
 async function loadTelegram(){
