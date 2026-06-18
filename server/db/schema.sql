@@ -196,6 +196,31 @@ create index if not exists idx_llmusage_ws on llm_usage(workspace_id, created_at
 alter table schedule_slot add column if not exists post_id uuid references post(id) on delete cascade;
 alter table schedule_slot alter column plan_item_id drop not null;
 create index if not exists idx_slot_post on schedule_slot(post_id);
+
+-- рубрики (контент-мікс) на workspace
+create table if not exists rubric (
+  id           uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspace(id) on delete cascade,
+  name         text not null,
+  emoji        text,
+  description  text,
+  share        int not null default 0,
+  idx          int not null default 0
+);
+create index if not exists idx_rubric_ws on rubric(workspace_id);
+
+-- засіяти дефолтні рубрики для workspace, де їх ще немає
+insert into rubric(workspace_id,name,emoji,description,share,idx)
+select w.id, d.name, d.emoji, d.descr, d.share, d.idx
+from workspace w
+cross join (values
+  ('Освітнє','📚','Гайди, поради, туторіали, галузеві знання',35,0),
+  ('Промо','🛍️','Запуски продуктів, пропозиції, послуги, заклики до дії',20,1),
+  ('Розважальне','🎭','Меми, життєвий контент, тренди, гумор',15,2),
+  ('Спільнота','🤝','Історії користувачів, Q&A, опитування, пости для залучення',20,3),
+  ('За лаштунками','🏢','Команда, процеси, культура, будні компанії',10,4)
+) as d(name,emoji,descr,share,idx)
+where not exists (select 1 from rubric r where r.workspace_id = w.id);
 create index if not exists idx_steprun_run on step_run(run_id);
 create index if not exists idx_post_run on post(run_id);
 create index if not exists idx_idea_run on idea(run_id);

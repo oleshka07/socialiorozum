@@ -463,6 +463,27 @@ app.get("/api/usage", async (req: any) => {
               from llm_usage where workspace_id=$1`, [req.user.workspace_id]);
 });
 
+// ===================== РУБРИКИ (контент-мікс) =====================
+app.get("/api/rubrics", async (req: any) =>
+  q(`select id,name,emoji,description,share,idx from rubric where workspace_id=$1 order by idx, name`, [req.user.workspace_id]));
+
+app.put("/api/rubrics", async (req: any) => {
+  const ws = req.user.workspace_id;
+  const items = Array.isArray(req.body?.rubrics) ? req.body.rubrics : [];
+  await q(`delete from rubric where workspace_id=$1`, [ws]);
+  let count = 0;
+  for (let i = 0; i < items.length; i++) {
+    const r = items[i]; const name = String(r?.name ?? "").trim();
+    if (!name) continue;
+    await q(`insert into rubric(workspace_id,name,emoji,description,share,idx) values($1,$2,$3,$4,$5,$6)`,
+      [ws, name.slice(0, 60), r.emoji ? String(r.emoji).slice(0, 8) : null,
+       r.description ? String(r.description).slice(0, 300) : null,
+       Math.max(0, Math.min(100, Number(r.share) || 0)), i]);
+    count++;
+  }
+  return { ok: true, count };
+});
+
 // ===================== БАНК + ПЛАНУВАННЯ (по постах, рівень workspace) =====================
 app.get("/api/bank", async (req: any) => {
   return q(`select p.id, p.content, p.review, p.created_at, src.title as source_title

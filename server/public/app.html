@@ -122,7 +122,16 @@
         <div class="fld"><label>Контент-стратегія</label><textarea id="strat"></textarea></div>
         <div class="fld"><label>Правила De-AI</label><textarea id="deai"></textarea></div>
       </div></div>
-      <p class="hint">Далі сюди додамо Рубрики (%-мікс), деталі Аудиторії, Конкурентів і Дослідження.</p>
+      <div class="settings"><div class="body">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+          <b>🗂️ Рубрики (контент-мікс)</b>
+          <div class="ctl" style="margin:0"><button id="addRubric" class="ghost">+ Рубрика</button><button class="primary" id="saveRubrics">Зберегти рубрики</button><span id="rubSum" style="font-size:12px;color:var(--muted)"></span></div>
+        </div>
+        <div class="hint">AI орієнтується на ці теми й пропорції при генерації ідей, чернеток і плану.</div>
+        <div id="rubBar" style="display:flex;height:10px;border-radius:6px;overflow:hidden;margin:10px 0;background:var(--panel2)"></div>
+        <div id="rubList" class="out"></div>
+      </div></div>
+      <p class="hint">Далі сюди додамо деталі Аудиторії, Конкурентів і Дослідження.</p>
     </section>
 
     <section class="viewsec active" data-view="create">
@@ -534,6 +543,33 @@ async function savePrompt(step){
   catch(e){ alert('Не вдалося зберегти промпт: '+e.message); }
 }
 
+// ---------- Рубрики ----------
+let Rubrics = [];
+const RUB_COLORS = ['#5b8cff','#f5704a','#f5b54a','#3fb950','#a982ff','#6fe3c2','#e36fb0'];
+function rubSum(){ return Rubrics.reduce((a,r)=>a+(+r.share||0),0); }
+function renderRubBar(){
+  const s=rubSum(); const el=$('rubSum'); el.textContent='сума: '+s+'%'+(s===100?' ✓':' (бажано 100%)'); el.style.color=s===100?'var(--ok)':'var(--warn)';
+  $('rubBar').innerHTML=Rubrics.map((r,i)=>'<div style="width:'+(+r.share||0)+'%;background:'+RUB_COLORS[i%RUB_COLORS.length]+'"></div>').join('');
+}
+function renderRubrics(){
+  const list=$('rubList'); if(!list) return;
+  renderRubBar(); list.innerHTML='';
+  Rubrics.forEach((r,i)=>{
+    const c=document.createElement('div'); c.className='card'; c.style.cssText='display:flex;gap:8px;align-items:center;flex-wrap:wrap';
+    c.innerHTML='<input class="txt" style="width:46px;text-align:center" data-f="emoji" value="'+esc(r.emoji||'')+'">'
+      +'<input class="txt" style="flex:1;min-width:110px" data-f="name" value="'+esc(r.name||'')+'" placeholder="Назва">'
+      +'<input class="txt" style="flex:2;min-width:150px" data-f="description" value="'+esc(r.description||'')+'" placeholder="Опис тем">'
+      +'<input class="txt" type="number" min="0" max="100" style="width:62px" data-f="share" value="'+(+r.share||0)+'"><span style="color:var(--muted)">%</span>'
+      +'<button class="ghost" data-rm="'+i+'" style="padding:6px 10px">✕</button>';
+    c.querySelectorAll('[data-f]').forEach(inp=>inp.oninput=()=>{ Rubrics[i][inp.dataset.f]= inp.dataset.f==='share'?(+inp.value||0):inp.value; if(inp.dataset.f==='share') renderRubBar(); });
+    c.querySelector('[data-rm]').onclick=()=>{ Rubrics.splice(i,1); renderRubrics(); };
+    list.appendChild(c);
+  });
+}
+async function loadRubrics(){ try{ Rubrics=await api('/rubrics')||[]; }catch(e){ Rubrics=[]; } renderRubrics(); }
+$('addRubric').onclick=()=>{ Rubrics.push({name:'',emoji:'',description:'',share:0}); renderRubrics(); };
+$('saveRubrics').onclick=async()=>{ try{ await api('/rubrics',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rubrics:Rubrics})}); flashSaved(); }catch(e){ alert('Не вдалося зберегти рубрики: '+e.message); } };
+
 // ---------- init ----------
 (async()=>{
   try{ const me=await api('/auth/me'); $('userEmail').textContent=me.email; }
@@ -541,6 +577,7 @@ async function savePrompt(step){
   await loadSettings();
   await loadTelegram();
   await loadPrompts();
+  loadRubrics();
   loadUsage();
   updRunLabel();
   if(runId){ try{ await refresh(); }catch(e){ runId=null; localStorage.removeItem('kg_run'); updRunLabel(); } }

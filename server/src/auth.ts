@@ -1,6 +1,6 @@
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { q, one } from "./db.js";
-import { DEFAULT_SETTINGS } from "./defaults.js";
+import { DEFAULT_SETTINGS, DEFAULT_RUBRICS } from "./defaults.js";
 
 const SESSION_DAYS = 30;
 const VERIFY_HOURS = 24;
@@ -33,6 +33,11 @@ export async function createWorkspaceWithDefaults(name: string): Promise<string>
        on conflict (workspace_id,key) do nothing`,
       [wsId, key, content]
     );
+  }
+  for (let i = 0; i < DEFAULT_RUBRICS.length; i++) {
+    const r = DEFAULT_RUBRICS[i];
+    await q(`insert into rubric(workspace_id,name,emoji,description,share,idx) values($1,$2,$3,$4,$5,$6)`,
+      [wsId, r.name, r.emoji, r.description, r.share, i]);
   }
   return wsId;
 }

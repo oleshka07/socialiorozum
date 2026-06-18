@@ -117,7 +117,14 @@ export async function executeStep(runId: string, step: StepKey) {
   const settings = await loadSettings(workspace_id);
   const tpl = await resolvePrompt(workspace_id, step);
   const lang = (settings.output_language || "Українська").trim();
-  const system = fillPrompt(tpl.content, settings) + `\n\nМова всього тексту у відповіді: ${lang}.`;
+  let rubricsText = "";
+  if (step === "extract_ideas" || step === "drafts" || step === "strategy") {
+    const rubs = await q<{ name: string; share: number; description: string }>(
+      `select name, share, description from rubric where workspace_id=$1 order by idx`, [workspace_id]);
+    if (rubs.length) rubricsText = "\n\nРубрики контенту (орієнтир для тем і пропорцій у наборі постів): " +
+      rubs.map((r) => `${r.name} ~${r.share}%${r.description ? ` (${r.description})` : ""}`).join("; ") + ".";
+  }
+  const system = fillPrompt(tpl.content, settings) + `\n\nМова всього тексту у відповіді: ${lang}.` + rubricsText;
   const ctx = { workspaceId: workspace_id, step };
   await upsertStepRun(runId, step, { status: "running", model: tpl.model, prompt_version: tpl.version });
 
