@@ -19,7 +19,7 @@ export const DEFAULT_PROMPTS: Record<StepKey, { model: string; content: string }
     content:
       "Зроби пост СУВОРО на основі змісту сесії (першоджерело нижче) — використовуй конкретні приклади, думки й формулювання саме з неї, НЕ вигадуй загальних порад «з повітря». " +
       "Структура: гачок, 2-4 абзаци користі, м'який заклик. " +
-      "Marketing Context: {{marketing_context}}. Пиши українською. Поверни лише текст поста.",
+      "Marketing Context: {{marketing_context}}. Поверни лише текст поста.",
   },
   tone: {
     model: "anthropic/claude-sonnet-4.5",
@@ -116,7 +116,8 @@ export async function executeStep(runId: string, step: StepKey) {
   const { workspace_id, transcript } = await runContext(runId);
   const settings = await loadSettings(workspace_id);
   const tpl = await resolvePrompt(workspace_id, step);
-  const system = fillPrompt(tpl.content, settings);
+  const lang = (settings.output_language || "Українська").trim();
+  const system = fillPrompt(tpl.content, settings) + `\n\nМова всього тексту у відповіді: ${lang}.`;
   await upsertStepRun(runId, step, { status: "running", model: tpl.model, prompt_version: tpl.version });
 
   try {

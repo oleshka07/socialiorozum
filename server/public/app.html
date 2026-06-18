@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>socialio.rozum.one — кишка контенту</title>
+<title>socialio — кабінет</title>
 <style>
   :root{
     --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --line:#2a3340;
@@ -13,22 +13,27 @@
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.5 -apple-system,Segoe UI,Roboto,Inter,sans-serif}
   a{color:var(--accent)}
-  .wrap{max-width:900px;margin:0 auto;padding:28px 20px 130px}
-  header.top{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:8px}
-  h1{font-size:22px;margin:0;letter-spacing:.2px}
-  h1 .v{color:var(--muted);font-weight:500;font-size:14px}
-  .sub{color:var(--muted);font-size:13px;margin:2px 0 22px}
-  .keybar{display:flex;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--stale)}
-  .dot.on{background:var(--ok)}
-  .keybar small{color:var(--muted);font-size:12px}
-  .settings{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:26px;overflow:hidden}
-  .settings>summary{cursor:pointer;list-style:none;padding:14px 18px;font-weight:600;display:flex;align-items:center;gap:8px}
-  .settings>summary::-webkit-details-marker{display:none}
-  .settings .body{padding:0 18px 18px;display:grid;gap:14px}
+  /* layout */
+  .layout{display:flex;min-height:100vh}
+  .sidebar{width:236px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--line);padding:18px 14px;display:flex;flex-direction:column;gap:2px;position:sticky;top:0;height:100vh;overflow:auto}
+  .sidebar .ws{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+  .sidebar .wsname{font-weight:800;font-size:18px;margin:2px 0 14px}
+  .navgroup{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 4px;padding:0 8px}
+  .navitem{padding:9px 12px;border-radius:9px;cursor:pointer;color:var(--txt);font-size:14px;font-weight:500;border:1px solid transparent}
+  .navitem:hover{background:var(--panel2)}
+  .navitem.active{background:var(--accent);color:#06122b;font-weight:700}
+  .sidebar .foot{margin-top:auto;font-size:12px;color:var(--muted);padding-top:14px}
+  main.content{flex:1;min-width:0;padding:26px 30px 70px;max-width:1000px}
+  .viewsec{display:none}
+  .viewsec.active{display:block}
+  .pagehead h1{font-size:24px;margin:0 0 4px;letter-spacing:.2px}
+  .pagehead p{color:var(--muted);font-size:14px;margin:0 0 22px}
+  /* shared */
   .fld label{display:block;font-size:12px;color:var(--muted);margin:0 0 5px;text-transform:uppercase;letter-spacing:.5px}
   textarea,select,input.txt{width:100%;background:#0b0e13;border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:10px 12px;font:13px/1.5 inherit;resize:vertical}
   textarea{min-height:64px}
+  .settings{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:18px;overflow:hidden}
+  .settings .body{padding:18px;display:grid;gap:14px}
   .pipe{position:relative;display:grid;gap:0}
   .step{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;margin:0 0 0 34px}
   .step+.step{margin-top:26px}
@@ -73,155 +78,156 @@
   .day .dn{color:var(--muted);font-size:10px;margin-bottom:4px}
   .day .pchip{background:#17212b;border:1px solid #2c3a4a;border-radius:6px;padding:4px 6px;margin-bottom:4px;font-size:10px;cursor:grab;position:relative}
   .day .pchip .x{position:absolute;top:1px;right:4px;color:var(--muted);cursor:pointer}
-  .runall{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transparent,var(--bg) 38%);padding:22px 20px;display:flex;justify-content:center;gap:10px;z-index:20}
-  .runall .inner{display:flex;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
   .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:s .7s linear infinite;vertical-align:-2px}
   @keyframes s{to{transform:rotate(360deg)}}
-  .hint{font-size:11px;color:var(--muted);margin-top:6px}
-  #saved{font-size:11px;color:var(--ok);opacity:0;transition:.3s}
+  .hint{font-size:12px;color:var(--muted);margin-top:8px}
+  #saved{color:var(--ok);opacity:0;transition:.3s}
   #saved.show{opacity:1}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--stale);display:inline-block}
+  .dot.on{background:var(--ok)}
+  @media(max-width:760px){.layout{flex-direction:column}.sidebar{width:auto;height:auto;position:static;flex-direction:row;flex-wrap:wrap;align-items:center}.sidebar .foot{margin:0 0 0 auto}.navgroup{display:none}main.content{padding:18px}}
 </style>
 </head>
 <body>
-<div class="wrap">
-
-  <header class="top">
-    <div>
-      <h1>socialio <span class="v">· кишка контенту</span></h1>
-      <div class="sub">Транскрипт → ідеї → пости → tone of voice → Telegram → де-AI → контент-стратегія → календар.</div>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="ws">Робочий простір</div>
+    <div class="wsname">socialio</div>
+    <div class="navgroup">Стратегія</div>
+    <div class="navitem" data-view="strategy">🎯 Стратегія</div>
+    <div class="navgroup">Робота</div>
+    <div class="navitem active" data-view="create">✍️ Створення</div>
+    <div class="navitem" data-view="publish">📅 Публікація</div>
+    <div class="navitem" data-view="analytics">📊 Аналітика</div>
+    <div class="navgroup">Акаунт</div>
+    <div class="navitem" data-view="settings">🔌 Налаштування</div>
+    <div class="foot">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><span class="dot" id="srvDot"></span><span id="saved">збережено ✓</span></div>
+      <div id="userEmail" style="margin-bottom:8px;word-break:break-all"></div>
+      <button id="logoutBtn" class="ghost" style="width:100%">Вийти</button>
     </div>
-    <div class="keybar">
-      <span class="dot" id="srvDot"></span>
-      <small id="runLabel">новий прогін</small>
-      <span id="saved">збережено ✓</span>
-      <span id="userEmail" style="font-size:12px;color:var(--muted)"></span>
-      <button id="logoutBtn" class="ghost" style="padding:4px 10px;font-size:12px">Вийти</button>
-    </div>
-  </header>
+  </aside>
 
-  <details class="settings" open>
-    <summary>⚙️ Глобальні блоки (зберігаються на сервері, тягнуться кроками)</summary>
-    <div class="body">
-      <div class="fld"><label>Marketing Context · крок 1</label><textarea id="mkt"></textarea></div>
-      <div class="fld"><label>Tone of Voice · крок 4</label><textarea id="tov"></textarea></div>
-      <div class="fld"><label>De-AI Rules · крок 6</label><textarea id="deai"></textarea></div>
-      <div class="fld"><label>Content Strategy · крок 7</label><textarea id="strat"></textarea></div>
-    </div>
-  </details>
+  <main class="content">
 
-  <details class="settings" id="tgPanel">
-    <summary>🔌 Інтеграція: Telegram (публікація постів)</summary>
-    <div class="body">
-      <div class="hint" style="font-size:13px;line-height:1.7">
-        <b>Як підключити (одноразово):</b><br>
-        1. У Telegram відкрий <b>@BotFather</b> → команда <code>/newbot</code> → дай ім'я → отримаєш <b>токен</b> (вигляд <code>123456:ABC-...</code>).<br>
-        2. Додай свого бота <b>адміністратором</b> у свій канал (з правом «Publish messages») і у свою групу.<br>
-        3. Встав токен нижче. Канал — <code>@username</code> (публічний) або числовий id; група — числовий id (напр. <code>-1001234567890</code>).<br>
-        4. Тисни <b>«Перевірити з'єднання»</b> — покаже, чи бот бачить канал/групу і чи він адмін.<br>
-        <small>Не знаєш id? Додай бота у канал/групу й скористайся ботом <code>@getidsbot</code> або <code>@username_to_id_bot</code>.</small>
+    <section class="viewsec" data-view="strategy">
+      <div class="pagehead"><h1>Стратегія</h1><p>Голос бренду, аудиторія та правила — AI тягне це у кожен крок генерації.</p></div>
+      <div class="settings"><div class="body">
+        <div class="fld"><label>Мова виводу (застосовується до всіх кроків)</label>
+          <select id="langSel">
+            <option>Українська</option><option>Російська</option><option>English</option><option>Polski</option><option>Deutsch</option>
+          </select></div>
+        <div class="fld"><label>Голос бренду (Tone of Voice)</label><textarea id="tov"></textarea></div>
+        <div class="fld"><label>Аудиторія / Marketing Context</label><textarea id="mkt"></textarea></div>
+        <div class="fld"><label>Контент-стратегія</label><textarea id="strat"></textarea></div>
+        <div class="fld"><label>Правила De-AI</label><textarea id="deai"></textarea></div>
+      </div></div>
+      <p class="hint">Далі сюди додамо Рубрики (%-мікс), деталі Аудиторії, Конкурентів і Дослідження.</p>
+    </section>
+
+    <section class="viewsec active" data-view="create">
+      <div class="pagehead"><h1>Створення</h1><p>Транскрипт сесії → ідеї → пости у вашому голосі. <span id="runLabel" style="color:var(--muted)"></span></p></div>
+      <div class="ctl" style="margin:0 0 18px">
+        <button class="primary" id="runAll">⚡ Прогнати всю кишку</button>
+        <button class="ghost" id="newRun">＋ Новий прогін</button>
       </div>
-      <div class="fld"><label>Bot Token</label><input class="txt" type="password" id="tgToken" placeholder="123456:ABC-..."></div>
-      <div class="fld"><label>Канал (chat id або @username)</label><input class="txt" id="tgChannel" placeholder="@my_channel або -1001234567890"></div>
-      <div class="fld"><label>Група (chat id)</label><input class="txt" id="tgGroup" placeholder="-1001234567890"></div>
-      <div class="ctl">
-        <button class="primary" id="tgSave">Зберегти</button>
-        <button class="ghost" id="tgTest">Перевірити з'єднання</button>
+      <div class="pipe" id="pipe">
+        <section class="step" id="s0">
+          <div class="shead"><div class="t"><span class="num">0</span> Транскрипт сесії</div><span class="badge" id="b0">джерело</span></div>
+          <div class="fld" style="margin-top:12px"><label>Вставте транскрипт коуч-сесії</label>
+            <textarea id="transcript" style="min-height:120px"></textarea>
+            <div class="ctl"><button class="ghost" id="sampleBtn">Підставити приклад</button></div>
+            <div class="hint" id="lockHint"></div>
+          </div>
+        </section>
+        <section class="step" id="s1">
+          <div class="shead"><div class="t"><span class="num">1</span> Витяг ідей</div><span class="badge" id="b1">очікує</span></div>
+          <div class="ctl"><button class="primary" data-run="1">▷ Запустити</button><button class="ghost" data-from="1">↻ Звідси донизу</button></div>
+          <div class="out" id="o1"><div class="empty">Ідеї з'являться тут — кожну можна вимкнути перед чернетками.</div></div>
+        </section>
+        <section class="step" id="s3">
+          <div class="shead"><div class="t"><span class="num">2–3</span> Чорнові пости</div><span class="badge" id="b3">очікує</span></div>
+          <div class="ctl"><button class="primary" data-run="3">▷ Запустити</button><button class="ghost" data-from="3">↻ Звідси донизу</button></div>
+          <div class="out" id="o3"><div class="empty">Спершу відбери ідеї на кроці 1.</div></div>
+        </section>
+        <section class="step" id="s4">
+          <div class="shead"><div class="t"><span class="num">4</span> Tone of Voice</div><span class="badge" id="b4">очікує</span></div>
+          <div class="ctl"><button class="primary" data-run="4">▷ Запустити</button><button class="ghost" data-from="4">↻ Звідси донизу</button></div>
+          <div class="out" id="o4"><div class="empty">—</div></div>
+        </section>
+        <section class="step" id="s5">
+          <div class="shead"><div class="t"><span class="num">5</span> Формат під Telegram <span class="badge soon">IG / FB — скоро</span></div><span class="badge" id="b5">очікує</span></div>
+          <div class="ctl"><button class="primary" data-run="5">▷ Запустити</button><button class="ghost" data-from="5">↻ Звідси донизу</button></div>
+          <div class="out" id="o5"><div class="empty">—</div></div>
+        </section>
+        <section class="step" id="s6">
+          <div class="shead"><div class="t"><span class="num">6</span> Де-AI</div><span class="badge" id="b6">очікує</span></div>
+          <div class="ctl"><button class="primary" data-run="6">▷ Запустити</button><button class="ghost" data-from="6">↻ Звідси донизу</button></div>
+          <div class="out" id="o6"><div class="empty">Готові пости з кнопками публікації в Telegram.</div></div>
+        </section>
+        <section class="step" id="s7">
+          <div class="shead"><div class="t"><span class="num">7</span> Контент-стратегія</div><span class="badge" id="b7">очікує</span></div>
+          <div class="ctl"><button class="primary" data-run="7">▷ Запустити</button><button class="ghost" data-from="7">↻ Звідси донизу</button></div>
+          <div class="out" id="o7"><div class="empty">План публікацій з'явиться тут.</div></div>
+        </section>
       </div>
-      <div id="tgResult" class="out"></div>
-    </div>
-  </details>
-
-  <div class="pipe" id="pipe">
-
-    <section class="step" id="s0">
-      <div class="shead"><div class="t"><span class="num">0</span> Транскрипт сесії</div><span class="badge" id="b0">джерело</span></div>
-      <div class="fld" style="margin-top:12px"><label>Вставте транскрипт коуч-сесії</label>
-        <textarea id="transcript" style="min-height:120px"></textarea>
-        <div class="ctl"><button class="ghost" id="sampleBtn">Підставити приклад</button></div>
-        <div class="hint" id="lockHint"></div>
-      </div>
     </section>
 
-    <section class="step" id="s1">
-      <div class="shead"><div class="t"><span class="num">1</span> Витяг ідей</div><span class="badge" id="b1">очікує</span></div>
-      <div class="ctl"><button class="primary" data-run="1">▷ Запустити</button>
-        <button class="ghost" data-from="1">↻ Звідси донизу</button></div>
-      <div class="out" id="o1"><div class="empty">Ідеї з'являться тут — кожну можна вимкнути перед чернетками.</div></div>
+    <section class="viewsec" data-view="publish">
+      <div class="pagehead"><h1>Публікація</h1><p>Перетягни готові пости на дні, тоді «Зберегти». Заплановане публікується автоматично.</p></div>
+      <div class="settings"><div class="body">
+        <div class="ctl" style="margin:0">
+          <button class="primary" id="recoBtn">✨ Рекомендувати дати</button>
+          <button id="saveCal">💾 Зберегти календар</button>
+          <button class="ghost" id="clearCal">Очистити календар</button>
+          <span id="calMsg" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+        <div class="hint">Заплановані пости публікуються в Telegram у призначений час (≈09:00 UTC того дня).</div>
+        <div class="tray" id="tray"></div>
+        <div class="cal" id="cal"></div>
+      </div></div>
     </section>
 
-    <section class="step" id="s3">
-      <div class="shead"><div class="t"><span class="num">2–3</span> Чорнові пости</div><span class="badge" id="b3">очікує</span></div>
-      <div class="ctl"><button class="primary" data-run="3">▷ Запустити</button>
-        <button class="ghost" data-from="3">↻ Звідси донизу</button></div>
-      <div class="out" id="o3"><div class="empty">Спершу відбери ідеї на кроці 1.</div></div>
+    <section class="viewsec" data-view="analytics">
+      <div class="pagehead"><h1>Аналітика</h1><p>Скоро: лічильник токенів і вартості згенерованого контенту, ефективність постів.</p></div>
+      <div class="settings"><div class="body"><div class="empty">Додаємо у наступній хвилі (R2).</div></div></div>
     </section>
 
-    <section class="step" id="s4">
-      <div class="shead"><div class="t"><span class="num">4</span> Tone of Voice</div><span class="badge" id="b4">очікує</span></div>
-      <div class="ctl"><button class="primary" data-run="4">▷ Запустити</button>
-        <button class="ghost" data-from="4">↻ Звідси донизу</button></div>
-      <div class="out" id="o4"><div class="empty">—</div></div>
+    <section class="viewsec" data-view="settings">
+      <div class="pagehead"><h1>Налаштування</h1><p>Інтеграції та акаунт.</p></div>
+      <div class="settings"><div class="body">
+        <b>🔌 Telegram (публікація постів)</b>
+        <div class="hint" style="line-height:1.7">
+          1. У Telegram відкрий <b>@BotFather</b> → <code>/newbot</code> → отримаєш <b>токен</b>.<br>
+          2. Додай бота <b>адміністратором</b> у канал (право «Publish messages») і у групу.<br>
+          3. Встав токен; канал — <code>@username</code> або числовий id; група — числовий id (напр. <code>-1001234567890</code>).<br>
+          4. Тисни «Перевірити з'єднання». Не знаєш id? Бот <code>@getidsbot</code>.
+        </div>
+        <div class="fld"><label>Bot Token</label><input class="txt" type="password" id="tgToken" placeholder="123456:ABC-..."></div>
+        <div class="fld"><label>Канал (chat id або @username)</label><input class="txt" id="tgChannel" placeholder="@my_channel або -1001234567890"></div>
+        <div class="fld"><label>Група (chat id)</label><input class="txt" id="tgGroup" placeholder="-1001234567890"></div>
+        <div class="ctl"><button class="primary" id="tgSave">Зберегти</button><button class="ghost" id="tgTest">Перевірити з'єднання</button></div>
+        <div id="tgResult" class="out"></div>
+      </div></div>
     </section>
 
-    <section class="step" id="s5">
-      <div class="shead"><div class="t"><span class="num">5</span> Формат під Telegram <span class="badge soon">IG / FB — скоро</span></div><span class="badge" id="b5">очікує</span></div>
-      <div class="ctl"><button class="primary" data-run="5">▷ Запустити</button>
-        <button class="ghost" data-from="5">↻ Звідси донизу</button></div>
-      <div class="out" id="o5"><div class="empty">—</div></div>
-    </section>
-
-    <section class="step" id="s6">
-      <div class="shead"><div class="t"><span class="num">6</span> Де-AI</div><span class="badge" id="b6">очікує</span></div>
-      <div class="ctl"><button class="primary" data-run="6">▷ Запустити</button>
-        <button class="ghost" data-from="6">↻ Звідси донизу</button></div>
-      <div class="out" id="o6"><div class="empty">Готові Telegram-пости з кнопкою копіювання.</div></div>
-    </section>
-
-    <section class="step" id="s7">
-      <div class="shead"><div class="t"><span class="num">7</span> Контент-стратегія</div><span class="badge" id="b7">очікує</span></div>
-      <div class="ctl"><button class="primary" data-run="7">▷ Запустити</button>
-        <button class="ghost" data-from="7">↻ Звідси донизу</button></div>
-      <div class="out" id="o7"><div class="empty">План публікацій з'явиться тут.</div></div>
-    </section>
-
-    <section class="step" id="s8">
-      <div class="shead"><div class="t"><span class="num">8</span> Календар <span class="badge ok">автопостинг ✓</span></div><span class="badge" id="b8">план</span></div>
-      <div class="ctl">
-        <button class="primary" id="recoBtn">✨ Рекомендувати дати</button>
-        <button id="saveCal">💾 Зберегти календар</button>
-        <button class="ghost" id="clearCal">Очистити календар</button>
-        <span id="calMsg" style="font-size:12px;color:var(--muted)"></span>
-      </div>
-      <div class="hint">Перетягуй картки на дні (або «Рекомендувати»), тоді «Зберегти». Заплановані пости автоматично опублікуються в Telegram у призначений час (≈09:00 UTC того дня).</div>
-      <div class="tray" id="tray"></div>
-      <div class="cal" id="cal"></div>
-    </section>
-
-  </div>
+  </main>
 </div>
-
-<div class="runall"><div class="inner">
-  <button class="primary" id="runAll">⚡ Прогнати всю кишку</button>
-  <button class="ghost" id="newRun">＋ Новий прогін</button>
-</div></div>
 
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
-// UI step number -> backend step key
 const STEP  = {1:'extract_ideas',3:'drafts',4:'tone',5:'format',6:'deai',7:'strategy'};
 const ORDER = [1,3,4,5,6,7];
-// settings textarea id -> backend key
 const SET = {mkt:'marketing_context', tov:'tone_of_voice', deai:'deai_rules', strat:'content_strategy'};
-const STATUS_BADGE = {fresh:['ok','готово'], stale:['stale','застаріло'], running:['run','<span class="spin"></span> генерую'], error:['stale','помилка'], idle:['','очікує']};
 
 const SAMPLE = `Клієнт: я постійно відкладаю важливі справи, сідаю за роботу і одразу лізу в телефон.
 Коуч: давай подивимось, що відбувається в момент перед тим, як ти береш телефон. Який це стан?
 Клієнт: тривога. Ніби боюся почати, бо раптом не вийде ідеально.
 Коуч: тобто телефон - це спосіб втекти від тривоги, а не лінь. Перфекціонізм часто маскується під прокрастинацію.
 Клієнт: так, я ніколи так не думав. Я себе просто вважав лінивим.
-Коуч: спробуй наступного разу домовитись із собою про «погану першу версію» - дозволь зробити неідеально за 10 хвилин. Маленький поріг входу знімає тривогу.
+Коуч: спробуй наступного разу домовитись із собою про «погану першу версію» - дозволь зробити неідеально за 10 хвилин.
 Клієнт: о, це звучить реально. І ще я помітив, що зранку легше, коли я не дивлюся новини відразу.
 Коуч: чудове спостереження. Ранковий простір без шуму - це ресурс. Зробимо це твоїм експериментом на тиждень.`;
 
@@ -236,25 +242,31 @@ async function api(path, opts){
   return ct.includes('json') ? r.json() : r.text();
 }
 
+// ---------- навігація ----------
+document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>{
+  document.querySelectorAll('.navitem').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.viewsec').forEach(x=>x.classList.remove('active'));
+  n.classList.add('active');
+  const v=document.querySelector('.viewsec[data-view="'+n.dataset.view+'"]'); if(v) v.classList.add('active');
+});
+
 // ---------- settings ----------
 async function loadSettings(){
   try{
     const rows = await api('/settings');
     const map = Object.fromEntries(rows.map(r=>[r.key, r.content]));
     for(const [tid,key] of Object.entries(SET)){ if(map[key]!=null) $(tid).value = map[key]; }
+    if(map.output_language) $('langSel').value = map.output_language;
     $('srvDot').classList.add('on');
   }catch(e){ $('srvDot').classList.remove('on'); }
 }
 let saveT;
-function flashSaved(){ const s=$('saved'); s.classList.add('show'); clearTimeout(flashSaved._t); flashSaved._t=setTimeout(()=>s.classList.remove('show'),1200); }
+function flashSaved(){ const s=$('saved'); s.classList.add('show'); clearTimeout(flashSaved._t); flashSaved._t=setTimeout(()=>s.classList.remove('show'),1500); }
+async function saveSetting(key,val){ try{ await api('/settings/'+key,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:val})}); flashSaved(); }catch(e){} }
 for(const tid of Object.keys(SET)){
-  $(tid).addEventListener('input', ()=>{
-    clearTimeout(saveT);
-    saveT = setTimeout(async ()=>{
-      try{ await api('/settings/'+SET[tid], {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({content:$(tid).value})}); flashSaved(); }catch(e){}
-    }, 700);
-  });
+  $(tid).addEventListener('input', ()=>{ clearTimeout(saveT); saveT=setTimeout(()=>saveSetting(SET[tid],$(tid).value),700); });
 }
+$('langSel').onchange=()=>saveSetting('output_language',$('langSel').value);
 
 // ---------- render ----------
 const badge=(n,cls,txt)=>{const b=$('b'+n); if(b){ b.className='badge '+(cls||''); b.innerHTML=txt; }};
@@ -265,39 +277,30 @@ function applyState(d){
   for(const n of ORDER){
     const s = byKey[STEP[n]];
     if(s){
-      const [c,t] = STATUS_BADGE[s.status] || ['','очікує'];
-      badge(n,c,t);
-      stepEl(n).classList.toggle('done', s.status==='fresh');
-      stepEl(n).classList.toggle('stale', s.status==='stale' || s.status==='error');
+      const map={fresh:['ok','готово'],stale:['stale','застаріло'],running:['run','<span class="spin"></span> генерую'],error:['stale','помилка'],idle:['','очікує']};
+      const [c,t]=map[s.status]||['','очікує'];
+      badge(n,c,t); stepEl(n).classList.toggle('done',s.status==='fresh'); stepEl(n).classList.toggle('stale',s.status==='stale'||s.status==='error');
     } else { badge(n,'','очікує'); stepEl(n).classList.remove('done','stale'); }
   }
   renderIdeas(d.ideas||[]);
-  const byStage = {draft:[], toned:[], formatted:[], final:[]};
+  const byStage={draft:[],toned:[],formatted:[],final:[]};
   (d.posts||[]).forEach(p=>{ if(byStage[p.stage]) byStage[p.stage].push(p); });
-  renderPosts('o3', byStage.draft, 'Спершу відбери ідеї на кроці 1.');
-  renderPosts('o4', byStage.toned);
-  renderPosts('o5', byStage.formatted);
-  renderFinals(byStage.final, d.published||[]);
-  S.plan = (d.plan||[]).map(p=>({id:p.id, title:p.title, content:p.post_content||p.title, type:p.type, dayOffset:p.day_offset||0}));
-  S.schedule = {};
-  (d.schedule||[]).forEach(s=>{
-    if(!s.scheduled_at) return;
-    const idx = S.plan.findIndex(p=>p.id===s.plan_item_id);
-    if(idx<0) return;
-    const iso = String(s.scheduled_at).slice(0,10);
-    (S.schedule[iso]=S.schedule[iso]||[]).push(idx);
-  });
+  renderPosts('o3',byStage.draft,'Спершу відбери ідеї на кроці 1.');
+  renderPosts('o4',byStage.toned);
+  renderPosts('o5',byStage.formatted);
+  renderFinals(byStage.final,d.published||[]);
+  S.plan=(d.plan||[]).map(p=>({id:p.id,title:p.title,content:p.post_content||p.title,type:p.type,dayOffset:p.day_offset||0}));
+  S.schedule={};
+  (d.schedule||[]).forEach(s=>{ if(!s.scheduled_at) return; const idx=S.plan.findIndex(p=>p.id===s.plan_item_id); if(idx<0) return; const iso=String(s.scheduled_at).slice(0,10); (S.schedule[iso]=S.schedule[iso]||[]).push(idx); });
   renderPlan(); renderCalendar();
 }
 function renderIdeas(ideas){
   const o=$('o1');
   if(!ideas.length){ o.innerHTML='<div class="empty">Ідеї з\'являться тут після кроку 1.</div>'; return; }
   o.innerHTML='';
-  ideas.forEach(it=>{
-    const d=document.createElement('div'); d.className='card idea';
+  ideas.forEach(it=>{ const d=document.createElement('div'); d.className='card idea';
     d.innerHTML='<input type="checkbox" '+(it.selected?'checked':'')+' data-id="'+it.id+'"><div class="it"><b>'+esc(it.idea)+'</b>'+(it.angle?'<div class="ang">↳ '+esc(it.angle)+'</div>':'')+'</div>';
-    o.appendChild(d);
-  });
+    o.appendChild(d); });
   o.querySelectorAll('input').forEach(c=>c.onchange=saveSelection);
 }
 async function saveSelection(){
@@ -305,32 +308,28 @@ async function saveSelection(){
   const ids=[...$('o1').querySelectorAll('input:checked')].map(c=>c.dataset.id);
   try{ await api('/runs/'+runId+'/ideas/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({selectedIds:ids})}); flashSaved(); }catch(e){}
 }
-function renderPosts(oid, posts, emptyTxt){
+function renderPosts(oid,posts,emptyTxt){
   const o=$(oid); if(!o) return;
-  if(!posts || !posts.length){ o.innerHTML='<div class="empty">'+(emptyTxt||'—')+'</div>'; return; }
-  o.innerHTML = posts.map(p => '<div class="card post">'+esc(p.content)+'</div>').join('');
+  if(!posts||!posts.length){ o.innerHTML='<div class="empty">'+(emptyTxt||'—')+'</div>'; return; }
+  o.innerHTML=posts.map(p=>'<div class="card post">'+esc(p.content)+'</div>').join('');
 }
 function bindCopy(){document.querySelectorAll('.copy').forEach(b=>b.onclick=()=>{navigator.clipboard.writeText(decodeURIComponent(b.dataset.c));b.textContent='✓';setTimeout(()=>b.textContent='копіювати',1000);});}
-function renderFinals(posts, published){
+function renderFinals(posts,published){
   const o=$('o6');
-  if(!posts || !posts.length){ o.innerHTML='<div class="empty">Готові пости з кнопками публікації в Telegram.</div>'; return; }
+  if(!posts||!posts.length){ o.innerHTML='<div class="empty">Готові пости з кнопками публікації в Telegram.</div>'; return; }
   const isPub=(pid,t)=>published.some(x=>x.post_id===pid && x.target===t);
-  o.innerHTML = posts.map(p=>'<div class="tg">'
-    +'<button class="copy" data-c="'+encodeURIComponent(p.content)+'">копіювати</button>'
-    +esc(p.content)
+  o.innerHTML=posts.map(p=>'<div class="tg"><button class="copy" data-c="'+encodeURIComponent(p.content)+'">копіювати</button>'+esc(p.content)
     +'<div class="ctl" style="margin-top:10px">'
     +'<button class="pub" data-post="'+p.id+'" data-t="channel">'+(isPub(p.id,'channel')?'✓ у каналі':'→ Канал')+'</button>'
     +'<button class="pub" data-post="'+p.id+'" data-t="group">'+(isPub(p.id,'group')?'✓ у групі':'→ Група')+'</button>'
-    +'<span class="pubmsg" data-for="'+p.id+'" style="font-size:12px"></span>'
-    +'</div></div>').join('');
+    +'<span class="pubmsg" data-for="'+p.id+'" style="font-size:12px"></span></div></div>').join('');
   bindCopy();
   o.querySelectorAll('.pub').forEach(b=>b.onclick=()=>publish(b));
 }
 async function publish(btn){
-  const postId=btn.dataset.post, target=btn.dataset.t;
+  const postId=btn.dataset.post,target=btn.dataset.t;
   const msg=$('o6').querySelector('.pubmsg[data-for="'+postId+'"]');
-  const old=btn.textContent; btn.disabled=true; btn.innerHTML='<span class="spin"></span>';
-  if(msg) msg.textContent='';
+  const old=btn.textContent; btn.disabled=true; btn.innerHTML='<span class="spin"></span>'; if(msg) msg.textContent='';
   try{
     const r=await api('/posts/'+postId+'/publish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({targets:[target]})});
     const res=(r.results||[]).find(x=>x.target===target)||{};
@@ -339,60 +338,49 @@ async function publish(btn){
   }catch(e){ btn.disabled=false; btn.textContent=old; if(msg){ msg.style.color='var(--stale)'; msg.textContent=' ⚠ '+e.message; } }
 }
 
-function updRunLabel(){ $('runLabel').textContent = runId ? ('прогін '+runId.slice(0,8)) : 'новий прогін'; $('lockHint').textContent = runId ? 'Прогін створено з цього транскрипту. «Новий прогін», щоб почати з іншого тексту.' : ''; }
-
-async function refresh(){ if(!runId) return; const d = await api('/runs/'+runId); applyState(d); }
-
+function updRunLabel(){ $('runLabel').textContent = runId ? ('· прогін '+runId.slice(0,8)) : '· новий прогін'; $('lockHint').textContent = runId ? 'Прогін створено з цього транскрипту. «Новий прогін», щоб почати з іншого тексту.' : ''; }
+async function refresh(){ if(!runId) return; const d=await api('/runs/'+runId); applyState(d); }
 async function ensureRun(){
   if(runId) return runId;
-  const transcript = $('transcript').value.trim();
+  const transcript=$('transcript').value.trim();
   if(!transcript) throw new Error('Спершу вставте транскрипт.');
-  const r = await api('/sources', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({transcript})});
-  runId = r.runId; localStorage.setItem('kg_run', runId); updRunLabel();
-  return runId;
+  const r=await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript})});
+  runId=r.runId; localStorage.setItem('kg_run',runId); updRunLabel(); return runId;
 }
 
 // ---------- run ----------
-function setBusy(b){ busy=b; document.querySelectorAll('button').forEach(x=>{ if(x.id!=='newRun') x.disabled=b; }); }
+function setBusy(b){ busy=b; document.querySelectorAll('.pipe button, #runAll').forEach(x=>x.disabled=b); }
 async function run(n){
   if(busy) return; setBusy(true);
-  try{
-    await ensureRun();
-    badge(n,'run','<span class="spin"></span> генерую'); stepEl(n).classList.remove('stale');
-    await api('/runs/'+runId+'/steps/'+STEP[n]+'/run', {method:'POST'});
-    await refresh();
+  try{ await ensureRun(); badge(n,'run','<span class="spin"></span> генерую'); stepEl(n).classList.remove('stale');
+    await api('/runs/'+runId+'/steps/'+STEP[n]+'/run',{method:'POST'}); await refresh();
   }catch(e){ badge(n,'stale','помилка'); const o=$('o'+n); if(o) o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
   finally{ setBusy(false); }
 }
 async function runFrom(startN){
   if(busy) return; setBusy(true);
-  try{
-    await ensureRun();
-    for(const k of ORDER.slice(ORDER.indexOf(startN))) badge(k,'run','<span class="spin"></span> у черзі');
-    await api('/runs/'+runId+'/run-from/'+STEP[startN], {method:'POST'});
+  try{ await ensureRun(); for(const k of ORDER.slice(ORDER.indexOf(startN))) badge(k,'run','<span class="spin"></span> у черзі');
+    await api('/runs/'+runId+'/run-from/'+STEP[startN],{method:'POST'});
   }catch(e){ alert('Помилка: '+e.message); }
   finally{ try{ await refresh(); }catch(_){} setBusy(false); }
 }
 
-// ---------- calendar (client-side view of the plan) ----------
+// ---------- календар ----------
 function renderPlan(){
   const o=$('o7');
   if(!S.plan.length){ o.innerHTML='<div class="empty">План публікацій з\'явиться тут.</div>'; return; }
   o.innerHTML='';
   S.plan.forEach((p,i)=>{ const prev=((p.content||p.title||'')).replace(/\n+/g,' ').slice(0,140); o.innerHTML+='<div class="card"><div>'+esc(prev)+'…</div><small style="color:var(--muted)">'+esc(p.type||'пост')+' · рек. день +'+(p.dayOffset||0)+'</small></div>'; });
 }
-function startMonday(){const d=new Date();const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);d.setHours(0,0,0,0);return d;} // понеділок поточного тижня
+function startMonday(){const d=new Date();const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);d.setHours(0,0,0,0);return d;}
 const DOW=['Пн','Вт','Ср','Чт','Пт','Сб','Нд'];
 function dateISO(off){const d=startMonday();d.setDate(d.getDate()+off);return d.toISOString().slice(0,10);}
 function renderTray(){
   const tray=$('tray'); tray.innerHTML='';
-  S.plan.forEach((p,i)=>{
-    const placed=Object.values(S.schedule).flat().includes(i);
+  S.plan.forEach((p,i)=>{ const placed=Object.values(S.schedule).flat().includes(i);
     const c=document.createElement('div'); c.className='chip'+(placed?' placed':''); c.draggable=!placed; c.dataset.i=i;
     c.innerHTML='<b>'+esc((p.content||p.title||'').replace(/\n+/g,' ').slice(0,38))+'</b><small>'+esc(p.type||'')+'</small>';
-    c.addEventListener('dragstart',ev=>ev.dataTransfer.setData('text/plain',i));
-    tray.appendChild(c);
-  });
+    c.addEventListener('dragstart',ev=>ev.dataTransfer.setData('text/plain',i)); tray.appendChild(c); });
 }
 function renderCalendar(){
   renderTray();
@@ -415,7 +403,7 @@ document.querySelectorAll('[data-run]').forEach(b=>b.onclick=()=>run(+b.dataset.
 document.querySelectorAll('[data-from]').forEach(b=>b.onclick=()=>runFrom(+b.dataset.from));
 $('runAll').onclick=()=>runFrom(1);
 $('sampleBtn').onclick=()=>{ $('transcript').value=SAMPLE; };
-$('recoBtn').onclick=()=>{ if(!S.plan.length){alert('Спершу запусти крок 7');return;} S.schedule={}; S.plan.forEach((p,i)=>{const iso=dateISO(Math.min(27,p.dayOffset||i*2));(S.schedule[iso]=S.schedule[iso]||[]).push(i);}); renderCalendar(); };
+$('recoBtn').onclick=()=>{ if(!S.plan.length){alert('Спершу запусти крок 7 (стратегію)');return;} S.schedule={}; S.plan.forEach((p,i)=>{const iso=dateISO(Math.min(27,p.dayOffset||i*2));(S.schedule[iso]=S.schedule[iso]||[]).push(i);}); renderCalendar(); };
 $('clearCal').onclick=()=>{ S.schedule={}; renderCalendar(); };
 $('saveCal').onclick=async()=>{
   if(!runId){ alert('Спершу запусти кишку (потрібен прогін зі стратегією).'); return; }
@@ -425,46 +413,39 @@ $('saveCal').onclick=async()=>{
   try{ const r=await api('/runs/'+runId+'/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slots})}); m.style.color='var(--ok)'; m.textContent='збережено: '+r.count+' — автопостинг увімкнено'; }
   catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; }
 };
+$('newRun').onclick=()=>{
+  if(busy) return;
+  if(runId && !confirm('Почати новий прогін? Поточні результати лишаться на сервері, але зникнуть з екрана.')) return;
+  runId=null; localStorage.removeItem('kg_run'); S={plan:[],schedule:{}};
+  ['o1','o3','o4','o5','o6','o7'].forEach(id=>$(id).innerHTML='<div class="empty">—</div>');
+  $('tray').innerHTML=''; $('cal').innerHTML=''; $('transcript').value='';
+  [1,3,4,5,6,7].forEach(n=>{badge(n,'','очікує');stepEl(n).classList.remove('done','stale');});
+  updRunLabel();
+};
+$('logoutBtn').onclick=async()=>{ try{ await api('/auth/logout',{method:'POST'}); }catch(e){} location.href='/login'; };
 
-// ---------- Telegram integration ----------
+// ---------- Telegram ----------
 async function loadTelegram(){
-  try{
-    const c=await api('/integrations/telegram');
+  try{ const c=await api('/integrations/telegram');
     $('tgChannel').value=c.channelChatId||''; $('tgGroup').value=c.groupChatId||'';
     if(c.hasToken) $('tgToken').placeholder='•••••••• (токен збережено — лиши порожнім, щоб не міняти)';
   }catch(e){}
 }
 $('tgSave').onclick=async()=>{
-  try{
-    await api('/integrations/telegram',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({botToken:$('tgToken').value,channelChatId:$('tgChannel').value,groupChatId:$('tgGroup').value})});
+  try{ await api('/integrations/telegram',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({botToken:$('tgToken').value,channelChatId:$('tgChannel').value,groupChatId:$('tgGroup').value})});
     $('tgToken').value=''; $('tgToken').placeholder='•••••••• (токен збережено)';
     $('tgResult').innerHTML='<div class="card" style="color:var(--ok)">Збережено ✓</div>';
   }catch(e){ $('tgResult').innerHTML='<div class="card" style="color:var(--stale)">⚠ '+esc(e.message)+'</div>'; }
 };
 $('tgTest').onclick=async()=>{
   $('tgResult').innerHTML='<div class="empty"><span class="spin"></span> перевіряю…</div>';
-  try{
-    const r=await api('/integrations/telegram/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({botToken:$('tgToken').value,channelChatId:$('tgChannel').value,groupChatId:$('tgGroup').value})});
-    const line=(label,c)=>{
-      if(!c) return '<div class="card"><b>'+label+':</b> <span style="color:var(--muted)">не вказано</span></div>';
+  try{ const r=await api('/integrations/telegram/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({botToken:$('tgToken').value,channelChatId:$('tgChannel').value,groupChatId:$('tgGroup').value})});
+    const line=(label,c)=>{ if(!c) return '<div class="card"><b>'+label+':</b> <span style="color:var(--muted)">не вказано</span></div>';
       if(!c.ok) return '<div class="card"><b>'+label+':</b> <span style="color:var(--stale)">⚠ '+esc(c.error||'недоступно')+'</span></div>';
-      return '<div class="card"><b>'+label+':</b> <span style="color:var(--ok)">✓ '+esc(c.title)+'</span> '+(c.isAdmin?'<span style="color:var(--ok)">· бот адмін</span>':'<span style="color:var(--warn)">· бот НЕ адмін (додай у адміни)</span>')+'</div>';
-    };
+      return '<div class="card"><b>'+label+':</b> <span style="color:var(--ok)">✓ '+esc(c.title)+'</span> '+(c.isAdmin?'<span style="color:var(--ok)">· бот адмін</span>':'<span style="color:var(--warn)">· бот НЕ адмін</span>')+'</div>'; };
     $('tgResult').innerHTML='<div class="card" style="color:var(--ok)">Бот: @'+esc(r.bot.username||'?')+' ✓</div>'+line('Канал',r.channel)+line('Група',r.group);
   }catch(e){ $('tgResult').innerHTML='<div class="card" style="color:var(--stale)">⚠ '+esc(e.message)+'</div>'; }
 };
-$('newRun').onclick=()=>{
-  if(busy) return;
-  if(runId && !confirm('Почати новий прогін? Поточні результати лишаться на сервері, але зникнуть з екрана.')) return;
-  runId=null; localStorage.removeItem('kg_run'); S={plan:[],schedule:{}};
-  ['o1','o3','o4','o5','o6','o7'].forEach(id=>$(id).innerHTML='<div class="empty">—</div>');
-  $('tray').innerHTML=''; $('cal').innerHTML='';
-  [1,3,4,5,6,7].forEach(n=>{badge(n,'','очікує');stepEl(n).classList.remove('done','stale');});
-  updRunLabel();
-};
-
-// ---------- auth + logout ----------
-$('logoutBtn').onclick=async()=>{ try{ await api('/auth/logout',{method:'POST'}); }catch(e){} location.href='/login'; };
 
 // ---------- модель + промпт на кожен крок ----------
 const STEP_BY_SEC = {s1:'extract_ideas', s3:'drafts', s4:'tone', s5:'format', s6:'deai', s7:'strategy'};
@@ -488,7 +469,7 @@ async function loadPrompts(){
     sel.innerHTML=opts.map(m=>'<option value="'+m[0]+'"'+(m[0]===cur.model?' selected':'')+'>'+m[1]+'</option>').join('');
     sel.onchange=()=>savePrompt(step); ctl.appendChild(sel);
     const det=document.createElement('details'); det.style.cssText='margin-top:10px;border:1px dashed var(--line);border-radius:9px';
-    det.innerHTML='<summary style="cursor:pointer;padding:8px 12px;font-size:12px;color:var(--muted)">✎ Промпт кроку (тут задавай і мову)</summary><div style="padding:0 12px 12px"><textarea class="stepPrompt" data-step="'+step+'" style="min-height:90px"></textarea><button class="savePrompt" data-step="'+step+'" style="margin-top:8px">Зберегти промпт</button></div>';
+    det.innerHTML='<summary style="cursor:pointer;padding:8px 12px;font-size:12px;color:var(--muted)">✎ Промпт кроку</summary><div style="padding:0 12px 12px"><textarea class="stepPrompt" data-step="'+step+'" style="min-height:90px"></textarea><button class="savePrompt" data-step="'+step+'" style="margin-top:8px">Зберегти промпт</button></div>';
     det.querySelector('textarea').value=cur.content||'';
     det.querySelector('.savePrompt').onclick=()=>savePrompt(step);
     ctl.parentNode.insertBefore(det, ctl.nextSibling);
