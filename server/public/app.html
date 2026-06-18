@@ -278,7 +278,7 @@ function applyState(d){
   renderPosts('o4', byStage.toned);
   renderPosts('o5', byStage.formatted);
   renderFinals(byStage.final, d.published||[]);
-  S.plan = (d.plan||[]).map(p=>({id:p.id, title:p.title, type:p.type, dayOffset:p.day_offset||0}));
+  S.plan = (d.plan||[]).map(p=>({id:p.id, title:p.title, content:p.post_content||p.title, type:p.type, dayOffset:p.day_offset||0}));
   S.schedule = {};
   (d.schedule||[]).forEach(s=>{
     if(!s.scheduled_at) return;
@@ -379,7 +379,7 @@ function renderPlan(){
   const o=$('o7');
   if(!S.plan.length){ o.innerHTML='<div class="empty">План публікацій з\'явиться тут.</div>'; return; }
   o.innerHTML='';
-  S.plan.forEach((p,i)=>{ o.innerHTML+='<div class="card"><b>'+esc(p.title)+'</b> <small style="color:var(--muted)">· '+esc(p.type||'')+' · рек. день +'+(p.dayOffset||0)+'</small></div>'; });
+  S.plan.forEach((p,i)=>{ const prev=((p.content||p.title||'')).replace(/\n+/g,' ').slice(0,140); o.innerHTML+='<div class="card"><div>'+esc(prev)+'…</div><small style="color:var(--muted)">'+esc(p.type||'пост')+' · рек. день +'+(p.dayOffset||0)+'</small></div>'; });
 }
 function startMonday(){const d=new Date();const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);d.setHours(0,0,0,0);return d;} // понеділок поточного тижня
 const DOW=['Пн','Вт','Ср','Чт','Пт','Сб','Нд'];
@@ -389,7 +389,7 @@ function renderTray(){
   S.plan.forEach((p,i)=>{
     const placed=Object.values(S.schedule).flat().includes(i);
     const c=document.createElement('div'); c.className='chip'+(placed?' placed':''); c.draggable=!placed; c.dataset.i=i;
-    c.innerHTML='<b>'+esc(p.title)+'</b><small>'+esc(p.type||'')+'</small>';
+    c.innerHTML='<b>'+esc((p.content||p.title||'').replace(/\n+/g,' ').slice(0,38))+'</b><small>'+esc(p.type||'')+'</small>';
     c.addEventListener('dragstart',ev=>ev.dataTransfer.setData('text/plain',i));
     tray.appendChild(c);
   });
@@ -401,7 +401,7 @@ function renderCalendar(){
   for(let off=0;off<28;off++){
     const iso=dateISO(off); const cell=document.createElement('div'); cell.className='day'; cell.dataset.iso=iso;
     const dt=new Date(iso); cell.innerHTML='<div class="dn">'+dt.getDate()+'.'+(dt.getMonth()+1)+'</div>';
-    (S.schedule[iso]||[]).forEach(pi=>{const p=S.plan[pi];const ch=document.createElement('div');ch.className='pchip';ch.draggable=true;ch.dataset.i=pi;ch.innerHTML=esc(p?p.title:'?')+'<span class="x" data-rm="'+pi+'" data-iso="'+iso+'">✕</span>';ch.addEventListener('dragstart',ev=>ev.dataTransfer.setData('text/plain',pi));cell.appendChild(ch);});
+    (S.schedule[iso]||[]).forEach(pi=>{const p=S.plan[pi];const ch=document.createElement('div');ch.className='pchip';ch.draggable=true;ch.dataset.i=pi;ch.innerHTML=esc(p?(p.content||p.title||'').replace(/\n+/g,' ').slice(0,26):'?')+'<span class="x" data-rm="'+pi+'" data-iso="'+iso+'">✕</span>';ch.addEventListener('dragstart',ev=>ev.dataTransfer.setData('text/plain',pi));cell.appendChild(ch);});
     cell.addEventListener('dragover',ev=>{ev.preventDefault();cell.classList.add('over');});
     cell.addEventListener('dragleave',()=>cell.classList.remove('over'));
     cell.addEventListener('drop',ev=>{ev.preventDefault();cell.classList.remove('over');const pi=+ev.dataTransfer.getData('text/plain');Object.keys(S.schedule).forEach(k=>S.schedule[k]=S.schedule[k].filter(x=>x!==pi));(S.schedule[iso]=S.schedule[iso]||[]).push(pi);renderCalendar();});
@@ -466,12 +466,48 @@ $('newRun').onclick=()=>{
 // ---------- auth + logout ----------
 $('logoutBtn').onclick=async()=>{ try{ await api('/auth/logout',{method:'POST'}); }catch(e){} location.href='/login'; };
 
+// ---------- модель + промпт на кожен крок ----------
+const STEP_BY_SEC = {s1:'extract_ideas', s3:'drafts', s4:'tone', s5:'format', s6:'deai', s7:'strategy'};
+const MODELS = [
+  ['anthropic/claude-sonnet-4.5','Claude Sonnet 4.5 (якість)'],
+  ['anthropic/claude-sonnet-4.6','Claude Sonnet 4.6'],
+  ['anthropic/claude-haiku-4.5','Claude Haiku 4.5 (швидко)'],
+  ['openai/gpt-4o-mini','GPT-4o mini (дешево)'],
+  ['anthropic/claude-opus-4.5','Claude Opus 4.5 (макс)'],
+];
+async function loadPrompts(){
+  let cfg=[]; try{ cfg=await api('/prompts'); }catch(e){ return; }
+  const byStep=Object.fromEntries(cfg.map(c=>[c.step_key,c]));
+  for(const sec in STEP_BY_SEC){
+    const step=STEP_BY_SEC[sec]; const ctl=document.querySelector('#'+sec+' .ctl');
+    if(!ctl || ctl.querySelector('.stepModel')) continue;
+    const cur=byStep[step]||{model:'',content:''};
+    const sel=document.createElement('select'); sel.className='stepModel'; sel.dataset.step=step;
+    sel.style.cssText='width:auto;min-width:165px;font-size:12px;padding:6px 8px';
+    let opts=MODELS.slice(); if(cur.model && !opts.some(m=>m[0]===cur.model)) opts.unshift([cur.model,cur.model]);
+    sel.innerHTML=opts.map(m=>'<option value="'+m[0]+'"'+(m[0]===cur.model?' selected':'')+'>'+m[1]+'</option>').join('');
+    sel.onchange=()=>savePrompt(step); ctl.appendChild(sel);
+    const det=document.createElement('details'); det.style.cssText='margin-top:10px;border:1px dashed var(--line);border-radius:9px';
+    det.innerHTML='<summary style="cursor:pointer;padding:8px 12px;font-size:12px;color:var(--muted)">✎ Промпт кроку (тут задавай і мову)</summary><div style="padding:0 12px 12px"><textarea class="stepPrompt" data-step="'+step+'" style="min-height:90px"></textarea><button class="savePrompt" data-step="'+step+'" style="margin-top:8px">Зберегти промпт</button></div>';
+    det.querySelector('textarea').value=cur.content||'';
+    det.querySelector('.savePrompt').onclick=()=>savePrompt(step);
+    ctl.parentNode.insertBefore(det, ctl.nextSibling);
+  }
+}
+async function savePrompt(step){
+  const sel=document.querySelector('.stepModel[data-step="'+step+'"]'); const ta=document.querySelector('.stepPrompt[data-step="'+step+'"]');
+  if(!sel||!ta) return;
+  try{ await api('/prompts/'+step,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:sel.value,content:ta.value})}); flashSaved(); }
+  catch(e){ alert('Не вдалося зберегти промпт: '+e.message); }
+}
+
 // ---------- init ----------
 (async()=>{
   try{ const me=await api('/auth/me'); $('userEmail').textContent=me.email; }
   catch(e){ location.href='/login'; return; }
   await loadSettings();
   await loadTelegram();
+  await loadPrompts();
   updRunLabel();
   if(runId){ try{ await refresh(); }catch(e){ runId=null; localStorage.removeItem('kg_run'); updRunLabel(); } }
   renderCalendar();

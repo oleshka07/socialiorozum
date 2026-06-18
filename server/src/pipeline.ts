@@ -36,8 +36,8 @@ export const DEFAULT_PROMPTS: Record<StepKey, { model: string; content: string }
   strategy: {
     model: "openai/gpt-4o-mini",
     content:
-      "Склади план публікацій. Content Strategy: {{content_strategy}}\n" +
-      'Поверни ЛИШЕ JSON-масив: [{"title":"...","type":"користь|історія|рефлексія|заклик","postIndex":0,"dayOffset":0}]',
+      "Для КОЖНОГО готового поста (по порядку) признач тип і рекомендований зсув у днях від старту. Content Strategy: {{content_strategy}}\n" +
+      'Поверни ЛИШЕ JSON-масив рівно по одному об\'єкту на пост, у ТОМУ Ж порядку: [{"type":"користь|історія|рефлексія|заклик","dayOffset":0}]',
   },
 };
 
@@ -159,17 +159,20 @@ export async function executeStep(runId: string, step: StepKey) {
     } else if (step === "strategy") {
       const finals = await getPosts(runId, "final");
       if (!finals.length) throw new Error("немає фінальних постів");
+      // AI радить лише тип і день для КОЖНОГО готового поста (по порядку) — самі пости не змінюємо
       const out = await chat(tpl.model, system,
-        "Готові пости:\n" + finals.map((p, i) => `[${i}] ${p.content}`).join("\n\n"));
-      const plan = extractJsonArray<{ title: string; type?: string; postIndex?: number; dayOffset?: number }>(out);
+        "Готові пости (по порядку):\n" + finals.map((p, i) => `[${i}] ${p.content}`).join("\n\n"));
+      let advice: { type?: string; dayOffset?: number }[] = [];
+      try { advice = extractJsonArray<{ type?: string; dayOffset?: number }>(out); } catch { advice = []; }
       await q(`delete from content_plan where run_id=$1`, [runId]);
       const cp = await one<{ id: string }>(`insert into content_plan(run_id) values($1) returning id`, [runId]);
-      for (const it of plan) {
-        const post = finals[it.postIndex ?? 0];
+      for (let i = 0; i < finals.length; i++) {
+        const a = advice[i] ?? {};
+        const title = (finals[i].content.split("\n")[0] || `Пост ${i + 1}`).slice(0, 80);
         await q(`insert into plan_item(plan_id, post_id, title, type, day_offset) values($1,$2,$3,$4,$5)`,
-          [cp!.id, post?.id ?? null, it.title, it.type ?? null, it.dayOffset ?? 0]);
+          [cp!.id, finals[i].id, title, a.type ?? null, a.dayOffset ?? i * 2]);
       }
-      await upsertStepRun(runId, step, { status: "fresh", model: tpl.model, prompt_version: tpl.version, output: plan });
+      await upsertStepRun(runId, step, { status: "fresh", model: tpl.model, prompt_version: tpl.version, output: advice });
     }
 
     await markDownstreamStale(runId, step);

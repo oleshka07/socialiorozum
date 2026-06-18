@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS } from "./pipeline.js";
 import * as tg from "./telegram.js";
 import * as auth from "./auth.js";
 import { sendVerifyEmail, sendResetEmail } from "./email.js";
@@ -212,6 +212,29 @@ app.put("/api/settings/:key", async (req: any) => {
   return { ok: true };
 });
 
+// ===================== PROMPTS (модель + промпт на кожен крок) =====================
+app.get("/api/prompts", async (req: any) => {
+  const rows = await q<{ step_key: string; model: string; content: string }>(
+    `select step_key, model, content from prompt_template where workspace_id=$1 and is_active=true`,
+    [req.user.workspace_id]
+  );
+  const byStep = Object.fromEntries(rows.map((r) => [r.step_key, r]));
+  return STEP_ORDER.map((step) =>
+    byStep[step] ?? { step_key: step, model: DEFAULT_PROMPTS[step].model, content: DEFAULT_PROMPTS[step].content });
+});
+
+app.put("/api/prompts/:step", async (req: any, reply) => {
+  const step = req.params.step;
+  if (!STEP_ORDER.includes(step)) return reply.code(400).send({ error: "невідомий крок" });
+  const model = String(req.body?.model ?? "").trim();
+  const content = String(req.body?.content ?? "").trim();
+  if (!model || !content) return reply.code(400).send({ error: "model і content обов'язкові" });
+  const ws = req.user.workspace_id;
+  await q(`update prompt_template set is_active=false where workspace_id=$1 and step_key=$2 and is_active=true`, [ws, step]);
+  await q(`insert into prompt_template(workspace_id, step_key, model, content, is_active) values($1,$2,$3,$4,true)`, [ws, step, model, content]);
+  return { ok: true };
+});
+
 // ===================== SOURCES + RUNS =====================
 app.post("/api/sources", async (req: any) => {
   const { transcript, title, origin } = req.body ?? {};
@@ -233,7 +256,10 @@ app.get("/api/runs/:id", async (req: any, reply) => {
     q(`select step_key,status,model,prompt_version,output,error,updated_at from step_run where run_id=$1`, [id]),
     q(`select id,idx,idea,angle,selected from idea where run_id=$1 order by idx`, [id]),
     q(`select id,stage,channel_type,content from post where run_id=$1 order by created_at`, [id]),
-    q(`select pi.* from plan_item pi join content_plan cp on cp.id=pi.plan_id where cp.run_id=$1`, [id]),
+    q(`select pi.*, p.content as post_content from plan_item pi
+        join content_plan cp on cp.id=pi.plan_id
+        left join post p on p.id=pi.post_id
+        where cp.run_id=$1`, [id]),
     q(`select tp.post_id, tp.target, tp.status, tp.message_id from telegram_publish tp
         join post p on p.id=tp.post_id where p.run_id=$1 and tp.status='sent'`, [id]),
     q(`select ss.id, ss.plan_item_id, ss.scheduled_at, ss.status from schedule_slot ss
