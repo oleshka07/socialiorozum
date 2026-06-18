@@ -145,7 +145,7 @@
           <div class="shead"><div class="t"><span class="num">0</span> Транскрипт сесії</div><span class="badge" id="b0">джерело</span></div>
           <div class="fld" style="margin-top:12px"><label>Вставте транскрипт коуч-сесії</label>
             <textarea id="transcript" style="min-height:120px"></textarea>
-            <div class="ctl"><button class="ghost" id="sampleBtn">Підставити приклад</button></div>
+            <div class="ctl"><button class="ghost" id="sampleBtn">Підставити приклад</button><button class="ghost" id="ffImport">📥 Імпорт із Fireflies</button></div>
             <div class="hint" id="lockHint"></div>
           </div>
         </section>
@@ -218,6 +218,12 @@
         <div class="fld"><label>Група (chat id)</label><input class="txt" id="tgGroup" placeholder="-1001234567890"></div>
         <div class="ctl"><button class="primary" id="tgSave">Зберегти</button><button class="ghost" id="tgTest">Перевірити з'єднання</button></div>
         <div id="tgResult" class="out"></div>
+      </div></div>
+      <div class="settings"><div class="body">
+        <b>🎙️ Транскрибація (Fireflies)</b>
+        <div class="hint">API-ключ: Fireflies → Settings → Developer Settings → API Key. Далі імпортуй зустрічі у «Створенні».</div>
+        <div class="fld"><label>Fireflies API Key</label><input class="txt" type="password" id="ffKey" placeholder="вставте ключ"></div>
+        <div class="ctl"><button class="primary" id="ffSave">Зберегти</button><button class="ghost" id="ffTest">Перевірити</button><span id="ffMsg" style="font-size:12px;color:var(--muted)"></span></div>
       </div></div>
     </section>
 
@@ -543,6 +549,24 @@ async function savePrompt(step){
   catch(e){ alert('Не вдалося зберегти промпт: '+e.message); }
 }
 
+// ---------- Fireflies (транскрибація) ----------
+async function loadFF(){ try{ const c=await api('/integrations/transcription'); if(c.hasKey) $('ffKey').placeholder='•••••••• (ключ збережено)'; }catch(e){} }
+$('ffSave').onclick=async()=>{ try{ await api('/integrations/transcription',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({apiKey:$('ffKey').value})}); $('ffKey').value=''; $('ffKey').placeholder='•••••••• (ключ збережено)'; $('ffMsg').style.color='var(--ok)'; $('ffMsg').textContent='збережено ✓'; }catch(e){ $('ffMsg').style.color='var(--stale)'; $('ffMsg').textContent='⚠ '+e.message; } };
+$('ffTest').onclick=async()=>{ $('ffMsg').style.color='var(--muted)'; $('ffMsg').textContent='перевіряю…'; try{ const l=await api('/transcription/list'); $('ffMsg').style.color='var(--ok)'; $('ffMsg').textContent='ОК, зустрічей: '+l.length; }catch(e){ $('ffMsg').style.color='var(--stale)'; $('ffMsg').textContent='⚠ '+e.message; } };
+$('ffImport').onclick=async()=>{
+  const ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;z-index:50;padding:16px';
+  ov.innerHTML='<div class="settings" style="max-width:560px;width:100%;margin:0"><div class="body"><b>Імпорт із Fireflies</b><div id="ffList" class="out"><div class="empty"><span class="spin"></span> завантаження…</div></div><div class="ctl"><button class="ghost" id="ffClose">Закрити</button></div></div></div>';
+  document.body.appendChild(ov); const close=()=>ov.remove(); ov.addEventListener('click',e=>{if(e.target===ov)close();}); ov.querySelector('#ffClose').onclick=close;
+  try{ const l=await api('/transcription/list'); const el=ov.querySelector('#ffList');
+    if(!l.length){ el.innerHTML='<div class="empty">Немає зустрічей (або ще обробляються).</div>'; return; }
+    el.innerHTML='';
+    l.forEach(t=>{ const d=document.createElement('div'); d.className='card'; d.style.cursor='pointer';
+      const dt=t.date?new Date(+t.date).toISOString().slice(0,10):''; d.innerHTML='<b>'+esc(t.title||'Без назви')+'</b> <small style="color:var(--muted)"> '+dt+'</small>';
+      d.onclick=async()=>{ el.innerHTML='<div class="empty"><span class="spin"></span> імпорт…</div>'; try{ const r=await api('/transcription/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:t.id})}); runId=r.runId; localStorage.setItem('kg_run',runId); $('transcript').value=''; close(); updRunLabel(); await refresh(); alert('Імпортовано: '+(r.title||'')+'. Тепер запустіть кишку.'); }catch(e){ el.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; } };
+      el.appendChild(d); });
+  }catch(e){ ov.querySelector('#ffList').innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
+};
+
 // ---------- Рубрики ----------
 let Rubrics = [];
 const RUB_COLORS = ['#5b8cff','#f5704a','#f5b54a','#3fb950','#a982ff','#6fe3c2','#e36fb0'];
@@ -578,6 +602,7 @@ $('saveRubrics').onclick=async()=>{ try{ await api('/rubrics',{method:'PUT',head
   await loadTelegram();
   await loadPrompts();
   loadRubrics();
+  loadFF();
   loadUsage();
   updRunLabel();
   if(runId){ try{ await refresh(); }catch(e){ runId=null; localStorage.removeItem('kg_run'); updRunLabel(); } }

@@ -8,6 +8,7 @@ import { env } from "./env.js";
 import { q, one } from "./db.js";
 import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, rewriteWithStep } from "./pipeline.js";
 import * as tg from "./telegram.js";
+import * as fireflies from "./fireflies.js";
 import * as auth from "./auth.js";
 import { sendVerifyEmail, sendResetEmail } from "./email.js";
 import { logEvent } from "./log.js";
@@ -549,6 +550,41 @@ app.post("/api/schedule/auto", async (req: any) => {
     count++;
   }
   return { ok: true, count };
+});
+
+// ===================== ТРАНСКРИБАЦІЯ (Fireflies) =====================
+async function transConfig(ws: string) {
+  return one<{ provider: string; api_key: string | null }>(`select provider, api_key from transcription_config where workspace_id=$1`, [ws]);
+}
+app.get("/api/integrations/transcription", async (req: any) => {
+  const c = await transConfig(req.user.workspace_id);
+  return { provider: c?.provider || "fireflies", hasKey: !!(c && c.api_key) };
+});
+app.put("/api/integrations/transcription", async (req: any) => {
+  const ws = req.user.workspace_id;
+  const key = String(req.body?.apiKey ?? "").trim();
+  await q(`insert into transcription_config(workspace_id, provider, api_key, updated_at) values($1,'fireflies', nullif($2,''), now())
+           on conflict (workspace_id) do update set api_key = case when $2 <> '' then $2 else transcription_config.api_key end, updated_at=now()`, [ws, key]);
+  return { ok: true };
+});
+app.get("/api/transcription/list", async (req: any, reply) => {
+  const c = await transConfig(req.user.workspace_id);
+  if (!c?.api_key) return reply.code(400).send({ error: "Спершу додайте API-ключ Fireflies у Налаштуваннях" });
+  try { return await fireflies.listTranscripts(c.api_key); }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+app.post("/api/transcription/import", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const c = await transConfig(ws);
+  if (!c?.api_key) return reply.code(400).send({ error: "Спершу додайте API-ключ Fireflies" });
+  let t: { title: string; text: string };
+  try { t = await fireflies.getTranscript(c.api_key, String(req.body?.id ?? "")); }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
+  if (!t.text) return reply.code(400).send({ error: "Порожній транскрипт" });
+  const src = await one<{ id: string }>(`insert into source(workspace_id, origin, title, transcript) values($1,'fireflies',$2,$3) returning id`, [ws, t.title, t.text]);
+  const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
+  await logEvent("info", "transcription", `імпорт Fireflies: ${t.title}`, null, req.user.id);
+  return { sourceId: src!.id, runId: run!.id, title: t.title };
 });
 
 // ===================== СТОРІНКИ =====================

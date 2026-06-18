@@ -221,6 +221,14 @@ cross join (values
   ('За лаштунками','🏢','Команда, процеси, культура, будні компанії',10,4)
 ) as d(name,emoji,descr,share,idx)
 where not exists (select 1 from rubric r where r.workspace_id = w.id);
+
+-- інтеграція транскрибації (Fireflies) на workspace; ключ лише на сервері
+create table if not exists transcription_config (
+  workspace_id uuid primary key references workspace(id) on delete cascade,
+  provider     text not null default 'fireflies',
+  api_key      text,
+  updated_at   timestamptz not null default now()
+);
 create index if not exists idx_steprun_run on step_run(run_id);
 create index if not exists idx_post_run on post(run_id);
 create index if not exists idx_idea_run on idea(run_id);
