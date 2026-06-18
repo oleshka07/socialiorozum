@@ -21,7 +21,7 @@ export const DEFAULT_PROMPTS: Record<StepKey, { model: string; content: string }
       "Marketing Context: {{marketing_context}}. Пиши українською. Поверни лише текст.",
   },
   tone: {
-    model: "anthropic/claude-3.5-sonnet",
+    model: "anthropic/claude-sonnet-4.5",
     content: "Перепиши пост у голосі бренду, не змінюючи зміст. Tone of Voice: {{tone_of_voice}}. Поверни лише текст.",
   },
   format: {
@@ -29,7 +29,7 @@ export const DEFAULT_PROMPTS: Record<StepKey, { model: string; content: string }
     content: "Адаптуй під Telegram: короткі абзаци, помірні емодзі, 1-2 хештеги. Поверни лише текст.",
   },
   deai: {
-    model: "anthropic/claude-3.5-sonnet",
+    model: "anthropic/claude-sonnet-4.5",
     content: "Прибери ознаки AI за правилами: {{deai_rules}}. Збережи зміст і голос. Поверни лише текст.",
   },
   strategy: {
