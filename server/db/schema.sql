@@ -191,6 +191,11 @@ create table if not exists llm_usage (
   created_at        timestamptz not null default now()
 );
 create index if not exists idx_llmusage_ws on llm_usage(workspace_id, created_at desc);
+
+-- планування по постах напряму (банк публікацій -> календар)
+alter table schedule_slot add column if not exists post_id uuid references post(id) on delete cascade;
+alter table schedule_slot alter column plan_item_id drop not null;
+create index if not exists idx_slot_post on schedule_slot(post_id);
 create index if not exists idx_steprun_run on step_run(run_id);
 create index if not exists idx_post_run on post(run_id);
 create index if not exists idx_idea_run on idea(run_id);

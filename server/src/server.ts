@@ -463,6 +463,73 @@ app.get("/api/usage", async (req: any) => {
               from llm_usage where workspace_id=$1`, [req.user.workspace_id]);
 });
 
+// ===================== БАНК + ПЛАНУВАННЯ (по постах, рівень workspace) =====================
+app.get("/api/bank", async (req: any) => {
+  return q(`select p.id, p.content, p.review, p.created_at, src.title as source_title
+            from post p join pipeline_run r on r.id=p.run_id join source src on src.id=r.source_id
+            where src.workspace_id=$1 and p.stage='final' and p.review='approved'
+            order by p.created_at desc`, [req.user.workspace_id]);
+});
+
+app.get("/api/schedule", async (req: any) => {
+  return q(`select ss.id, ss.scheduled_at, ss.status, p.id as post_id, p.content
+            from schedule_slot ss
+              left join plan_item pi on pi.id=ss.plan_item_id
+              join post p on p.id = coalesce(ss.post_id, pi.post_id)
+              join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+            where s.workspace_id=$1 order by ss.scheduled_at`, [req.user.workspace_id]);
+});
+
+async function slotOwned(slotId: string, ws: string) {
+  return one(`select ss.id from schedule_slot ss
+                left join plan_item pi on pi.id=ss.plan_item_id
+                join post p on p.id=coalesce(ss.post_id, pi.post_id)
+                join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+              where ss.id=$1 and s.workspace_id=$2`, [slotId, ws]);
+}
+
+app.post("/api/schedule", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const postId = String(req.body?.postId ?? "");
+  if (!(await postOwned(postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  const r = await one<{ id: string }>(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned') returning id`,
+    [postId, req.body?.scheduledAt ?? null]);
+  return { ok: true, id: r!.id };
+});
+
+app.put("/api/schedule/:id", async (req: any, reply) => {
+  if (!(await slotOwned(req.params.id, req.user.workspace_id))) return reply.code(404).send({ error: "слот не знайдено" });
+  await q(`update schedule_slot set scheduled_at=$2, status='planned' where id=$1`, [req.params.id, req.body?.scheduledAt ?? null]);
+  return { ok: true };
+});
+
+app.delete("/api/schedule/:id", async (req: any, reply) => {
+  if (!(await slotOwned(req.params.id, req.user.workspace_id))) return reply.code(404).send({ error: "слот не знайдено" });
+  await q(`delete from schedule_slot where id=$1`, [req.params.id]);
+  return { ok: true };
+});
+
+// авто-розподіл затверджених незапланованих юнітів за найкращими годинами
+app.post("/api/schedule/auto", async (req: any) => {
+  const ws = req.user.workspace_id;
+  const units = await q<{ id: string }>(
+    `select p.id from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+     where s.workspace_id=$1 and p.stage='final' and p.review='approved'
+       and not exists(select 1 from schedule_slot ss where ss.post_id=p.id and ss.status in ('planned','posting','posted'))
+     order by p.created_at`, [ws]);
+  const TIMES = [[9, 0], [13, 0], [19, 0]];
+  const base = new Date(); base.setUTCHours(0, 0, 0, 0);
+  let count = 0;
+  for (let i = 0; i < units.length; i++) {
+    const day = Math.floor(i / TIMES.length) + 1;
+    const [h, m] = TIMES[i % TIMES.length];
+    const d = new Date(base); d.setUTCDate(d.getUTCDate() + day); d.setUTCHours(h, m, 0, 0);
+    await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [units[i].id, d.toISOString()]);
+    count++;
+  }
+  return { ok: true, count };
+});
+
 // ===================== СТОРІНКИ =====================
 app.get("/app", (_req, reply) => reply.sendFile("app.html"));
 app.get("/B", (_req, reply) => reply.sendFile("b.html"));

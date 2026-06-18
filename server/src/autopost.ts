@@ -15,11 +15,10 @@ async function tick(): Promise<void> {
             tc.channel_chat_id as channel_chat,
             tc.group_chat_id   as group_chat
      from schedule_slot ss
-       join plan_item pi  on pi.id = ss.plan_item_id
-       join content_plan cp on cp.id = pi.plan_id
-       join pipeline_run r on r.id = cp.run_id
+       left join plan_item pi on pi.id = ss.plan_item_id
+       join post p on p.id = coalesce(ss.post_id, pi.post_id)
+       join pipeline_run r on r.id = p.run_id
        join source s on s.id = r.source_id
-       left join post p on p.id = pi.post_id
        left join telegram_config tc on tc.workspace_id = s.workspace_id
      where ss.status = 'planned' and ss.scheduled_at is not null and ss.scheduled_at <= now()
      order by ss.scheduled_at

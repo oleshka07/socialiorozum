@@ -174,16 +174,17 @@
     </section>
 
     <section class="viewsec" data-view="publish">
-      <div class="pagehead"><h1>Публікація</h1><p>Перетягни готові пости на дні, тоді «Зберегти». Заплановане публікується автоматично.</p></div>
+      <div class="pagehead"><h1>Публікація</h1><p>Зверху — банк затверджених публікацій. Перетягни юніт на день у календарі (час за замовч. 09:00; клікни слот, щоб змінити). Або «AI-розподіл».</p></div>
       <div class="settings"><div class="body">
-        <div class="ctl" style="margin:0">
-          <button class="primary" id="recoBtn">✨ Рекомендувати дати</button>
-          <button id="saveCal">💾 Зберегти календар</button>
-          <button class="ghost" id="clearCal">Очистити календар</button>
-          <span id="calMsg" style="font-size:12px;color:var(--muted)"></span>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+          <b>🏦 Банк публікацій <span class="badge" id="bankCount">0</span></b>
+          <div class="ctl" style="margin:0"><button class="primary" id="aiDistribute">✨ AI-розподіл</button><button class="ghost" id="reloadPub">↻ Оновити</button><span id="pubMsg" style="font-size:12px;color:var(--muted)"></span></div>
         </div>
-        <div class="hint">Заплановані пости публікуються в Telegram у призначений час (≈09:00 UTC того дня).</div>
-        <div class="tray" id="tray"></div>
+        <div class="hint">Сюди потрапляють пости, які ви «Затвердили» у Створенні.</div>
+        <div class="tray" id="bank"></div>
+      </div></div>
+      <div class="settings"><div class="body">
+        <b>📅 Календар</b>
         <div class="cal" id="cal"></div>
       </div></div>
     </section>
@@ -249,6 +250,7 @@ document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>{
   n.classList.add('active');
   const v=document.querySelector('.viewsec[data-view="'+n.dataset.view+'"]'); if(v) v.classList.add('active');
   if(n.dataset.view==='analytics') loadUsage();
+  if(n.dataset.view==='publish') loadPublish();
 });
 async function loadUsage(){
   try{ const u=await api('/usage'); const toks=((u.prompt_tokens||0)+(u.completion_tokens||0));
@@ -298,9 +300,7 @@ function applyState(d){
   renderPosts('o5',byStage.formatted);
   renderFinals(byStage.final,d.published||[]);
   S.plan=(d.plan||[]).map(p=>({id:p.id,title:p.title,content:p.post_content||p.title,type:p.type,dayOffset:p.day_offset||0}));
-  S.schedule={};
-  (d.schedule||[]).forEach(s=>{ if(!s.scheduled_at) return; const idx=S.plan.findIndex(p=>p.id===s.plan_item_id); if(idx<0) return; const iso=String(s.scheduled_at).slice(0,10); (S.schedule[iso]=S.schedule[iso]||[]).push(idx); });
-  renderPlan(); renderCalendar();
+  renderPlan();
 }
 function renderIdeas(ideas){
   const o=$('o1');
@@ -394,37 +394,68 @@ async function runFrom(startN){
   finally{ try{ await refresh(); }catch(_){} setBusy(false); }
 }
 
-// ---------- календар ----------
+// ---------- стратегія: прев'ю плану (крок 7) ----------
 function renderPlan(){
   const o=$('o7');
-  if(!S.plan.length){ o.innerHTML='<div class="empty">План публікацій з\'явиться тут.</div>'; return; }
+  if(!S.plan.length){ o.innerHTML='<div class="empty">План з\'явиться тут. Затверджені пости підуть у Банк (вкладка Публікація).</div>'; return; }
   o.innerHTML='';
-  S.plan.forEach((p,i)=>{ const prev=((p.content||p.title||'')).replace(/\n+/g,' ').slice(0,140); o.innerHTML+='<div class="card"><div>'+esc(prev)+'…</div><small style="color:var(--muted)">'+esc(p.type||'пост')+' · рек. день +'+(p.dayOffset||0)+'</small></div>'; });
+  S.plan.forEach((p,i)=>{ const prev=((p.content||p.title||'')).replace(/\n+/g,' ').slice(0,140); o.innerHTML+='<div class="card"><div>'+esc(prev)+'…</div><small style="color:var(--muted)">'+esc(p.type||'пост')+'</small></div>'; });
 }
-function startMonday(){const d=new Date();const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);d.setHours(0,0,0,0);return d;}
-const DOW=['Пн','Вт','Ср','Чт','Пт','Сб','Нд'];
-function dateISO(off){const d=startMonday();d.setDate(d.getDate()+off);return d.toISOString().slice(0,10);}
-function renderTray(){
-  const tray=$('tray'); tray.innerHTML='';
-  S.plan.forEach((p,i)=>{ const placed=Object.values(S.schedule).flat().includes(i);
-    const c=document.createElement('div'); c.className='chip'+(placed?' placed':''); c.draggable=!placed; c.dataset.i=i;
-    c.innerHTML='<b>'+esc((p.content||p.title||'').replace(/\n+/g,' ').slice(0,38))+'</b><small>'+esc(p.type||'')+'</small>';
-    c.addEventListener('dragstart',ev=>ev.dataTransfer.setData('text/plain',i)); tray.appendChild(c); });
+
+// ---------- Публікація: банк + календар (рівень workspace) ----------
+let Pub = { bank: [], slots: [] };
+async function loadPublish(){
+  try{ const [bank,slots]=await Promise.all([api('/bank'),api('/schedule')]); Pub.bank=bank||[]; Pub.slots=slots||[]; renderBank(); renderCal(); }catch(e){}
 }
-function renderCalendar(){
-  renderTray();
-  const cal=$('cal'); cal.innerHTML='';
-  DOW.forEach(d=>{const h=document.createElement('div');h.className='dow';h.textContent=d;cal.appendChild(h);});
+function renderBank(){
+  const o=$('bank'); if(!o) return; const sch=new Set(Pub.slots.map(s=>s.post_id));
+  $('bankCount').textContent=Pub.bank.length;
+  if(!Pub.bank.length){ o.innerHTML='<div class="empty">Порожньо. Затвердьте пости у «Створенні» — вони зʼявляться тут.</div>'; return; }
+  o.innerHTML='';
+  Pub.bank.forEach(p=>{ const placed=sch.has(p.id);
+    const c=document.createElement('div'); c.className='chip'+(placed?' placed':''); c.draggable=true; c.dataset.post=p.id;
+    c.innerHTML='<b>'+esc((p.content||'').replace(/\n+/g,' ').slice(0,46))+'</b><small>'+(p.source_title?esc(p.source_title):'джерело')+(placed?' · у календарі':'')+'</small>';
+    c.addEventListener('dragstart',ev=>ev.dataTransfer.setData('text/plain','post:'+p.id));
+    o.appendChild(c);
+  });
+}
+function calMonday(){const d=new Date();const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);d.setHours(0,0,0,0);return d;}
+function calISO(off){const d=calMonday();d.setDate(d.getDate()+off);return d.toISOString().slice(0,10);}
+function renderCal(){
+  const cal=$('cal'); if(!cal) return; cal.innerHTML='';
+  ['Пн','Вт','Ср','Чт','Пт','Сб','Нд'].forEach(d=>{const h=document.createElement('div');h.className='dow';h.textContent=d;cal.appendChild(h);});
+  const byDay={}; Pub.slots.forEach(s=>{ if(!s.scheduled_at) return; const iso=String(s.scheduled_at).slice(0,10); (byDay[iso]=byDay[iso]||[]).push(s); });
   for(let off=0;off<28;off++){
-    const iso=dateISO(off); const cell=document.createElement('div'); cell.className='day'; cell.dataset.iso=iso;
+    const iso=calISO(off); const cell=document.createElement('div'); cell.className='day'; cell.dataset.iso=iso;
     const dt=new Date(iso); cell.innerHTML='<div class="dn">'+dt.getDate()+'.'+(dt.getMonth()+1)+'</div>';
-    (S.schedule[iso]||[]).forEach(pi=>{const p=S.plan[pi];const ch=document.createElement('div');ch.className='pchip';ch.draggable=true;ch.dataset.i=pi;ch.innerHTML=esc(p?(p.content||p.title||'').replace(/\n+/g,' ').slice(0,26):'?')+'<span class="x" data-rm="'+pi+'" data-iso="'+iso+'">✕</span>';ch.addEventListener('dragstart',ev=>ev.dataTransfer.setData('text/plain',pi));cell.appendChild(ch);});
+    (byDay[iso]||[]).sort((a,b)=>String(a.scheduled_at).localeCompare(String(b.scheduled_at))).forEach(s=>{
+      const time=String(s.scheduled_at).slice(11,16); const posted=s.status==='posted';
+      const ch=document.createElement('div'); ch.className='pchip'; ch.style.cursor='pointer';
+      ch.innerHTML='<b style="color:var(--accent2)">'+time+(posted?' ✓':'')+'</b> '+esc((s.content||'').replace(/\n+/g,' ').slice(0,20));
+      ch.onclick=()=>slotDialog(s); cell.appendChild(ch);
+    });
     cell.addEventListener('dragover',ev=>{ev.preventDefault();cell.classList.add('over');});
     cell.addEventListener('dragleave',()=>cell.classList.remove('over'));
-    cell.addEventListener('drop',ev=>{ev.preventDefault();cell.classList.remove('over');const pi=+ev.dataTransfer.getData('text/plain');Object.keys(S.schedule).forEach(k=>S.schedule[k]=S.schedule[k].filter(x=>x!==pi));(S.schedule[iso]=S.schedule[iso]||[]).push(pi);renderCalendar();});
+    cell.addEventListener('drop',async ev=>{ev.preventDefault();cell.classList.remove('over');const d=ev.dataTransfer.getData('text/plain'); if(d.indexOf('post:')!==0) return; const postId=d.slice(5);
+      try{ await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:iso+'T09:00:00.000Z'})}); await loadPublish(); }catch(e){ alert(e.message); } });
     cal.appendChild(cell);
   }
-  cal.querySelectorAll('[data-rm]').forEach(x=>x.onclick=e=>{e.stopPropagation();const pi=+x.dataset.rm,iso=x.dataset.iso;S.schedule[iso]=(S.schedule[iso]||[]).filter(v=>v!==pi);renderCalendar();});
+}
+function slotDialog(s){
+  const day=String(s.scheduled_at).slice(0,10), time=String(s.scheduled_at).slice(11,16);
+  const ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;z-index:50;padding:16px';
+  ov.innerHTML='<div class="settings" style="max-width:520px;width:100%;margin:0"><div class="body">'
+    +'<b>Слот · '+day+'</b>'
+    +'<div class="card post" style="max-height:170px;overflow:auto">'+esc(s.content||'')+'</div>'
+    +'<div class="fld"><label>Час публікації (UTC)</label><input class="txt" type="time" id="slotTime" value="'+time+'"></div>'
+    +'<div class="ctl"><button class="primary" id="slotSave">Зберегти час</button><button id="slotRegen">↻ Перегенерувати</button><button class="ghost" id="slotDel">🗑 Прибрати зі слоту</button><button class="ghost" id="slotClose">Закрити</button></div>'
+    +'<div id="slotMsg" class="hint"></div></div></div>';
+  document.body.appendChild(ov);
+  const close=()=>ov.remove(); ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
+  ov.querySelector('#slotClose').onclick=close;
+  ov.querySelector('#slotSave').onclick=async()=>{ const t=ov.querySelector('#slotTime').value||'09:00'; try{ await api('/schedule/'+s.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:day+'T'+t+':00.000Z'})}); close(); await loadPublish(); }catch(e){ ov.querySelector('#slotMsg').textContent='⚠ '+e.message; } };
+  ov.querySelector('#slotDel').onclick=async()=>{ try{ await api('/schedule/'+s.id,{method:'DELETE'}); close(); await loadPublish(); }catch(e){ ov.querySelector('#slotMsg').textContent='⚠ '+e.message; } };
+  ov.querySelector('#slotRegen').onclick=async()=>{ ov.querySelector('#slotMsg').textContent='перегенерація…'; try{ await api('/posts/'+s.post_id+'/regenerate',{method:'POST'}); close(); await loadPublish(); }catch(e){ ov.querySelector('#slotMsg').textContent='⚠ '+e.message; } };
 }
 
 // ---------- wiring ----------
@@ -432,22 +463,14 @@ document.querySelectorAll('[data-run]').forEach(b=>b.onclick=()=>run(+b.dataset.
 document.querySelectorAll('[data-from]').forEach(b=>b.onclick=()=>runFrom(+b.dataset.from));
 $('runAll').onclick=()=>runFrom(1);
 $('sampleBtn').onclick=()=>{ $('transcript').value=SAMPLE; };
-$('recoBtn').onclick=()=>{ if(!S.plan.length){alert('Спершу запусти крок 7 (стратегію)');return;} S.schedule={}; S.plan.forEach((p,i)=>{const iso=dateISO(Math.min(27,p.dayOffset||i*2));(S.schedule[iso]=S.schedule[iso]||[]).push(i);}); renderCalendar(); };
-$('clearCal').onclick=()=>{ S.schedule={}; renderCalendar(); };
-$('saveCal').onclick=async()=>{
-  if(!runId){ alert('Спершу запусти кишку (потрібен прогін зі стратегією).'); return; }
-  const slots=[];
-  for(const iso in S.schedule){ for(const idx of S.schedule[iso]){ const p=S.plan[idx]; if(p) slots.push({ planItemId:p.id, scheduledAt: iso+'T09:00:00.000Z' }); } }
-  const m=$('calMsg'); m.style.color='var(--muted)'; m.textContent='збереження…';
-  try{ const r=await api('/runs/'+runId+'/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slots})}); m.style.color='var(--ok)'; m.textContent='збережено: '+r.count+' — автопостинг увімкнено'; }
-  catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; }
-};
+$('aiDistribute').onclick=async()=>{ const m=$('pubMsg'); m.style.color='var(--muted)'; m.textContent='розподіляю…'; try{ const r=await api('/schedule/auto',{method:'POST'}); m.style.color='var(--ok)'; m.textContent='розподілено: '+r.count; await loadPublish(); }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; } };
+$('reloadPub').onclick=()=>loadPublish();
 $('newRun').onclick=()=>{
   if(busy) return;
   if(runId && !confirm('Почати новий прогін? Поточні результати лишаться на сервері, але зникнуть з екрана.')) return;
   runId=null; localStorage.removeItem('kg_run'); S={plan:[],schedule:{}};
   ['o1','o3','o4','o5','o6','o7'].forEach(id=>$(id).innerHTML='<div class="empty">—</div>');
-  $('tray').innerHTML=''; $('cal').innerHTML=''; $('transcript').value='';
+  $('transcript').value='';
   [1,3,4,5,6,7].forEach(n=>{badge(n,'','очікує');stepEl(n).classList.remove('done','stale');});
   updRunLabel();
 };
@@ -521,7 +544,7 @@ async function savePrompt(step){
   loadUsage();
   updRunLabel();
   if(runId){ try{ await refresh(); }catch(e){ runId=null; localStorage.removeItem('kg_run'); updRunLabel(); } }
-  renderCalendar();
+  loadPublish();
 })();
 </script>
 </body>
