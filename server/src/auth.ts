@@ -48,6 +48,23 @@ export async function createUser(email: string, password: string): Promise<User>
   );
   return u!;
 }
+export async function findOrCreateGoogleUser(email: string, googleId: string): Promise<User> {
+  const e = email.toLowerCase();
+  const existing = await one<User>(
+    `select id, email, email_verified, workspace_id from app_user where email=$1`, [e]);
+  if (existing) {
+    await q(`update app_user set email_verified=true, google_id=coalesce(google_id,$2) where id=$1`, [existing.id, googleId]);
+    return { ...existing, email_verified: true };
+  }
+  const wsId = await createWorkspaceWithDefaults("user:" + e);
+  const u = await one<User>(
+    `insert into app_user(email, password_hash, email_verified, workspace_id, google_id)
+     values($1, null, true, $2, $3) returning id, email, email_verified, workspace_id`,
+    [e, wsId, googleId]
+  );
+  return u!;
+}
+
 export const userByEmail = (email: string) =>
   one<User & { password_hash: string }>(
     `select id, email, email_verified, workspace_id, password_hash from app_user where email=$1`,

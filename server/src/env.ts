@@ -13,6 +13,12 @@ export const env = {
     apiKey: process.env.RESEND_API_KEY ?? "",
     from: process.env.RESEND_FROM ?? "socialio <onboarding@resend.dev>",
   },
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID ?? "",
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+  },
+  adminEmails: (process.env.ADMIN_EMAILS ?? "o.stepeniev@swipescape.eu,stepenievgroup@gmail.com")
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
 };
 
 if (!env.databaseUrl) console.warn("[env] DATABASE_URL не заданий");

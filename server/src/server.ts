@@ -10,6 +10,7 @@ import { executeStep, STEP_ORDER, StepKey } from "./pipeline.js";
 import * as tg from "./telegram.js";
 import * as auth from "./auth.js";
 import { sendVerifyEmail, sendResetEmail } from "./email.js";
+import { logEvent } from "./log.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = Fastify({ logger: true });
@@ -50,9 +51,10 @@ app.post("/api/auth/register", async (req: any, reply) => {
   if (password.length < 8) return reply.code(400).send({ error: "Пароль мінімум 8 символів" });
   if (await auth.userByEmail(email)) return reply.code(409).send({ error: "Такий email вже зареєстрований" });
   const user = await auth.createUser(email, password);
+  await logEvent("info", "register", `новий акаунт: ${email}`, null, user.id);
   const token = await auth.createEmailToken(user.id, "verify");
   try { await sendVerifyEmail(email, `${env.appBaseUrl}/api/auth/verify?token=${token}`); }
-  catch (e: any) { req.log.error("verify email failed: " + e.message); }
+  catch (e: any) { await logEvent("error", "email", `verify-лист НЕ надіслано (${email}): ${e.message}`, null, user.id); }
   return { ok: true, message: "Перевірте пошту й підтвердіть акаунт." };
 });
 
@@ -70,8 +72,10 @@ app.post("/api/auth/login", async (req: any, reply) => {
   const email = String(req.body?.email ?? "").trim().toLowerCase();
   const password = String(req.body?.password ?? "");
   const u = await auth.userByEmail(email);
-  if (!u || !auth.verifyPassword(password, u.password_hash))
+  if (!u || !auth.verifyPassword(password, u.password_hash)) {
+    await logEvent("warn", "auth", `невдалий вхід: ${email}`);
     return reply.code(401).send({ error: "Невірний email або пароль" });
+  }
   if (!u.email_verified) return reply.code(403).send({ error: "Підтвердіть пошту (перевірте лист)" });
   const sid = await auth.createSession(u.id);
   reply.setCookie(COOKIE, sid, cookieOpts);
@@ -97,7 +101,7 @@ app.post("/api/auth/request-reset", async (req: any) => {
   if (u) {
     const token = await auth.createEmailToken(u.id, "reset");
     try { await sendResetEmail(email, `${env.appBaseUrl}/reset?token=${token}`); }
-    catch (e: any) { req.log.error("reset email failed: " + e.message); }
+    catch (e: any) { await logEvent("error", "email", `reset-лист НЕ надіслано (${email}): ${e.message}`, null, u.id); }
   }
   // завжди ok — не розкриваємо, чи існує email
   return { ok: true, message: "Якщо такий email існує — ми надіслали лист для скидання." };
@@ -111,6 +115,64 @@ app.post("/api/auth/reset", async (req: any, reply) => {
   if (!userId) return reply.code(400).send({ error: "Посилання недійсне або застаріле" });
   await auth.setPassword(userId, password);
   return { ok: true };
+});
+
+// ---- Google OAuth (вхід через Google; обходить email-верифікацію) ----
+const GOOGLE_REDIRECT = `${env.appBaseUrl}/api/auth/google/callback`;
+const stateCookie = { httpOnly: true, secure: true, sameSite: "lax" as const, path: "/", maxAge: 600 };
+
+app.get("/api/auth/google", async (_req, reply) => {
+  if (!env.google.clientId) return reply.redirect("/login?error=google_off");
+  const state = auth.newToken();
+  reply.setCookie("oauth_state", state, stateCookie);
+  const u = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  u.searchParams.set("client_id", env.google.clientId);
+  u.searchParams.set("redirect_uri", GOOGLE_REDIRECT);
+  u.searchParams.set("response_type", "code");
+  u.searchParams.set("scope", "openid email profile");
+  u.searchParams.set("state", state);
+  u.searchParams.set("prompt", "select_account");
+  return reply.redirect(u.toString());
+});
+
+app.get("/api/auth/google/callback", async (req: any, reply) => {
+  const code = String(req.query?.code ?? "");
+  const state = String(req.query?.state ?? "");
+  if (!code || !state || state !== req.cookies?.oauth_state) return reply.redirect("/login?error=google");
+  reply.clearCookie("oauth_state", { path: "/" });
+  try {
+    const tr = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code, client_id: env.google.clientId, client_secret: env.google.clientSecret,
+        redirect_uri: GOOGLE_REDIRECT, grant_type: "authorization_code",
+      }),
+    });
+    const tok: any = await tr.json();
+    if (!tr.ok || !tok.access_token) throw new Error("token exchange: " + JSON.stringify(tok).slice(0, 150));
+    const ur = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      headers: { Authorization: `Bearer ${tok.access_token}` },
+    });
+    const info: any = await ur.json();
+    if (!info.email || info.email_verified === false) throw new Error("google не повернув підтверджений email");
+    const user = await auth.findOrCreateGoogleUser(info.email, info.sub || "");
+    reply.setCookie(COOKIE, await auth.createSession(user.id), cookieOpts);
+    await logEvent("info", "auth", `Google-вхід: ${info.email}`, null, user.id);
+    return reply.redirect("/app");
+  } catch (e: any) {
+    await logEvent("error", "auth", "Google callback помилка: " + e.message);
+    return reply.redirect("/login?error=google");
+  }
+});
+
+// ---- адмін: журнал подій/помилок ----
+app.get("/api/admin/logs", async (req: any, reply) => {
+  if (!env.adminEmails.includes(String(req.user.email).toLowerCase()))
+    return reply.code(403).send({ error: "Лише адміністратор" });
+  const limit = Math.min(Number(req.query?.limit ?? 100), 500);
+  return q(`select level, scope, message, meta, user_id, created_at
+            from app_log order by created_at desc limit $1`, [limit]);
 });
 
 // ===================== SETTINGS =====================
@@ -160,7 +222,7 @@ app.post("/api/runs/:id/steps/:step/run", async (req: any, reply) => {
   if (!STEP_ORDER.includes(step)) return reply.code(400).send({ error: "невідомий крок" });
   if (!(await runOwned(id, req.user.workspace_id))) return reply.code(404).send({ error: "run не знайдено" });
   try { await executeStep(id, step as StepKey); return { ok: true }; }
-  catch (e: any) { return reply.code(500).send({ error: e.message }); }
+  catch (e: any) { await logEvent("error", "pipeline", `крок ${step}: ${e.message}`, { runId: id }, req.user.id); return reply.code(500).send({ error: e.message }); }
 });
 
 app.post("/api/runs/:id/run-from/:step", async (req: any, reply) => {
@@ -169,7 +231,7 @@ app.post("/api/runs/:id/run-from/:step", async (req: any, reply) => {
   if (idx < 0) return reply.code(400).send({ error: "невідомий крок" });
   if (!(await runOwned(id, req.user.workspace_id))) return reply.code(404).send({ error: "run не знайдено" });
   try { for (const s of STEP_ORDER.slice(idx)) await executeStep(id, s as StepKey); return { ok: true }; }
-  catch (e: any) { return reply.code(500).send({ error: e.message }); }
+  catch (e: any) { await logEvent("error", "pipeline", `run-from ${step}: ${e.message}`, { runId: id }, req.user.id); return reply.code(500).send({ error: e.message }); }
 });
 
 app.post("/api/runs/:id/ideas/select", async (req: any, reply) => {
@@ -286,6 +348,7 @@ app.post("/api/posts/:postId/publish", async (req: any, reply) => {
     } catch (e: any) {
       await q(`insert into telegram_publish(post_id, target, chat_id, status, error) values($1,$2,$3,'error',$4)`,
         [req.params.postId, t, chatId, e.message]);
+      await logEvent("error", "telegram", `публікація в ${t}: ${e.message}`, null, req.user.id);
       results.push({ target: t, status: "error", error: e.message });
     }
   }

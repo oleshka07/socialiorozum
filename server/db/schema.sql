@@ -157,8 +157,24 @@ create table if not exists telegram_publish (
   created_at  timestamptz not null default now()
 );
 
+-- журнал подій/помилок (діагностика проблем розробки і юзерів)
+create table if not exists app_log (
+  id          uuid primary key default gen_random_uuid(),
+  level       text not null,             -- info|warn|error
+  scope       text,                      -- register|email|auth|pipeline|telegram|...
+  message     text not null,
+  meta        jsonb,
+  user_id     uuid,
+  created_at  timestamptz not null default now()
+);
+
+-- ідемпотентні міграції для Google-логіну (password_hash нульовий для google-юзерів)
+alter table app_user alter column password_hash drop not null;
+alter table app_user add column if not exists google_id text;
+
 create index if not exists idx_run_source on pipeline_run(source_id);
 create index if not exists idx_tgpub_post on telegram_publish(post_id);
+create index if not exists idx_applog_created on app_log(created_at desc);
 create index if not exists idx_steprun_run on step_run(run_id);
 create index if not exists idx_post_run on post(run_id);
 create index if not exists idx_idea_run on idea(run_id);
