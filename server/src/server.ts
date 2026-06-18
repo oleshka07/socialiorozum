@@ -13,10 +13,28 @@ import { sendVerifyEmail, sendResetEmail } from "./email.js";
 import { logEvent } from "./log.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const app = Fastify({ logger: true });
-await app.register(cors, { origin: true, credentials: true });
+const app = Fastify({ logger: true, trustProxy: true });
+await app.register(cors, { origin: env.appBaseUrl, credentials: true });
 await app.register(cookie, { secret: env.sessionSecret });
 await app.register(fstatic, { root: join(__dirname, "..", "public"), prefix: "/" });
+
+// базові security-заголовки
+app.addHook("onRequest", async (_req, reply) => {
+  reply.header("X-Frame-Options", "DENY");
+  reply.header("X-Content-Type-Options", "nosniff");
+  reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
+  reply.header("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
+});
+
+// простий in-memory rate-limit (додаток одноінстансний)
+const rlHits = new Map<string, { n: number; t: number }>();
+function rateLimited(key: string, max: number, windowMs = 60000): boolean {
+  const now = Date.now();
+  const h = rlHits.get(key);
+  if (!h || now - h.t > windowMs) { rlHits.set(key, { n: 1, t: now }); return false; }
+  h.n++;
+  return h.n > max;
+}
 
 const COOKIE = "sid";
 const cookieOpts = { httpOnly: true, secure: true, sameSite: "lax" as const, path: "/", maxAge: 60 * 60 * 24 * 30 };
@@ -45,6 +63,7 @@ app.get("/health", async () => ({ ok: true }));
 
 // ===================== AUTH =====================
 app.post("/api/auth/register", async (req: any, reply) => {
+  if (rateLimited("reg:" + req.ip, 10)) return reply.code(429).send({ error: "Забагато спроб. Спробуйте за хвилину." });
   const email = String(req.body?.email ?? "").trim().toLowerCase();
   const password = String(req.body?.password ?? "");
   if (!emailOk(email)) return reply.code(400).send({ error: "Некоректний email" });
@@ -69,6 +88,7 @@ app.get("/api/auth/verify", async (req: any, reply) => {
 });
 
 app.post("/api/auth/login", async (req: any, reply) => {
+  if (rateLimited("login:" + req.ip, 20)) return reply.code(429).send({ error: "Забагато спроб. Спробуйте за хвилину." });
   const email = String(req.body?.email ?? "").trim().toLowerCase();
   const password = String(req.body?.password ?? "");
   const u = await auth.userByEmail(email);
@@ -95,7 +115,8 @@ app.get("/api/auth/me", async (req: any, reply) => {
   return { email: user.email, emailVerified: user.email_verified };
 });
 
-app.post("/api/auth/request-reset", async (req: any) => {
+app.post("/api/auth/request-reset", async (req: any, reply) => {
+  if (rateLimited("reset:" + req.ip, 5)) return reply.code(429).send({ error: "Забагато спроб. Спробуйте за хвилину." });
   const email = String(req.body?.email ?? "").trim().toLowerCase();
   const u = await auth.userByEmail(email);
   if (u) {
@@ -194,6 +215,7 @@ app.put("/api/settings/:key", async (req: any) => {
 app.post("/api/sources", async (req: any) => {
   const { transcript, title, origin } = req.body ?? {};
   if (!transcript) return { error: "transcript обовʼязковий" };
+  if (String(transcript).length > 100000) return { error: "Транскрипт задовгий (макс 100k символів)" };
   const src = await one<{ id: string }>(
     `insert into source(workspace_id, origin, title, transcript) values($1,$2,$3,$4) returning id`,
     [req.user.workspace_id, origin ?? "manual", title ?? null, transcript]
