@@ -559,7 +559,7 @@ $('autopilotBtn').onclick=async()=>{
   }catch(e){ alert('Помилка: '+e.message); try{ await refresh(); }catch(_){} }
   finally{ btn.disabled=false; btn.textContent=old; }
 };
-$('aiDistribute').onclick=async()=>{ const m=$('pubMsg'); m.style.color='var(--muted)'; m.textContent='розподіляю…'; try{ const r=await api('/schedule/auto',{method:'POST'}); m.style.color='var(--ok)'; m.textContent='розподілено: '+r.count; await loadPublish(); }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; } };
+$('aiDistribute').onclick=async()=>{ if(!confirm('Перерозподілити всі незапощені пости заново за розкладом зі Стратегії? Раніше заплановані (але не опубліковані) слоти буде перекладено.')) return; const m=$('pubMsg'); m.style.color='var(--muted)'; m.textContent='розподіляю…'; try{ const r=await api('/schedule/auto',{method:'POST'}); m.style.color='var(--ok)'; m.textContent='розподілено: '+r.count; await loadPublish(); }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; } };
 $('reloadPub').onclick=()=>loadPublish();
 $('newRun').onclick=()=>{
   if(busy) return;
@@ -617,9 +617,10 @@ async function loadPrompts(){
     sel.innerHTML=opts.map(m=>'<option value="'+m[0]+'"'+(m[0]===cur.model?' selected':'')+'>'+m[1]+'</option>').join('');
     sel.onchange=()=>savePrompt(step); ctl.appendChild(sel);
     const det=document.createElement('details'); det.style.cssText='margin-top:10px;border:1px dashed var(--line);border-radius:9px';
-    det.innerHTML='<summary style="cursor:pointer;padding:8px 12px;font-size:12px;color:var(--muted)">✎ Промпт кроку</summary><div style="padding:0 12px 12px"><textarea class="stepPrompt" data-step="'+step+'" style="min-height:90px"></textarea><button class="savePrompt" data-step="'+step+'" style="margin-top:8px">Зберегти промпт</button></div>';
+    det.innerHTML='<summary style="cursor:pointer;padding:8px 12px;font-size:12px;color:var(--muted)">✎ Промпт кроку</summary><div style="padding:0 12px 12px"><textarea class="stepPrompt" data-step="'+step+'" style="min-height:90px"></textarea><button class="savePrompt" data-step="'+step+'" style="margin-top:8px">Зберегти промпт</button><button class="resetPrompt ghost" data-step="'+step+'" style="margin:8px 0 0 8px">↺ Стандартний</button></div>';
     det.querySelector('textarea').value=cur.content||'';
     det.querySelector('.savePrompt').onclick=()=>savePrompt(step);
+    det.querySelector('.resetPrompt').onclick=()=>resetPrompt(step);
     ctl.parentNode.insertBefore(det, ctl.nextSibling);
   }
 }
@@ -628,6 +629,17 @@ async function savePrompt(step){
   if(!sel||!ta) return;
   try{ await api('/prompts/'+step,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:sel.value,content:ta.value})}); flashSaved(); }
   catch(e){ alert('Не вдалося зберегти промпт: '+e.message); }
+}
+async function resetPrompt(step){
+  if(!confirm('Повернути стандартний промпт цього кроку? Твої правки тут зітруться.')) return;
+  try{
+    await api('/prompts/'+step,{method:'DELETE'});
+    const cfg=await api('/prompts'); const c=cfg.find(x=>x.step_key===step)||{model:'',content:''};
+    const sel=document.querySelector('.stepModel[data-step="'+step+'"]'); const ta=document.querySelector('.stepPrompt[data-step="'+step+'"]');
+    if(ta) ta.value=c.content||'';
+    if(sel){ if(c.model && !Array.from(sel.options).some(o=>o.value===c.model)){ const op=document.createElement('option'); op.value=c.model; op.textContent=c.model; sel.appendChild(op); } sel.value=c.model; }
+    flashSaved();
+  }catch(e){ alert('Не вдалося скинути: '+e.message); }
 }
 
 // ---------- Fireflies (транскрибація) ----------
@@ -650,17 +662,35 @@ $('ffImport').onclick=async()=>{
 
 // ---------- Стратегія (згенерована) ----------
 let STRAT = { data:{}, status:"none" };
+const WEEK=[['mon','Пн'],['tue','Вт'],['wed','Ср'],['thu','Чт'],['fri','Пт'],['sat','Сб'],['sun','Нд']];
 function renderStrategy(){
   const d=STRAT.data||{}, st=STRAT.status;
   $('stratStatus').textContent = st==='applied'?'застосовано':(st==='draft'?'чернетка':'нема');
   const o=$('stratView'); if(!o) return;
   if(!d || !Object.keys(d).length){ o.innerHTML='<div class="empty">Натисни «Згенерувати».</div>'; return; }
   const rubs=(d.rubrics||[]).map(r=>(r.emoji||'')+' '+esc(r.name||'')+' '+(r.share||0)+'%').join(' · ');
-  const days=(d.best_days||[]).join(', ');
   const themes=(d.monthly_themes||[]).map(t=>esc(typeof t==='string'?t:((t&&t.themes)||[]).join(', '))).filter(Boolean).join(' · ');
+  const sel=new Set((d.best_days||[]).map(x=>String(x).toLowerCase().slice(0,3)));
+  const times=(Array.isArray(d.times)&&d.times.length?d.times:['11:00']).join(', ');
   o.innerHTML='<div class="card"><b>Рубрики:</b> '+(rubs||'—')+'</div>'
-    +'<div class="card"><b>Частота:</b> '+((d.frequency&&d.frequency.posts_per_week)||'?')+' пост/тиж · <b>Дні:</b> '+esc(days||'—')+' · <b>Канали:</b> '+esc((d.channels||[]).join(', ')||'—')+'</div>'
+    +'<div class="card"><b>🗓️ Розклад постингу</b>'
+      +'<div class="hint" style="margin:6px 0">Дні й час підібрані під нішу та канал. Скоригуй за потреби — планувальник бере саме це.</div>'
+      +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">'+WEEK.map(w=>'<label style="font-size:12px;border:1px solid var(--line);border-radius:8px;padding:4px 9px;cursor:pointer"><input type="checkbox" class="stDay" value="'+w[0]+'"'+(sel.has(w[0])?' checked':'')+'> '+w[1]+'</label>').join('')+'</div>'
+      +'<label style="font-size:12px;color:var(--muted)">Час (HH:MM, через кому = кілька на день): <input id="stTimes" class="txt" value="'+esc(times)+'" style="width:170px;display:inline-block;padding:6px 9px"></label>'
+      +'<div class="ctl" style="margin-top:10px"><button class="primary" id="saveSched">Зберегти розклад</button><span id="schedMsg" style="font-size:12px;color:var(--muted)"></span></div>'
+      +(d.schedule_rationale?'<div class="hint" style="margin-top:8px">💡 '+esc(d.schedule_rationale)+'</div>':'')
+    +'</div>'
+    +'<div class="card"><b>Частота:</b> '+((d.frequency&&d.frequency.posts_per_week)||'?')+' пост/тиж · <b>Канали:</b> '+esc((d.channels||[]).join(', ')||'—')+'</div>'
     +(themes?'<div class="card"><b>Теми:</b> '+themes+'</div>':'');
+  const sb=$('saveSched'); if(sb) sb.onclick=saveSchedule;
+}
+async function saveSchedule(){
+  const days=[...document.querySelectorAll('.stDay:checked')].map(c=>c.value);
+  const times=(($('stTimes')||{}).value||'').split(',').map(s=>s.trim()).filter(s=>/^\d{1,2}:\d{2}$/.test(s));
+  STRAT.data=STRAT.data||{}; STRAT.data.best_days=days; STRAT.data.times=times;
+  const m=$('schedMsg'); if(m){m.style.color='var(--muted)'; m.textContent='зберігаю…';}
+  try{ await api('/strategy',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:STRAT.data})}); if(m){m.style.color='var(--ok)'; m.textContent='збережено ✓';} }
+  catch(e){ if(m){m.style.color='var(--stale)'; m.textContent='⚠ '+e.message;} }
 }
 async function loadStrategy(){ try{ STRAT=await api('/strategy'); }catch(e){ STRAT={data:{},status:'none'}; } renderStrategy(); }
 $('genStrat').onclick=async()=>{ const m=$('stratMsg'); m.style.color='var(--muted)'; m.textContent='генерую…'; try{ const r=await api('/strategy/generate',{method:'POST'}); STRAT={data:r.data,status:'draft'}; renderStrategy(); m.textContent=''; }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; } };

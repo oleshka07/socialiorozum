@@ -76,8 +76,11 @@ export async function generateStrategy(workspaceId: string): Promise<any> {
   const system =
     "Ти контент-стратег. На основі ніші, аудиторії й голосу бренду згенеруй контент-стратегію. " +
     'Поверни ЛИШЕ валідний JSON-обʼєкт: {"rubrics":[{"name":"...","emoji":"...","description":"...","share":40}],' +
-    '"frequency":{"posts_per_week":4},"best_days":["mon","wed","fri"],"channels":["telegram"],"monthly_themes":["...","..."]}. ' +
-    "4-6 рубрик, сума share = 100." + `\n\nМова текстів: ${lang}.`;
+    '"frequency":{"posts_per_week":4},"best_days":["mon","wed","fri"],"times":["11:00","18:00"],' +
+    '"channels":["telegram"],"schedule_rationale":"чому саме ці дні й час для цієї ніші та каналу","monthly_themes":["...","..."]}. ' +
+    "4-6 рубрик, сума share = 100. Дні й час публікацій підбери за найкращими практиками саме для цієї ніші та каналу: " +
+    "best_days — короткі коди (пн=mon … нд=sun); times — формат HH:MM, 1-3 значення (скільки значень — стільки постів на день)." +
+    `\n\nМова текстів (rubrics, schedule_rationale, monthly_themes): ${lang}.`;
   const user = `Ніша й аудиторія: ${s.marketing_context || ""}\nГолос бренду: ${s.tone_of_voice || ""}\nНотатки стратегії: ${s.content_strategy || ""}`;
   const raw = await chat("openai/gpt-4o-mini", system, user, { workspaceId, step: "strategy" });
   const parsed = extractJsonObject(raw);

@@ -237,6 +237,14 @@ app.put("/api/prompts/:step", async (req: any, reply) => {
   return { ok: true };
 });
 
+// скинути промпт кроку до стандартного (деактивує збережені версії → фолбек на DEFAULT_PROMPTS)
+app.delete("/api/prompts/:step", async (req: any, reply) => {
+  const step = req.params.step;
+  if (!STEP_ORDER.includes(step)) return reply.code(400).send({ error: "невідомий крок" });
+  await q(`update prompt_template set is_active=false where workspace_id=$1 and step_key=$2`, [req.user.workspace_id, step]);
+  return { ok: true };
+});
+
 // ===================== SOURCES + RUNS =====================
 app.post("/api/sources", async (req: any) => {
   const { transcript, title, origin } = req.body ?? {};
@@ -586,28 +594,40 @@ app.delete("/api/schedule/:id", async (req: any, reply) => {
   return { ok: true };
 });
 
-// авто-розподіл затверджених незапланованих юнітів за найкращими годинами
+// авто-розподіл затверджених постів за розкладом зі Стратегії (дні + час).
+// Чистить незапощені planned-слоти й розкладає заново — передбачуваний календар без дублів.
 app.post("/api/schedule/auto", async (req: any) => {
   const ws = req.user.workspace_id;
+  // 1) прибрати всі незапощені (planned) слоти воркспейсу — і старі plan-based, і post-based
+  await q(
+    `delete from schedule_slot where status='planned' and id in (
+       select ss.id from schedule_slot ss
+         left join plan_item pi on pi.id=ss.plan_item_id
+         join post p on p.id=coalesce(ss.post_id, pi.post_id)
+         join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+       where s.workspace_id=$1)`, [ws]);
+  // 2) затверджені фінальні пости, які ще не запощені й не в процесі
   const units = await q<{ id: string }>(
     `select p.id from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where s.workspace_id=$1 and p.stage='final' and p.review='approved'
-       and not exists(select 1 from schedule_slot ss where ss.post_id=p.id and ss.status in ('planned','posting','posted'))
+       and not exists(select 1 from schedule_slot ss where ss.post_id=p.id and ss.status in ('posting','posted'))
      order by p.created_at`, [ws]);
-  // дні зі стратегії (best_days) керують розкладом; інакше — 3 пости/день
+  // 3) розклад зі Стратегії: дні (best_days) + час (times). Фолбек: щодня, 11:00.
   const strat = await one<{ data: any }>(`select data from strategy where workspace_id=$1`, [ws]);
   const DMAP: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
   const bestDays: number[] = Array.isArray(strat?.data?.best_days)
     ? strat!.data.best_days.map((d: string) => DMAP[String(d).toLowerCase().slice(0, 3)]).filter((x: any) => x != null) : [];
-  const TIMES = [[9, 0], [13, 0], [19, 0]];
-  const perDay = bestDays.length ? 1 : TIMES.length;
+  let times: string[] = Array.isArray(strat?.data?.times)
+    ? strat!.data.times.map((t: any) => String(t)).filter((t: string) => /^\d{1,2}:\d{2}$/.test(t)) : [];
+  if (!times.length) times = ["11:00"];
+  // 4) times.length постів/день у дозволені дні; надлишок — на наступні тижні
   const base = new Date(); base.setUTCHours(0, 0, 0, 0);
-  let count = 0, off = 1, ti = 0;
-  for (let i = 0; i < units.length;) {
+  let count = 0, off = 1, i = 0;
+  while (i < units.length && off <= 120) {
     const d = new Date(base); d.setUTCDate(d.getUTCDate() + off);
-    if (bestDays.length && !bestDays.includes(d.getUTCDay())) { off++; if (off > 90) break; continue; }
-    for (let k = 0; k < perDay && i < units.length; k++, i++) {
-      const [h, m] = TIMES[(ti++) % TIMES.length];
+    if (bestDays.length && !bestDays.includes(d.getUTCDay())) { off++; continue; }
+    for (let k = 0; k < times.length && i < units.length; k++, i++) {
+      const [h, m] = times[k].split(":").map(Number);
       const dd = new Date(d); dd.setUTCHours(h, m, 0, 0);
       await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [units[i].id, dd.toISOString()]);
       count++;
