@@ -67,3 +67,15 @@ export function extractJsonArray<T = any>(text: string): T[] {
     throw new Error("невалідний JSON у відповіді моделі");
   }
 }
+
+// надійний витяг JSON-обʼєкта
+export function extractJsonObject<T = any>(text: string): T {
+  const cleaned = text.replace(/```json/gi, "").replace(/```/g, "").trim();
+  const m = cleaned.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error("у відповіді немає JSON-обʼєкта");
+  try {
+    return JSON.parse(m[0]) as T;
+  } catch {
+    throw new Error("невалідний JSON у відповіді моделі");
+  }
+}

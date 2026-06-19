@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, rewriteWithStep, deriveVoice } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, rewriteWithStep, deriveVoice, generateStrategy } from "./pipeline.js";
 import * as tg from "./telegram.js";
 import * as fireflies from "./fireflies.js";
 import * as auth from "./auth.js";
@@ -470,16 +470,35 @@ app.post("/api/brand/derive-voice", async (req: any, reply) => {
   catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
 
-// ===================== РУБРИКИ (контент-мікс) =====================
-app.get("/api/rubrics", async (req: any) =>
-  q(`select id,name,emoji,description,share,idx from rubric where workspace_id=$1 order by idx, name`, [req.user.workspace_id]));
-
-app.put("/api/rubrics", async (req: any) => {
+// ===================== СТРАТЕГІЯ (згенерована, L2) =====================
+app.get("/api/strategy", async (req: any) => {
+  const r = await one(`select data, status, updated_at from strategy where workspace_id=$1`, [req.user.workspace_id]);
+  return r ?? { data: {}, status: "none" };
+});
+app.post("/api/strategy/generate", async (req: any, reply) => {
+  try { return { data: await generateStrategy(req.user.workspace_id), status: "draft" }; }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+app.put("/api/strategy", async (req: any) => {
+  await q(`insert into strategy(workspace_id,data,status,updated_at) values($1,$2,'draft',now())
+           on conflict (workspace_id) do update set data=excluded.data, updated_at=now()`,
+    [req.user.workspace_id, JSON.stringify(req.body?.data ?? {})]);
+  return { ok: true };
+});
+app.post("/api/strategy/apply", async (req: any) => {
   const ws = req.user.workspace_id;
-  const items = Array.isArray(req.body?.rubrics) ? req.body.rubrics : [];
+  const r = await one<{ data: any }>(`select data from strategy where workspace_id=$1`, [ws]);
+  const rubrics = Array.isArray(r?.data?.rubrics) ? r!.data.rubrics : [];
+  const count = await saveRubrics(ws, rubrics);
+  await q(`update strategy set status='applied', updated_at=now() where workspace_id=$1`, [ws]);
+  return { ok: true, rubrics: count };
+});
+
+// ===================== РУБРИКИ (контент-мікс) =====================
+async function saveRubrics(ws: string, items: any[]): Promise<number> {
   await q(`delete from rubric where workspace_id=$1`, [ws]);
   let count = 0;
-  for (let i = 0; i < items.length; i++) {
+  for (let i = 0; i < (items || []).length; i++) {
     const r = items[i]; const name = String(r?.name ?? "").trim();
     if (!name) continue;
     await q(`insert into rubric(workspace_id,name,emoji,description,share,idx) values($1,$2,$3,$4,$5,$6)`,
@@ -488,8 +507,12 @@ app.put("/api/rubrics", async (req: any) => {
        Math.max(0, Math.min(100, Number(r.share) || 0)), i]);
     count++;
   }
-  return { ok: true, count };
-});
+  return count;
+}
+app.get("/api/rubrics", async (req: any) =>
+  q(`select id,name,emoji,description,share,idx from rubric where workspace_id=$1 order by idx, name`, [req.user.workspace_id]));
+app.put("/api/rubrics", async (req: any) =>
+  ({ ok: true, count: await saveRubrics(req.user.workspace_id, Array.isArray(req.body?.rubrics) ? req.body.rubrics : []) }));
 
 // ===================== БАНК + ПЛАНУВАННЯ (по постах, рівень workspace) =====================
 app.get("/api/bank", async (req: any) => {

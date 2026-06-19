@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { q, one } from "./db.js";
-import { chat, extractJsonArray } from "./openrouter.js";
+import { chat, extractJsonArray, extractJsonObject } from "./openrouter.js";
 
 // порядок кроків кишки (strategy = v2)
 export const STEP_ORDER = ["extract_ideas", "drafts", "tone", "format", "deai", "strategy"] as const;
@@ -67,6 +67,26 @@ export async function deriveVoice(workspaceId: string): Promise<string> {
     [workspaceId, derived]
   );
   return derived;
+}
+
+// Згенерувати контент-стратегію (L2) із Бази бренду. Зберігає у strategy.data (draft).
+export async function generateStrategy(workspaceId: string): Promise<any> {
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const system =
+    "Ти контент-стратег. На основі ніші, аудиторії й голосу бренду згенеруй контент-стратегію. " +
+    'Поверни ЛИШЕ валідний JSON-обʼєкт: {"rubrics":[{"name":"...","emoji":"...","description":"...","share":40}],' +
+    '"frequency":{"posts_per_week":4},"best_days":["mon","wed","fri"],"channels":["telegram"],"monthly_themes":["...","..."]}. ' +
+    "4-6 рубрик, сума share = 100." + `\n\nМова текстів: ${lang}.`;
+  const user = `Ніша й аудиторія: ${s.marketing_context || ""}\nГолос бренду: ${s.tone_of_voice || ""}\nНотатки стратегії: ${s.content_strategy || ""}`;
+  const raw = await chat("openai/gpt-4o-mini", system, user, { workspaceId, step: "strategy" });
+  const parsed = extractJsonObject(raw);
+  await q(
+    `insert into strategy(workspace_id,data,status,updated_at) values($1,$2,'draft',now())
+     on conflict (workspace_id) do update set data=excluded.data, status='draft', updated_at=now()`,
+    [workspaceId, JSON.stringify(parsed)]
+  );
+  return parsed;
 }
 
 async function loadSettings(workspaceId: string): Promise<Record<string, string>> {

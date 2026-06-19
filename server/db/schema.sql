@@ -229,6 +229,14 @@ create table if not exists transcription_config (
   api_key      text,
   updated_at   timestamptz not null default now()
 );
+
+-- згенерована стратегія (L2): JSON-артефакт на workspace
+create table if not exists strategy (
+  workspace_id uuid primary key references workspace(id) on delete cascade,
+  data         jsonb not null default '{}',
+  status       text not null default 'draft',   -- draft|applied
+  updated_at   timestamptz not null default now()
+);
 create index if not exists idx_steprun_run on step_run(run_id);
 create index if not exists idx_post_run on post(run_id);
 create index if not exists idx_idea_run on idea(run_id);

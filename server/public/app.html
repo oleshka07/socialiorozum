@@ -149,7 +149,15 @@
     </section>
 
     <section class="viewsec" data-view="strategy">
-      <div class="pagehead"><h1>Стратегія</h1><p>Рубрики й мікс контенту. (Далі — авто-генерація стратегії з Бази бренду.)</p></div>
+      <div class="pagehead"><h1>Стратегія</h1><p>Згенеруй стратегію з Бази бренду, переглянь і застосуй — рубрики підуть у редактор нижче.</p></div>
+      <div class="settings"><div class="body">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+          <b>🤖 Згенерована стратегія <span class="badge" id="stratStatus">—</span></b>
+          <div class="ctl" style="margin:0"><button class="primary" id="genStrat">✨ Згенерувати</button><button id="applyStrat">Застосувати</button><span id="stratMsg" style="font-size:12px;color:var(--muted)"></span></div>
+        </div>
+        <div class="hint">AI бере нішу/аудиторію/голос із Бази бренду → рубрики, частота, дні, теми. «Застосувати» переносить рубрики в редактор нижче (і пайплайн їх враховує).</div>
+        <div id="stratView" class="out"></div>
+      </div></div>
       <div class="settings"><div class="body">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
           <b>🗂️ Рубрики (контент-мікс)</b>
@@ -606,6 +614,24 @@ $('ffImport').onclick=async()=>{
   }catch(e){ ov.querySelector('#ffList').innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 };
 
+// ---------- Стратегія (згенерована) ----------
+let STRAT = { data:{}, status:"none" };
+function renderStrategy(){
+  const d=STRAT.data||{}, st=STRAT.status;
+  $('stratStatus').textContent = st==='applied'?'застосовано':(st==='draft'?'чернетка':'нема');
+  const o=$('stratView'); if(!o) return;
+  if(!d || !Object.keys(d).length){ o.innerHTML='<div class="empty">Натисни «Згенерувати».</div>'; return; }
+  const rubs=(d.rubrics||[]).map(r=>(r.emoji||'')+' '+esc(r.name||'')+' '+(r.share||0)+'%').join(' · ');
+  const days=(d.best_days||[]).join(', ');
+  const themes=(d.monthly_themes||[]).map(t=>esc(typeof t==='string'?t:((t&&t.themes)||[]).join(', '))).filter(Boolean).join(' · ');
+  o.innerHTML='<div class="card"><b>Рубрики:</b> '+(rubs||'—')+'</div>'
+    +'<div class="card"><b>Частота:</b> '+((d.frequency&&d.frequency.posts_per_week)||'?')+' пост/тиж · <b>Дні:</b> '+esc(days||'—')+' · <b>Канали:</b> '+esc((d.channels||[]).join(', ')||'—')+'</div>'
+    +(themes?'<div class="card"><b>Теми:</b> '+themes+'</div>':'');
+}
+async function loadStrategy(){ try{ STRAT=await api('/strategy'); }catch(e){ STRAT={data:{},status:'none'}; } renderStrategy(); }
+$('genStrat').onclick=async()=>{ const m=$('stratMsg'); m.style.color='var(--muted)'; m.textContent='генерую…'; try{ const r=await api('/strategy/generate',{method:'POST'}); STRAT={data:r.data,status:'draft'}; renderStrategy(); m.textContent=''; }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; } };
+$('applyStrat').onclick=async()=>{ const m=$('stratMsg'); m.style.color='var(--muted)'; m.textContent='застосовую…'; try{ const r=await api('/strategy/apply',{method:'POST'}); STRAT.status='applied'; renderStrategy(); m.style.color='var(--ok)'; m.textContent='рубрик застосовано: '+r.rubrics; await loadRubrics(); }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; } };
+
 // ---------- Рубрики ----------
 let Rubrics = [];
 const RUB_COLORS = ['#5b8cff','#f5704a','#f5b54a','#3fb950','#a982ff','#6fe3c2','#e36fb0'];
@@ -641,6 +667,7 @@ $('saveRubrics').onclick=async()=>{ try{ await api('/rubrics',{method:'PUT',head
   await loadTelegram();
   await loadPrompts();
   loadRubrics();
+  loadStrategy();
   loadFF();
   loadUsage();
   updRunLabel();
