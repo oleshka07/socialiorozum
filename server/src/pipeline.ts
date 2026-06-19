@@ -6,24 +6,22 @@ import { chat, extractJsonArray } from "./openrouter.js";
 export const STEP_ORDER = ["extract_ideas", "drafts", "tone", "format", "deai", "strategy"] as const;
 export type StepKey = (typeof STEP_ORDER)[number];
 
-// дефолтні промпти (placeholders тягнуться з settings_block)
+// РЕДАГОВАНІ промпти — ЛИШЕ обробка/стилістика. Технічну частину (формат JSON, контекст бренду)
+// додає код нижче (STEP_CONTEXT/STEP_FORMAT), щоб правки промпта не ламали парсинг.
 export const DEFAULT_PROMPTS: Record<StepKey, { model: string; content: string }> = {
   extract_ideas: {
     model: "openai/gpt-4o-mini",
-    content:
-      "Ти контент-стратег. Знайди в транскрипті до 6 контент-ідей. Marketing Context: {{marketing_context}}\n" +
-      'Поверни ЛИШЕ JSON-масив: [{"idea":"...","angle":"..."}]',
+    content: "Ти контент-стратег. Знайди в транскрипті до 6 окремих контент-ідей, кожна зі своїм кутом подачі.",
   },
   drafts: {
     model: "anthropic/claude-sonnet-4.5",
     content:
-      "Зроби пост СУВОРО на основі змісту сесії (першоджерело нижче) — використовуй конкретні приклади, думки й формулювання саме з неї, НЕ вигадуй загальних порад «з повітря». " +
-      "Структура: гачок, 2-4 абзаци користі, м'який заклик. " +
-      "Marketing Context: {{marketing_context}}. Поверни лише текст поста.",
+      "Зроби пост СУВОРО на основі змісту сесії (першоджерело нижче) — використовуй конкретні приклади, думки й формулювання саме з неї, не вигадуй загальних порад «з повітря». " +
+      "Структура: гачок, 2-4 абзаци користі, м'який заклик. Поверни лише текст поста.",
   },
   tone: {
     model: "anthropic/claude-sonnet-4.5",
-    content: "Перепиши пост у голосі бренду, не змінюючи зміст. Tone of Voice: {{tone_of_voice}}. Поверни лише текст.",
+    content: "Перепиши пост у голосі бренду, не змінюючи зміст. Поверни лише текст.",
   },
   format: {
     model: "openai/gpt-4o-mini",
@@ -31,14 +29,26 @@ export const DEFAULT_PROMPTS: Record<StepKey, { model: string; content: string }
   },
   deai: {
     model: "anthropic/claude-sonnet-4.5",
-    content: "Прибери ознаки AI за правилами: {{deai_rules}}. ЗБЕРЕЖИ зміст, голос ТА формат — абзаци, емодзі, хештеги. Поверни лише текст.",
+    content: "Прибери ознаки AI. Збережи зміст, голос і формат (абзаци, емодзі, хештеги). Поверни лише текст.",
   },
   strategy: {
     model: "openai/gpt-4o-mini",
-    content:
-      "Для КОЖНОГО готового поста (по порядку) признач тип і рекомендований зсув у днях від старту. Content Strategy: {{content_strategy}}\n" +
-      'Поверни ЛИШЕ JSON-масив рівно по одному об\'єкту на пост, у ТОМУ Ж порядку: [{"type":"користь|історія|рефлексія|заклик","dayOffset":0}]',
+    content: "Признач кожному готовому посту (по порядку) тип і рекомендований зсув у днях від старту, спираючись на контент-стратегію.",
   },
+};
+
+// ХАРДКОД (не редагується юзером): контекст бренду + контракт формату відповіді.
+const STEP_CONTEXT: Record<StepKey, (s: Record<string, string>) => string> = {
+  extract_ideas: (s) => (s.marketing_context ? `\n\nКонтекст бренду й аудиторії: ${s.marketing_context}` : ""),
+  drafts:        (s) => (s.marketing_context ? `\n\nКонтекст бренду й аудиторії: ${s.marketing_context}` : ""),
+  tone:          (s) => (s.tone_of_voice ? `\n\nГолос бренду (Tone of Voice): ${s.tone_of_voice}` : ""),
+  format:        () => "",
+  deai:          (s) => (s.deai_rules ? `\n\nПравила де-AI: ${s.deai_rules}` : ""),
+  strategy:      (s) => (s.content_strategy ? `\n\nКонтент-стратегія: ${s.content_strategy}` : ""),
+};
+const STEP_FORMAT: Partial<Record<StepKey, string>> = {
+  extract_ideas: `\n\nПоверни ЛИШЕ валідний JSON-масив, без жодного тексту довкола: [{"idea":"...","angle":"..."}]`,
+  strategy: `\n\nПоверни ЛИШЕ валідний JSON-масив рівно по одному обʼєкту на пост, у тому ж порядку: [{"type":"користь|історія|рефлексія|заклик","dayOffset":0}]`,
 };
 
 async function loadSettings(workspaceId: string): Promise<Record<string, string>> {
@@ -124,7 +134,8 @@ export async function executeStep(runId: string, step: StepKey) {
     if (rubs.length) rubricsText = "\n\nРубрики контенту (орієнтир для тем і пропорцій у наборі постів): " +
       rubs.map((r) => `${r.name} ~${r.share}%${r.description ? ` (${r.description})` : ""}`).join("; ") + ".";
   }
-  const system = fillPrompt(tpl.content, settings) + `\n\nМова всього тексту у відповіді: ${lang}.` + rubricsText;
+  const system = fillPrompt(tpl.content, settings) + STEP_CONTEXT[step](settings) + (STEP_FORMAT[step] || "")
+    + `\n\nМова всього тексту у відповіді: ${lang}.` + rubricsText;
   const ctx = { workspaceId: workspace_id, step };
   await upsertStepRun(runId, step, { status: "running", model: tpl.model, prompt_version: tpl.version });
 
@@ -197,6 +208,6 @@ export async function rewriteWithStep(workspaceId: string, step: StepKey, text: 
   const settings = await loadSettings(workspaceId);
   const tpl = await resolvePrompt(workspaceId, step);
   const lang = (settings.output_language || "Українська").trim();
-  const system = fillPrompt(tpl.content, settings) + `\n\nМова всього тексту у відповіді: ${lang}.`;
+  const system = fillPrompt(tpl.content, settings) + STEP_CONTEXT[step](settings) + `\n\nМова всього тексту у відповіді: ${lang}.`;
   return chat(tpl.model, system, `---\n${text}`, { workspaceId, step });
 }

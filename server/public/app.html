@@ -493,7 +493,18 @@ document.querySelectorAll('[data-run]').forEach(b=>b.onclick=()=>run(+b.dataset.
 document.querySelectorAll('[data-from]').forEach(b=>b.onclick=()=>runFrom(+b.dataset.from));
 $('runAll').onclick=()=>runFrom(1);
 $('sampleBtn').onclick=()=>{ $('transcript').value=SAMPLE; };
-$('toCreate').onclick=async()=>{ try{ await ensureRun(); document.querySelector('.navitem[data-view="create"]').click(); }catch(e){ alert(e.message); } };
+$('toCreate').onclick=async()=>{
+  const transcript=$('transcript').value.trim();
+  if(!transcript){ alert('Спершу вставте транскрипт або імпортуйте джерело.'); return; }
+  try{
+    const r=await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript})});
+    runId=r.runId; localStorage.setItem('kg_run',runId);
+    ['o1','o3','o4','o5','o6','o7'].forEach(id=>$(id).innerHTML='<div class="empty">—</div>');
+    [1,3,4,5,6,7].forEach(n=>{badge(n,'','очікує');stepEl(n).classList.remove('done','stale');});
+    updRunLabel();
+    document.querySelector('.navitem[data-view="create"]').click();
+  }catch(e){ alert('Помилка: '+e.message); }
+};
 $('aiDistribute').onclick=async()=>{ const m=$('pubMsg'); m.style.color='var(--muted)'; m.textContent='розподіляю…'; try{ const r=await api('/schedule/auto',{method:'POST'}); m.style.color='var(--ok)'; m.textContent='розподілено: '+r.count; await loadPublish(); }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; } };
 $('reloadPub').onclick=()=>loadPublish();
 $('newRun').onclick=()=>{
