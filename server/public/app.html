@@ -119,12 +119,17 @@
           <select id="langSel">
             <option>Українська</option><option>Російська</option><option>English</option><option>Polski</option><option>Deutsch</option>
           </select></div>
+        <div class="fld"><label>Приклади ваших постів (3-5) — AI виведе голос</label>
+          <textarea id="voiceExamples" placeholder="Встав 3-5 своїх найкращих постів…"></textarea>
+          <div class="ctl"><button class="primary" id="deriveVoiceBtn">✨ Вивести голос із прикладів</button><span id="voiceMsg" style="font-size:12px;color:var(--muted)"></span></div>
+          <div id="derivedVoice"></div>
+        </div>
         <div class="fld"><label>Голос бренду (Tone of Voice)</label><textarea id="tov"></textarea></div>
         <div class="fld"><label>Аудиторія / Marketing Context</label><textarea id="mkt"></textarea></div>
         <div class="fld"><label>Загальна контент-стратегія (нотатки)</label><textarea id="strat"></textarea></div>
         <div class="fld"><label>Правила De-AI</label><textarea id="deai"></textarea></div>
       </div></div>
-      <p class="hint">Далі тут зʼявиться «Голос із прикладів постів» і деталі аудиторії.</p>
+      <p class="hint">Далі тут зʼявляться деталі аудиторії.</p>
     </section>
 
     <section class="viewsec" data-view="sources">
@@ -251,7 +256,7 @@ const esc = s => String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt
 
 const STEP  = {1:'extract_ideas',3:'drafts',4:'tone',5:'format',6:'deai',7:'strategy'};
 const ORDER = [1,3,4,5,6,7];
-const SET = {mkt:'marketing_context', tov:'tone_of_voice', deai:'deai_rules', strat:'content_strategy'};
+const SET = {mkt:'marketing_context', tov:'tone_of_voice', deai:'deai_rules', strat:'content_strategy', voiceExamples:'voice_examples'};
 
 const SAMPLE = `Клієнт: я постійно відкладаю важливі справи, сідаю за роботу і одразу лізу в телефон.
 Коуч: давай подивимось, що відбувається в момент перед тим, як ти береш телефон. Який це стан?
@@ -297,6 +302,7 @@ async function loadSettings(){
     const map = Object.fromEntries(rows.map(r=>[r.key, r.content]));
     for(const [tid,key] of Object.entries(SET)){ if(map[key]!=null) $(tid).value = map[key]; }
     if(map.output_language) $('langSel').value = map.output_language;
+    if(map.tone_of_voice_derived) renderDerived(map.tone_of_voice_derived);
     $('srvDot').classList.add('on');
   }catch(e){ $('srvDot').classList.remove('on'); }
 }
@@ -307,6 +313,12 @@ for(const tid of Object.keys(SET)){
   $(tid).addEventListener('input', ()=>{ clearTimeout(saveT); saveT=setTimeout(()=>saveSetting(SET[tid],$(tid).value),700); });
 }
 $('langSel').onchange=()=>saveSetting('output_language',$('langSel').value);
+function renderDerived(text){
+  const o=$('derivedVoice'); if(!o) return; if(!text){ o.innerHTML=''; return; }
+  o.innerHTML='<div class="card" style="margin-top:10px"><div style="font-size:12px;color:var(--muted);margin-bottom:6px">Запропонований голос (ще не застосовано):</div><div class="post">'+esc(text)+'</div><div class="ctl"><button class="primary" id="acceptVoice">Прийняти → у Tone of Voice</button></div></div>';
+  $('acceptVoice').onclick=()=>{ $('tov').value=text; saveSetting('tone_of_voice',$('tov').value); $('derivedVoice').querySelector('.ctl').innerHTML='<span style="color:var(--ok);font-size:12px">✓ застосовано до Tone of Voice</span>'; };
+}
+$('deriveVoiceBtn').onclick=async()=>{ const m=$('voiceMsg'); m.style.color='var(--muted)'; m.textContent='аналізую приклади…'; try{ const r=await api('/brand/derive-voice',{method:'POST'}); m.textContent=''; renderDerived(r.derived); }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; } };
 
 // ---------- render ----------
 const badge=(n,cls,txt)=>{const b=$('b'+n); if(b){ b.className='badge '+(cls||''); b.innerHTML=txt; }};

@@ -9,6 +9,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   content_strategy:
     "3-4 пости на тиждень, рівномірно. Чергувати типи. З сильного матеріалу — серія 2-3 пости.",
   output_language: "Українська",
+  voice_examples: "",
 };
 
 // Дефолтні рубрики (контент-мікс) для нового workspace.

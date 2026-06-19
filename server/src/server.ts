@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, rewriteWithStep } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, rewriteWithStep, deriveVoice } from "./pipeline.js";
 import * as tg from "./telegram.js";
 import * as fireflies from "./fireflies.js";
 import * as auth from "./auth.js";
@@ -462,6 +462,12 @@ app.get("/api/usage", async (req: any) => {
                      coalesce(sum(completion_tokens),0)::int as completion_tokens,
                      coalesce(sum(cost),0)::float as cost, count(*)::int as calls
               from llm_usage where workspace_id=$1`, [req.user.workspace_id]);
+});
+
+// ===================== БАЗА БРЕНДУ =====================
+app.post("/api/brand/derive-voice", async (req: any, reply) => {
+  try { return { derived: await deriveVoice(req.user.workspace_id) }; }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
 
 // ===================== РУБРИКИ (контент-мікс) =====================

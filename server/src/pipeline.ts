@@ -51,6 +51,24 @@ const STEP_FORMAT: Partial<Record<StepKey, string>> = {
   strategy: `\n\nПоверни ЛИШЕ валідний JSON-масив рівно по одному обʼєкту на пост, у тому ж порядку: [{"type":"користь|історія|рефлексія|заклик","dayOffset":0}]`,
 };
 
+// Вивести tone of voice із прикладів постів (Базa бренду). Пропонує (пише в tone_of_voice_derived), не чіпає tone_of_voice.
+export async function deriveVoice(workspaceId: string): Promise<string> {
+  const settings = await loadSettings(workspaceId);
+  const examples = (settings.voice_examples || "").trim();
+  if (!examples) throw new Error("Спершу встав 3-5 прикладів постів");
+  const lang = (settings.output_language || "Українська").trim();
+  const system =
+    "Проаналізуй приклади постів автора і стисло опиши його tone of voice (голос бренду): звертання (ти/ви), тон, характерну лексику й ритм, що робить голос впізнаваним і чого уникати. 4-6 речень суцільним описом, без преамбул і списків — щоб вставити як інструкцію для AI." +
+    `\n\nМова опису: ${lang}.`;
+  const derived = await chat("anthropic/claude-sonnet-4.5", system, `Приклади постів:\n---\n${examples}`, { workspaceId, step: "tone" });
+  await q(
+    `insert into settings_block(workspace_id, key, content) values($1,'tone_of_voice_derived',$2)
+     on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`,
+    [workspaceId, derived]
+  );
+  return derived;
+}
+
 async function loadSettings(workspaceId: string): Promise<Record<string, string>> {
   const rows = await q<{ key: string; content: string }>(
     `select key, content from settings_block where workspace_id=$1`,
