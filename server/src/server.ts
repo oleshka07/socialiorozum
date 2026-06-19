@@ -54,6 +54,7 @@ app.addHook("preHandler", async (req: any, reply) => {
 });
 
 // володіння run/post у межах workspace юзера
+const cancelRun = new Set<string>();
 async function runOwned(runId: string, ws: string) {
   return !!(await one(
     `select 1 from pipeline_run r join source s on s.id=r.source_id where r.id=$1 and s.workspace_id=$2`,
@@ -274,7 +275,8 @@ app.post("/api/runs/:id/steps/:step/run", async (req: any, reply) => {
   const { id, step } = req.params;
   if (!STEP_ORDER.includes(step)) return reply.code(400).send({ error: "невідомий крок" });
   if (!(await runOwned(id, req.user.workspace_id))) return reply.code(404).send({ error: "run не знайдено" });
-  try { await executeStep(id, step as StepKey); return { ok: true }; }
+  const opts = { count: req.body?.count, rubrics: req.body?.rubrics };
+  try { await executeStep(id, step as StepKey, opts); return { ok: true }; }
   catch (e: any) { await logEvent("error", "pipeline", `крок ${step}: ${e.message}`, { runId: id }, req.user.id); return reply.code(500).send({ error: e.message }); }
 });
 
@@ -283,16 +285,32 @@ app.post("/api/runs/:id/run-from/:step", async (req: any, reply) => {
   const idx = STEP_ORDER.indexOf(step);
   if (idx < 0) return reply.code(400).send({ error: "невідомий крок" });
   if (!(await runOwned(id, req.user.workspace_id))) return reply.code(404).send({ error: "run не знайдено" });
-  try { for (const s of STEP_ORDER.slice(idx)) await executeStep(id, s as StepKey); return { ok: true }; }
-  catch (e: any) { await logEvent("error", "pipeline", `run-from ${step}: ${e.message}`, { runId: id }, req.user.id); return reply.code(500).send({ error: e.message }); }
+  const opts = { count: req.body?.count, rubrics: req.body?.rubrics };
+  try {
+    for (const s of STEP_ORDER.slice(idx)) {
+      if (cancelRun.has(id)) { cancelRun.delete(id); break; }
+      await executeStep(id, s as StepKey, s === "extract_ideas" ? opts : undefined);
+    }
+    cancelRun.delete(id);
+    return { ok: true };
+  } catch (e: any) { cancelRun.delete(id); await logEvent("error", "pipeline", `run-from ${step}: ${e.message}`, { runId: id }, req.user.id); return reply.code(500).send({ error: e.message }); }
 });
 
 // Автопілот: повний прогін кишки (чернетки лишаються на підтвердження — банк-pending)
 app.post("/api/runs/:id/autopilot", async (req: any, reply) => {
   const id = req.params.id;
   if (!(await runOwned(id, req.user.workspace_id))) return reply.code(404).send({ error: "run не знайдено" });
-  try { for (const s of STEP_ORDER) await executeStep(id, s as StepKey); await logEvent("info", "autopilot", "повний прогін", { runId: id }, req.user.id); return { ok: true }; }
-  catch (e: any) { await logEvent("error", "autopilot", e.message, { runId: id }, req.user.id); return reply.code(500).send({ error: e.message }); }
+  try {
+    for (const s of STEP_ORDER) { if (cancelRun.has(id)) { cancelRun.delete(id); break; } await executeStep(id, s as StepKey); }
+    cancelRun.delete(id);
+    await logEvent("info", "autopilot", "повний прогін", { runId: id }, req.user.id); return { ok: true };
+  } catch (e: any) { cancelRun.delete(id); await logEvent("error", "autopilot", e.message, { runId: id }, req.user.id); return reply.code(500).send({ error: e.message }); }
+});
+
+app.post("/api/runs/:id/cancel", async (req: any, reply) => {
+  if (!(await runOwned(req.params.id, req.user.workspace_id))) return reply.code(404).send({ error: "run не знайдено" });
+  cancelRun.add(req.params.id);
+  return { ok: true };
 });
 
 app.post("/api/runs/:id/ideas/select", async (req: any, reply) => {

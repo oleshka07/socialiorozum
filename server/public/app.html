@@ -183,11 +183,16 @@
       <div class="ctl" style="margin:0 0 18px">
         <button class="primary" id="runAll">⚡ Прогнати всю кишку</button>
         <button class="ghost" id="newRun">＋ Новий прогін</button>
+        <button id="stopBtn" style="display:none;background:var(--stale);border-color:var(--stale);color:#fff">⛔ Зупинити</button>
       </div>
       <div class="pipe" id="pipe">
         <section class="step" id="s1">
           <div class="shead"><div class="t"><span class="num">1</span> Витяг ідей</div><span class="badge" id="b1">очікує</span></div>
           <div class="ctl"><button class="primary" data-run="1">▷ Запустити</button><button class="ghost" data-from="1">↻ Звідси донизу</button></div>
+          <div class="ctl" style="margin-top:8px">
+            <label style="font-size:12px;color:var(--muted)">Кількість ідей: <input id="ideaCount" type="number" min="1" max="12" value="6" class="txt" style="width:62px;display:inline-block;padding:5px 8px"></label>
+            <details style="border:1px dashed var(--line);border-radius:9px"><summary style="cursor:pointer;padding:6px 12px;font-size:12px;color:var(--muted)">Рубрики для цієї генерації</summary><div id="ideaRubrics" style="padding:4px 12px 10px"></div></details>
+          </div>
           <div class="out" id="o1"><div class="empty">Ідеї з'являться тут — кожну можна вимкнути перед чернетками.</div></div>
         </section>
         <section class="step" id="s3">
@@ -436,18 +441,22 @@ async function ensureRun(){
 }
 
 // ---------- run ----------
-function setBusy(b){ busy=b; document.querySelectorAll('.pipe button, #runAll').forEach(x=>x.disabled=b); }
+function setBusy(b){ busy=b; document.querySelectorAll('.pipe button, #runAll').forEach(x=>x.disabled=b); const sb=$('stopBtn'); if(sb){ sb.style.display=b?'inline-block':'none'; if(!b) sb.textContent='⛔ Зупинити'; } }
+function ideaOpts(){ return { count: Math.max(1,Math.min(12,(+($('ideaCount')&&$('ideaCount').value))||6)), rubrics: [...document.querySelectorAll('.ideaRub:checked')].map(c=>c.value) }; }
+function renderIdeaRubrics(){ const o=$('ideaRubrics'); if(!o) return; o.innerHTML = Rubrics.length ? Rubrics.map(r=>'<label style="display:block;font-size:13px;margin:3px 0"><input type="checkbox" class="ideaRub" value="'+esc(r.name)+'" checked> '+(r.emoji||'')+' '+esc(r.name)+'</label>').join('') : '<div class="empty">нема рубрик</div>'; }
 async function run(n){
   if(busy) return; setBusy(true);
   try{ await ensureRun(); badge(n,'run','<span class="spin"></span> генерую'); stepEl(n).classList.remove('stale');
-    await api('/runs/'+runId+'/steps/'+STEP[n]+'/run',{method:'POST'}); await refresh();
+    const body=n===1?JSON.stringify(ideaOpts()):null;
+    await api('/runs/'+runId+'/steps/'+STEP[n]+'/run', body?{method:'POST',headers:{'Content-Type':'application/json'},body}:{method:'POST'}); await refresh();
   }catch(e){ badge(n,'stale','помилка'); const o=$('o'+n); if(o) o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
   finally{ setBusy(false); }
 }
 async function runFrom(startN){
   if(busy) return; setBusy(true);
   try{ await ensureRun(); for(const k of ORDER.slice(ORDER.indexOf(startN))) badge(k,'run','<span class="spin"></span> у черзі');
-    await api('/runs/'+runId+'/run-from/'+STEP[startN],{method:'POST'});
+    const body=startN===1?JSON.stringify(ideaOpts()):null;
+    await api('/runs/'+runId+'/run-from/'+STEP[startN], body?{method:'POST',headers:{'Content-Type':'application/json'},body}:{method:'POST'});
   }catch(e){ alert('Помилка: '+e.message); }
   finally{ try{ await refresh(); }catch(_){} setBusy(false); }
 }
@@ -520,6 +529,7 @@ function slotDialog(s){
 document.querySelectorAll('[data-run]').forEach(b=>b.onclick=()=>run(+b.dataset.run));
 document.querySelectorAll('[data-from]').forEach(b=>b.onclick=()=>runFrom(+b.dataset.from));
 $('runAll').onclick=()=>runFrom(1);
+$('stopBtn').onclick=async()=>{ if(!runId) return; $('stopBtn').textContent='⛔ зупиняю…'; try{ await api('/runs/'+runId+'/cancel',{method:'POST'}); }catch(e){} };
 $('sampleBtn').onclick=()=>{ $('transcript').value=SAMPLE; };
 $('toCreate').onclick=async()=>{
   const transcript=$('transcript').value.trim();
@@ -679,7 +689,7 @@ function renderRubrics(){
     list.appendChild(c);
   });
 }
-async function loadRubrics(){ try{ Rubrics=await api('/rubrics')||[]; }catch(e){ Rubrics=[]; } renderRubrics(); }
+async function loadRubrics(){ try{ Rubrics=await api('/rubrics')||[]; }catch(e){ Rubrics=[]; } renderRubrics(); renderIdeaRubrics(); }
 $('addRubric').onclick=()=>{ Rubrics.push({name:'',emoji:'',description:'',share:0}); renderRubrics(); };
 $('saveRubrics').onclick=async()=>{ try{ await api('/rubrics',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rubrics:Rubrics})}); flashSaved(); }catch(e){ alert('Не вдалося зберегти рубрики: '+e.message); } };
 

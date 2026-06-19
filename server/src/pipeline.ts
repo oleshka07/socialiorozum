@@ -11,7 +11,7 @@ export type StepKey = (typeof STEP_ORDER)[number];
 export const DEFAULT_PROMPTS: Record<StepKey, { model: string; content: string }> = {
   extract_ideas: {
     model: "openai/gpt-4o-mini",
-    content: "Ти контент-стратег. Знайди в транскрипті до 6 окремих контент-ідей, кожна зі своїм кутом подачі.",
+    content: "Ти контент-стратег. Знайди в транскрипті окремі контент-ідеї, кожна зі своїм кутом подачі.",
   },
   drafts: {
     model: "anthropic/claude-sonnet-4.5",
@@ -160,20 +160,23 @@ async function markDownstreamStale(runId: string, step: StepKey) {
 }
 
 /** Виконати один крок кишки, зберегти результат, позначити downstream як stale. */
-export async function executeStep(runId: string, step: StepKey) {
+export async function executeStep(runId: string, step: StepKey, opts?: { count?: number; rubrics?: string[] }) {
   const { workspace_id, transcript } = await runContext(runId);
   const settings = await loadSettings(workspace_id);
   const tpl = await resolvePrompt(workspace_id, step);
   const lang = (settings.output_language || "Українська").trim();
-  let rubricsText = "";
+  let rubricsText = "", countText = "";
   if (step === "extract_ideas" || step === "drafts" || step === "strategy") {
-    const rubs = await q<{ name: string; share: number; description: string }>(
+    let rubs = await q<{ name: string; share: number; description: string }>(
       `select name, share, description from rubric where workspace_id=$1 order by idx`, [workspace_id]);
+    if (step === "extract_ideas" && Array.isArray(opts?.rubrics) && opts!.rubrics.length)
+      rubs = rubs.filter((r) => opts!.rubrics!.includes(r.name));
     if (rubs.length) rubricsText = "\n\nРубрики контенту (орієнтир для тем і пропорцій у наборі постів): " +
       rubs.map((r) => `${r.name} ~${r.share}%${r.description ? ` (${r.description})` : ""}`).join("; ") + ".";
   }
+  if (step === "extract_ideas") countText = `\n\nЗнайди до ${Math.max(1, Math.min(12, Number(opts?.count) || 6))} контент-ідей.`;
   const system = fillPrompt(tpl.content, settings) + STEP_CONTEXT[step](settings) + (STEP_FORMAT[step] || "")
-    + `\n\nМова всього тексту у відповіді: ${lang}.` + rubricsText;
+    + countText + `\n\nМова всього тексту у відповіді: ${lang}.` + rubricsText;
   const ctx = { workspaceId: workspace_id, step };
   await upsertStepRun(runId, step, { status: "running", model: tpl.model, prompt_version: tpl.version });
 
