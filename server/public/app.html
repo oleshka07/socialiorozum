@@ -138,7 +138,7 @@
         <b>📝 Ручне джерело</b>
         <div class="fld" style="margin-top:8px"><label>Транскрипт / нотатка</label>
           <textarea id="transcript" style="min-height:140px"></textarea>
-          <div class="ctl"><button class="ghost" id="sampleBtn">Підставити приклад</button><button class="ghost" id="ffImport">📥 Імпорт із Fireflies</button><button class="primary" id="toCreate">▷ У роботу</button></div>
+          <div class="ctl"><button class="ghost" id="sampleBtn">Підставити приклад</button><button class="ghost" id="ffImport">📥 Імпорт із Fireflies</button><button id="toCreate">▷ У роботу (ручний)</button><button class="primary" id="autopilotBtn" style="background:var(--ok);border-color:var(--ok)">🟢 Автопілот</button></div>
           <div class="hint" id="lockHint"></div>
         </div>
       </div></div>
@@ -524,6 +524,22 @@ $('toCreate').onclick=async()=>{
     updRunLabel();
     document.querySelector('.navitem[data-view="create"]').click();
   }catch(e){ alert('Помилка: '+e.message); }
+};
+$('autopilotBtn').onclick=async()=>{
+  const transcript=$('transcript').value.trim();
+  if(!transcript){ alert('Спершу вставте транскрипт або імпортуйте джерело.'); return; }
+  if(!confirm('Автопілот прожене ВСЮ кишку (кілька AI-викликів, ~1-2 хв) і покладе чернетки на підтвердження. Продовжити?')) return;
+  const btn=$('autopilotBtn'); const old=btn.textContent; btn.disabled=true; btn.textContent='🟢 працюю…';
+  try{
+    const r=await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript})});
+    runId=r.runId; localStorage.setItem('kg_run',runId); updRunLabel();
+    document.querySelector('.navitem[data-view="create"]').click();
+    [1,3,4,5,6,7].forEach(n=>badge(n,'run','<span class="spin"></span> у черзі'));
+    await api('/runs/'+runId+'/autopilot',{method:'POST'});
+    await refresh();
+    alert('Готово! Перегляньте чернетки (крок 6) і затвердьте потрібні — вони підуть у Банк публікацій.');
+  }catch(e){ alert('Помилка: '+e.message); try{ await refresh(); }catch(_){} }
+  finally{ btn.disabled=false; btn.textContent=old; }
 };
 $('aiDistribute').onclick=async()=>{ const m=$('pubMsg'); m.style.color='var(--muted)'; m.textContent='розподіляю…'; try{ const r=await api('/schedule/auto',{method:'POST'}); m.style.color='var(--ok)'; m.textContent='розподілено: '+r.count; await loadPublish(); }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; } };
 $('reloadPub').onclick=()=>loadPublish();

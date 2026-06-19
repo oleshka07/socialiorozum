@@ -287,6 +287,14 @@ app.post("/api/runs/:id/run-from/:step", async (req: any, reply) => {
   catch (e: any) { await logEvent("error", "pipeline", `run-from ${step}: ${e.message}`, { runId: id }, req.user.id); return reply.code(500).send({ error: e.message }); }
 });
 
+// Автопілот: повний прогін кишки (чернетки лишаються на підтвердження — банк-pending)
+app.post("/api/runs/:id/autopilot", async (req: any, reply) => {
+  const id = req.params.id;
+  if (!(await runOwned(id, req.user.workspace_id))) return reply.code(404).send({ error: "run не знайдено" });
+  try { for (const s of STEP_ORDER) await executeStep(id, s as StepKey); await logEvent("info", "autopilot", "повний прогін", { runId: id }, req.user.id); return { ok: true }; }
+  catch (e: any) { await logEvent("error", "autopilot", e.message, { runId: id }, req.user.id); return reply.code(500).send({ error: e.message }); }
+});
+
 app.post("/api/runs/:id/ideas/select", async (req: any, reply) => {
   if (!(await runOwned(req.params.id, req.user.workspace_id))) return reply.code(404).send({ error: "run не знайдено" });
   const { selectedIds } = req.body ?? {};
@@ -568,15 +576,25 @@ app.post("/api/schedule/auto", async (req: any) => {
      where s.workspace_id=$1 and p.stage='final' and p.review='approved'
        and not exists(select 1 from schedule_slot ss where ss.post_id=p.id and ss.status in ('planned','posting','posted'))
      order by p.created_at`, [ws]);
+  // дні зі стратегії (best_days) керують розкладом; інакше — 3 пости/день
+  const strat = await one<{ data: any }>(`select data from strategy where workspace_id=$1`, [ws]);
+  const DMAP: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+  const bestDays: number[] = Array.isArray(strat?.data?.best_days)
+    ? strat!.data.best_days.map((d: string) => DMAP[String(d).toLowerCase().slice(0, 3)]).filter((x: any) => x != null) : [];
   const TIMES = [[9, 0], [13, 0], [19, 0]];
+  const perDay = bestDays.length ? 1 : TIMES.length;
   const base = new Date(); base.setUTCHours(0, 0, 0, 0);
-  let count = 0;
-  for (let i = 0; i < units.length; i++) {
-    const day = Math.floor(i / TIMES.length) + 1;
-    const [h, m] = TIMES[i % TIMES.length];
-    const d = new Date(base); d.setUTCDate(d.getUTCDate() + day); d.setUTCHours(h, m, 0, 0);
-    await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [units[i].id, d.toISOString()]);
-    count++;
+  let count = 0, off = 1, ti = 0;
+  for (let i = 0; i < units.length;) {
+    const d = new Date(base); d.setUTCDate(d.getUTCDate() + off);
+    if (bestDays.length && !bestDays.includes(d.getUTCDay())) { off++; if (off > 90) break; continue; }
+    for (let k = 0; k < perDay && i < units.length; k++, i++) {
+      const [h, m] = TIMES[(ti++) % TIMES.length];
+      const dd = new Date(d); dd.setUTCHours(h, m, 0, 0);
+      await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [units[i].id, dd.toISOString()]);
+      count++;
+    }
+    off++;
   }
   return { ok: true, count };
 });
