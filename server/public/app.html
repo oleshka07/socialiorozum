@@ -89,6 +89,14 @@
 </style>
 </head>
 <body>
+<div id="onboarding" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);place-items:center;z-index:100;padding:16px">
+  <div class="settings" style="max-width:560px;width:100%;margin:0"><div class="body">
+    <div style="font-weight:800;font-size:18px">👋 Ласкаво просимо в socialio</div>
+    <div id="obTitle" style="font-weight:600;margin-top:6px"></div>
+    <textarea id="obInput" style="min-height:120px"></textarea>
+    <div class="ctl"><button id="obBack" class="ghost">← Назад</button><button class="primary" id="obNext">Далі →</button><button id="obSkip" class="ghost">Пропустити</button><span id="obMsg" style="font-size:12px;color:var(--muted)"></span></div>
+  </div></div>
+</div>
 <div class="layout">
   <aside class="sidebar">
     <div class="ws">Робочий простір</div>
@@ -675,6 +683,45 @@ async function loadRubrics(){ try{ Rubrics=await api('/rubrics')||[]; }catch(e){
 $('addRubric').onclick=()=>{ Rubrics.push({name:'',emoji:'',description:'',share:0}); renderRubrics(); };
 $('saveRubrics').onclick=async()=>{ try{ await api('/rubrics',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rubrics:Rubrics})}); flashSaved(); }catch(e){ alert('Не вдалося зберегти рубрики: '+e.message); } };
 
+// ---------- онбординг ----------
+const OB_STEPS=[
+  {title:'Про що ваш бренд і для кого?', key:'marketing_context', ph:'Ніша + аудиторія: хто ви, для кого пишете, який результат даєте…', req:true},
+  {title:'Ваш голос — встав 3-5 своїх постів', key:'voice_examples', ph:'Приклади постів, щоб AI вивів ваш стиль…'},
+  {title:'Перше джерело (необовʼязково)', key:'__transcript', ph:'Встав транскрипт/нотатку — зробимо перший контент…'},
+];
+let obIdx=0;
+function showOnboarding(){ obIdx=0; $('onboarding').style.display='grid'; renderOb(); }
+function renderOb(){
+  const s=OB_STEPS[obIdx];
+  $('obTitle').textContent='Крок '+(obIdx+1)+'/'+OB_STEPS.length+': '+s.title;
+  $('obInput').placeholder=s.ph; $('obInput').value=s._val||'';
+  $('obBack').style.display=obIdx>0?'inline-block':'none';
+  $('obNext').textContent=obIdx===OB_STEPS.length-1?'Завершити ✨':'Далі →';
+  $('obMsg').textContent='';
+}
+$('obBack').onclick=()=>{ OB_STEPS[obIdx]._val=$('obInput').value; if(obIdx>0){obIdx--;renderOb();} };
+$('obSkip').onclick=async()=>{ await saveSetting('onboarded','1'); $('onboarding').style.display='none'; };
+$('obNext').onclick=async()=>{
+  const s=OB_STEPS[obIdx]; const val=$('obInput').value.trim(); s._val=val;
+  if(s.req && !val){ $('obMsg').textContent='Заповніть це поле'; return; }
+  if(s.key==='marketing_context'){ await saveSetting('marketing_context',val); if($('mkt'))$('mkt').value=val; }
+  else if(s.key==='voice_examples'){ await saveSetting('voice_examples',val); if($('voiceExamples'))$('voiceExamples').value=val; }
+  if(obIdx<OB_STEPS.length-1){ obIdx++; renderOb(); return; }
+  $('obNext').disabled=true; $('obMsg').textContent='Налаштовую кабінет…';
+  try{
+    if((OB_STEPS[1]._val||'').trim()){ try{ await api('/brand/derive-voice',{method:'POST'}); }catch(e){} }
+    const tr=(OB_STEPS[2]._val||'').trim();
+    if(tr){ try{ const r=await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript:tr})}); runId=r.runId; localStorage.setItem('kg_run',runId);}catch(e){} }
+    try{ await api('/strategy/generate',{method:'POST'}); }catch(e){}
+    await saveSetting('onboarded','1');
+    $('onboarding').style.display='none';
+    await loadSettings(); await loadStrategy(); await loadRubrics(); updRunLabel();
+    document.querySelector('.navitem[data-view="strategy"]').click();
+    alert('Готово! Ми згенерували чернетку стратегії — перегляньте й застосуйте.');
+  }catch(e){ $('obMsg').textContent='⚠ '+e.message; }
+  finally{ $('obNext').disabled=false; }
+};
+
 // ---------- init ----------
 (async()=>{
   try{ const me=await api('/auth/me'); $('userEmail').textContent=me.email; }
@@ -685,6 +732,7 @@ $('saveRubrics').onclick=async()=>{ try{ await api('/rubrics',{method:'PUT',head
   loadRubrics();
   loadStrategy();
   loadFF();
+  try{ const st=await api('/settings'); if(!st.some(r=>r.key==='onboarded')) showOnboarding(); }catch(e){}
   loadUsage();
   updRunLabel();
   if(runId){ try{ await refresh(); }catch(e){ runId=null; localStorage.removeItem('kg_run'); updRunLabel(); } }
