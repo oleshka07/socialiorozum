@@ -230,6 +230,27 @@ create table if not exists transcription_config (
   updated_at   timestamptz not null default now()
 );
 
+-- інтеграція Threads (Meta): окремий OAuth-токен на workspace (лише на сервері)
+create table if not exists threads_config (
+  workspace_id     uuid primary key references workspace(id) on delete cascade,
+  threads_user_id  text,
+  username         text,
+  access_token     text,
+  token_expires_at timestamptz,
+  updated_at       timestamptz not null default now()
+);
+
+-- лог публікацій у Threads (+ media_id для інсайтів)
+create table if not exists threads_publish (
+  id          uuid primary key default gen_random_uuid(),
+  post_id     uuid references post(id) on delete cascade,
+  media_id    text,
+  status      text not null,             -- sent|error
+  error       text,
+  created_at  timestamptz not null default now()
+);
+create index if not exists idx_thpub_post on threads_publish(post_id);
+
 -- згенерована стратегія (L2): JSON-артефакт на workspace
 create table if not exists strategy (
   workspace_id uuid primary key references workspace(id) on delete cascade,

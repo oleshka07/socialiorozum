@@ -8,6 +8,7 @@ import { env } from "./env.js";
 import { q, one } from "./db.js";
 import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, rewriteWithStep, deriveVoice, generateStrategy } from "./pipeline.js";
 import * as tg from "./telegram.js";
+import * as threads from "./threads.js";
 import * as fireflies from "./fireflies.js";
 import * as auth from "./auth.js";
 import { sendVerifyEmail, sendResetEmail } from "./email.js";
@@ -454,6 +455,100 @@ app.post("/api/posts/:postId/publish", async (req: any, reply) => {
     }
   }
   return { ok: true, results };
+});
+
+// ===================== THREADS (Meta) =====================
+const THREADS_REDIRECT = `${env.appBaseUrl}/api/integrations/threads/callback`;
+const THREADS_SCOPES = ["threads_basic", "threads_content_publish", "threads_manage_insights"];
+
+async function thConfig(ws: string) {
+  return one<{ threads_user_id: string | null; username: string | null; access_token: string | null; token_expires_at: string | null }>(
+    `select threads_user_id, username, access_token, token_expires_at from threads_config where workspace_id=$1`, [ws]);
+}
+
+// дійсний токен (рефреш якщо лишилось < 7 днів до завершення 60-денного)
+async function thValidToken(ws: string): Promise<{ token: string; userId: string } | null> {
+  const c = await thConfig(ws);
+  if (!c?.access_token || !c.threads_user_id) return null;
+  const exp = c.token_expires_at ? new Date(c.token_expires_at).getTime() : 0;
+  if (exp && exp - Date.now() < 7 * 864e5) {
+    try {
+      const r = await threads.refreshToken(c.access_token);
+      const newExp = new Date(Date.now() + r.expires_in * 1000).toISOString();
+      await q(`update threads_config set access_token=$2, token_expires_at=$3, updated_at=now() where workspace_id=$1`, [ws, r.access_token, newExp]);
+      return { token: r.access_token, userId: c.threads_user_id };
+    } catch { /* рефреш не вдався — пробуємо наявним токеном */ }
+  }
+  return { token: c.access_token, userId: c.threads_user_id };
+}
+
+app.get("/api/integrations/threads", async (req: any) => {
+  const c = await thConfig(req.user.workspace_id);
+  return { configured: !!env.threads.appId, hasToken: !!(c && c.access_token), username: c?.username ?? "", expiresAt: c?.token_expires_at ?? null };
+});
+
+app.get("/api/integrations/threads/connect", async (req: any, reply) => {
+  if (!env.threads.appId) return reply.code(400).send({ error: "THREADS_APP_ID не заданий на сервері" });
+  const state = auth.newToken();
+  reply.setCookie("threads_state", state, stateCookie);
+  return reply.redirect(threads.authUrl(env.threads.appId, THREADS_REDIRECT, state, THREADS_SCOPES));
+});
+
+app.get("/api/integrations/threads/callback", async (req: any, reply) => {
+  const code = String(req.query?.code ?? ""); const state = String(req.query?.state ?? "");
+  if (!code || !state || state !== req.cookies?.threads_state) return reply.redirect("/app?threads=error");
+  reply.clearCookie("threads_state", { path: "/" });
+  try {
+    const short = await threads.exchangeCode(env.threads.appId, env.threads.appSecret, THREADS_REDIRECT, code);
+    const long = await threads.exchangeLongLived(env.threads.appSecret, short.access_token);
+    const me = await threads.getMe(long.access_token).catch(() => ({ id: short.user_id, username: "" }));
+    const exp = new Date(Date.now() + long.expires_in * 1000).toISOString();
+    await q(`insert into threads_config(workspace_id, threads_user_id, username, access_token, token_expires_at, updated_at)
+             values($1,$2,$3,$4,$5,now())
+             on conflict (workspace_id) do update set threads_user_id=excluded.threads_user_id, username=excluded.username,
+               access_token=excluded.access_token, token_expires_at=excluded.token_expires_at, updated_at=now()`,
+      [req.user.workspace_id, me.id || short.user_id, me.username ?? "", long.access_token, exp]);
+    await logEvent("info", "threads", `підключено @${me.username || me.id}`, null, req.user.id);
+    return reply.redirect("/app?threads=ok");
+  } catch (e: any) {
+    await logEvent("error", "threads", "OAuth callback: " + e.message, null, req.user.id);
+    return reply.redirect("/app?threads=error");
+  }
+});
+
+app.post("/api/integrations/threads/disconnect", async (req: any) => {
+  await q(`delete from threads_config where workspace_id=$1`, [req.user.workspace_id]);
+  return { ok: true };
+});
+
+app.post("/api/posts/:postId/publish/threads", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const post = await postOwned(req.params.postId, ws);
+  if (!post) return reply.code(404).send({ error: "пост не знайдено" });
+  const tok = await thValidToken(ws);
+  if (!tok) return reply.code(400).send({ error: "Threads не підключений — підключіть у Налаштуваннях" });
+  try {
+    const r = await threads.publish(tok.token, tok.userId, post.content);
+    await q(`insert into threads_publish(post_id, media_id, status) values($1,$2,'sent')`, [req.params.postId, r.mediaId]);
+    return { ok: true, mediaId: r.mediaId };
+  } catch (e: any) {
+    await q(`insert into threads_publish(post_id, status, error) values($1,'error',$2)`, [req.params.postId, e.message]);
+    await logEvent("error", "threads", `публікація: ${e.message}`, null, req.user.id);
+    return reply.code(500).send({ error: e.message });
+  }
+});
+
+app.get("/api/posts/:postId/threads-insights", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  const pub = await one<{ media_id: string }>(
+    `select media_id from threads_publish where post_id=$1 and status='sent' and media_id is not null order by created_at desc limit 1`,
+    [req.params.postId]);
+  if (!pub?.media_id) return reply.code(400).send({ error: "Цей пост ще не опубліковано в Threads" });
+  const tok = await thValidToken(ws);
+  if (!tok) return reply.code(400).send({ error: "Threads не підключений" });
+  try { return await threads.mediaInsights(tok.token, pub.media_id); }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
 
 // ===================== POST-ЮНІТИ (банк публікацій) =====================

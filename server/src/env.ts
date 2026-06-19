@@ -17,6 +17,10 @@ export const env = {
     clientId: process.env.GOOGLE_CLIENT_ID ?? "",
     clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
   },
+  threads: {
+    appId: process.env.THREADS_APP_ID ?? "",
+    appSecret: process.env.THREADS_APP_SECRET ?? "",
+  },
   adminEmails: (process.env.ADMIN_EMAILS ?? "o.stepeniev@swipescape.eu,stepenievgroup@gmail.com")
     .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
 };

@@ -261,6 +261,15 @@
         <div id="tgResult" class="out"></div>
       </div></div>
       <div class="settings"><div class="body">
+        <b>🧵 Threads (Meta)</b>
+        <div class="hint" style="line-height:1.7">
+          Постинг і аналітика через офіційний Threads API (окремий OAuth — вхід через Threads).<br>
+          У Meta-застосунку мають бути дозволи <code>threads_content_publish</code> + <code>threads_manage_insights</code>, а ваш Threads-акаунт — у списку <b>Threads Testers</b>.
+        </div>
+        <div class="ctl"><span id="thStatus" style="font-size:13px;color:var(--muted)">…</span></div>
+        <div class="ctl"><a id="thConnect" class="primary" href="/api/integrations/threads/connect" style="display:none;text-decoration:none">🔗 Підключити Threads</a><button class="ghost" id="thDisconnect" style="display:none">Відключити</button></div>
+      </div></div>
+      <div class="settings"><div class="body">
         <b>🎙️ Транскрибація (Fireflies)</b>
         <div class="hint">API-ключ: Fireflies → Settings → Developer Settings → API Key. Далі імпортуй зустрічі у «Створенні».</div>
         <div class="fld"><label>Fireflies API Key</label><input class="txt" type="password" id="ffKey" placeholder="вставте ключ"></div>
@@ -401,11 +410,15 @@ function renderFinals(posts,published){
       +'<button class="act" data-a="copy">Копіювати</button>'
       +'<button class="pub" data-t="channel">'+(isPub(p.id,'channel')?'✓ канал':'→ Канал')+'</button>'
       +'<button class="pub" data-t="group">'+(isPub(p.id,'group')?'✓ група':'→ Група')+'</button>'
+      +'<button class="pubth">🧵 Threads</button>'
+      +'<button class="act statth">📊 Threads</button>'
       +'<span class="pubmsg" style="font-size:12px"></span></div></div>';
   }).join('');
   o.querySelectorAll('.tg').forEach(card=>{ const id=card.dataset.post;
     card.querySelectorAll('.act').forEach(b=>b.onclick=()=>postAction(card,id,b.dataset.a));
     card.querySelectorAll('.pub').forEach(b=>b.onclick=()=>publishUnit(card,id,b.dataset.t,b));
+    const pth=card.querySelector('.pubth'); if(pth) pth.onclick=()=>publishThreads(card,id,pth);
+    const sth=card.querySelector('.statth'); if(sth) sth.onclick=()=>threadsStats(card,id);
   });
 }
 async function postAction(card,id,a){
@@ -428,6 +441,17 @@ async function publishUnit(card,id,target,btn){
   try{ const r=await api('/posts/'+id+'/publish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({targets:[target]})}); const res=(r.results||[]).find(x=>x.target===target)||{};
     if(res.status==='sent'){ btn.textContent=(target==='channel'?'✓ канал':'✓ група'); } else { btn.disabled=false; btn.textContent=old; if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+(res.error||'помилка');} }
   }catch(e){ btn.disabled=false; btn.textContent=old; if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+e.message;} }
+}
+
+async function publishThreads(card,id,btn){
+  const msg=card.querySelector('.pubmsg'); const old=btn.textContent; btn.disabled=true; btn.innerHTML='<span class="spin"></span>'; if(msg) msg.textContent='';
+  try{ await api('/posts/'+id+'/publish/threads',{method:'POST'}); btn.textContent='✓ Threads'; }
+  catch(e){ btn.disabled=false; btn.textContent=old; if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+e.message;} }
+}
+async function threadsStats(card,id){
+  const msg=card.querySelector('.pubmsg'); if(msg){msg.style.color='var(--muted)';msg.textContent=' завантаження…';}
+  try{ const s=await api('/posts/'+id+'/threads-insights'); if(msg){msg.style.color='var(--ok)';msg.textContent=' 👁 '+(s.views||0)+' · ❤ '+(s.likes||0)+' · 💬 '+(s.replies||0)+' · 🔁 '+(s.reposts||0)+' · ❝ '+(s.quotes||0);} }
+  catch(e){ if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+e.message;} }
 }
 
 function updRunLabel(){ $('runLabel').textContent = runId ? ('· прогін '+runId.slice(0,8)) : '· новий прогін'; $('lockHint').textContent = runId ? 'Прогін створено з цього транскрипту. «Новий прогін», щоб почати з іншого тексту.' : ''; }
@@ -579,6 +603,15 @@ async function loadTelegram(){
     if(c.hasToken) $('tgToken').placeholder='•••••••• (токен збережено — лиши порожнім, щоб не міняти)';
   }catch(e){}
 }
+async function loadThreads(){
+  try{ const c=await api('/integrations/threads');
+    const st=$('thStatus'), conn=$('thConnect'), dis=$('thDisconnect'); if(!st) return;
+    if(!c.configured){ st.textContent='⚠ Threads App ID не налаштований на сервері (THREADS_APP_ID).'; if(conn)conn.style.display='none'; if(dis)dis.style.display='none'; return; }
+    if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.username?(' як <b>@'+esc(c.username)+'</b>'):'')+(c.expiresAt?(' · токен дійсний до '+new Date(c.expiresAt).toLocaleDateString()):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-block'; }
+    else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-block'; if(dis)dis.style.display='none'; }
+  }catch(e){}
+}
+$('thDisconnect').onclick=async()=>{ if(!confirm('Відключити Threads?')) return; try{ await api('/integrations/threads/disconnect',{method:'POST'}); await loadThreads(); }catch(e){} };
 $('tgSave').onclick=async()=>{
   try{ await api('/integrations/telegram',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({botToken:$('tgToken').value,channelChatId:$('tgChannel').value,groupChatId:$('tgGroup').value})});
     $('tgToken').value=''; $('tgToken').placeholder='•••••••• (токен збережено)';
@@ -768,6 +801,9 @@ $('obNext').onclick=async()=>{
   catch(e){ location.href='/login'; return; }
   await loadSettings();
   await loadTelegram();
+  loadThreads();
+  const _thq=new URLSearchParams(location.search).get('threads');
+  if(_thq){ history.replaceState(null,'',location.pathname); alert(_thq==='ok'?'Threads підключено ✓':'Не вдалося підключити Threads. Перевірте дозволи й Redirect URI у Meta.'); }
   await loadPrompts();
   loadRubrics();
   loadStrategy();
