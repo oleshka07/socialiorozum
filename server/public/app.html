@@ -93,7 +93,9 @@
   <aside class="sidebar">
     <div class="ws">Робочий простір</div>
     <div class="wsname">socialio</div>
-    <div class="navgroup">Стратегія</div>
+    <div class="navgroup">Бренд</div>
+    <div class="navitem" data-view="brand">🧠 База бренду</div>
+    <div class="navitem" data-view="sources">📥 Джерела</div>
     <div class="navitem" data-view="strategy">🎯 Стратегія</div>
     <div class="navgroup">Робота</div>
     <div class="navitem active" data-view="create">✍️ Створення</div>
@@ -110,8 +112,8 @@
 
   <main class="content">
 
-    <section class="viewsec" data-view="strategy">
-      <div class="pagehead"><h1>Стратегія</h1><p>Голос бренду, аудиторія та правила — AI тягне це у кожен крок генерації.</p></div>
+    <section class="viewsec" data-view="brand">
+      <div class="pagehead"><h1>База бренду</h1><p>Факти про бренд — вводяться раз. AI тягне це у стратегію й у кожен пост.</p></div>
       <div class="settings"><div class="body">
         <div class="fld"><label>Мова виводу (застосовується до всіх кроків)</label>
           <select id="langSel">
@@ -119,9 +121,30 @@
           </select></div>
         <div class="fld"><label>Голос бренду (Tone of Voice)</label><textarea id="tov"></textarea></div>
         <div class="fld"><label>Аудиторія / Marketing Context</label><textarea id="mkt"></textarea></div>
-        <div class="fld"><label>Контент-стратегія</label><textarea id="strat"></textarea></div>
+        <div class="fld"><label>Загальна контент-стратегія (нотатки)</label><textarea id="strat"></textarea></div>
         <div class="fld"><label>Правила De-AI</label><textarea id="deai"></textarea></div>
       </div></div>
+      <p class="hint">Далі тут зʼявиться «Голос із прикладів постів» і деталі аудиторії.</p>
+    </section>
+
+    <section class="viewsec" data-view="sources">
+      <div class="pagehead"><h1>Джерела</h1><p>Звідки беремо матеріал. Зараз — ручний транскрипт/нотатка (інші джерела — далі).</p></div>
+      <div class="settings"><div class="body">
+        <b>📝 Ручне джерело</b>
+        <div class="fld" style="margin-top:8px"><label>Транскрипт / нотатка</label>
+          <textarea id="transcript" style="min-height:140px"></textarea>
+          <div class="ctl"><button class="ghost" id="sampleBtn">Підставити приклад</button><button class="ghost" id="ffImport">📥 Імпорт із Fireflies</button><button class="primary" id="toCreate">▷ У роботу</button></div>
+          <div class="hint" id="lockHint"></div>
+        </div>
+      </div></div>
+      <div class="settings"><div class="body">
+        <b>Інші джерела</b>
+        <div class="tray"><span class="chip placed">RSS · скоро</span><span class="chip placed">Google Drive · скоро</span><span class="chip placed">Новини ніші · скоро</span></div>
+      </div></div>
+    </section>
+
+    <section class="viewsec" data-view="strategy">
+      <div class="pagehead"><h1>Стратегія</h1><p>Рубрики й мікс контенту. (Далі — авто-генерація стратегії з Бази бренду.)</p></div>
       <div class="settings"><div class="body">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
           <b>🗂️ Рубрики (контент-мікс)</b>
@@ -135,20 +158,12 @@
     </section>
 
     <section class="viewsec active" data-view="create">
-      <div class="pagehead"><h1>Створення</h1><p>Транскрипт сесії → ідеї → пости у вашому голосі. <span id="runLabel" style="color:var(--muted)"></span></p></div>
+      <div class="pagehead"><h1>Створення</h1><p>Джерело — у вкладці «Джерела» (▷ У роботу). Тут проганяєш кроки. <span id="runLabel" style="color:var(--muted)"></span></p></div>
       <div class="ctl" style="margin:0 0 18px">
         <button class="primary" id="runAll">⚡ Прогнати всю кишку</button>
         <button class="ghost" id="newRun">＋ Новий прогін</button>
       </div>
       <div class="pipe" id="pipe">
-        <section class="step" id="s0">
-          <div class="shead"><div class="t"><span class="num">0</span> Транскрипт сесії</div><span class="badge" id="b0">джерело</span></div>
-          <div class="fld" style="margin-top:12px"><label>Вставте транскрипт коуч-сесії</label>
-            <textarea id="transcript" style="min-height:120px"></textarea>
-            <div class="ctl"><button class="ghost" id="sampleBtn">Підставити приклад</button><button class="ghost" id="ffImport">📥 Імпорт із Fireflies</button></div>
-            <div class="hint" id="lockHint"></div>
-          </div>
-        </section>
         <section class="step" id="s1">
           <div class="shead"><div class="t"><span class="num">1</span> Витяг ідей</div><span class="badge" id="b1">очікує</span></div>
           <div class="ctl"><button class="primary" data-run="1">▷ Запустити</button><button class="ghost" data-from="1">↻ Звідси донизу</button></div>
@@ -478,6 +493,7 @@ document.querySelectorAll('[data-run]').forEach(b=>b.onclick=()=>run(+b.dataset.
 document.querySelectorAll('[data-from]').forEach(b=>b.onclick=()=>runFrom(+b.dataset.from));
 $('runAll').onclick=()=>runFrom(1);
 $('sampleBtn').onclick=()=>{ $('transcript').value=SAMPLE; };
+$('toCreate').onclick=async()=>{ try{ await ensureRun(); document.querySelector('.navitem[data-view="create"]').click(); }catch(e){ alert(e.message); } };
 $('aiDistribute').onclick=async()=>{ const m=$('pubMsg'); m.style.color='var(--muted)'; m.textContent='розподіляю…'; try{ const r=await api('/schedule/auto',{method:'POST'}); m.style.color='var(--ok)'; m.textContent='розподілено: '+r.count; await loadPublish(); }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; } };
 $('reloadPub').onclick=()=>loadPublish();
 $('newRun').onclick=()=>{
