@@ -21,6 +21,10 @@ export const env = {
     appId: process.env.THREADS_APP_ID ?? "",
     appSecret: process.env.THREADS_APP_SECRET ?? "",
   },
+  meta: {
+    appId: process.env.META_APP_ID ?? "",
+    appSecret: process.env.META_APP_SECRET ?? "",
+  },
   adminEmails: (process.env.ADMIN_EMAILS ?? "o.stepeniev@swipescape.eu,stepenievgroup@gmail.com")
     .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
 };

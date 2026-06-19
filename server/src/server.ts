@@ -9,6 +9,7 @@ import { q, one } from "./db.js";
 import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, rewriteWithStep, deriveVoice, generateStrategy } from "./pipeline.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
+import * as meta from "./meta.js";
 import * as fireflies from "./fireflies.js";
 import * as auth from "./auth.js";
 import { sendVerifyEmail, sendResetEmail } from "./email.js";
@@ -549,6 +550,104 @@ app.get("/api/posts/:postId/threads-insights", async (req: any, reply) => {
   if (!tok) return reply.code(400).send({ error: "Threads не підключений" });
   try { return await threads.mediaInsights(tok.token, pub.media_id); }
   catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+
+// ===================== META (Facebook + Instagram) =====================
+const META_REDIRECT = `${env.appBaseUrl}/api/integrations/meta/callback`;
+const META_SCOPES = ["public_profile", "pages_show_list", "pages_read_engagement", "pages_manage_posts", "instagram_basic", "instagram_manage_insights"];
+
+async function metaCfg(ws: string) {
+  return one<{ page_id: string | null; page_name: string | null; page_token: string | null; ig_user_id: string | null; ig_username: string | null; token_expires_at: string | null }>(
+    `select page_id, page_name, page_token, ig_user_id, ig_username, token_expires_at from meta_config where workspace_id=$1`, [ws]);
+}
+
+app.get("/api/integrations/meta", async (req: any) => {
+  const c = await metaCfg(req.user.workspace_id);
+  return {
+    configured: !!env.meta.appId,
+    hasToken: !!(c && c.page_token),
+    pageName: c?.page_name ?? "",
+    igUsername: c?.ig_username ?? "",
+    expiresAt: c?.token_expires_at ?? null,
+  };
+});
+
+app.get("/api/integrations/meta/connect", async (req: any, reply) => {
+  if (!env.meta.appId) return reply.code(400).send({ error: "META_APP_ID не заданий на сервері" });
+  const state = auth.newToken();
+  reply.setCookie("meta_state", state, stateCookie);
+  return reply.redirect(meta.authUrl(env.meta.appId, META_REDIRECT, state, META_SCOPES));
+});
+
+app.get("/api/integrations/meta/callback", async (req: any, reply) => {
+  const code = String(req.query?.code ?? ""); const state = String(req.query?.state ?? "");
+  if (!code || !state || state !== req.cookies?.meta_state) return reply.redirect("/app?meta=error");
+  reply.clearCookie("meta_state", { path: "/" });
+  try {
+    const short = await meta.exchangeCode(env.meta.appId, env.meta.appSecret, META_REDIRECT, code);
+    const long = await meta.exchangeLongLived(env.meta.appId, env.meta.appSecret, short.access_token);
+    const pages = await meta.getPages(long.access_token);
+    if (!pages.length) return reply.redirect("/app?meta=nopage");
+    const page = pages.find((p) => p.instagram_business_account?.id) || pages[0]; // надаємо перевагу сторінці з IG
+    const exp = long.expires_in ? new Date(Date.now() + long.expires_in * 1000).toISOString() : null;
+    await q(`insert into meta_config(workspace_id, user_token, page_id, page_name, page_token, ig_user_id, ig_username, token_expires_at, updated_at)
+             values($1,$2,$3,$4,$5,$6,$7,$8,now())
+             on conflict (workspace_id) do update set user_token=excluded.user_token, page_id=excluded.page_id, page_name=excluded.page_name,
+               page_token=excluded.page_token, ig_user_id=excluded.ig_user_id, ig_username=excluded.ig_username,
+               token_expires_at=excluded.token_expires_at, updated_at=now()`,
+      [req.user.workspace_id, long.access_token, page.id, page.name, page.access_token,
+       page.instagram_business_account?.id ?? null, page.instagram_business_account?.username ?? null, exp]);
+    await logEvent("info", "meta", `підключено сторінку «${page.name}»${page.instagram_business_account ? ` + IG @${page.instagram_business_account.username || ""}` : ""}`, null, req.user.id);
+    return reply.redirect("/app?meta=ok");
+  } catch (e: any) {
+    await logEvent("error", "meta", "OAuth callback: " + e.message, null, req.user.id);
+    return reply.redirect("/app?meta=error");
+  }
+});
+
+app.post("/api/integrations/meta/disconnect", async (req: any) => {
+  await q(`delete from meta_config where workspace_id=$1`, [req.user.workspace_id]);
+  return { ok: true };
+});
+
+app.post("/api/posts/:postId/publish/facebook", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const post = await postOwned(req.params.postId, ws);
+  if (!post) return reply.code(404).send({ error: "пост не знайдено" });
+  const c = await metaCfg(ws);
+  if (!c?.page_id || !c.page_token) return reply.code(400).send({ error: "Facebook не підключений — підключіть у Налаштуваннях" });
+  try {
+    const r = await meta.publishToPage(c.page_id, c.page_token, post.content);
+    await q(`insert into meta_publish(post_id, channel, external_id, status) values($1,'facebook',$2,'sent')`, [req.params.postId, r.id]);
+    return { ok: true, externalId: r.id };
+  } catch (e: any) {
+    await q(`insert into meta_publish(post_id, channel, status, error) values($1,'facebook','error',$2)`, [req.params.postId, e.message]);
+    await logEvent("error", "meta", `публікація FB: ${e.message}`, null, req.user.id);
+    return reply.code(500).send({ error: e.message });
+  }
+});
+
+app.get("/api/posts/:postId/facebook-insights", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  const pub = await one<{ external_id: string }>(
+    `select external_id from meta_publish where post_id=$1 and channel='facebook' and status='sent' and external_id is not null order by created_at desc limit 1`,
+    [req.params.postId]);
+  if (!pub?.external_id) return reply.code(400).send({ error: "Цей пост ще не опубліковано у Facebook" });
+  const c = await metaCfg(ws);
+  if (!c?.page_token) return reply.code(400).send({ error: "Facebook не підключений" });
+  try { return await meta.postInsights(pub.external_id, c.page_token); }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+
+// зведена аналітика акаунтів (FB-Сторінка + IG): надійні поля підписників
+app.get("/api/integrations/meta/stats", async (req: any, reply) => {
+  const c = await metaCfg(req.user.workspace_id);
+  if (!c?.page_token) return reply.code(400).send({ error: "Meta не підключений" });
+  const out: any = {};
+  try { if (c.page_id) out.facebook = await meta.pageStats(c.page_id, c.page_token); } catch (e: any) { out.facebookError = e.message; }
+  try { if (c.ig_user_id) out.instagram = await meta.igStats(c.ig_user_id, c.page_token); } catch (e: any) { out.instagramError = e.message; }
+  return out;
 });
 
 // ===================== POST-ЮНІТИ (банк публікацій) =====================

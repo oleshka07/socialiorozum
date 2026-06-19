@@ -251,6 +251,30 @@ create table if not exists threads_publish (
 );
 create index if not exists idx_thpub_post on threads_publish(post_id);
 
+-- інтеграція Meta (Facebook + Instagram): FB-постинг + аналітика (токени лише на сервері)
+create table if not exists meta_config (
+  workspace_id     uuid primary key references workspace(id) on delete cascade,
+  user_token       text,
+  page_id          text,
+  page_name        text,
+  page_token       text,
+  ig_user_id       text,
+  ig_username      text,
+  token_expires_at timestamptz,
+  updated_at       timestamptz not null default now()
+);
+
+create table if not exists meta_publish (
+  id          uuid primary key default gen_random_uuid(),
+  post_id     uuid references post(id) on delete cascade,
+  channel     text not null,             -- facebook
+  external_id text,                      -- id поста у FB
+  status      text not null,             -- sent|error
+  error       text,
+  created_at  timestamptz not null default now()
+);
+create index if not exists idx_metapub_post on meta_publish(post_id);
+
 -- згенерована стратегія (L2): JSON-артефакт на workspace
 create table if not exists strategy (
   workspace_id uuid primary key references workspace(id) on delete cascade,

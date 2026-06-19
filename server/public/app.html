@@ -270,6 +270,17 @@
         <div class="ctl"><a id="thConnect" class="primary" href="/api/integrations/threads/connect" style="display:none;text-decoration:none">🔗 Підключити Threads</a><button class="ghost" id="thDisconnect" style="display:none">Відключити</button></div>
       </div></div>
       <div class="settings"><div class="body">
+        <b>📘 Facebook + Instagram (Meta)</b>
+        <div class="hint" style="line-height:1.7">
+          Постинг у Facebook-Сторінку + аналітика FB/IG (підключення через вхід у Facebook).<br>
+          Instagram підключається й показує статистику; <b>публікація в IG</b> потребує зображення (пости текстові) — увімкнемо згодом.<br>
+          На сервері мають бути <code>META_APP_ID</code>/<code>META_APP_SECRET</code>, а у Facebook Login → Redirect URI — <code>…/api/integrations/meta/callback</code>.
+        </div>
+        <div class="ctl"><span id="mtStatus" style="font-size:13px;color:var(--muted)">…</span></div>
+        <div class="ctl"><a id="mtConnect" class="primary" href="/api/integrations/meta/connect" style="display:none;text-decoration:none">🔗 Підключити Facebook/Instagram</a><button class="ghost" id="mtStats" style="display:none">📊 Статистика</button><button class="ghost" id="mtDisconnect" style="display:none">Відключити</button></div>
+        <div id="mtStatsOut" class="out"></div>
+      </div></div>
+      <div class="settings"><div class="body">
         <b>🎙️ Транскрибація (Fireflies)</b>
         <div class="hint">API-ключ: Fireflies → Settings → Developer Settings → API Key. Далі імпортуй зустрічі у «Створенні».</div>
         <div class="fld"><label>Fireflies API Key</label><input class="txt" type="password" id="ffKey" placeholder="вставте ключ"></div>
@@ -412,6 +423,8 @@ function renderFinals(posts,published){
       +'<button class="pub" data-t="group">'+(isPub(p.id,'group')?'✓ група':'→ Група')+'</button>'
       +'<button class="pubth">🧵 Threads</button>'
       +'<button class="act statth">📊 Threads</button>'
+      +'<button class="pubfb">📘 Facebook</button>'
+      +'<button class="act statfb">📊 FB</button>'
       +'<span class="pubmsg" style="font-size:12px"></span></div></div>';
   }).join('');
   o.querySelectorAll('.tg').forEach(card=>{ const id=card.dataset.post;
@@ -419,6 +432,8 @@ function renderFinals(posts,published){
     card.querySelectorAll('.pub').forEach(b=>b.onclick=()=>publishUnit(card,id,b.dataset.t,b));
     const pth=card.querySelector('.pubth'); if(pth) pth.onclick=()=>publishThreads(card,id,pth);
     const sth=card.querySelector('.statth'); if(sth) sth.onclick=()=>threadsStats(card,id);
+    const pfb=card.querySelector('.pubfb'); if(pfb) pfb.onclick=()=>publishFacebook(card,id,pfb);
+    const sfb=card.querySelector('.statfb'); if(sfb) sfb.onclick=()=>facebookStats(card,id);
   });
 }
 async function postAction(card,id,a){
@@ -451,6 +466,17 @@ async function publishThreads(card,id,btn){
 async function threadsStats(card,id){
   const msg=card.querySelector('.pubmsg'); if(msg){msg.style.color='var(--muted)';msg.textContent=' завантаження…';}
   try{ const s=await api('/posts/'+id+'/threads-insights'); if(msg){msg.style.color='var(--ok)';msg.textContent=' 👁 '+(s.views||0)+' · ❤ '+(s.likes||0)+' · 💬 '+(s.replies||0)+' · 🔁 '+(s.reposts||0)+' · ❝ '+(s.quotes||0);} }
+  catch(e){ if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+e.message;} }
+}
+
+async function publishFacebook(card,id,btn){
+  const msg=card.querySelector('.pubmsg'); const old=btn.textContent; btn.disabled=true; btn.innerHTML='<span class="spin"></span>'; if(msg) msg.textContent='';
+  try{ await api('/posts/'+id+'/publish/facebook',{method:'POST'}); btn.textContent='✓ Facebook'; }
+  catch(e){ btn.disabled=false; btn.textContent=old; if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+e.message;} }
+}
+async function facebookStats(card,id){
+  const msg=card.querySelector('.pubmsg'); if(msg){msg.style.color='var(--muted)';msg.textContent=' завантаження…';}
+  try{ const s=await api('/posts/'+id+'/facebook-insights'); if(msg){msg.style.color='var(--ok)';msg.textContent=' 👁 '+(s.post_impressions||0)+' · 🙋 '+(s.post_impressions_unique||0)+' · 🖱 '+(s.post_clicks||0);} }
   catch(e){ if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+e.message;} }
 }
 
@@ -612,6 +638,21 @@ async function loadThreads(){
   }catch(e){}
 }
 $('thDisconnect').onclick=async()=>{ if(!confirm('Відключити Threads?')) return; try{ await api('/integrations/threads/disconnect',{method:'POST'}); await loadThreads(); }catch(e){} };
+async function loadMeta(){
+  try{ const c=await api('/integrations/meta');
+    const st=$('mtStatus'), conn=$('mtConnect'), dis=$('mtDisconnect'), stats=$('mtStats'); if(!st) return;
+    if(!c.configured){ st.textContent='⚠ META_APP_ID не налаштований на сервері.'; [conn,dis,stats].forEach(b=>b&&(b.style.display='none')); return; }
+    if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.pageName?(' · FB: <b>'+esc(c.pageName)+'</b>'):'')+(c.igUsername?(' · IG: <b>@'+esc(c.igUsername)+'</b>'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-block'; if(stats)stats.style.display='inline-block'; }
+    else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-block'; if(dis)dis.style.display='none'; if(stats)stats.style.display='none'; }
+  }catch(e){}
+}
+$('mtDisconnect').onclick=async()=>{ if(!confirm('Відключити Facebook/Instagram?')) return; try{ await api('/integrations/meta/disconnect',{method:'POST'}); await loadMeta(); }catch(e){} };
+$('mtStats').onclick=async()=>{ const o=$('mtStatsOut'); o.innerHTML='<div class="empty"><span class="spin"></span> завантаження…</div>';
+  try{ const s=await api('/integrations/meta/stats');
+    o.innerHTML=(s.facebook?('<div class="card">📘 <b>'+esc(s.facebook.name||'FB')+'</b>: '+(s.facebook.followers_count||s.facebook.fan_count||0)+' підписників</div>'):'')
+      +(s.instagram?('<div class="card">📸 <b>@'+esc(s.instagram.username||'')+'</b>: '+(s.instagram.followers_count||0)+' підписників · '+(s.instagram.media_count||0)+' постів</div>'):'')
+      +(!s.facebook&&!s.instagram?'<div class="empty">Немає даних.</div>':'');
+  }catch(e){ o.innerHTML='<div class="card" style="color:var(--stale)">⚠ '+esc(e.message)+'</div>'; } };
 $('tgSave').onclick=async()=>{
   try{ await api('/integrations/telegram',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({botToken:$('tgToken').value,channelChatId:$('tgChannel').value,groupChatId:$('tgGroup').value})});
     $('tgToken').value=''; $('tgToken').placeholder='•••••••• (токен збережено)';
@@ -802,8 +843,11 @@ $('obNext').onclick=async()=>{
   await loadSettings();
   await loadTelegram();
   loadThreads();
-  const _thq=new URLSearchParams(location.search).get('threads');
-  if(_thq){ history.replaceState(null,'',location.pathname); alert(_thq==='ok'?'Threads підключено ✓':'Не вдалося підключити Threads. Перевірте дозволи й Redirect URI у Meta.'); }
+  loadMeta();
+  const _sp=new URLSearchParams(location.search); const _thq=_sp.get('threads'), _mtq=_sp.get('meta');
+  if(_thq||_mtq) history.replaceState(null,'',location.pathname);
+  if(_thq) alert(_thq==='ok'?'Threads підключено ✓':'Не вдалося підключити Threads. Перевірте дозволи й Redirect URI у Meta.');
+  if(_mtq) alert(_mtq==='ok'?'Facebook/Instagram підключено ✓':(_mtq==='nopage'?'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).':'Не вдалося підключити Facebook/Instagram. Перевірте дозволи й Redirect URI.'));
   await loadPrompts();
   loadRubrics();
   loadStrategy();
