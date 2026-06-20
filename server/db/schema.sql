@@ -283,6 +283,21 @@ create table if not exists meta_publish (
 );
 create index if not exists idx_metapub_post on meta_publish(post_id);
 
+-- збережені контент-джерела (RSS) на workspace; фоновий поллер тягне нові статті
+create table if not exists content_source (
+  id             uuid primary key default gen_random_uuid(),
+  workspace_id   uuid not null references workspace(id) on delete cascade,
+  kind           text not null default 'rss',
+  url            text not null,
+  title          text,
+  active         boolean not null default true,
+  auto_run       boolean not null default false,
+  last_pulled_at timestamptz,
+  last_error     text,
+  created_at     timestamptz not null default now()
+);
+create index if not exists idx_contentsource_ws on content_source(workspace_id);
+
 -- згенерована стратегія (L2): JSON-артефакт на workspace
 create table if not exists strategy (
   workspace_id uuid primary key references workspace(id) on delete cascade,

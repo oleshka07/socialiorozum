@@ -151,8 +151,16 @@
         </div>
       </div></div>
       <div class="settings"><div class="body">
-        <b>Інші джерела</b>
-        <div class="tray"><span class="chip placed">RSS · скоро</span><span class="chip placed">Google Drive · скоро</span><span class="chip placed">Новини ніші · скоро</span></div>
+        <b>📡 RSS-стрічки (авто-інжест)</b>
+        <div class="hint">Додай URL RSS/Atom-стрічки — поллер кожні ~15 хв тягне нові статті у «Джерела». «Авто-пілот» = одразу проганяти кишку для нових (обережно з вартістю AI).</div>
+        <div class="ctl" style="margin-top:8px"><input class="txt" id="rssUrl" placeholder="https://example.com/feed.xml" style="flex:1;min-width:220px"><label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="rssAuto"> авто-пілот</label><button class="primary" id="rssAdd">Додати</button></div>
+        <div id="rssMsg" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
+        <div id="rssList" class="out" style="margin-top:10px"></div>
+      </div></div>
+      <div class="settings"><div class="body">
+        <div style="display:flex;align-items:center;justify-content:space-between"><b>🗂️ Останні джерела</b><button class="ghost" id="recReload">↻</button></div>
+        <div class="hint">Усе, що підтягнулося (RSS / Fireflies / вручну). «Відкрити» — щоб працювати з ним у «Створенні».</div>
+        <div id="recList" class="out" style="margin-top:8px"></div>
       </div></div>
     </section>
 
@@ -744,6 +752,44 @@ async function resetPrompt(step){
 }
 
 // ---------- Fireflies (транскрибація) ----------
+// ---------- RSS-стрічки ----------
+async function loadRss(){
+  const o=$('rssList'); if(!o) return;
+  try{ const feeds=await api('/sources/rss');
+    if(!feeds.length){ o.innerHTML='<div class="empty">Поки немає стрічок.</div>'; return; }
+    o.innerHTML=feeds.map(f=>'<div class="card" data-id="'+f.id+'"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">'
+      +'<div style="min-width:0;flex:1"><div style="word-break:break-all">'+esc(f.url)+'</div>'
+      +'<div style="font-size:12px;color:var(--muted)">'+(f.last_pulled_at?('останнє: '+new Date(f.last_pulled_at).toLocaleString()):'ще не тягнулось')+(f.last_error?(' · ⚠ '+esc(f.last_error)):'')+'</div></div>'
+      +'<div class="ctl" style="margin:0;flex-wrap:nowrap">'
+      +'<label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" class="rssActive" '+(f.active?'checked':'')+'> активна</label>'
+      +'<label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" class="rssAutoT" '+(f.auto_run?'checked':'')+'> авто</label>'
+      +'<button class="ghost rssPull">↓ Тягнути</button><button class="act rssDel">🗑</button></div></div></div>').join('');
+    o.querySelectorAll('.card[data-id]').forEach(c=>{ const id=c.dataset.id;
+      c.querySelector('.rssActive').onchange=e=>api('/sources/rss/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:e.target.checked})}).catch(()=>{});
+      c.querySelector('.rssAutoT').onchange=e=>api('/sources/rss/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({autoRun:e.target.checked})}).catch(()=>{});
+      c.querySelector('.rssPull').onclick=async(ev)=>{ const b=ev.target; b.disabled=true; b.textContent='…'; try{ const r=await api('/sources/rss/'+id+'/pull',{method:'POST'}); b.textContent='+'+r.created; await loadRss(); await loadRecent(); }catch(e){ b.textContent='⚠'; alert(e.message); } finally{ setTimeout(()=>{b.disabled=false;b.textContent='↓ Тягнути';},1500); } };
+      c.querySelector('.rssDel').onclick=async()=>{ if(!confirm('Видалити стрічку?'))return; try{ await api('/sources/rss/'+id,{method:'DELETE'}); await loadRss(); }catch(e){ alert(e.message); } };
+    });
+  }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
+}
+$('rssAdd').onclick=async()=>{
+  const url=$('rssUrl').value.trim(); const m=$('rssMsg');
+  if(!url){ m.style.color='var(--stale)'; m.textContent='Вкажи URL'; return; }
+  m.style.color='var(--muted)'; m.textContent='додаю…';
+  try{ await api('/sources/rss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,autoRun:$('rssAuto').checked})}); $('rssUrl').value=''; $('rssAuto').checked=false; m.style.color='var(--ok)'; m.textContent='додано ✓'; await loadRss(); }
+  catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; }
+};
+// ---------- останні джерела ----------
+async function loadRecent(){
+  const o=$('recList'); if(!o) return;
+  try{ const rows=await api('/sources/recent');
+    if(!rows.length){ o.innerHTML='<div class="empty">Поки порожньо.</div>'; return; }
+    const ICON={rss:'📡',fireflies:'🎙️',manual:'📝'};
+    o.innerHTML=rows.map(s=>'<div class="card" data-run="'+s.run_id+'" style="display:flex;justify-content:space-between;gap:8px;align-items:center"><div style="min-width:0"><div>'+(ICON[s.origin]||'📄')+' '+esc(s.title||'(без назви)')+'</div><div style="font-size:12px;color:var(--muted)">'+esc(s.origin||'')+' · '+new Date(s.created_at).toLocaleString()+'</div></div><button class="ghost recOpen">Відкрити</button></div>').join('');
+    o.querySelectorAll('.card[data-run]').forEach(c=>{ c.querySelector('.recOpen').onclick=async()=>{ runId=c.dataset.run; localStorage.setItem('kg_run',runId); updRunLabel(); document.querySelector('.navitem[data-view="create"]').click(); try{ await refresh(); }catch(e){} }; });
+  }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
+}
+$('recReload').onclick=()=>loadRecent();
 async function loadFF(){ try{ const c=await api('/integrations/transcription');
   if(c.hasKey) $('ffKey').placeholder='•••••••• (ключ збережено)';
   if($('ffHook')) $('ffHook').value=c.webhookUrl||'';
@@ -885,6 +931,8 @@ $('obNext').onclick=async()=>{
   loadRubrics();
   loadStrategy();
   loadFF();
+  loadRss();
+  loadRecent();
   try{ const st=await api('/settings'); if(!st.some(r=>r.key==='onboarded')) showOnboarding(); }catch(e){}
   loadUsage();
   updRunLabel();

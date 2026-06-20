@@ -16,6 +16,7 @@ import * as auth from "./auth.js";
 import { sendVerifyEmail, sendResetEmail } from "./email.js";
 import { logEvent } from "./log.js";
 import { startAutopost } from "./autopost.js";
+import { startRssPoller, pullFeed } from "./rss-poller.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = Fastify({ logger: true, trustProxy: true });
@@ -276,6 +277,49 @@ app.post("/api/sources", async (req: any) => {
   const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
   return { sourceId: src!.id, runId: run!.id };
 });
+
+// ----- контент-джерела (RSS) -----
+app.get("/api/sources/rss", async (req: any) =>
+  q(`select id, url, title, active, auto_run, last_pulled_at, last_error from content_source
+     where workspace_id=$1 and kind='rss' order by created_at desc`, [req.user.workspace_id]));
+
+app.post("/api/sources/rss", async (req: any, reply) => {
+  const url = String(req.body?.url ?? "").trim();
+  if (!/^https?:\/\//i.test(url)) return reply.code(400).send({ error: "Вкажіть коректний URL стрічки (https://…)" });
+  const autoRun = req.body?.autoRun === true;
+  const r = await one<{ id: string }>(
+    `insert into content_source(workspace_id, kind, url, auto_run) values($1,'rss',$2,$3) returning id`,
+    [req.user.workspace_id, url, autoRun]);
+  return { ok: true, id: r!.id };
+});
+
+app.put("/api/sources/rss/:id", async (req: any, reply) => {
+  const owned = await one(`select id from content_source where id=$1 and workspace_id=$2`, [req.params.id, req.user.workspace_id]);
+  if (!owned) return reply.code(404).send({ error: "стрічку не знайдено" });
+  const active = typeof req.body?.active === "boolean" ? req.body.active : null;
+  const autoRun = typeof req.body?.autoRun === "boolean" ? req.body.autoRun : null;
+  await q(`update content_source set active=coalesce($2,active), auto_run=coalesce($3,auto_run) where id=$1`,
+    [req.params.id, active, autoRun]);
+  return { ok: true };
+});
+
+app.delete("/api/sources/rss/:id", async (req: any, reply) => {
+  const owned = await one(`select id from content_source where id=$1 and workspace_id=$2`, [req.params.id, req.user.workspace_id]);
+  if (!owned) return reply.code(404).send({ error: "стрічку не знайдено" });
+  await q(`delete from content_source where id=$1`, [req.params.id]);
+  return { ok: true };
+});
+
+app.post("/api/sources/rss/:id/pull", async (req: any, reply) => {
+  try { return { ok: true, created: await pullFeed(req.params.id, req.user.workspace_id) }; }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+
+// останні підтягнуті джерела (RSS/Fireflies/ручні) — щоб їх можна було відкрити в роботі
+app.get("/api/sources/recent", async (req: any) =>
+  q(`select s.id, s.title, s.origin, s.created_at, r.id as run_id
+     from source s join pipeline_run r on r.source_id=s.id
+     where s.workspace_id=$1 order by s.created_at desc limit 20`, [req.user.workspace_id]));
 
 app.get("/api/runs/:id", async (req: any, reply) => {
   const { id } = req.params;
@@ -996,4 +1040,5 @@ app.get("/reset", (_req, reply) => reply.sendFile("auth.html"));
 app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
   app.log.info(`socialio на ${addr}`);
   startAutopost();
+  startRssPoller();
 });
