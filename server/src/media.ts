@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
 import { writeFile, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import heicConvert from "heic-convert";
 import { q } from "./db.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -15,16 +16,26 @@ export async function saveMedia(
   ws: string,
   opts: { buffer: Buffer; mime: string; name?: string; source?: string; externalId?: string }
 ): Promise<{ id: string; filename: string; kind: string }> {
-  const mime = opts.mime || "application/octet-stream";
+  let buffer = opts.buffer;
+  let mime = opts.mime || "application/octet-stream";
+  const nm = String(opts.name || "").toLowerCase();
+  // iPhone HEIC/HEIF -> JPEG (браузер їх не показує, Meta не приймає)
+  if (/heic|heif/.test(mime) || nm.endsWith(".heic") || nm.endsWith(".heif")) {
+    try {
+      const out = await heicConvert({ buffer, format: "JPEG", quality: 0.9 });
+      buffer = Buffer.from(out as ArrayBuffer);
+      mime = "image/jpeg";
+    } catch { /* конвертація не вдалась — зберігаємо як є */ }
+  }
   const ext = (mime.split("/")[1] || "bin").replace(/[^a-z0-9]/gi, "").slice(0, 5) || "bin";
   const id = randomUUID();
   const filename = `${id}.${ext}`;
-  await writeFile(join(MEDIA_DIR, filename), opts.buffer);
+  await writeFile(join(MEDIA_DIR, filename), buffer);
   const kind = mime.startsWith("video") ? "video" : "image";
   await q(
     `insert into media_asset(id, workspace_id, kind, mime, original_name, filename, size, source, external_id)
      values($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-    [id, ws, kind, mime, String(opts.name || "").slice(0, 200), filename, opts.buffer.length, opts.source || "upload", opts.externalId || null]
+    [id, ws, kind, mime, String(opts.name || "").slice(0, 200), filename, buffer.length, opts.source || "upload", opts.externalId || null]
   );
   return { id, filename, kind };
 }
