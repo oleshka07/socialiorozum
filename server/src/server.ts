@@ -30,6 +30,14 @@ app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body,
   try { done(null, JSON.parse(body as string)); } catch (e) { done(e as Error, undefined); }
 });
 
+// HTML-сторінки не кешуємо браузером — щоб після деплою одразу бачити свіжий app.html
+app.addHook("onSend", async (req: any, reply, payload) => {
+  const u = (req.raw.url || "").split("?")[0];
+  if (["/", "/app", "/B", "/b", "/login", "/register", "/forgot", "/reset"].includes(u))
+    reply.header("Cache-Control", "no-cache, must-revalidate");
+  return payload;
+});
+
 // базові security-заголовки
 app.addHook("onRequest", async (_req, reply) => {
   reply.header("X-Frame-Options", "DENY");
