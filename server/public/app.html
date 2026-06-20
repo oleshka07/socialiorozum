@@ -624,6 +624,7 @@ function renderBank(){
 }
 function calMonday(){const d=new Date();const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);d.setHours(0,0,0,0);return d;}
 function calISO(off){const d=calMonday();d.setDate(d.getDate()+off);return d.toISOString().slice(0,10);}
+function chanIcons(ch){ if(!ch) return ''; const I={telegram:'✈️',instagram:'📸',facebook:'📘',threads:'🧵'}; return Object.keys(I).filter(k=>ch[k]&&ch[k].on).map(k=>I[k]).join(''); }
 function renderCal(){
   const cal=$('cal'); if(!cal) return; cal.innerHTML='';
   ['Пн','Вт','Ср','Чт','Пт','Сб','Нд'].forEach(d=>{const h=document.createElement('div');h.className='dow';h.textContent=d;cal.appendChild(h);});
@@ -634,7 +635,7 @@ function renderCal(){
     (byDay[iso]||[]).sort((a,b)=>String(a.scheduled_at).localeCompare(String(b.scheduled_at))).forEach(s=>{
       const time=String(s.scheduled_at).slice(11,16); const posted=s.status==='posted';
       const ch=document.createElement('div'); ch.className='pchip'; ch.style.cursor='pointer';
-      ch.innerHTML='<b style="color:var(--accent2)">'+time+(posted?' ✓':'')+'</b> '+esc((s.content||'').replace(/\n+/g,' ').slice(0,20));
+      ch.innerHTML='<b style="color:var(--accent2)">'+time+(posted?' ✓':'')+'</b> '+chanIcons(s.channels)+' '+esc((s.content||'').replace(/\n+/g,' ').slice(0,18));
       ch.onclick=()=>slotDialog(s); cell.appendChild(ch);
     });
     cell.addEventListener('dragover',ev=>{ev.preventDefault();cell.classList.add('over');});

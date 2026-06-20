@@ -1,26 +1,18 @@
 import { q, one } from "./db.js";
-import * as tg from "./telegram.js";
 import { logEvent } from "./log.js";
+import { publishPostToChannels } from "./publisher.js";
 
-// Фоновий воркер: публікує заплановані (status='planned') слоти, час яких настав.
-// Постить лише те, що користувач свідомо додав у календар із датою.
+// Фоновий воркер: публікує заплановані (status='planned') слоти, час яких настав,
+// у ВСІ обрані мережі поста (post.channels). Якщо мережі не обрані — Telegram (legacy).
 async function tick(): Promise<void> {
-  const due = await q<{
-    id: string; post_id: string | null; content: string | null;
-    bot_token: string | null; channel_chat: string | null; group_chat: string | null;
-  }>(
-    `select ss.id,
-            p.id as post_id, p.content as content,
-            tc.bot_token,
-            tc.channel_chat_id as channel_chat,
-            tc.group_chat_id   as group_chat
+  const due = await q<{ id: string; post_id: string; workspace_id: string }>(
+    `select ss.id, p.id as post_id, s.workspace_id
      from schedule_slot ss
        left join plan_item pi on pi.id = ss.plan_item_id
        join post p on p.id = coalesce(ss.post_id, pi.post_id)
        join pipeline_run r on r.id = p.run_id
        join source s on s.id = r.source_id
-       left join telegram_config tc on tc.workspace_id = s.workspace_id
-     where ss.status = 'planned' and ss.scheduled_at is not null and ss.scheduled_at <= now()
+     where ss.status='planned' and ss.scheduled_at is not null and ss.scheduled_at <= now()
      order by ss.scheduled_at
      limit 20`
   );
@@ -29,29 +21,18 @@ async function tick(): Promise<void> {
     // атомарно "забираємо" слот, щоб не задублювати при перекритті тіків
     const claimed = await one(`update schedule_slot set status='posting' where id=$1 and status='planned' returning id`, [slot.id]);
     if (!claimed) continue;
-
-    if (!slot.content || !slot.bot_token) {
+    try {
+      const results = await publishPostToChannels(slot.workspace_id, slot.post_id, { fallbackTelegram: true });
+      const anyOk = results.some((r) => r.status === "sent");
+      await q(`update schedule_slot set status=$2 where id=$1`, [slot.id, anyOk ? "posted" : "failed"]);
+      const ok = results.filter((r) => r.status === "sent").map((r) => r.channel).join(", ");
+      const err = results.filter((r) => r.status === "error").map((r) => `${r.channel}: ${r.error}`).join("; ");
+      if (anyOk) await logEvent("info", "autopost", `slot ${slot.id} → ${ok}${err ? ` (помилки: ${err})` : ""}`);
+      else await logEvent("warn", "autopost", `slot ${slot.id} не опубліковано: ${err || "немає каналів"}`);
+    } catch (e: any) {
       await q(`update schedule_slot set status='failed' where id=$1`, [slot.id]);
-      await logEvent("warn", "autopost", `slot ${slot.id}: немає контенту або Telegram не підключений`);
-      continue;
+      await logEvent("error", "autopost", `slot ${slot.id}: ${e.message}`);
     }
-
-    let anyOk = false;
-    for (const [target, chatId] of [["channel", slot.channel_chat], ["group", slot.group_chat]] as const) {
-      if (!chatId) continue;
-      try {
-        const r = await tg.sendMessage(slot.bot_token, chatId, slot.content);
-        await q(`insert into telegram_publish(post_id, target, chat_id, message_id, status) values($1,$2,$3,$4,'sent')`,
-          [slot.post_id, target, chatId, r.message_id]);
-        anyOk = true;
-      } catch (e: any) {
-        await q(`insert into telegram_publish(post_id, target, chat_id, status, error) values($1,$2,$3,'error',$4)`,
-          [slot.post_id, target, chatId, e.message]);
-        await logEvent("error", "autopost", `slot ${slot.id} ${target}: ${e.message}`);
-      }
-    }
-    await q(`update schedule_slot set status=$2 where id=$1`, [slot.id, anyOk ? "posted" : "failed"]);
-    if (anyOk) await logEvent("info", "autopost", `опубліковано slot ${slot.id}`);
   }
 }
 
