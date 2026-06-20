@@ -1239,6 +1239,8 @@ app.get("/login", (_req, reply) => reply.sendFile("auth.html"));
 app.get("/register", (_req, reply) => reply.sendFile("auth.html"));
 app.get("/forgot", (_req, reply) => reply.sendFile("auth.html"));
 app.get("/reset", (_req, reply) => reply.sendFile("auth.html"));
+app.get("/privacy", (_req, reply) => reply.sendFile("privacy.html"));
+app.get("/terms", (_req, reply) => reply.sendFile("terms.html"));
 
 app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
   app.log.info(`socialio на ${addr}`);
