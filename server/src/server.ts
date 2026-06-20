@@ -4,7 +4,7 @@ import fstatic from "@fastify/static";
 import cookie from "@fastify/cookie";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { createHmac } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
 import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, rewriteWithStep, deriveVoice, generateStrategy } from "./pipeline.js";
@@ -911,9 +911,15 @@ app.post("/api/webhooks/fireflies/:token", async (req: any, reply) => {
     `select workspace_id, api_key, webhook_secret, auto_run from transcription_config where webhook_token=$1`, [req.params.token]);
   if (!cfg) return reply.code(404).send({ error: "unknown webhook" });
   if (cfg.webhook_secret) {
-    const expected = createHmac("sha256", cfg.webhook_secret).update(req.rawBody || "").digest("hex");
+    const raw = req.rawBody || "";
+    const expected = createHmac("sha256", cfg.webhook_secret).update(raw).digest("hex");
     const got = String(req.headers["x-hub-signature"] || "").replace(/^sha256=/, "");
-    if (!got || got !== expected) { await logEvent("warn", "transcription", "вебхук: невірний підпис", null); return reply.code(401).send({ error: "bad signature" }); }
+    const gb = Buffer.from(got), eb = Buffer.from(expected);
+    const okSig = gb.length === eb.length && timingSafeEqual(gb, eb);
+    if (!okSig) {
+      await logEvent("warn", "transcription", `вебхук: невірний підпис (rawLen=${raw.length}, hdr=${req.headers["x-hub-signature"] ? "є" : "нема"}, got=${got.slice(0, 10)}, exp=${expected.slice(0, 10)})`, null);
+      return reply.code(401).send({ error: "bad signature" });
+    }
   }
   const body = req.body || {};
   if (body.eventType && body.eventType !== "Transcription completed") return { ok: true, ignored: true };
