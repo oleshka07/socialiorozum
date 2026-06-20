@@ -51,6 +51,9 @@
   .badge.run{color:var(--accent);border-color:var(--accent)}
   .badge.soon{color:var(--warn);border-color:var(--warn)}
   .ctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0 0}
+  .netchip{font-size:12px;padding:5px 11px;border-radius:8px;margin:0 6px 6px 0;border:1px solid var(--line);background:transparent;color:var(--txt);cursor:pointer}
+  .netchip.on{background:var(--ok);border-color:var(--ok);color:#04140d}
+  .netchip:disabled{opacity:.4;cursor:not-allowed}
   button{cursor:pointer;border:1px solid var(--line);background:var(--panel2);color:var(--txt);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;transition:.15s}
   button:hover{border-color:var(--accent)}
   button.primary{background:var(--accent);border-color:var(--accent);color:#06122b}
@@ -232,7 +235,7 @@
           <div class="out" id="o4"><div class="empty">—</div></div>
         </section>
         <section class="step" id="s5">
-          <div class="shead"><div class="t"><span class="num">5</span> Формат під Telegram <span class="badge soon">IG / FB — скоро</span></div><span class="badge" id="b5">очікує</span></div>
+          <div class="shead"><div class="t"><span class="num">5</span> Формат</div><span class="badge" id="b5">очікує</span></div>
           <div class="ctl"><button class="primary" data-run="5">▷ Запустити</button><button class="ghost" data-from="5">↻ Звідси донизу</button></div>
           <div class="out" id="o5"><div class="empty">—</div></div>
         </section>
@@ -439,42 +442,64 @@ function renderPosts(oid,posts,emptyTxt){
   if(!posts||!posts.length){ o.innerHTML='<div class="empty">'+(emptyTxt||'—')+'</div>'; return; }
   o.innerHTML=posts.map(p=>'<div class="card post">'+esc(p.content)+'</div>').join('');
 }
+const NETS=[['telegram','Telegram'],['instagram','Instagram'],['facebook','Facebook'],['threads','Threads']];
+let ChanStatus={}, PostChannels={};
+async function loadChanStatus(){ try{ ChanStatus=await api('/channels/status'); }catch(e){ ChanStatus={}; } }
+function variantsHtml(ch){
+  return NETS.filter(n=>ch[n[0]]&&ch[n[0]].on).map(n=>{ const t=(ch[n[0]].text||''); if(!t) return ''; return '<div style="font-size:12px;border:1px solid var(--line);border-radius:8px;padding:6px 9px;margin-top:6px"><b>'+n[1]+'</b> <span style="color:var(--muted)">'+t.length+' симв.</span><div style="color:var(--muted);margin-top:2px;white-space:pre-wrap">'+esc(t.slice(0,180))+(t.length>180?'…':'')+'</div></div>'; }).join('');
+}
 function renderFinals(posts,published){
   const o=$('o6');
   const visible=(posts||[]).filter(p=>p.review!=='archived');
-  if(!visible.length){ o.innerHTML='<div class="empty">Готові пости з\'являться тут — з діями (затвердити / редагувати / перегенерувати / архів / у Telegram).</div>'; return; }
-  const isPub=(pid,t)=>published.some(x=>x.post_id===pid && x.target===t);
+  if(!visible.length){ o.innerHTML='<div class="empty">Готові пости з\'являться тут — затвердити / фото / обрати мережі / опублікувати.</div>'; return; }
   o.innerHTML=visible.map(p=>{
     const st=p.review==='approved'?'<span class="badge ok">✓ затверджено</span>':p.review==='needs_work'?'<span class="badge soon">доопрацювати</span>':'';
+    const ch=p.channels||{}; PostChannels[p.id]=ch;
+    const chips=NETS.map(n=>{ const on=ch[n[0]]&&ch[n[0]].on; const conn=ChanStatus[n[0]]; return '<button class="netchip'+(on?' on':'')+'" data-net="'+n[0]+'"'+(conn?'':' disabled title="не підключено"')+'>'+n[1]+'</button>'; }).join('');
     return '<div class="tg" data-post="'+p.id+'"><div class="pcontent">'+esc(p.content)+'</div>'
       +(p.media_filename?'<div style="margin-top:8px"><img src="/media/'+esc(p.media_filename)+'" style="max-height:120px;border-radius:8px"></div>':'')
       +'<div class="ctl" style="margin-top:10px">'+st
-      +'<button class="act" data-a="edit">✎ Редагувати</button>'
+      +'<button class="act" data-a="edit">✎</button>'
       +'<button class="act" data-a="approve">✓ Затвердити</button>'
       +'<button class="act" data-a="needs">Доопрацювати</button>'
-      +'<button class="act" data-a="regen">↻ Перегенерувати</button>'
-      +'<button class="act" data-a="archive">🗄 Архів</button>'
+      +'<button class="act" data-a="regen">↻</button>'
+      +'<button class="act" data-a="archive">🗄</button>'
       +'<button class="act" data-a="copy">Копіювати</button>'
-      +'<button class="pub" data-t="channel">'+(isPub(p.id,'channel')?'✓ канал':'→ Канал')+'</button>'
-      +'<button class="pub" data-t="group">'+(isPub(p.id,'group')?'✓ група':'→ Група')+'</button>'
-      +'<button class="pubth">🧵 Threads</button>'
-      +'<button class="act statth">📊 Threads</button>'
-      +'<button class="pubfb">📘 Facebook</button>'
-      +'<button class="act statfb">📊 FB</button>'
-      +'<button class="act mediaPick">📎 Фото</button>'
-      +'<button class="pubig">📷 Instagram</button>'
-      +'<span class="pubmsg" style="font-size:12px"></span></div></div>';
+      +'<button class="act mediaPick">📎 Фото</button></div>'
+      +'<div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:10px">'
+      +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Куди публікуємо:</div>'
+      +'<div class="netchips">'+chips+'</div>'
+      +'<div class="ctl" style="margin-top:8px"><button class="act adaptBtn">✨ Підлаштувати під мережі</button><button class="primary pubAll">📣 Опублікувати</button><span class="pubmsg" style="font-size:12px"></span></div>'
+      +'<div class="variants">'+variantsHtml(ch)+'</div>'
+      +'</div></div>';
   }).join('');
   o.querySelectorAll('.tg').forEach(card=>{ const id=card.dataset.post;
-    card.querySelectorAll('.act').forEach(b=>b.onclick=()=>postAction(card,id,b.dataset.a));
-    card.querySelectorAll('.pub').forEach(b=>b.onclick=()=>publishUnit(card,id,b.dataset.t,b));
-    const pth=card.querySelector('.pubth'); if(pth) pth.onclick=()=>publishThreads(card,id,pth);
-    const sth=card.querySelector('.statth'); if(sth) sth.onclick=()=>threadsStats(card,id);
-    const pfb=card.querySelector('.pubfb'); if(pfb) pfb.onclick=()=>publishFacebook(card,id,pfb);
-    const sfb=card.querySelector('.statfb'); if(sfb) sfb.onclick=()=>facebookStats(card,id);
-    const pig=card.querySelector('.pubig'); if(pig) pig.onclick=()=>publishInstagram(card,id,pig);
+    card.querySelectorAll('.act[data-a]').forEach(b=>b.onclick=()=>postAction(card,id,b.dataset.a));
     const mpk=card.querySelector('.mediaPick'); if(mpk) mpk.onclick=()=>pickMedia(id);
+    card.querySelectorAll('.netchip').forEach(b=>{ if(!b.disabled) b.onclick=()=>toggleNet(card,id,b.dataset.net); });
+    card.querySelector('.adaptBtn').onclick=()=>adaptNets(card,id);
+    card.querySelector('.pubAll').onclick=(e)=>publishAll(card,id,e.target);
   });
+}
+async function toggleNet(card,id,net){
+  const ch=PostChannels[id]||{}; ch[net]=ch[net]||{text:''}; ch[net].on=!ch[net].on; PostChannels[id]=ch;
+  card.querySelector('.netchip[data-net="'+net+'"]').classList.toggle('on',ch[net].on);
+  try{ await api('/posts/'+id+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:ch})}); }catch(e){}
+}
+async function adaptNets(card,id){
+  const ch=PostChannels[id]||{}; const sel=Object.keys(ch).filter(k=>ch[k]&&ch[k].on); const msg=card.querySelector('.pubmsg');
+  if(!sel.length){ if(msg){msg.style.color='var(--stale)';msg.textContent=' оберіть мережі';} return; }
+  if(msg){msg.style.color='var(--muted)';msg.textContent=' AI підлаштовує…';}
+  try{ const r=await api('/posts/'+id+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:sel})}); PostChannels[id]=r.channels; card.querySelector('.variants').innerHTML=variantsHtml(r.channels); if(msg){msg.style.color='var(--ok)';msg.textContent=' готово ✓';} }
+  catch(e){ if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+e.message;} }
+}
+async function publishAll(card,id,btn){
+  const msg=card.querySelector('.pubmsg'); const old=btn.textContent; btn.disabled=true; btn.innerHTML='<span class="spin"></span>'; if(msg)msg.textContent='';
+  try{ const r=await api('/posts/'+id+'/publish-all',{method:'POST'}); const res=r.results||[];
+    const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error');
+    btn.disabled=false; btn.textContent=old;
+    if(msg){ msg.style.color=err.length?'var(--stale)':'var(--ok)'; msg.textContent=' '+(ok.length?('✓ '+ok.join(', ')):'')+(err.length?(' ⚠ '+err.map(e=>e.channel+': '+e.error).join('; ')):''); }
+  }catch(e){ btn.disabled=false; btn.textContent=old; if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+e.message;} }
 }
 async function postAction(card,id,a){
   const cont=card.querySelector('.pcontent');
@@ -1023,6 +1048,7 @@ $('obNext').onclick=async()=>{
   loadRecent();
   loadMedia();
   loadGdrive();
+  await loadChanStatus();
   try{ const st=await api('/settings'); if(!st.some(r=>r.key==='onboarded')) showOnboarding(); }catch(e){}
   loadUsage();
   updRunLabel();

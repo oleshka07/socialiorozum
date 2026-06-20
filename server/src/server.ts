@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, rewriteWithStep, deriveVoice, generateStrategy } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, rewriteWithStep, deriveVoice, generateStrategy, adaptForChannels } from "./pipeline.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
 import * as meta from "./meta.js";
@@ -388,6 +388,96 @@ app.post("/api/posts/:postId/publish/instagram", async (req: any, reply) => {
   }
 });
 
+// ===================== КОМПОЗЕР (мульти-мережевий постинг) =====================
+// які мережі взагалі підключені (для чипів у композері)
+app.get("/api/channels/status", async (req: any) => {
+  const ws = req.user.workspace_id;
+  const [tgc, th, mt] = await Promise.all([
+    one<{ bot_token: string | null; channel_chat_id: string | null; group_chat_id: string | null }>(`select bot_token, channel_chat_id, group_chat_id from telegram_config where workspace_id=$1`, [ws]),
+    one<{ access_token: string | null }>(`select access_token from threads_config where workspace_id=$1`, [ws]),
+    one<{ page_token: string | null; ig_user_id: string | null }>(`select page_token, ig_user_id from meta_config where workspace_id=$1`, [ws]),
+  ]);
+  return {
+    telegram: !!(tgc && tgc.bot_token && (tgc.channel_chat_id || tgc.group_chat_id)),
+    threads: !!(th && th.access_token),
+    facebook: !!(mt && mt.page_token),
+    instagram: !!(mt && mt.page_token && mt.ig_user_id),
+  };
+});
+
+// зберегти вибір мереж + тексти
+app.post("/api/posts/:postId/channels", async (req: any, reply) => {
+  if (!(await postOwned(req.params.postId, req.user.workspace_id))) return reply.code(404).send({ error: "пост не знайдено" });
+  await q(`update post set channels=$2 where id=$1`, [req.params.postId, JSON.stringify(req.body?.channels ?? {})]);
+  return { ok: true };
+});
+
+// AI-адаптація під обрані мережі
+app.post("/api/posts/:postId/adapt", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const post = await one<{ content: string; channels: any }>(
+    `select p.content, p.channels from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where p.id=$1 and s.workspace_id=$2`,
+    [req.params.postId, ws]);
+  if (!post) return reply.code(404).send({ error: "пост не знайдено" });
+  const channels: string[] = Array.isArray(req.body?.channels) ? req.body.channels : [];
+  try {
+    const variants = await adaptForChannels(ws, post.content, channels);
+    const cur = post.channels || {};
+    for (const ch of channels) cur[ch] = { on: true, text: variants[ch] || (cur[ch] && cur[ch].text) || post.content };
+    await q(`update post set channels=$2 where id=$1`, [req.params.postId, JSON.stringify(cur)]);
+    return { ok: true, channels: cur };
+  } catch (e: any) { await logEvent("error", "adapt", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
+});
+
+// опублікувати в усі обрані мережі (з пер-мережевим текстом + медіа)
+app.post("/api/posts/:postId/publish-all", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const post = await one<{ content: string; channels: any; filename: string | null }>(
+    `select p.content, p.channels, ma.filename from post p
+       join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+       left join media_asset ma on ma.id=p.media_id
+     where p.id=$1 and s.workspace_id=$2`, [req.params.postId, ws]);
+  if (!post) return reply.code(404).send({ error: "пост не знайдено" });
+  const ch = post.channels || {};
+  const enabled = Object.keys(ch).filter((k) => ch[k] && ch[k].on);
+  if (!enabled.length) return reply.code(400).send({ error: "Оберіть хоча б одну мережу" });
+  const textOf = (k: string) => (ch[k] && ch[k].text) || post.content;
+  const imageUrl = post.filename ? `${env.appBaseUrl}/media/${post.filename}` : null;
+  const pid = req.params.postId;
+  const results: any[] = [];
+  const [tgc, thTok, mt] = await Promise.all([tgConfig(ws), thValidToken(ws), metaCfg(ws)]);
+  for (const k of enabled) {
+    try {
+      if (k === "telegram") {
+        if (!tgc?.bot_token) throw new Error("Telegram не підключено");
+        let any = false;
+        for (const [t, chat] of [["channel", tgc.channel_chat_id], ["group", tgc.group_chat_id]] as const) {
+          if (!chat) continue;
+          const r = await tg.sendMessage(tgc.bot_token, chat, textOf(k));
+          await q(`insert into telegram_publish(post_id,target,chat_id,message_id,status) values($1,$2,$3,$4,'sent')`, [pid, t, chat, r.message_id]);
+          any = true;
+        }
+        if (!any) throw new Error("Не вказано канал/групу");
+      } else if (k === "threads") {
+        if (!thTok) throw new Error("Threads не підключено");
+        const r = await threads.publish(thTok.token, thTok.userId, textOf(k));
+        await q(`insert into threads_publish(post_id,media_id,status) values($1,$2,'sent')`, [pid, r.mediaId]);
+      } else if (k === "facebook") {
+        if (!mt?.page_id || !mt.page_token) throw new Error("Facebook не підключено");
+        const r = imageUrl ? await meta.publishPhotoToPage(mt.page_id, mt.page_token, textOf(k), imageUrl) : await meta.publishToPage(mt.page_id, mt.page_token, textOf(k));
+        await q(`insert into meta_publish(post_id,channel,external_id,status) values($1,'facebook',$2,'sent')`, [pid, (r as any).post_id || r.id]);
+      } else if (k === "instagram") {
+        if (!mt?.ig_user_id || !mt.page_token) throw new Error("Instagram не підключено");
+        if (!imageUrl) throw new Error("Instagram потребує фото");
+        const r = await meta.publishToInstagram(mt.ig_user_id, mt.page_token, imageUrl, textOf(k));
+        await q(`insert into meta_publish(post_id,channel,external_id,status) values($1,'instagram',$2,'sent')`, [pid, r.mediaId]);
+      }
+      results.push({ channel: k, status: "sent" });
+    } catch (e: any) { results.push({ channel: k, status: "error", error: e.message }); }
+  }
+  return { ok: true, results };
+});
+
 // ===================== GOOGLE DRIVE =====================
 const GDRIVE_REDIRECT = `${env.appBaseUrl}/api/integrations/gdrive/callback`;
 
@@ -470,7 +560,7 @@ app.get("/api/runs/:id", async (req: any, reply) => {
   const [steps, ideas, posts, plan, published, schedule] = await Promise.all([
     q(`select step_key,status,model,prompt_version,output,error,updated_at from step_run where run_id=$1`, [id]),
     q(`select id,idx,idea,angle,selected from idea where run_id=$1 order by idx`, [id]),
-    q(`select p.id,p.stage,p.channel_type,p.content,p.review,p.media_id, ma.filename as media_filename
+    q(`select p.id,p.stage,p.channel_type,p.content,p.review,p.media_id,p.channels, ma.filename as media_filename
        from post p left join media_asset ma on ma.id=p.media_id where p.run_id=$1 order by p.created_at`, [id]),
     q(`select pi.*, p.content as post_content from plan_item pi
         join content_plan cp on cp.id=pi.plan_id

@@ -25,7 +25,7 @@ export const DEFAULT_PROMPTS: Record<StepKey, { model: string; content: string }
   },
   format: {
     model: "openai/gpt-4o-mini",
-    content: "Адаптуй під Telegram: короткі абзаци, помірні емодзі, 1-2 хештеги. Поверни лише текст.",
+    content: "Зроби чистий, готовий до публікації формат: короткі абзаци, помірні емодзі. Поверни лише текст.",
   },
   deai: {
     model: "anthropic/claude-sonnet-4.5",
@@ -254,4 +254,27 @@ export async function rewriteWithStep(workspaceId: string, step: StepKey, text: 
   const lang = (settings.output_language || "Українська").trim();
   const system = fillPrompt(tpl.content, settings) + STEP_CONTEXT[step](settings) + `\n\nМова всього тексту у відповіді: ${lang}.`;
   return chat(tpl.model, system, `---\n${text}`, { workspaceId, step });
+}
+
+// AI-адаптація поста під кожну соцмережу (один виклик -> JSON {channel: text})
+export async function adaptForChannels(workspaceId: string, content: string, channels: string[]): Promise<Record<string, string>> {
+  const rules: Record<string, string> = {
+    telegram: "Telegram: короткі абзаци, помірні емодзі, 1-2 хештеги.",
+    instagram: "Instagram: чіпкий підпис + 5-10 релевантних хештегів наприкінці.",
+    threads: "Threads: до 500 символів, без хештегів, розмовний тон.",
+    facebook: "Facebook: 1-3 абзаци, нейтральний тон, без надлишку хештегів.",
+  };
+  const want = channels.filter((c) => rules[c]);
+  if (!want.length) return {};
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const tone = s.tone_of_voice ? `\nГолос бренду (зберігай): ${s.tone_of_voice}` : "";
+  const system = "Адаптуй пост під кожну вказану соцмережу, зберігаючи зміст і голос бренду." + tone +
+    "\nПравила:\n" + want.map((c) => "- " + rules[c]).join("\n") +
+    `\n\nПоверни ЛИШЕ валідний JSON-обʼєкт виду {${want.map((c) => `"${c}":"…"`).join(",")}}. Мова: ${lang}.`;
+  const raw = await chat("openai/gpt-4o-mini", system, `Пост:\n---\n${content}`, { workspaceId, step: "format" });
+  const obj = extractJsonObject(raw) as Record<string, string>;
+  const out: Record<string, string> = {};
+  for (const c of want) if (obj && obj[c]) out[c] = String(obj[c]);
+  return out;
 }
