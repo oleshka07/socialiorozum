@@ -314,6 +314,28 @@ create table if not exists media_asset (
 create index if not exists idx_media_ws on media_asset(workspace_id, created_at desc);
 alter table post add column if not exists media_id uuid references media_asset(id) on delete set null;
 
+-- Google Drive: OAuth-підключення (drive.readonly) на workspace
+create table if not exists gdrive_config (
+  workspace_id     uuid primary key references workspace(id) on delete cascade,
+  access_token     text,
+  refresh_token    text,
+  token_expires_at timestamptz,
+  email            text,
+  updated_at       timestamptz not null default now()
+);
+-- папки Google Drive для синхронізації фото
+create table if not exists gdrive_folder (
+  id             uuid primary key default gen_random_uuid(),
+  workspace_id   uuid not null references workspace(id) on delete cascade,
+  folder_id      text not null,
+  name           text,
+  active         boolean not null default true,
+  last_pulled_at timestamptz,
+  last_error     text,
+  created_at     timestamptz not null default now()
+);
+create index if not exists idx_gdrivefolder_ws on gdrive_folder(workspace_id);
+
 -- згенерована стратегія (L2): JSON-артефакт на workspace
 create table if not exists strategy (
   workspace_id uuid primary key references workspace(id) on delete cascade,

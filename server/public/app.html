@@ -164,6 +164,17 @@
         <div id="rssList" class="out" style="margin-top:10px"></div>
       </div></div>
       <div class="settings"><div class="body">
+        <b>📁 Google Drive (фото з папок)</b>
+        <div class="hint">Підключи Google Drive і додай папки — поллер кожні ~15 хв тягне нові фото з них у медіа-бібліотеку.</div>
+        <div class="ctl" style="margin-top:8px"><span id="gdStatus" style="font-size:13px;color:var(--muted)">…</span></div>
+        <div class="ctl"><a id="gdConnect" class="primary" href="/api/integrations/gdrive/connect" style="display:none;text-decoration:none">🔗 Підключити Google Drive</a><button class="ghost" id="gdDisconnect" style="display:none">Відключити</button></div>
+        <div id="gdFolderBox" style="display:none;margin-top:10px">
+          <div class="ctl"><input class="txt" id="gdUrl" placeholder="Посилання на папку Google Drive" style="flex:1;min-width:220px"><button class="primary" id="gdAdd">Додати папку</button></div>
+          <div id="gdMsg" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
+          <div id="gdList" class="out" style="margin-top:8px"></div>
+        </div>
+      </div></div>
+      <div class="settings"><div class="body">
         <div style="display:flex;align-items:center;justify-content:space-between"><b>🗂️ Останні джерела</b><button class="ghost" id="recReload">↻</button></div>
         <div class="hint">Усе, що підтягнулося (RSS / Fireflies / вручну). «Відкрити» — щоб працювати з ним у «Створенні».</div>
         <div id="recList" class="out" style="margin-top:8px"></div>
@@ -836,6 +847,36 @@ $('mediaUpload').onclick=async()=>{
   try{ const r=await fetch('/api/media',{method:'POST',body:fd,credentials:'same-origin'}); const j=await r.json(); if(!r.ok||j.error) throw new Error(j.error||('HTTP '+r.status)); $('mediaFile').value=''; m.style.color='var(--ok)'; m.textContent='завантажено: '+((j.saved||[]).length); await loadMedia(); }
   catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; }
 };
+// ---------- Google Drive ----------
+async function loadGdrive(){
+  const st=$('gdStatus'); if(!st) return;
+  try{ const c=await api('/integrations/gdrive');
+    const conn=$('gdConnect'), dis=$('gdDisconnect'), box=$('gdFolderBox');
+    if(!c.configured){ st.textContent='⚠ Google OAuth не налаштований на сервері.'; [conn,dis].forEach(b=>b&&(b.style.display='none')); if(box)box.style.display='none'; return; }
+    if(c.connected){ st.innerHTML='✅ Підключено'+(c.email?(' ('+esc(c.email)+')'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-block'; if(box)box.style.display='block'; loadGdriveFolders(); }
+    else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-block'; if(dis)dis.style.display='none'; if(box)box.style.display='none'; }
+  }catch(e){}
+}
+async function loadGdriveFolders(){
+  const o=$('gdList'); if(!o) return;
+  try{ const folders=await api('/sources/gdrive');
+    if(!folders.length){ o.innerHTML='<div class="empty">Папок ще немає.</div>'; return; }
+    o.innerHTML=folders.map(f=>'<div class="card" data-id="'+f.id+'"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap"><div style="min-width:0;flex:1"><div style="word-break:break-all">'+esc(f.name||f.folder_id)+'</div><div style="font-size:12px;color:var(--muted)">'+(f.last_pulled_at?('останнє: '+new Date(f.last_pulled_at).toLocaleString()):'ще не тягнулось')+(f.last_error?(' · ⚠ '+esc(f.last_error)):'')+'</div></div><div class="ctl" style="margin:0;flex-wrap:nowrap"><label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" class="gdActive" '+(f.active?'checked':'')+'> активна</label><button class="ghost gdPull">↓ Тягнути</button><button class="act gdDel">🗑</button></div></div></div>').join('');
+    o.querySelectorAll('.card[data-id]').forEach(c=>{ const id=c.dataset.id;
+      c.querySelector('.gdActive').onchange=e=>api('/sources/gdrive/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:e.target.checked})}).catch(()=>{});
+      c.querySelector('.gdPull').onclick=async(ev)=>{ const b=ev.target; b.disabled=true; b.textContent='…'; try{ const r=await api('/sources/gdrive/'+id+'/pull',{method:'POST'}); b.textContent='+'+r.created; await loadGdriveFolders(); await loadMedia(); }catch(e){ b.textContent='⚠'; alert(e.message); } finally{ setTimeout(()=>{b.disabled=false;b.textContent='↓ Тягнути';},1500); } };
+      c.querySelector('.gdDel').onclick=async()=>{ if(!confirm('Видалити папку?'))return; try{ await api('/sources/gdrive/'+id,{method:'DELETE'}); await loadGdriveFolders(); }catch(e){ alert(e.message); } };
+    });
+  }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
+}
+$('gdAdd').onclick=async()=>{
+  const url=$('gdUrl').value.trim(); const m=$('gdMsg');
+  if(!url){ m.style.color='var(--stale)'; m.textContent='Вкажи посилання на папку'; return; }
+  m.style.color='var(--muted)'; m.textContent='додаю…';
+  try{ await api('/sources/gdrive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})}); $('gdUrl').value=''; m.style.color='var(--ok)'; m.textContent='додано ✓'; await loadGdriveFolders(); }
+  catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; }
+};
+$('gdDisconnect').onclick=async()=>{ if(!confirm('Відключити Google Drive?')) return; try{ await api('/integrations/gdrive/disconnect',{method:'POST'}); await loadGdrive(); }catch(e){} };
 async function loadFF(){ try{ const c=await api('/integrations/transcription');
   if(c.hasKey) $('ffKey').placeholder='•••••••• (ключ збережено)';
   if($('ffHook')) $('ffHook').value=c.webhookUrl||'';
@@ -969,10 +1010,11 @@ $('obNext').onclick=async()=>{
   await loadTelegram();
   loadThreads();
   loadMeta();
-  const _sp=new URLSearchParams(location.search); const _thq=_sp.get('threads'), _mtq=_sp.get('meta');
-  if(_thq||_mtq) history.replaceState(null,'',location.pathname);
+  const _sp=new URLSearchParams(location.search); const _thq=_sp.get('threads'), _mtq=_sp.get('meta'), _gdq=_sp.get('gdrive');
+  if(_thq||_mtq||_gdq) history.replaceState(null,'',location.pathname);
   if(_thq) alert(_thq==='ok'?'Threads підключено ✓':'Не вдалося підключити Threads. Перевірте дозволи й Redirect URI у Meta.');
   if(_mtq) alert(_mtq==='ok'?'Facebook/Instagram підключено ✓':(_mtq==='nopage'?'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).':'Не вдалося підключити Facebook/Instagram. Перевірте дозволи й Redirect URI.'));
+  if(_gdq) alert(_gdq==='ok'?'Google Drive підключено ✓':'Не вдалося підключити Google Drive. Перевір, що додано scope drive.readonly й Redirect URI.');
   await loadPrompts();
   loadRubrics();
   loadStrategy();
@@ -980,6 +1022,7 @@ $('obNext').onclick=async()=>{
   loadRss();
   loadRecent();
   loadMedia();
+  loadGdrive();
   try{ const st=await api('/settings'); if(!st.some(r=>r.key==='onboarded')) showOnboarding(); }catch(e){}
   loadUsage();
   updRunLabel();

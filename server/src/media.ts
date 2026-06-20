@@ -1,0 +1,34 @@
+// Спільна логіка медіа-сховища: файли на диску (Docker-volume) + метадані в media_asset.
+// Використовують і аплоад (server.ts), і Google Drive поллер.
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { mkdirSync } from "node:fs";
+import { writeFile, unlink } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { q } from "./db.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+export const MEDIA_DIR = join(__dirname, "..", "media");
+mkdirSync(MEDIA_DIR, { recursive: true });
+
+export async function saveMedia(
+  ws: string,
+  opts: { buffer: Buffer; mime: string; name?: string; source?: string; externalId?: string }
+): Promise<{ id: string; filename: string; kind: string }> {
+  const mime = opts.mime || "application/octet-stream";
+  const ext = (mime.split("/")[1] || "bin").replace(/[^a-z0-9]/gi, "").slice(0, 5) || "bin";
+  const id = randomUUID();
+  const filename = `${id}.${ext}`;
+  await writeFile(join(MEDIA_DIR, filename), opts.buffer);
+  const kind = mime.startsWith("video") ? "video" : "image";
+  await q(
+    `insert into media_asset(id, workspace_id, kind, mime, original_name, filename, size, source, external_id)
+     values($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [id, ws, kind, mime, String(opts.name || "").slice(0, 200), filename, opts.buffer.length, opts.source || "upload", opts.externalId || null]
+  );
+  return { id, filename, kind };
+}
+
+export async function deleteMediaFile(filename: string): Promise<void> {
+  try { await unlink(join(MEDIA_DIR, filename)); } catch { /* файл міг бути вже видалений */ }
+}

@@ -5,9 +5,7 @@ import multipart from "@fastify/multipart";
 import cookie from "@fastify/cookie";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { createHmac, timingSafeEqual, randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { writeFile, unlink } from "node:fs/promises";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
 import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, rewriteWithStep, deriveVoice, generateStrategy } from "./pipeline.js";
@@ -20,6 +18,9 @@ import { sendVerifyEmail, sendResetEmail } from "./email.js";
 import { logEvent } from "./log.js";
 import { startAutopost } from "./autopost.js";
 import { startRssPoller, pullFeed } from "./rss-poller.js";
+import { MEDIA_DIR, saveMedia, deleteMediaFile } from "./media.js";
+import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
+import * as gdrive from "./gdrive.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = Fastify({ logger: true, trustProxy: true });
@@ -28,8 +29,6 @@ await app.register(cookie, { secret: env.sessionSecret });
 await app.register(fstatic, { root: join(__dirname, "..", "public"), prefix: "/" });
 
 // медіа-сховище: файли на диску (Docker-volume), віддаємо публічно за /media/<uuid>.<ext>
-const MEDIA_DIR = join(__dirname, "..", "media");
-mkdirSync(MEDIA_DIR, { recursive: true });
 await app.register(multipart, { limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
 await app.register(fstatic, { root: MEDIA_DIR, prefix: "/media/", decorateReply: false });
 
@@ -336,15 +335,8 @@ app.post("/api/media", async (req: any, reply) => {
   try {
     for await (const part of req.files()) {
       const buf = await part.toBuffer();
-      const mime = part.mimetype || "application/octet-stream";
-      const ext = (mime.split("/")[1] || "bin").replace(/[^a-z0-9]/gi, "").slice(0, 5) || "bin";
-      const id = randomUUID();
-      const filename = `${id}.${ext}`;
-      await writeFile(join(MEDIA_DIR, filename), buf);
-      const kind = mime.startsWith("video") ? "video" : "image";
-      await q(`insert into media_asset(id, workspace_id, kind, mime, original_name, filename, size, source) values($1,$2,$3,$4,$5,$6,$7,'upload')`,
-        [id, req.user.workspace_id, kind, mime, String(part.filename || "").slice(0, 200), filename, buf.length]);
-      saved.push({ id, kind, url: `/media/${filename}` });
+      const m = await saveMedia(req.user.workspace_id, { buffer: buf, mime: part.mimetype || "application/octet-stream", name: part.filename });
+      saved.push({ id: m.id, kind: m.kind, url: `/media/${m.filename}` });
     }
   } catch (e: any) { return reply.code(400).send({ error: e.message }); }
   return { ok: true, saved };
@@ -358,7 +350,7 @@ app.delete("/api/media/:id", async (req: any, reply) => {
   const m = await one<{ filename: string }>(`select filename from media_asset where id=$1 and workspace_id=$2`, [req.params.id, req.user.workspace_id]);
   if (!m) return reply.code(404).send({ error: "медіа не знайдено" });
   await q(`delete from media_asset where id=$1`, [req.params.id]);
-  try { await unlink(join(MEDIA_DIR, m.filename)); } catch { /* файл міг бути вже видалений */ }
+  await deleteMediaFile(m.filename);
   return { ok: true };
 });
 
@@ -394,6 +386,81 @@ app.post("/api/posts/:postId/publish/instagram", async (req: any, reply) => {
     await logEvent("error", "meta", `IG публікація: ${e.message}`, null, req.user.id);
     return reply.code(500).send({ error: e.message });
   }
+});
+
+// ===================== GOOGLE DRIVE =====================
+const GDRIVE_REDIRECT = `${env.appBaseUrl}/api/integrations/gdrive/callback`;
+
+app.get("/api/integrations/gdrive", async (req: any) => {
+  const c = await one<{ email: string | null; refresh_token: string | null }>(`select email, refresh_token from gdrive_config where workspace_id=$1`, [req.user.workspace_id]);
+  return { configured: !!env.google.clientId, connected: !!(c && c.refresh_token), email: c?.email ?? "" };
+});
+
+app.get("/api/integrations/gdrive/connect", async (req: any, reply) => {
+  if (!env.google.clientId) return reply.code(400).send({ error: "GOOGLE_CLIENT_ID не заданий на сервері" });
+  const state = auth.newToken();
+  reply.setCookie("gdrive_state", state, stateCookie);
+  return reply.redirect(gdrive.authUrl(env.google.clientId, GDRIVE_REDIRECT, state));
+});
+
+app.get("/api/integrations/gdrive/callback", async (req: any, reply) => {
+  const code = String(req.query?.code ?? ""); const state = String(req.query?.state ?? "");
+  const oerr = String(req.query?.error ?? "");
+  if (oerr) { await logEvent("error", "gdrive", `Google відмовив: ${oerr}`, null, req.user?.id); return reply.redirect("/app?gdrive=error"); }
+  if (!code || !state || state !== req.cookies?.gdrive_state) return reply.redirect("/app?gdrive=error");
+  reply.clearCookie("gdrive_state", { path: "/" });
+  try {
+    const t = await gdrive.exchangeCode(env.google.clientId, env.google.clientSecret, GDRIVE_REDIRECT, code);
+    const email = await gdrive.getEmail(t.access_token).catch(() => "");
+    const exp = new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString();
+    await q(`insert into gdrive_config(workspace_id, access_token, refresh_token, token_expires_at, email, updated_at)
+             values($1,$2,$3,$4,$5,now())
+             on conflict (workspace_id) do update set access_token=excluded.access_token,
+               refresh_token=coalesce(excluded.refresh_token, gdrive_config.refresh_token),
+               token_expires_at=excluded.token_expires_at, email=excluded.email, updated_at=now()`,
+      [req.user.workspace_id, t.access_token, t.refresh_token ?? null, exp, email]);
+    await logEvent("info", "gdrive", `підключено ${email}`, null, req.user.id);
+    return reply.redirect("/app?gdrive=ok");
+  } catch (e: any) {
+    await logEvent("error", "gdrive", "OAuth callback: " + e.message, null, req.user?.id);
+    return reply.redirect("/app?gdrive=error");
+  }
+});
+
+app.post("/api/integrations/gdrive/disconnect", async (req: any) => {
+  await q(`delete from gdrive_config where workspace_id=$1`, [req.user.workspace_id]);
+  return { ok: true };
+});
+
+app.get("/api/sources/gdrive", async (req: any) =>
+  q(`select id, folder_id, name, active, last_pulled_at, last_error from gdrive_folder where workspace_id=$1 order by created_at desc`, [req.user.workspace_id]));
+
+app.post("/api/sources/gdrive", async (req: any, reply) => {
+  const folderId = gdrive.folderIdFromUrl(String(req.body?.url ?? ""));
+  if (!folderId) return reply.code(400).send({ error: "Вкажіть посилання на папку Google Drive або її ID" });
+  const r = await one<{ id: string }>(`insert into gdrive_folder(workspace_id, folder_id, name) values($1,$2,$3) returning id`,
+    [req.user.workspace_id, folderId, String(req.body?.name ?? "").slice(0, 120) || null]);
+  return { ok: true, id: r!.id };
+});
+
+app.put("/api/sources/gdrive/:id", async (req: any, reply) => {
+  const owned = await one(`select id from gdrive_folder where id=$1 and workspace_id=$2`, [req.params.id, req.user.workspace_id]);
+  if (!owned) return reply.code(404).send({ error: "папку не знайдено" });
+  const active = typeof req.body?.active === "boolean" ? req.body.active : null;
+  await q(`update gdrive_folder set active=coalesce($2,active) where id=$1`, [req.params.id, active]);
+  return { ok: true };
+});
+
+app.delete("/api/sources/gdrive/:id", async (req: any, reply) => {
+  const owned = await one(`select id from gdrive_folder where id=$1 and workspace_id=$2`, [req.params.id, req.user.workspace_id]);
+  if (!owned) return reply.code(404).send({ error: "папку не знайдено" });
+  await q(`delete from gdrive_folder where id=$1`, [req.params.id]);
+  return { ok: true };
+});
+
+app.post("/api/sources/gdrive/:id/pull", async (req: any, reply) => {
+  try { return { ok: true, created: await pullGdriveFolder(req.params.id, req.user.workspace_id) }; }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
 
 app.get("/api/runs/:id", async (req: any, reply) => {
@@ -1124,4 +1191,5 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
   app.log.info(`socialio на ${addr}`);
   startAutopost();
   startRssPoller();
+  startGdrivePoller();
 });
