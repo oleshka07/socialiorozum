@@ -28,6 +28,9 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:8080:8080"   # назовні віддаємо через reverse proxy (Caddy/nginx)
+    volumes:
+      - media:/app/media        # завантажені фото/відео — переживають деплої
 
 volumes:
   pgdata:
+  media:

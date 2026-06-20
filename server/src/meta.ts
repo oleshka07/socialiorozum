@@ -94,3 +94,24 @@ export async function igStats(igUserId: string, pageToken: string) {
   u.searchParams.set("access_token", pageToken);
   return fbFetch<{ username?: string; followers_count?: number; media_count?: number }>(u.toString());
 }
+
+// фото-пост у FB-Сторінку (url зображення + підпис)
+export async function publishPhotoToPage(pageId: string, pageToken: string, message: string, imageUrl: string) {
+  const body = new URLSearchParams({ url: imageUrl, caption: message, access_token: pageToken });
+  return fbFetch<{ id: string; post_id?: string }>(`${GRAPH}/${pageId}/photos`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body,
+  });
+}
+
+// Instagram: двокроковий публіш (контейнер із image_url+caption -> media_publish)
+export async function publishToInstagram(igUserId: string, pageToken: string, imageUrl: string, caption: string) {
+  const cbody = new URLSearchParams({ image_url: imageUrl, caption, access_token: pageToken });
+  const c = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: cbody,
+  });
+  const pbody = new URLSearchParams({ creation_id: c.id, access_token: pageToken });
+  const p = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media_publish`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: pbody,
+  });
+  return { mediaId: p.id };
+}

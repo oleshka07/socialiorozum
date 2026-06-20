@@ -298,6 +298,22 @@ create table if not exists content_source (
 );
 create index if not exists idx_contentsource_ws on content_source(workspace_id);
 
+-- медіа-бібліотека (фото/відео) на workspace; файли на диску (volume), тут — метадані
+create table if not exists media_asset (
+  id            uuid primary key default gen_random_uuid(),
+  workspace_id  uuid not null references workspace(id) on delete cascade,
+  kind          text not null default 'image',   -- image|video
+  mime          text,
+  original_name text,
+  filename      text not null,                    -- uuid.ext на диску
+  size          int,
+  source        text not null default 'upload',   -- upload|gdrive
+  external_id   text,                             -- gdrive file id (дедуп)
+  created_at    timestamptz not null default now()
+);
+create index if not exists idx_media_ws on media_asset(workspace_id, created_at desc);
+alter table post add column if not exists media_id uuid references media_asset(id) on delete set null;
+
 -- згенерована стратегія (L2): JSON-артефакт на workspace
 create table if not exists strategy (
   workspace_id uuid primary key references workspace(id) on delete cascade,

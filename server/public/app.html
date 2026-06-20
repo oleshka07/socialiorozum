@@ -151,6 +151,12 @@
         </div>
       </div></div>
       <div class="settings"><div class="body">
+        <b>🖼️ Медіа-бібліотека (фото)</b>
+        <div class="hint">Завантаж фото — потім прикріпиш до постів (обов'язково для Instagram). Згодом сюди ж тягнутиме Google Drive.</div>
+        <div class="ctl" style="margin-top:8px"><input type="file" id="mediaFile" accept="image/*" multiple style="font-size:13px"><button class="primary" id="mediaUpload">Завантажити</button><span id="mediaMsg" style="font-size:12px;color:var(--muted)"></span></div>
+        <div id="mediaGrid" class="out" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"></div>
+      </div></div>
+      <div class="settings"><div class="body">
         <b>📡 RSS-стрічки (авто-інжест)</b>
         <div class="hint">Додай URL RSS/Atom-стрічки — поллер кожні ~15 хв тягне нові статті у «Джерела». «Авто-пілот» = одразу проганяти кишку для нових (обережно з вартістю AI).</div>
         <div class="ctl" style="margin-top:8px"><input class="txt" id="rssUrl" placeholder="https://example.com/feed.xml" style="flex:1;min-width:220px"><label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="rssAuto"> авто-пілот</label><button class="primary" id="rssAdd">Додати</button></div>
@@ -430,6 +436,7 @@ function renderFinals(posts,published){
   o.innerHTML=visible.map(p=>{
     const st=p.review==='approved'?'<span class="badge ok">✓ затверджено</span>':p.review==='needs_work'?'<span class="badge soon">доопрацювати</span>':'';
     return '<div class="tg" data-post="'+p.id+'"><div class="pcontent">'+esc(p.content)+'</div>'
+      +(p.media_filename?'<div style="margin-top:8px"><img src="/media/'+esc(p.media_filename)+'" style="max-height:120px;border-radius:8px"></div>':'')
       +'<div class="ctl" style="margin-top:10px">'+st
       +'<button class="act" data-a="edit">✎ Редагувати</button>'
       +'<button class="act" data-a="approve">✓ Затвердити</button>'
@@ -443,6 +450,8 @@ function renderFinals(posts,published){
       +'<button class="act statth">📊 Threads</button>'
       +'<button class="pubfb">📘 Facebook</button>'
       +'<button class="act statfb">📊 FB</button>'
+      +'<button class="act mediaPick">📎 Фото</button>'
+      +'<button class="pubig">📷 Instagram</button>'
       +'<span class="pubmsg" style="font-size:12px"></span></div></div>';
   }).join('');
   o.querySelectorAll('.tg').forEach(card=>{ const id=card.dataset.post;
@@ -452,6 +461,8 @@ function renderFinals(posts,published){
     const sth=card.querySelector('.statth'); if(sth) sth.onclick=()=>threadsStats(card,id);
     const pfb=card.querySelector('.pubfb'); if(pfb) pfb.onclick=()=>publishFacebook(card,id,pfb);
     const sfb=card.querySelector('.statfb'); if(sfb) sfb.onclick=()=>facebookStats(card,id);
+    const pig=card.querySelector('.pubig'); if(pig) pig.onclick=()=>publishInstagram(card,id,pig);
+    const mpk=card.querySelector('.mediaPick'); if(mpk) mpk.onclick=()=>pickMedia(id);
   });
 }
 async function postAction(card,id,a){
@@ -496,6 +507,24 @@ async function facebookStats(card,id){
   const msg=card.querySelector('.pubmsg'); if(msg){msg.style.color='var(--muted)';msg.textContent=' завантаження…';}
   try{ const s=await api('/posts/'+id+'/facebook-insights'); if(msg){msg.style.color='var(--ok)';msg.textContent=' 👁 '+(s.post_impressions||0)+' · 🙋 '+(s.post_impressions_unique||0)+' · 🖱 '+(s.post_clicks||0);} }
   catch(e){ if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+e.message;} }
+}
+
+async function publishInstagram(card,id,btn){
+  const msg=card.querySelector('.pubmsg'); const old=btn.textContent; btn.disabled=true; btn.innerHTML='<span class="spin"></span>'; if(msg) msg.textContent='';
+  try{ await api('/posts/'+id+'/publish/instagram',{method:'POST'}); btn.textContent='✓ Instagram'; }
+  catch(e){ btn.disabled=false; btn.textContent=old; if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+e.message;} }
+}
+async function pickMedia(id){
+  let media=[]; try{ media=await api('/media'); }catch(e){ alert('Не вдалося завантажити бібліотеку: '+e.message); return; }
+  const imgs=media.filter(m=>m.kind==='image');
+  const ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;z-index:50;padding:16px';
+  const grid=imgs.length?imgs.map(m=>'<img src="/media/'+esc(m.filename)+'" data-id="'+m.id+'" style="height:90px;border-radius:8px;cursor:pointer">').join(''):'<div class="empty">Бібліотека порожня — завантаж фото у «Джерела».</div>';
+  ov.innerHTML='<div class="settings" style="max-width:640px;width:100%;margin:0"><div class="body"><b>Обери фото для поста</b><div class="out" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">'+grid+'</div><div class="ctl"><button class="ghost" id="mClose">Закрити</button><button class="act" id="mDetach">Прибрати фото</button></div></div></div>';
+  document.body.appendChild(ov);
+  const close=()=>ov.remove(); ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
+  ov.querySelector('#mClose').onclick=close;
+  ov.querySelector('#mDetach').onclick=async()=>{ try{ await api('/posts/'+id+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:null})}); close(); await refresh(); }catch(e){ alert(e.message); } };
+  ov.querySelectorAll('img[data-id]').forEach(im=>im.onclick=async()=>{ try{ await api('/posts/'+id+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:im.dataset.id})}); close(); await refresh(); }catch(e){ alert(e.message); } });
 }
 
 function updRunLabel(){ $('runLabel').textContent = runId ? ('· прогін '+runId.slice(0,8)) : '· новий прогін'; $('lockHint').textContent = runId ? 'Прогін створено з цього транскрипту. «Новий прогін», щоб почати з іншого тексту.' : ''; }
@@ -790,6 +819,23 @@ async function loadRecent(){
   }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }
 $('recReload').onclick=()=>loadRecent();
+// ---------- медіа-бібліотека ----------
+async function loadMedia(){
+  const o=$('mediaGrid'); if(!o) return;
+  try{ const m=await api('/media');
+    if(!m.length){ o.innerHTML='<div class="empty">Порожньо.</div>'; return; }
+    o.innerHTML=m.map(x=>'<div style="position:relative" data-id="'+x.id+'">'+(x.kind==='video'?'<video src="/media/'+esc(x.filename)+'" style="height:90px;border-radius:8px"></video>':'<img src="/media/'+esc(x.filename)+'" style="height:90px;border-radius:8px">')+'<button class="mediaDel" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;padding:1px 6px">✕</button></div>').join('');
+    o.querySelectorAll('[data-id]').forEach(c=>{ c.querySelector('.mediaDel').onclick=async()=>{ if(!confirm('Видалити фото?'))return; try{ await api('/media/'+c.dataset.id,{method:'DELETE'}); await loadMedia(); }catch(e){ alert(e.message); } }; });
+  }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
+}
+$('mediaUpload').onclick=async()=>{
+  const f=$('mediaFile').files; const m=$('mediaMsg');
+  if(!f||!f.length){ m.style.color='var(--stale)'; m.textContent='Обери файл(и)'; return; }
+  const fd=new FormData(); for(const file of f) fd.append('file',file);
+  m.style.color='var(--muted)'; m.textContent='завантаження…';
+  try{ const r=await fetch('/api/media',{method:'POST',body:fd,credentials:'same-origin'}); const j=await r.json(); if(!r.ok||j.error) throw new Error(j.error||('HTTP '+r.status)); $('mediaFile').value=''; m.style.color='var(--ok)'; m.textContent='завантажено: '+((j.saved||[]).length); await loadMedia(); }
+  catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; }
+};
 async function loadFF(){ try{ const c=await api('/integrations/transcription');
   if(c.hasKey) $('ffKey').placeholder='•••••••• (ключ збережено)';
   if($('ffHook')) $('ffHook').value=c.webhookUrl||'';
@@ -933,6 +979,7 @@ $('obNext').onclick=async()=>{
   loadFF();
   loadRss();
   loadRecent();
+  loadMedia();
   try{ const st=await api('/settings'); if(!st.some(r=>r.key==='onboarded')) showOnboarding(); }catch(e){}
   loadUsage();
   updRunLabel();

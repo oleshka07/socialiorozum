@@ -1,10 +1,13 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import fstatic from "@fastify/static";
+import multipart from "@fastify/multipart";
 import cookie from "@fastify/cookie";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual, randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
+import { writeFile, unlink } from "node:fs/promises";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
 import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, rewriteWithStep, deriveVoice, generateStrategy } from "./pipeline.js";
@@ -23,6 +26,12 @@ const app = Fastify({ logger: true, trustProxy: true });
 await app.register(cors, { origin: env.appBaseUrl, credentials: true });
 await app.register(cookie, { secret: env.sessionSecret });
 await app.register(fstatic, { root: join(__dirname, "..", "public"), prefix: "/" });
+
+// медіа-сховище: файли на диску (Docker-volume), віддаємо публічно за /media/<uuid>.<ext>
+const MEDIA_DIR = join(__dirname, "..", "media");
+mkdirSync(MEDIA_DIR, { recursive: true });
+await app.register(multipart, { limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
+await app.register(fstatic, { root: MEDIA_DIR, prefix: "/media/", decorateReply: false });
 
 // зберігаємо сирий JSON-боді (для HMAC-перевірки вебхуків), парсинг лишаємо як був
 app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body, done) => {
@@ -321,6 +330,72 @@ app.get("/api/sources/recent", async (req: any) =>
      from source s join pipeline_run r on r.source_id=s.id
      where s.workspace_id=$1 order by s.created_at desc limit 20`, [req.user.workspace_id]));
 
+// ===================== МЕДІА-БІБЛІОТЕКА =====================
+app.post("/api/media", async (req: any, reply) => {
+  const saved: any[] = [];
+  try {
+    for await (const part of req.files()) {
+      const buf = await part.toBuffer();
+      const mime = part.mimetype || "application/octet-stream";
+      const ext = (mime.split("/")[1] || "bin").replace(/[^a-z0-9]/gi, "").slice(0, 5) || "bin";
+      const id = randomUUID();
+      const filename = `${id}.${ext}`;
+      await writeFile(join(MEDIA_DIR, filename), buf);
+      const kind = mime.startsWith("video") ? "video" : "image";
+      await q(`insert into media_asset(id, workspace_id, kind, mime, original_name, filename, size, source) values($1,$2,$3,$4,$5,$6,$7,'upload')`,
+        [id, req.user.workspace_id, kind, mime, String(part.filename || "").slice(0, 200), filename, buf.length]);
+      saved.push({ id, kind, url: `/media/${filename}` });
+    }
+  } catch (e: any) { return reply.code(400).send({ error: e.message }); }
+  return { ok: true, saved };
+});
+
+app.get("/api/media", async (req: any) =>
+  q(`select id, kind, mime, original_name, filename, size, source, created_at from media_asset
+     where workspace_id=$1 order by created_at desc limit 200`, [req.user.workspace_id]));
+
+app.delete("/api/media/:id", async (req: any, reply) => {
+  const m = await one<{ filename: string }>(`select filename from media_asset where id=$1 and workspace_id=$2`, [req.params.id, req.user.workspace_id]);
+  if (!m) return reply.code(404).send({ error: "медіа не знайдено" });
+  await q(`delete from media_asset where id=$1`, [req.params.id]);
+  try { await unlink(join(MEDIA_DIR, m.filename)); } catch { /* файл міг бути вже видалений */ }
+  return { ok: true };
+});
+
+// прикріпити/відкріпити медіа до поста
+app.post("/api/posts/:postId/media", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  const mediaId = req.body?.mediaId || null;
+  if (mediaId && !(await one(`select id from media_asset where id=$1 and workspace_id=$2`, [mediaId, ws])))
+    return reply.code(404).send({ error: "медіа не знайдено" });
+  await q(`update post set media_id=$2 where id=$1`, [req.params.postId, mediaId]);
+  return { ok: true };
+});
+
+// публікація в Instagram (потрібне прикріплене фото)
+app.post("/api/posts/:postId/publish/instagram", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const post = await one<{ content: string; media_id: string | null; filename: string | null }>(
+    `select p.content, p.media_id, ma.filename from post p
+       join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+       left join media_asset ma on ma.id=p.media_id
+     where p.id=$1 and s.workspace_id=$2`, [req.params.postId, ws]);
+  if (!post) return reply.code(404).send({ error: "пост не знайдено" });
+  if (!post.media_id || !post.filename) return reply.code(400).send({ error: "Для Instagram прикріпіть фото (кнопка 📎 Фото)" });
+  const c = await metaCfg(ws);
+  if (!c?.ig_user_id || !c.page_token) return reply.code(400).send({ error: "Instagram не підключений (Налаштування → Meta)" });
+  try {
+    const r = await meta.publishToInstagram(c.ig_user_id, c.page_token, `${env.appBaseUrl}/media/${post.filename}`, post.content);
+    await q(`insert into meta_publish(post_id, channel, external_id, status) values($1,'instagram',$2,'sent')`, [req.params.postId, r.mediaId]);
+    return { ok: true, mediaId: r.mediaId };
+  } catch (e: any) {
+    await q(`insert into meta_publish(post_id, channel, status, error) values($1,'instagram','error',$2)`, [req.params.postId, e.message]);
+    await logEvent("error", "meta", `IG публікація: ${e.message}`, null, req.user.id);
+    return reply.code(500).send({ error: e.message });
+  }
+});
+
 app.get("/api/runs/:id", async (req: any, reply) => {
   const { id } = req.params;
   if (!(await runOwned(id, req.user.workspace_id))) return reply.code(404).send({ error: "run не знайдено" });
@@ -328,7 +403,8 @@ app.get("/api/runs/:id", async (req: any, reply) => {
   const [steps, ideas, posts, plan, published, schedule] = await Promise.all([
     q(`select step_key,status,model,prompt_version,output,error,updated_at from step_run where run_id=$1`, [id]),
     q(`select id,idx,idea,angle,selected from idea where run_id=$1 order by idx`, [id]),
-    q(`select id,stage,channel_type,content,review from post where run_id=$1 order by created_at`, [id]),
+    q(`select p.id,p.stage,p.channel_type,p.content,p.review,p.media_id, ma.filename as media_filename
+       from post p left join media_asset ma on ma.id=p.media_id where p.run_id=$1 order by p.created_at`, [id]),
     q(`select pi.*, p.content as post_content from plan_item pi
         join content_plan cp on cp.id=pi.plan_id
         left join post p on p.id=pi.post_id
@@ -683,14 +759,21 @@ app.post("/api/integrations/meta/disconnect", async (req: any) => {
 
 app.post("/api/posts/:postId/publish/facebook", async (req: any, reply) => {
   const ws = req.user.workspace_id;
-  const post = await postOwned(req.params.postId, ws);
+  const post = await one<{ content: string; filename: string | null }>(
+    `select p.content, ma.filename from post p
+       join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+       left join media_asset ma on ma.id=p.media_id
+     where p.id=$1 and s.workspace_id=$2`, [req.params.postId, ws]);
   if (!post) return reply.code(404).send({ error: "пост не знайдено" });
   const c = await metaCfg(ws);
   if (!c?.page_id || !c.page_token) return reply.code(400).send({ error: "Facebook не підключений — підключіть у Налаштуваннях" });
   try {
-    const r = await meta.publishToPage(c.page_id, c.page_token, post.content);
-    await q(`insert into meta_publish(post_id, channel, external_id, status) values($1,'facebook',$2,'sent')`, [req.params.postId, r.id]);
-    return { ok: true, externalId: r.id };
+    const r = post.filename
+      ? await meta.publishPhotoToPage(c.page_id, c.page_token, post.content, `${env.appBaseUrl}/media/${post.filename}`)
+      : await meta.publishToPage(c.page_id, c.page_token, post.content);
+    const eid = (r as any).post_id || r.id;
+    await q(`insert into meta_publish(post_id, channel, external_id, status) values($1,'facebook',$2,'sent')`, [req.params.postId, eid]);
+    return { ok: true, externalId: eid };
   } catch (e: any) {
     await q(`insert into meta_publish(post_id, channel, status, error) values($1,'facebook','error',$2)`, [req.params.postId, e.message]);
     await logEvent("error", "meta", `публікація FB: ${e.message}`, null, req.user.id);
