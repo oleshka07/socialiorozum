@@ -452,11 +452,10 @@ function variantsHtml(ch){
 function renderFinals(posts,published){
   const o=$('o6');
   const visible=(posts||[]).filter(p=>p.review!=='archived');
-  if(!visible.length){ o.innerHTML='<div class="empty">Готові пости з\'являться тут — затвердити / фото / обрати мережі / опублікувати.</div>'; return; }
+  if(!visible.length){ o.innerHTML='<div class="empty">Готові пости з\'являться тут — затвердь і тисни «Опублікувати / запланувати».</div>'; return; }
   o.innerHTML=visible.map(p=>{
     const st=p.review==='approved'?'<span class="badge ok">✓ затверджено</span>':p.review==='needs_work'?'<span class="badge soon">доопрацювати</span>':'';
-    const ch=p.channels||{}; PostChannels[p.id]=ch;
-    const chips=NETS.map(n=>{ const on=ch[n[0]]&&ch[n[0]].on; const conn=ChanStatus[n[0]]; return '<button class="netchip'+(on?' on':'')+'" data-net="'+n[0]+'"'+(conn?'':' disabled title="не підключено"')+'>'+n[1]+'</button>'; }).join('');
+    const ic=chanIcons(p.channels);
     return '<div class="tg" data-post="'+p.id+'"><div class="pcontent">'+esc(p.content)+'</div>'
       +(p.media_filename?'<div style="margin-top:8px"><img src="/media/'+esc(p.media_filename)+'" style="max-height:120px;border-radius:8px"></div>':'')
       +'<div class="ctl" style="margin-top:10px">'+st
@@ -466,20 +465,13 @@ function renderFinals(posts,published){
       +'<button class="act" data-a="regen">↻</button>'
       +'<button class="act" data-a="archive">🗄</button>'
       +'<button class="act" data-a="copy">Копіювати</button>'
-      +'<button class="act mediaPick">📎 Фото</button></div>'
-      +'<div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:10px">'
-      +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Куди публікуємо:</div>'
-      +'<div class="netchips">'+chips+'</div>'
-      +'<div class="ctl" style="margin-top:8px"><button class="act adaptBtn">✨ Підлаштувати під мережі</button><button class="primary pubAll">📣 Опублікувати</button><span class="pubmsg" style="font-size:12px"></span></div>'
-      +'<div class="variants">'+variantsHtml(ch)+'</div>'
+      +'<button class="primary cmpOpen">📣 Опублікувати / запланувати</button>'
+      +(ic?'<span style="font-size:13px;color:var(--muted);margin-left:4px">'+ic+'</span>':'')
       +'</div></div>';
   }).join('');
   o.querySelectorAll('.tg').forEach(card=>{ const id=card.dataset.post;
     card.querySelectorAll('.act[data-a]').forEach(b=>b.onclick=()=>postAction(card,id,b.dataset.a));
-    const mpk=card.querySelector('.mediaPick'); if(mpk) mpk.onclick=()=>pickMedia(id);
-    card.querySelectorAll('.netchip').forEach(b=>{ if(!b.disabled) b.onclick=()=>toggleNet(card,id,b.dataset.net); });
-    card.querySelector('.adaptBtn').onclick=()=>adaptNets(card,id);
-    card.querySelector('.pubAll').onclick=(e)=>publishAll(card,id,e.target);
+    card.querySelector('.cmpOpen').onclick=()=>openComposer(id);
   });
 }
 async function toggleNet(card,id,net){
@@ -564,6 +556,56 @@ async function pickMedia(id){
   ov.querySelectorAll('img[data-id]').forEach(im=>im.onclick=async()=>{ try{ await api('/posts/'+id+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:im.dataset.id})}); close(); await refresh(); }catch(e){ alert(e.message); } });
 }
 
+function chooseMedia(){ return new Promise(async resolve=>{
+  let media=[]; try{ media=await api('/media'); }catch(e){ alert('Не вдалося завантажити бібліотеку'); resolve(undefined); return; }
+  const imgs=media.filter(m=>m.kind==='image');
+  const ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;z-index:70;padding:16px';
+  const grid=imgs.length?imgs.map(m=>'<img src="/media/'+esc(m.filename)+'" data-id="'+m.id+'" data-fn="'+esc(m.filename)+'" style="height:84px;border-radius:8px;cursor:pointer">').join(''):'<div class="empty">Бібліотека порожня — завантаж фото у «Джерела».</div>';
+  ov.innerHTML='<div class="settings" style="max-width:620px;width:100%;margin:0"><div class="body"><b>Обери фото</b><div class="out" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">'+grid+'</div><div class="ctl"><button class="ghost" id="cmClose">Скасувати</button><button class="act" id="cmDetach">Без фото</button></div></div></div>';
+  document.body.appendChild(ov); const close=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov){ close(); resolve(undefined); } });
+  ov.querySelector('#cmClose').onclick=()=>{ close(); resolve(undefined); };
+  ov.querySelector('#cmDetach').onclick=()=>{ close(); resolve({id:null,filename:null}); };
+  ov.querySelectorAll('img[data-id]').forEach(im=>im.onclick=()=>{ close(); resolve({id:im.dataset.id, filename:im.dataset.fn}); });
+}); }
+async function openComposer(postId, opts){
+  opts=opts||{};
+  let full; try{ full=await api('/posts/'+postId+'/full'); }catch(e){ alert('Не вдалося відкрити: '+e.message); return; }
+  const C=full.channels||{}; let mediaFilename=full.media_filename||null;
+  const initDate=opts.scheduledAt?String(opts.scheduledAt).slice(0,10):''; const initTime=opts.scheduledAt?(String(opts.scheduledAt).slice(11,16)||'11:00'):'11:00';
+  const ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);display:grid;place-items:center;z-index:60;padding:16px;overflow:auto';
+  const chipsHtml=()=>NETS.map(n=>{ const on=C[n[0]]&&C[n[0]].on; const conn=ChanStatus[n[0]]; return '<button class="netchip'+(on?' on':'')+'" data-net="'+n[0]+'"'+(conn?'':' disabled title="не підключено"')+'>'+n[1]+'</button>'; }).join('');
+  const prevHtml=()=>{ const sel=NETS.filter(n=>C[n[0]]&&C[n[0]].on); if(!sel.length) return '<div style="font-size:12px;color:var(--muted)">Обери мережі вище.</div>'; return sel.map(n=>{ const t=(C[n[0]].text||full.content||''); return '<div style="font-size:12px;border:1px solid var(--line);border-radius:8px;padding:6px 9px;margin-top:6px"><b>'+n[1]+'</b> <span style="color:var(--muted)">'+t.length+' симв.</span><div style="color:var(--muted);margin-top:2px;white-space:pre-wrap">'+esc(t.slice(0,200))+(t.length>200?'…':'')+'</div></div>'; }).join(''); };
+  const mediaHtml=()=>mediaFilename?'<img src="/media/'+esc(mediaFilename)+'" style="height:74px;border-radius:8px">':'<div style="width:74px;height:74px;border-radius:8px;background:var(--panel2);display:grid;place-items:center;color:var(--muted);font-size:11px">нема фото</div>';
+  ov.innerHTML='<div class="settings" style="max-width:600px;width:100%;margin:0"><div class="body">'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><b>📣 Опублікувати / запланувати</b><button class="ghost" id="cmpX" style="margin-left:auto">✕</button></div>'
+    +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Канали</div><div id="cmpChips" class="netchips">'+chipsHtml()+'</div>'
+    +'<div class="ctl" style="margin:8px 0"><button class="act" id="cmpAdapt">✨ Підлаштувати під мережі</button><span id="cmpMsg" style="font-size:12px"></span></div>'
+    +'<div style="display:flex;gap:10px;align-items:flex-start"><div style="flex:1;min-width:0" id="cmpPrev">'+prevHtml()+'</div><div style="text-align:center"><div id="cmpMedia">'+mediaHtml()+'</div><button class="ghost" id="cmpPhoto" style="margin-top:6px;font-size:12px">📎 Фото</button></div></div>'
+    +'<div class="ctl" style="margin-top:12px;gap:12px"><label style="font-size:12px;color:var(--muted)">Дата <input type="date" id="cmpDate" class="txt" value="'+initDate+'" style="width:auto;display:inline-block;padding:5px 8px"></label><label style="font-size:12px;color:var(--muted)">Час <input type="time" id="cmpTime" class="txt" value="'+initTime+'" style="width:auto;display:inline-block;padding:5px 8px"></label></div>'
+    +'<div class="ctl" style="margin-top:14px"><button class="primary" id="cmpNow">📣 Опублікувати зараз</button><button id="cmpSched" style="background:var(--ok);border-color:var(--ok);color:#04140d">🗓 Запланувати</button></div>'
+    +'</div></div>';
+  document.body.appendChild(ov); const close=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
+  const msg=ov.querySelector('#cmpMsg');
+  ov.querySelector('#cmpX').onclick=close;
+  ov.querySelectorAll('#cmpChips .netchip').forEach(b=>{ if(b.disabled) return; b.onclick=()=>{ const net=b.dataset.net; C[net]=C[net]||{text:''}; C[net].on=!C[net].on; b.classList.toggle('on',C[net].on); ov.querySelector('#cmpPrev').innerHTML=prevHtml(); }; });
+  ov.querySelector('#cmpAdapt').onclick=async()=>{ const sel=Object.keys(C).filter(k=>C[k]&&C[k].on); if(!sel.length){ msg.style.color='var(--stale)'; msg.textContent=' оберіть мережі'; return; } msg.style.color='var(--muted)'; msg.textContent=' AI підлаштовує…'; try{ const r=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:sel})}); Object.keys(r.channels||{}).forEach(k=>C[k]=r.channels[k]); ov.querySelector('#cmpPrev').innerHTML=prevHtml(); msg.style.color='var(--ok)'; msg.textContent=' готово ✓'; }catch(e){ msg.style.color='var(--stale)'; msg.textContent=' ⚠ '+e.message; } };
+  ov.querySelector('#cmpPhoto').onclick=async()=>{ const sel=await chooseMedia(); if(sel===undefined) return; try{ await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:sel.id})}); mediaFilename=sel.filename; ov.querySelector('#cmpMedia').innerHTML=mediaHtml(); }catch(e){ alert(e.message); } };
+  const saveCh=()=>api('/posts/'+postId+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:C})});
+  ov.querySelector('#cmpNow').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent=' публікую…'; try{ await saveCh(); const r=await api('/posts/'+postId+'/publish-all',{method:'POST'}); const res=r.results||[]; const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); msg.style.color=err.length?'var(--stale)':'var(--ok)'; msg.textContent=' '+(ok.length?('✓ '+ok.join(', ')):'')+(err.length?(' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; ')):''); if(!err.length){ if(typeof refresh==='function'){try{await refresh();}catch(_){}} setTimeout(close,1300);} }catch(e2){ msg.style.color='var(--stale)'; msg.textContent=' ⚠ '+e2.message; } finally{ b.disabled=false; } };
+  ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ msg.style.color='var(--stale)'; msg.textContent=' вкажи дату й час'; return; } const sel=Object.keys(C).filter(k=>C[k]&&C[k].on); if(!sel.length){ msg.style.color='var(--stale)'; msg.textContent=' оберіть мережі'; return; } const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent=' зберігаю…'; const at=d+'T'+t+':00.000Z'; try{ await saveCh(); if(opts.slotId){ await api('/schedule/'+opts.slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:at})}); } else { await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:at})}); } msg.style.color='var(--ok)'; msg.textContent=' заплановано ✓'; if(typeof loadPublish==='function'){try{await loadPublish();}catch(_){}} setTimeout(close,900); }catch(e2){ msg.style.color='var(--stale)'; msg.textContent=' ⚠ '+e2.message; b.disabled=false; } };
+}
+function openDayScheduler(iso){
+  const posts=(typeof Pub!=='undefined'&&Pub.bank)?Pub.bank:[];
+  const ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;z-index:62;padding:16px';
+  const list=posts.length?posts.map(p=>'<div class="card" data-id="'+p.id+'" style="cursor:pointer">'+esc((p.content||'').replace(/\n+/g,' ').slice(0,90))+'…</div>').join(''):'<div class="empty">Немає затверджених постів. Затвердь пост у «Створенні».</div>';
+  ov.innerHTML='<div class="settings" style="max-width:560px;width:100%;margin:0"><div class="body"><b>Що запланувати на '+iso+'?</b><div class="out" style="margin-top:10px">'+list+'</div><div class="ctl"><button class="ghost" id="dsClose">Закрити</button></div></div></div>';
+  document.body.appendChild(ov); const close=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
+  ov.querySelector('#dsClose').onclick=close;
+  ov.querySelectorAll('.card[data-id]').forEach(c=>c.onclick=()=>{ close(); openComposer(c.dataset.id,{scheduledAt:iso+'T11:00:00.000Z'}); });
+}
 function updRunLabel(){ $('runLabel').textContent = runId ? ('· прогін '+runId.slice(0,8)) : '· новий прогін'; $('lockHint').textContent = runId ? 'Прогін створено з цього транскрипту. «Новий прогін», щоб почати з іншого тексту.' : ''; }
 async function refresh(){ if(!runId) return; const d=await api('/runs/'+runId); applyState(d); }
 async function ensureRun(){
@@ -637,12 +679,14 @@ function renderCal(){
       const time=String(s.scheduled_at).slice(11,16); const posted=s.status==='posted';
       const ch=document.createElement('div'); ch.className='pchip'; ch.style.cursor='pointer';
       ch.innerHTML='<b style="color:var(--accent2)">'+time+(posted?' ✓':'')+'</b> '+chanIcons(s.channels)+' '+esc((s.content||'').replace(/\n+/g,' ').slice(0,18));
-      ch.onclick=()=>slotDialog(s); cell.appendChild(ch);
+      ch.onclick=(ev)=>{ ev.stopPropagation(); openComposer(s.post_id,{scheduledAt:s.scheduled_at,slotId:s.id}); }; cell.appendChild(ch);
     });
     cell.addEventListener('dragover',ev=>{ev.preventDefault();cell.classList.add('over');});
     cell.addEventListener('dragleave',()=>cell.classList.remove('over'));
     cell.addEventListener('drop',async ev=>{ev.preventDefault();cell.classList.remove('over');const d=ev.dataTransfer.getData('text/plain'); if(d.indexOf('post:')!==0) return; const postId=d.slice(5);
       try{ await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:iso+'T09:00:00.000Z'})}); await loadPublish(); }catch(e){ alert(e.message); } });
+    cell.style.cursor='pointer';
+    cell.addEventListener('click',ev=>{ if(ev.target.closest('.pchip')) return; openDayScheduler(iso); });
     cal.appendChild(cell);
   }
 }

@@ -406,6 +406,16 @@ app.get("/api/channels/status", async (req: any) => {
   };
 });
 
+// повний стан поста для композера (текст, канали, фото)
+app.get("/api/posts/:postId/full", async (req: any, reply) => {
+  const p = await one(`select p.id, p.content, p.review, p.channels, ma.filename as media_filename
+     from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+     left join media_asset ma on ma.id=p.media_id
+     where p.id=$1 and s.workspace_id=$2`, [req.params.postId, req.user.workspace_id]);
+  if (!p) return reply.code(404).send({ error: "пост не знайдено" });
+  return p;
+});
+
 // зберегти вибір мереж + тексти
 app.post("/api/posts/:postId/channels", async (req: any, reply) => {
   if (!(await postOwned(req.params.postId, req.user.workspace_id))) return reply.code(404).send({ error: "пост не знайдено" });
