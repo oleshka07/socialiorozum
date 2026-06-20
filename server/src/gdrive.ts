@@ -1,9 +1,9 @@
-// Google Drive (OAuth drive.readonly) — список зображень у папці + завантаження файлів.
-// Використовує той самий Google-застосунок, що й логін, але окремий scope/потік.
+// Google Drive — scope drive.file (non-sensitive, БЕЗ верифікації): доступ лише до папок/файлів,
+// які користувач сам обрав через Google Picker. Той самий Google-застосунок, що й логін.
 const OAUTH = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN = "https://oauth2.googleapis.com/token";
 const DRIVE = "https://www.googleapis.com/drive/v3";
-const SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+const SCOPE = "https://www.googleapis.com/auth/drive.file";
 
 export function authUrl(clientId: string, redirect: string, state: string): string {
   const u = new URL(OAUTH);
@@ -63,9 +63,4 @@ export async function downloadFile(token: string, fileId: string): Promise<Buffe
   return Buffer.from(await r.arrayBuffer());
 }
 
-// з URL папки Google Drive дістати folderId (або приймаємо вже голий id)
-export function folderIdFromUrl(s: string): string {
-  const t = String(s || "").trim();
-  const m = t.match(/folders\/([a-zA-Z0-9_-]+)/) || t.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-  return m ? m[1] : t;
-}
+// folderId тепер надходить напряму з Google Picker — парсинг URL не потрібен.

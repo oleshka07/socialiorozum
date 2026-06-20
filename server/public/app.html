@@ -90,6 +90,7 @@
   .dot.on{background:var(--ok)}
   @media(max-width:760px){.layout{flex-direction:column}.sidebar{width:auto;height:auto;position:static;flex-direction:row;flex-wrap:wrap;align-items:center}.sidebar .foot{margin:0 0 0 auto}.navgroup{display:none}main.content{padding:18px}}
 </style>
+<script src="https://apis.google.com/js/api.js"></script>
 </head>
 <body>
 <div id="onboarding" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);place-items:center;z-index:100;padding:16px">
@@ -168,11 +169,11 @@
       </div></div>
       <div class="settings"><div class="body">
         <b>📁 Google Drive (фото з папок)</b>
-        <div class="hint">Підключи Google Drive і додай папки — поллер кожні ~15 хв тягне нові фото з них у медіа-бібліотеку.</div>
+        <div class="hint">Підключи Google Drive, тоді через рідний вибір Google познач папку — поллер кожні ~15 хв тягне нові фото з неї у медіа-бібліотеку. Доступ лише до обраних папок (scope drive.file, без верифікації).</div>
         <div class="ctl" style="margin-top:8px"><span id="gdStatus" style="font-size:13px;color:var(--muted)">…</span></div>
         <div class="ctl"><a id="gdConnect" class="primary" href="/api/integrations/gdrive/connect" style="display:none;text-decoration:none">🔗 Підключити Google Drive</a><button class="ghost" id="gdDisconnect" style="display:none">Відключити</button></div>
         <div id="gdFolderBox" style="display:none;margin-top:10px">
-          <div class="ctl"><input class="txt" id="gdUrl" placeholder="Посилання на папку Google Drive" style="flex:1;min-width:220px"><button class="primary" id="gdAdd">Додати папку</button></div>
+          <div class="ctl"><button class="primary" id="gdPick">📂 Обрати папку з Google Drive</button></div>
           <div id="gdMsg" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
           <div id="gdList" class="out" style="margin-top:8px"></div>
         </div>
@@ -895,12 +896,27 @@ async function loadGdriveFolders(){
     });
   }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }
-$('gdAdd').onclick=async()=>{
-  const url=$('gdUrl').value.trim(); const m=$('gdMsg');
-  if(!url){ m.style.color='var(--stale)'; m.textContent='Вкажи посилання на папку'; return; }
-  m.style.color='var(--muted)'; m.textContent='додаю…';
-  try{ await api('/sources/gdrive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})}); $('gdUrl').value=''; m.style.color='var(--ok)'; m.textContent='додано ✓'; await loadGdriveFolders(); }
-  catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; }
+let _pickerReady=false;
+function loadPickerApi(cb){ if(_pickerReady){cb();return;} if(typeof gapi==='undefined'){ alert('Google API ще вантажиться — спробуй за мить'); return; } gapi.load('picker',()=>{ _pickerReady=true; cb(); }); }
+$('gdPick').onclick=async()=>{
+  const m=$('gdMsg'); m.style.color='var(--muted)'; m.textContent='відкриваю вибір…';
+  let cfg; try{ cfg=await api('/integrations/gdrive/picker-token'); }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; return; }
+  loadPickerApi(()=>{
+    m.textContent='';
+    const view=new google.picker.DocsView(google.picker.ViewId.FOLDERS).setSelectFolderEnabled(true).setMimeTypes('application/vnd.google-apps.folder');
+    const picker=new google.picker.PickerBuilder()
+      .setOAuthToken(cfg.token).setDeveloperKey(cfg.apiKey).setAppId(cfg.appId)
+      .addView(view)
+      .setCallback(async(d)=>{ if(d.action===google.picker.Action.PICKED){ const f=d.docs[0];
+        try{ const r=await api('/sources/gdrive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folderId:f.id,name:f.name})});
+          m.style.color='var(--ok)'; m.textContent=(r.duplicate?'папка вже додана':'додано: '+(f.name||''))+' — тягну…'; await loadGdriveFolders();
+          try{ await api('/sources/gdrive/'+r.id+'/pull',{method:'POST'}); await loadGdriveFolders(); await loadMedia(); m.textContent='готово ✓'; }
+          catch(e){ m.textContent='папку додано; фото підтягнуться за розкладом'; }
+        }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; }
+      } })
+      .build();
+    picker.setVisible(true);
+  });
 };
 $('gdDisconnect').onclick=async()=>{ if(!confirm('Відключити Google Drive?')) return; try{ await api('/integrations/gdrive/disconnect',{method:'POST'}); await loadGdrive(); }catch(e){} };
 async function loadFF(){ try{ const c=await api('/integrations/transcription');

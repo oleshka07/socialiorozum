@@ -485,12 +485,28 @@ app.post("/api/integrations/gdrive/disconnect", async (req: any) => {
   return { ok: true };
 });
 
+// токен + ключі для Google Picker (фронт відкриває нативний вибір папки)
+app.get("/api/integrations/gdrive/picker-token", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const c = await one<{ refresh_token: string | null }>(`select refresh_token from gdrive_config where workspace_id=$1`, [ws]);
+  if (!c?.refresh_token) return reply.code(400).send({ error: "Спершу підключіть Google Drive" });
+  if (!env.google.apiKey) return reply.code(400).send({ error: "GOOGLE_API_KEY не заданий на сервері" });
+  try {
+    const t = await gdrive.refresh(env.google.clientId, env.google.clientSecret, c.refresh_token);
+    await q(`update gdrive_config set access_token=$2, token_expires_at=$3, updated_at=now() where workspace_id=$1`,
+      [ws, t.access_token, new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString()]);
+    return { token: t.access_token, apiKey: env.google.apiKey, appId: env.google.clientId.split("-")[0] || "" };
+  } catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+
 app.get("/api/sources/gdrive", async (req: any) =>
   q(`select id, folder_id, name, active, last_pulled_at, last_error from gdrive_folder where workspace_id=$1 order by created_at desc`, [req.user.workspace_id]));
 
 app.post("/api/sources/gdrive", async (req: any, reply) => {
-  const folderId = gdrive.folderIdFromUrl(String(req.body?.url ?? ""));
-  if (!folderId) return reply.code(400).send({ error: "Вкажіть посилання на папку Google Drive або її ID" });
+  const folderId = String(req.body?.folderId ?? "").trim();
+  if (!folderId) return reply.code(400).send({ error: "Оберіть папку через Google Picker" });
+  const dup = await one<{ id: string }>(`select id from gdrive_folder where workspace_id=$1 and folder_id=$2`, [req.user.workspace_id, folderId]);
+  if (dup) return { ok: true, id: dup.id, duplicate: true };
   const r = await one<{ id: string }>(`insert into gdrive_folder(workspace_id, folder_id, name) values($1,$2,$3) returning id`,
     [req.user.workspace_id, folderId, String(req.body?.name ?? "").slice(0, 120) || null]);
   return { ok: true, id: r!.id };
