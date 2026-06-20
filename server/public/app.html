@@ -179,7 +179,8 @@
     </section>
 
     <section class="viewsec active" data-view="create">
-      <div class="pagehead"><h1>Створення</h1><p>Джерело — у вкладці «Джерела» (▷ У роботу). Тут проганяєш кроки. <span id="runLabel" style="color:var(--muted)"></span></p></div>
+      <div class="pagehead"><h1>Створення</h1><p>Джерело — у вкладці «Джерела» (▷ У роботу). Тут проганяєш кроки. <span id="runLabel" style="color:var(--muted)"></span></p>
+      <div id="srcInfo" class="hint" style="margin-top:8px"></div></div>
       <div class="ctl" style="margin:0 0 18px">
         <button class="primary" id="runAll">⚡ Прогнати всю кишку</button>
         <button class="ghost" id="newRun">＋ Новий прогін</button>
@@ -390,6 +391,9 @@ function applyState(d){
   renderFinals(byStage.final,d.published||[]);
   S.plan=(d.plan||[]).map(p=>({id:p.id,title:p.title,content:p.post_content||p.title,type:p.type,dayOffset:p.day_offset||0}));
   renderPlan();
+  const si=$('srcInfo'); if(si) si.innerHTML = d.source
+    ? ('📄 <b>Активне джерело:</b> '+esc(d.source.title||'(вставлений текст)')+' <span style="color:var(--muted)">· '+(d.source.len||0)+' симв.</span><div style="color:var(--muted);margin-top:3px">'+esc(d.source.snippet||'')+'…</div>')
+    : '';
 }
 function renderIdeas(ideas){
   const o=$('o1');
@@ -489,11 +493,14 @@ async function facebookStats(card,id){
 function updRunLabel(){ $('runLabel').textContent = runId ? ('· прогін '+runId.slice(0,8)) : '· новий прогін'; $('lockHint').textContent = runId ? 'Прогін створено з цього транскрипту. «Новий прогін», щоб почати з іншого тексту.' : ''; }
 async function refresh(){ if(!runId) return; const d=await api('/runs/'+runId); applyState(d); }
 async function ensureRun(){
-  if(runId) return runId;
   const transcript=$('transcript').value.trim();
-  if(!transcript) throw new Error('Спершу вставте транскрипт.');
-  const r=await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript})});
-  runId=r.runId; localStorage.setItem('kg_run',runId); updRunLabel(); return runId;
+  if(transcript){ // є новий текст у «Джерелах» → робимо новий прогін саме з нього (а не зі старого)
+    const r=await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript})});
+    if(r.error) throw new Error(r.error);
+    runId=r.runId; localStorage.setItem('kg_run',runId); $('transcript').value=''; updRunLabel(); return runId;
+  }
+  if(runId) return runId;
+  throw new Error('Спершу вставте транскрипт у вкладці «Джерела».');
 }
 
 // ---------- run ----------
@@ -592,11 +599,14 @@ $('toCreate').onclick=async()=>{
   if(!transcript){ alert('Спершу вставте транскрипт або імпортуйте джерело.'); return; }
   try{
     const r=await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript})});
+    if(r.error) throw new Error(r.error);
     runId=r.runId; localStorage.setItem('kg_run',runId);
     ['o1','o3','o4','o5','o6','o7'].forEach(id=>$(id).innerHTML='<div class="empty">—</div>');
     [1,3,4,5,6,7].forEach(n=>{badge(n,'','очікує');stepEl(n).classList.remove('done','stale');});
+    $('transcript').value='';
     updRunLabel();
     document.querySelector('.navitem[data-view="create"]').click();
+    refresh().catch(()=>{});
   }catch(e){ alert('Помилка: '+e.message); }
 };
 $('autopilotBtn').onclick=async()=>{
@@ -606,7 +616,8 @@ $('autopilotBtn').onclick=async()=>{
   const btn=$('autopilotBtn'); const old=btn.textContent; btn.disabled=true; btn.textContent='🟢 працюю…';
   try{
     const r=await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript})});
-    runId=r.runId; localStorage.setItem('kg_run',runId); updRunLabel();
+    if(r.error) throw new Error(r.error);
+    runId=r.runId; localStorage.setItem('kg_run',runId); $('transcript').value=''; updRunLabel();
     document.querySelector('.navitem[data-view="create"]').click();
     [1,3,4,5,6,7].forEach(n=>badge(n,'run','<span class="spin"></span> у черзі'));
     await api('/runs/'+runId+'/autopilot',{method:'POST'});
@@ -621,6 +632,7 @@ $('newRun').onclick=()=>{
   if(busy) return;
   if(runId && !confirm('Почати новий прогін? Поточні результати лишаться на сервері, але зникнуть з екрана.')) return;
   runId=null; localStorage.removeItem('kg_run'); S={plan:[],schedule:{}};
+  const si=$('srcInfo'); if(si) si.innerHTML='';
   ['o1','o3','o4','o5','o6','o7'].forEach(id=>$(id).innerHTML='<div class="empty">—</div>');
   $('transcript').value='';
   [1,3,4,5,6,7].forEach(n=>{badge(n,'','очікує');stepEl(n).classList.remove('done','stale');});

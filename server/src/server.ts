@@ -287,7 +287,9 @@ app.get("/api/runs/:id", async (req: any, reply) => {
         join plan_item pi on pi.id=ss.plan_item_id join content_plan cp on cp.id=pi.plan_id
         where cp.run_id=$1`, [id]),
   ]);
-  return { run, steps, ideas, posts, plan, published, schedule };
+  const source = await one(`select s.title, left(s.transcript,280) as snippet, length(s.transcript) as len
+                            from source s join pipeline_run r on r.source_id=s.id where r.id=$1`, [id]);
+  return { run, source, steps, ideas, posts, plan, published, schedule };
 });
 
 app.post("/api/runs/:id/steps/:step/run", async (req: any, reply) => {
