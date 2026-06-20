@@ -501,12 +501,16 @@ app.get("/api/integrations/threads/connect", async (req: any, reply) => {
   if (!env.threads.appId) return reply.code(400).send({ error: "THREADS_APP_ID не заданий на сервері" });
   const state = auth.newToken();
   reply.setCookie("threads_state", state, stateCookie);
+  await logEvent("info", "threads", `connect redirect_uri=${THREADS_REDIRECT}`, { scopes: THREADS_SCOPES }, req.user.id);
   return reply.redirect(threads.authUrl(env.threads.appId, THREADS_REDIRECT, state, THREADS_SCOPES));
 });
 
 app.get("/api/integrations/threads/callback", async (req: any, reply) => {
   const code = String(req.query?.code ?? ""); const state = String(req.query?.state ?? "");
-  if (!code || !state || state !== req.cookies?.threads_state) return reply.redirect("/app?threads=error");
+  const oerr = String(req.query?.error_description ?? req.query?.error ?? "");
+  if (oerr) { await logEvent("error", "threads", `Threads відмовив: ${oerr}`, { error: req.query?.error }, req.user.id); return reply.redirect("/app?threads=error"); }
+  if (!code) { await logEvent("error", "threads", "callback без code", { keys: Object.keys(req.query || {}) }, req.user.id); return reply.redirect("/app?threads=error"); }
+  if (!state || state !== req.cookies?.threads_state) { await logEvent("error", "threads", `state mismatch — cookie ${req.cookies?.threads_state ? "є але != state" : "ВІДСУТНІЙ"}`, null, req.user.id); return reply.redirect("/app?threads=error"); }
   reply.clearCookie("threads_state", { path: "/" });
   try {
     const short = await threads.exchangeCode(env.threads.appId, env.threads.appSecret, THREADS_REDIRECT, code);
@@ -585,12 +589,16 @@ app.get("/api/integrations/meta/connect", async (req: any, reply) => {
   if (!env.meta.appId) return reply.code(400).send({ error: "META_APP_ID не заданий на сервері" });
   const state = auth.newToken();
   reply.setCookie("meta_state", state, stateCookie);
+  await logEvent("info", "meta", `connect redirect_uri=${META_REDIRECT}`, { scopes: META_SCOPES }, req.user.id);
   return reply.redirect(meta.authUrl(env.meta.appId, META_REDIRECT, state, META_SCOPES));
 });
 
 app.get("/api/integrations/meta/callback", async (req: any, reply) => {
   const code = String(req.query?.code ?? ""); const state = String(req.query?.state ?? "");
-  if (!code || !state || state !== req.cookies?.meta_state) return reply.redirect("/app?meta=error");
+  const oerr = String(req.query?.error_description ?? req.query?.error ?? "");
+  if (oerr) { await logEvent("error", "meta", `Meta відмовив: ${oerr}`, { error: req.query?.error }, req.user.id); return reply.redirect("/app?meta=error"); }
+  if (!code) { await logEvent("error", "meta", "callback без code", { keys: Object.keys(req.query || {}) }, req.user.id); return reply.redirect("/app?meta=error"); }
+  if (!state || state !== req.cookies?.meta_state) { await logEvent("error", "meta", `state mismatch — cookie ${req.cookies?.meta_state ? "є але != state" : "ВІДСУТНІЙ"}`, null, req.user.id); return reply.redirect("/app?meta=error"); }
   reply.clearCookie("meta_state", { path: "/" });
   try {
     const short = await meta.exchangeCode(env.meta.appId, env.meta.appSecret, META_REDIRECT, code);
