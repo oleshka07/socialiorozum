@@ -18,7 +18,7 @@ import { sendVerifyEmail, sendResetEmail } from "./email.js";
 import { logEvent } from "./log.js";
 import { startAutopost } from "./autopost.js";
 import { startRssPoller, pullFeed } from "./rss-poller.js";
-import { MEDIA_DIR, saveMedia, deleteMediaFile } from "./media.js";
+import { MEDIA_DIR, saveMedia, deleteMediaFile, convertAllHeif } from "./media.js";
 import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
 import * as gdrive from "./gdrive.js";
 import { publishPostToChannels } from "./publisher.js";
@@ -1263,4 +1263,6 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
   startAutopost();
   startRssPoller();
   startGdrivePoller();
+  // одноразово полагодити залишкові iPhone HEIF -> JPEG (у фоні; ідемпотентно)
+  convertAllHeif().then((n) => { if (n) app.log.info(`HEIF→JPEG конвертовано: ${n}`); }).catch((e: any) => app.log.error("convertAllHeif: " + e.message));
 });

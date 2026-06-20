@@ -3,7 +3,7 @@
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
-import { writeFile, unlink } from "node:fs/promises";
+import { writeFile, unlink, readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import heicConvert from "heic-convert";
 import { q } from "./db.js";
@@ -42,4 +42,23 @@ export async function saveMedia(
 
 export async function deleteMediaFile(filename: string): Promise<void> {
   try { await unlink(join(MEDIA_DIR, filename)); } catch { /* файл міг бути вже видалений */ }
+}
+
+// Одноразова конвертація залишкових HEIC/HEIF -> JPEG (ідемпотентно: після неї HEIF не лишається).
+export async function convertAllHeif(): Promise<number> {
+  const rows = await q<{ id: string; filename: string }>(
+    `select id, filename from media_asset where mime ilike '%hei%' or filename ilike '%.heif' or filename ilike '%.heic'`);
+  let n = 0;
+  for (const r of rows) {
+    try {
+      const buf = await readFile(join(MEDIA_DIR, r.filename));
+      const out = Buffer.from(await heicConvert({ buffer: buf, format: "JPEG", quality: 0.9 }) as ArrayBuffer);
+      const newName = `${randomUUID()}.jpeg`;
+      await writeFile(join(MEDIA_DIR, newName), out);
+      await q(`update media_asset set filename=$2, mime='image/jpeg', size=$3 where id=$1`, [r.id, newName, out.length]);
+      try { await unlink(join(MEDIA_DIR, r.filename)); } catch { /* старий міг зникнути */ }
+      n++;
+    } catch { /* пропускаємо файл, який не вдалося прочитати/сконвертувати */ }
+  }
+  return n;
 }
