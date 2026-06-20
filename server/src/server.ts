@@ -667,6 +667,31 @@ app.get("/api/integrations/meta/stats", async (req: any, reply) => {
   return out;
 });
 
+// список доступних FB-Сторінок (+ їх IG) для вибору акаунта
+app.get("/api/integrations/meta/pages", async (req: any, reply) => {
+  const c = await one<{ user_token: string | null; page_id: string | null }>(`select user_token, page_id from meta_config where workspace_id=$1`, [req.user.workspace_id]);
+  if (!c?.user_token) return reply.code(400).send({ error: "Meta не підключений" });
+  try {
+    const pages = await meta.getPages(c.user_token);
+    return pages.map((p) => ({ id: p.id, name: p.name, ig: p.instagram_business_account?.username || null, current: p.id === c.page_id }));
+  } catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+
+// обрати конкретну сторінку (та її IG) як активну
+app.post("/api/integrations/meta/select", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const pageId = String(req.body?.pageId ?? "");
+  const c = await one<{ user_token: string | null }>(`select user_token from meta_config where workspace_id=$1`, [ws]);
+  if (!c?.user_token) return reply.code(400).send({ error: "Meta не підключений" });
+  const pages = await meta.getPages(c.user_token).catch(() => [] as any[]);
+  const page = pages.find((p) => p.id === pageId);
+  if (!page) return reply.code(404).send({ error: "сторінку не знайдено" });
+  await q(`update meta_config set page_id=$2, page_name=$3, page_token=$4, ig_user_id=$5, ig_username=$6, updated_at=now() where workspace_id=$1`,
+    [ws, page.id, page.name, page.access_token, page.instagram_business_account?.id ?? null, page.instagram_business_account?.username ?? null]);
+  await logEvent("info", "meta", `обрано сторінку «${page.name}»`, null, req.user.id);
+  return { ok: true };
+});
+
 // ===================== POST-ЮНІТИ (банк публікацій) =====================
 async function postOwned(postId: string, ws: string) {
   return one<{ content: string }>(

@@ -277,6 +277,7 @@
           На сервері мають бути <code>META_APP_ID</code>/<code>META_APP_SECRET</code>, а у Facebook Login → Redirect URI — <code>…/api/integrations/meta/callback</code>.
         </div>
         <div class="ctl"><span id="mtStatus" style="font-size:13px;color:var(--muted)">…</span></div>
+        <div class="ctl" id="mtPageRow" style="display:none"><label style="font-size:12px;color:var(--muted)">Акаунт:</label><select id="mtPage" style="min-width:240px;font-size:12px;padding:5px 8px"></select></div>
         <div class="ctl"><a id="mtConnect" class="primary" href="/api/integrations/meta/connect" style="display:none;text-decoration:none">🔗 Підключити Facebook/Instagram</a><button class="ghost" id="mtStats" style="display:none">📊 Статистика</button><button class="ghost" id="mtDisconnect" style="display:none">Відключити</button></div>
         <div id="mtStatsOut" class="out"></div>
       </div></div>
@@ -647,11 +648,20 @@ async function loadMeta(){
   try{ const c=await api('/integrations/meta');
     const st=$('mtStatus'), conn=$('mtConnect'), dis=$('mtDisconnect'), stats=$('mtStats'); if(!st) return;
     if(!c.configured){ st.textContent='⚠ META_APP_ID не налаштований на сервері.'; [conn,dis,stats].forEach(b=>b&&(b.style.display='none')); return; }
-    if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.pageName?(' · FB: <b>'+esc(c.pageName)+'</b>'):'')+(c.igUsername?(' · IG: <b>@'+esc(c.igUsername)+'</b>'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-block'; if(stats)stats.style.display='inline-block'; }
-    else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-block'; if(dis)dis.style.display='none'; if(stats)stats.style.display='none'; }
+    const row=$('mtPageRow');
+    if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.pageName?(' · FB: <b>'+esc(c.pageName)+'</b>'):'')+(c.igUsername?(' · IG: <b>@'+esc(c.igUsername)+'</b>'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-block'; if(stats)stats.style.display='inline-block'; if(row)row.style.display='flex'; loadMetaPages(); }
+    else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-block'; if(dis)dis.style.display='none'; if(stats)stats.style.display='none'; if(row)row.style.display='none'; }
   }catch(e){}
 }
 $('mtDisconnect').onclick=async()=>{ if(!confirm('Відключити Facebook/Instagram?')) return; try{ await api('/integrations/meta/disconnect',{method:'POST'}); await loadMeta(); }catch(e){} };
+async function loadMetaPages(){
+  const sel=$('mtPage'); if(!sel) return;
+  try{ const pages=await api('/integrations/meta/pages');
+    if(!Array.isArray(pages)||!pages.length){ sel.innerHTML='<option>—</option>'; return; }
+    sel.innerHTML=pages.map(p=>'<option value="'+p.id+'"'+(p.current?' selected':'')+'>'+esc(p.name)+(p.ig?(' · IG @'+esc(p.ig)):'')+'</option>').join('');
+  }catch(e){ sel.innerHTML='<option>—</option>'; }
+}
+$('mtPage').onchange=async(e)=>{ try{ await api('/integrations/meta/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pageId:e.target.value})}); await loadMeta(); flashSaved(); }catch(err){ alert('Не вдалося змінити акаунт: '+err.message); } };
 $('mtStats').onclick=async()=>{ const o=$('mtStatsOut'); o.innerHTML='<div class="empty"><span class="spin"></span> завантаження…</div>';
   try{ const s=await api('/integrations/meta/stats');
     o.innerHTML=(s.facebook?('<div class="card">📘 <b>'+esc(s.facebook.name||'FB')+'</b>: '+(s.facebook.followers_count||s.facebook.fan_count||0)+' підписників</div>'):'')
