@@ -4,6 +4,7 @@ import fstatic from "@fastify/static";
 import cookie from "@fastify/cookie";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { createHmac } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
 import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, rewriteWithStep, deriveVoice, generateStrategy } from "./pipeline.js";
@@ -21,6 +22,13 @@ const app = Fastify({ logger: true, trustProxy: true });
 await app.register(cors, { origin: env.appBaseUrl, credentials: true });
 await app.register(cookie, { secret: env.sessionSecret });
 await app.register(fstatic, { root: join(__dirname, "..", "public"), prefix: "/" });
+
+// зберігаємо сирий JSON-боді (для HMAC-перевірки вебхуків), парсинг лишаємо як був
+app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body, done) => {
+  (_req as any).rawBody = body;
+  if (!body) return done(null, {});
+  try { done(null, JSON.parse(body as string)); } catch (e) { done(e as Error, undefined); }
+});
 
 // базові security-заголовки
 app.addHook("onRequest", async (_req, reply) => {
@@ -49,6 +57,7 @@ app.addHook("preHandler", async (req: any, reply) => {
   const url = (req.raw.url || "").split("?")[0];
   if (!url.startsWith("/api/")) return;
   if (url.startsWith("/api/auth/")) return;
+  if (url.startsWith("/api/webhooks/")) return;
   const user = await auth.userBySession(req.cookies?.[COOKIE]);
   if (!user) return reply.code(401).send({ error: "Не авторизовано" });
   if (!user.email_verified) return reply.code(403).send({ error: "Пошта не підтверджена" });
@@ -833,17 +842,38 @@ app.post("/api/schedule/auto", async (req: any) => {
 
 // ===================== ТРАНСКРИБАЦІЯ (Fireflies) =====================
 async function transConfig(ws: string) {
-  return one<{ provider: string; api_key: string | null }>(`select provider, api_key from transcription_config where workspace_id=$1`, [ws]);
+  return one<{ provider: string; api_key: string | null; webhook_token: string | null; webhook_secret: string | null; auto_run: boolean | null }>(
+    `select provider, api_key, webhook_token, webhook_secret, auto_run from transcription_config where workspace_id=$1`, [ws]);
 }
 app.get("/api/integrations/transcription", async (req: any) => {
-  const c = await transConfig(req.user.workspace_id);
-  return { provider: c?.provider || "fireflies", hasKey: !!(c && c.api_key) };
+  const ws = req.user.workspace_id;
+  let c = await transConfig(ws);
+  if (c && !c.webhook_token) { // згенерувати токен для рядків, створених до фічі вебхуків
+    await q(`update transcription_config set webhook_token=$2 where workspace_id=$1`, [ws, auth.newToken()]);
+    c = await transConfig(ws);
+  }
+  return {
+    provider: c?.provider || "fireflies",
+    hasKey: !!(c && c.api_key),
+    webhookUrl: c?.webhook_token ? `${env.appBaseUrl}/api/webhooks/fireflies/${c.webhook_token}` : "",
+    hasSecret: !!(c && c.webhook_secret),
+    autoRun: !!(c && c.auto_run),
+  };
 });
 app.put("/api/integrations/transcription", async (req: any) => {
   const ws = req.user.workspace_id;
   const key = String(req.body?.apiKey ?? "").trim();
-  await q(`insert into transcription_config(workspace_id, provider, api_key, updated_at) values($1,'fireflies', nullif($2,''), now())
-           on conflict (workspace_id) do update set api_key = case when $2 <> '' then $2 else transcription_config.api_key end, updated_at=now()`, [ws, key]);
+  const secret = String(req.body?.webhookSecret ?? "").trim();
+  const autoRun = req.body?.autoRun === true || req.body?.autoRun === "true";
+  await q(`insert into transcription_config(workspace_id, provider, api_key, webhook_secret, auto_run, webhook_token, updated_at)
+           values($1,'fireflies', nullif($2,''), nullif($3,''), $4, $5, now())
+           on conflict (workspace_id) do update set
+             api_key = case when $2 <> '' then $2 else transcription_config.api_key end,
+             webhook_secret = case when $3 <> '' then $3 else transcription_config.webhook_secret end,
+             auto_run = $4,
+             webhook_token = coalesce(transcription_config.webhook_token, $5),
+             updated_at=now()`,
+    [ws, key, secret, autoRun, auth.newToken()]);
   return { ok: true };
 });
 app.get("/api/transcription/list", async (req: any, reply) => {
@@ -864,6 +894,45 @@ app.post("/api/transcription/import", async (req: any, reply) => {
   const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
   await logEvent("info", "transcription", `імпорт Fireflies: ${t.title}`, null, req.user.id);
   return { sourceId: src!.id, runId: run!.id, title: t.title };
+});
+
+// вебхук Fireflies: «зустріч готова» -> автоімпорт джерела (+ опційно автопілот).
+// Поза auth: маршрутизація через per-workspace токен у URL, автентичність — HMAC-підпис.
+app.post("/api/webhooks/fireflies/:token", async (req: any, reply) => {
+  const cfg = await one<{ workspace_id: string; api_key: string | null; webhook_secret: string | null; auto_run: boolean | null }>(
+    `select workspace_id, api_key, webhook_secret, auto_run from transcription_config where webhook_token=$1`, [req.params.token]);
+  if (!cfg) return reply.code(404).send({ error: "unknown webhook" });
+  if (cfg.webhook_secret) {
+    const expected = createHmac("sha256", cfg.webhook_secret).update(req.rawBody || "").digest("hex");
+    const got = String(req.headers["x-hub-signature"] || "").replace(/^sha256=/, "");
+    if (!got || got !== expected) { await logEvent("warn", "transcription", "вебхук: невірний підпис", null); return reply.code(401).send({ error: "bad signature" }); }
+  }
+  const body = req.body || {};
+  if (body.eventType && body.eventType !== "Transcription completed") return { ok: true, ignored: true };
+  const meetingId = String(body.meetingId || "");
+  if (!meetingId) return reply.code(400).send({ error: "no meetingId" });
+  if (!cfg.api_key) return reply.code(400).send({ error: "no api key" });
+  const dup = await one(`select id from source where workspace_id=$1 and external_id=$2`, [cfg.workspace_id, meetingId]);
+  if (dup) return { ok: true, duplicate: true };
+  try {
+    const t = await fireflies.getTranscript(cfg.api_key, meetingId);
+    if (!t.text) return { ok: true, empty: true };
+    const src = await one<{ id: string }>(`insert into source(workspace_id,origin,title,transcript,external_id) values($1,'fireflies',$2,$3,$4) returning id`,
+      [cfg.workspace_id, t.title, t.text, meetingId]);
+    const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
+    await logEvent("info", "transcription", `вебхук-імпорт: ${t.title}`, { runId: run!.id });
+    if (cfg.auto_run) {
+      // автопілот довгий (~2-3 хв) — у фоні, щоб вебхук одразу повернув 200 і Fireflies не ретраїв
+      (async () => {
+        try { for (const s of STEP_ORDER) await executeStep(run!.id, s as StepKey); await logEvent("info", "autopilot", "вебхук-автопілот: готово", { runId: run!.id }); }
+        catch (e: any) { await logEvent("error", "autopilot", `вебхук-автопілот: ${e.message}`, { runId: run!.id }); }
+      })();
+    }
+    return { ok: true, runId: run!.id, autopilot: !!cfg.auto_run };
+  } catch (e: any) {
+    await logEvent("error", "transcription", `вебхук getTranscript: ${e.message}`, null);
+    return reply.code(500).send({ error: e.message });
+  }
 });
 
 // ===================== СТОРІНКИ =====================

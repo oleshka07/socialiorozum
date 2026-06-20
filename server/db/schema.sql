@@ -229,6 +229,14 @@ create table if not exists transcription_config (
   api_key      text,
   updated_at   timestamptz not null default now()
 );
+-- авто-імпорт через вебхук Fireflies (per-workspace токен у URL + секрет для HMAC + авто-прогін)
+alter table transcription_config add column if not exists webhook_token  text;
+alter table transcription_config add column if not exists webhook_secret text;
+alter table transcription_config add column if not exists auto_run       boolean not null default false;
+create unique index if not exists idx_transcfg_webhook on transcription_config(webhook_token);
+-- дедуплікація автоімпорту зустрічей (Fireflies meetingId)
+alter table source add column if not exists external_id text;
+create index if not exists idx_source_extid on source(workspace_id, external_id);
 
 -- інтеграція Threads (Meta): окремий OAuth-токен на workspace (лише на сервері)
 create table if not exists threads_config (
