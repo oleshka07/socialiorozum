@@ -38,3 +38,19 @@ export function sendResetEmail(to: string, link: string) {
     wrap("Скидання пароля",
       `<p>Ви запросили скидання пароля. Натисніть, щоб задати новий (посилання дійсне 2 години):</p>${button(link, "Скинути пароль")}`));
 }
+export function sendDeletionScheduledEmail(to: string, loginLink: string, days: number) {
+  return send(to, "Акаунт заплановано до видалення — socialio",
+    wrap("Акаунт буде видалено",
+      `<p>Ви запросили видалення акаунта socialio. Усі дані буде остаточно стерто через <b>${days} днів</b>.</p>
+       <p>Передумали? Просто увійдіть у застосунок протягом цього часу — видалення скасується автоматично.</p>${button(loginLink, "Скасувати — увійти")}`));
+}
+export function sendInactivityWarningEmail(to: string, loginLink: string, days: number) {
+  return send(to, "Давно не бачились — socialio",
+    wrap("Ваш контент скоро приберемо",
+      `<p>Ви не заходили в socialio понад місяць. Щоб звільнити місце, ми приберемо ваші завантажені фото та прогони через <b>${days} днів</b>, якщо ви не повернетесь. Налаштування бренду й стратегія залишаться.</p>${button(loginLink, "Повернутись")}`));
+}
+export function sendEmailChangedNotice(to: string, newEmail: string) {
+  return send(to, "Email акаунта змінено — socialio",
+    wrap("Email змінено",
+      `<p>Email вашого акаунта socialio змінено на <b>${newEmail}</b>.</p><p>Якщо це були не ви — негайно скиньте пароль і зверніться до підтримки.</p>`));
+}

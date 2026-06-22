@@ -497,6 +497,30 @@
           <label class="rchip" style="margin:8px 0"><input type="checkbox" id="ffAuto"> Авто-прогін Автопілота для імпортованих зустрічей</label>
           <div class="btnrow"><button class="primary" id="ffSave">Зберегти</button><button class="ghost" id="ffTest">Перевірити</button><span id="ffMsg" style="font-size:12px;color:var(--muted)"></span></div>
         </div>
+        <div class="panel">
+          <div class="ph">👤 Акаунт</div>
+          <div class="hint" id="accInfo">…</div>
+          <div class="grid2" style="margin-top:12px">
+            <div>
+              <label class="fl">Змінити пароль</label>
+              <input class="txt" type="password" id="accCurPw" placeholder="Поточний пароль (якщо є)" style="margin-bottom:8px">
+              <input class="txt" type="password" id="accNewPw" placeholder="Новий пароль (мін. 8)">
+              <div class="btnrow"><button class="primary" id="accPwSave">Зберегти пароль</button><span id="accPwMsg" style="font-size:12px;color:var(--muted)"></span></div>
+            </div>
+            <div>
+              <label class="fl">Змінити email</label>
+              <input class="txt" type="email" id="accNewEmail" placeholder="новий@email.com" style="margin-bottom:8px">
+              <input class="txt" type="password" id="accEmailPw" placeholder="Пароль (підтвердження)">
+              <div class="btnrow"><button class="primary" id="accEmailSave">Змінити email</button><span id="accEmailMsg" style="font-size:12px;color:var(--muted)"></span></div>
+            </div>
+          </div>
+          <div class="btnrow" style="margin-top:14px"><button id="accExport">📤 Експорт моїх даних (JSON)</button></div>
+        </div>
+        <div class="panel" style="border-color:var(--danger)">
+          <div class="ph" style="color:var(--danger)">⚠ Небезпечна зона</div>
+          <div class="hint">Видалення акаунта: дані одразу зникнуть з кабінету, остаточно зітруться через 14 днів. Передумаєш — просто увійди протягом цього часу.</div>
+          <div class="btnrow"><button class="danger" id="accDelete">Видалити акаунт</button></div>
+        </div>
       </section>
 
     </div>
@@ -548,6 +572,7 @@ function selectView(v){
   $('genPostsBtn').style.display=v==='create'?'inline-flex':'none';
   if(v==='analytics') loadAnalytics();
   if(v==='publish') loadPublish();
+  if(v==='settings') loadAccount();
 }
 function go(v){ selectView(v); }
 document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>selectView(n.dataset.view));
@@ -1070,6 +1095,17 @@ $('ffImport').onclick=async()=>{
       el.appendChild(d); });
   }catch(e){ ov.querySelector('#ffList').innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 };
+
+// ---------- Акаунт ----------
+async function loadAccount(){
+  try{ const a=await api('/account'); const mb=(a.media.bytes/1048576).toFixed(1);
+    $('accInfo').innerHTML='Email: <b>'+esc(a.email||'')+'</b>'+(a.emailVerified?' ✓':' (не підтверджено)')+' · Медіа: '+a.media.count+' файлів ('+mb+' МБ)'+(a.hasPassword?'':' · вхід лише через Google');
+  }catch(e){ $('accInfo').textContent='—'; }
+}
+$('accPwSave').onclick=async()=>{ const m=$('accPwMsg'); m.style.color='var(--muted)'; m.textContent='…'; try{ await api('/account/password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({currentPassword:$('accCurPw').value,newPassword:$('accNewPw').value})}); $('accCurPw').value=''; $('accNewPw').value=''; m.style.color='var(--brand)'; m.textContent='пароль змінено ✓'; }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
+$('accEmailSave').onclick=async()=>{ const m=$('accEmailMsg'); m.style.color='var(--muted)'; m.textContent='…'; try{ const r=await api('/account/email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('accNewEmail').value,password:$('accEmailPw').value})}); $('accEmailPw').value=''; $('accNewEmail').value=''; m.style.color='var(--brand)'; m.textContent='email змінено ✓'; if($('userEmail'))$('userEmail').textContent=r.email; loadAccount(); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
+$('accExport').onclick=()=>{ window.location.href='/api/account/export'; };
+$('accDelete').onclick=async()=>{ const email=prompt('Видалення акаунта.\nДані одразу зникнуть з кабінету, остаточно зітруться через 14 днів (увійди, щоб скасувати).\n\nВведи свій email для підтвердження:'); if(!email) return; try{ const r=await api('/account/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmEmail:email})}); alert(r.message||'Акаунт заплановано до видалення.'); location.href='/login'; }catch(e){ alert('⚠ '+e.message); } };
 
 // ---------- Стратегія ----------
 let STRAT = { data:{}, status:"none" };

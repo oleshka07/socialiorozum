@@ -58,7 +58,8 @@ export async function findOrCreateGoogleUser(email: string, googleId: string): P
   const existing = await one<User>(
     `select id, email, email_verified, workspace_id from app_user where email=$1`, [e]);
   if (existing) {
-    await q(`update app_user set email_verified=true, google_id=coalesce(google_id,$2) where id=$1`, [existing.id, googleId]);
+    // вхід через Google теж скасовує заплановане видалення
+    await q(`update app_user set email_verified=true, google_id=coalesce(google_id,$2), deleted_at=null where id=$1`, [existing.id, googleId]);
     return { ...existing, email_verified: true };
   }
   const wsId = await createWorkspaceWithDefaults("user:" + e);
@@ -71,8 +72,8 @@ export async function findOrCreateGoogleUser(email: string, googleId: string): P
 }
 
 export const userByEmail = (email: string) =>
-  one<User & { password_hash: string }>(
-    `select id, email, email_verified, workspace_id, password_hash from app_user where email=$1`,
+  one<User & { password_hash: string; deleted_at: string | null }>(
+    `select id, email, email_verified, workspace_id, password_hash, deleted_at from app_user where email=$1`,
     [email.toLowerCase()]
   );
 export const setPassword = (userId: string, password: string) =>
@@ -94,11 +95,23 @@ export async function userBySession(token: string | undefined): Promise<User | n
   return one<User>(
     `select u.id, u.email, u.email_verified, u.workspace_id
      from user_session s join app_user u on u.id = s.user_id
-     where s.token=$1 and s.expires_at > now()`,
+     where s.token=$1 and s.expires_at > now() and u.deleted_at is null`,
     [token]
   );
 }
 export const deleteSession = (token: string) => q(`delete from user_session where token=$1`, [token]);
+
+// ---- lifecycle акаунта ----
+// Оновлює last_active не частіше ніж раз/год (дешево) і скидає прапор «попереджено про неактивність».
+export const touchActive = (userId: string) =>
+  q(`update app_user set last_active_at=now(), inactivity_warned_at=null
+     where id=$1 and (last_active_at is null or last_active_at < now() - interval '1 hour')`, [userId]);
+export async function softDeleteAccount(userId: string): Promise<void> {
+  await q(`update app_user set deleted_at=now() where id=$1`, [userId]);
+  await q(`delete from user_session where user_id=$1`, [userId]); // вилогінити з усіх пристроїв
+}
+export const restoreAccount = (userId: string) => q(`update app_user set deleted_at=null where id=$1`, [userId]);
+export const setEmailAddr = (userId: string, email: string) => q(`update app_user set email=$2 where id=$1`, [userId, email.toLowerCase()]);
 
 // ---- одноразові токени для пошти ----
 export async function createEmailToken(userId: string, kind: "verify" | "reset"): Promise<string> {

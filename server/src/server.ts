@@ -14,7 +14,7 @@ import * as threads from "./threads.js";
 import * as meta from "./meta.js";
 import * as fireflies from "./fireflies.js";
 import * as auth from "./auth.js";
-import { sendVerifyEmail, sendResetEmail } from "./email.js";
+import { sendVerifyEmail, sendResetEmail, sendDeletionScheduledEmail, sendEmailChangedNotice } from "./email.js";
 import { logEvent } from "./log.js";
 import { startAutopost } from "./autopost.js";
 import { startRssPoller, pullFeed } from "./rss-poller.js";
@@ -22,6 +22,7 @@ import { MEDIA_DIR, saveMedia, deleteMediaFile, convertAllHeif } from "./media.j
 import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
 import * as gdrive from "./gdrive.js";
 import { publishPostToChannels } from "./publisher.js";
+import { startLifecycleWorker } from "./lifecycle.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = Fastify({ logger: true, trustProxy: true });
@@ -80,6 +81,7 @@ app.addHook("preHandler", async (req: any, reply) => {
   if (!user) return reply.code(401).send({ error: "Не авторизовано" });
   if (!user.email_verified) return reply.code(403).send({ error: "Пошта не підтверджена" });
   req.user = user;
+  auth.touchActive(user.id).catch(() => {}); // оновлення активності (throttled усередині), не блокує запит
 });
 
 // володіння run/post у межах workspace юзера
@@ -129,6 +131,7 @@ app.post("/api/auth/login", async (req: any, reply) => {
     return reply.code(401).send({ error: "Невірний email або пароль" });
   }
   if (!u.email_verified) return reply.code(403).send({ error: "Підтвердіть пошту (перевірте лист)" });
+  if (u.deleted_at) { await auth.restoreAccount(u.id); await logEvent("info", "account", `відновлено акаунт при вході: ${email}`, null, u.id); }
   const sid = await auth.createSession(u.id);
   reply.setCookie(COOKIE, sid, cookieOpts);
   return { ok: true };
@@ -168,6 +171,67 @@ app.post("/api/auth/reset", async (req: any, reply) => {
   if (!userId) return reply.code(400).send({ error: "Посилання недійсне або застаріле" });
   await auth.setPassword(userId, password);
   return { ok: true };
+});
+
+// ===================== ACCOUNT (профіль, гігієна, видалення) =====================
+app.get("/api/account", async (req: any) => {
+  const u = await one<{ email: string; email_verified: boolean; created_at: string; has_pw: boolean }>(
+    `select email, email_verified, created_at, (password_hash is not null) as has_pw from app_user where id=$1`, [req.user.id]);
+  const m = await one<{ n: number; bytes: string }>(
+    `select count(*)::int n, coalesce(sum(size),0)::bigint bytes from media_asset where workspace_id=$1`, [req.user.workspace_id]);
+  return { email: u?.email, emailVerified: u?.email_verified, createdAt: u?.created_at, hasPassword: !!u?.has_pw, media: { count: m?.n || 0, bytes: Number(m?.bytes || 0) } };
+});
+
+app.post("/api/account/password", async (req: any, reply) => {
+  const cur = String(req.body?.currentPassword ?? "");
+  const next = String(req.body?.newPassword ?? "");
+  if (next.length < 8) return reply.code(400).send({ error: "Пароль мінімум 8 символів" });
+  const u = await one<{ password_hash: string | null }>(`select password_hash from app_user where id=$1`, [req.user.id]);
+  if (u?.password_hash && !auth.verifyPassword(cur, u.password_hash)) return reply.code(403).send({ error: "Поточний пароль невірний" });
+  await auth.setPassword(req.user.id, next);
+  await logEvent("info", "account", "пароль змінено", null, req.user.id);
+  return { ok: true };
+});
+
+app.post("/api/account/email", async (req: any, reply) => {
+  const newEmail = String(req.body?.email ?? "").trim().toLowerCase();
+  const pw = String(req.body?.password ?? "");
+  if (!emailOk(newEmail)) return reply.code(400).send({ error: "Некоректний email" });
+  const u = await one<{ password_hash: string | null; email: string }>(`select password_hash, email from app_user where id=$1`, [req.user.id]);
+  if (newEmail === u?.email) return reply.code(400).send({ error: "Це той самий email" });
+  if (u?.password_hash && !auth.verifyPassword(pw, u.password_hash)) return reply.code(403).send({ error: "Пароль невірний" });
+  if (await auth.userByEmail(newEmail)) return reply.code(409).send({ error: "Такий email вже зайнятий" });
+  const old = u?.email;
+  await auth.setEmailAddr(req.user.id, newEmail);
+  try { if (old) await sendEmailChangedNotice(old, newEmail); await sendEmailChangedNotice(newEmail, newEmail); } catch { /* лист не критичний */ }
+  await logEvent("info", "account", `email змінено: ${old} -> ${newEmail}`, null, req.user.id);
+  return { ok: true, email: newEmail };
+});
+
+app.get("/api/account/export", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const [settings, rubrics, strategy, sources, posts, schedule, media] = await Promise.all([
+    q(`select key, content from settings_block where workspace_id=$1`, [ws]),
+    q(`select name, emoji, description, share, idx from rubric where workspace_id=$1 order by idx`, [ws]),
+    one(`select data, status from strategy where workspace_id=$1`, [ws]),
+    q(`select id, origin, title, transcript, created_at from source where workspace_id=$1 order by created_at`, [ws]),
+    q(`select p.id, p.stage, p.review, p.content, p.channels, p.created_at from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 order by p.created_at`, [ws]),
+    q(`select ss.scheduled_at, ss.status, p.content from schedule_slot ss left join plan_item pi on pi.id=ss.plan_item_id join post p on p.id=coalesce(ss.post_id, pi.post_id) join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1`, [ws]),
+    q(`select kind, mime, original_name, filename, size, created_at from media_asset where workspace_id=$1`, [ws]),
+  ]);
+  reply.header("Content-Disposition", `attachment; filename="socialio-export.json"`);
+  reply.type("application/json");
+  return { exported_at: new Date().toISOString(), email: req.user.email, settings, rubrics, strategy, sources, posts, schedule, media };
+});
+
+app.post("/api/account/delete", async (req: any, reply) => {
+  const confirm = String(req.body?.confirmEmail ?? "").trim().toLowerCase();
+  if (confirm !== String(req.user.email).toLowerCase()) return reply.code(400).send({ error: "Введіть свій email для підтвердження" });
+  await auth.softDeleteAccount(req.user.id);
+  try { await sendDeletionScheduledEmail(req.user.email, `${env.appBaseUrl}/login`, 14); } catch { /* лист не критичний */ }
+  await logEvent("info", "account", `акаунт заплановано до видалення: ${req.user.email}`, null, req.user.id);
+  reply.clearCookie(COOKIE, { path: "/" });
+  return { ok: true, message: "Акаунт заплановано до видалення через 14 днів. Дані зникли з кабінету. Увійдіть протягом 14 днів, щоб скасувати." };
 });
 
 // ---- Google OAuth (вхід через Google; обходить email-верифікацію) ----
@@ -1286,6 +1350,7 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
   startAutopost();
   startRssPoller();
   startGdrivePoller();
+  startLifecycleWorker();
   // одноразово полагодити залишкові iPhone HEIF -> JPEG (у фоні; ідемпотентно)
   convertAllHeif().then((n) => { if (n) app.log.info(`HEIF→JPEG конвертовано: ${n}`); }).catch((e: any) => app.log.error("convertAllHeif: " + e.message));
 });

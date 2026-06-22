@@ -347,3 +347,11 @@ create table if not exists strategy (
 create index if not exists idx_steprun_run on step_run(run_id);
 create index if not exists idx_post_run on post(run_id);
 create index if not exists idx_idea_run on idea(run_id);
+
+-- lifecycle акаунтів: активність, soft-delete (grace 14 днів), попередження/чистка за неактивність
+alter table app_user add column if not exists last_active_at       timestamptz;
+alter table app_user add column if not exists deleted_at           timestamptz;   -- soft-delete; воркер стирає остаточно після grace
+alter table app_user add column if not exists inactivity_warned_at timestamptz;   -- лист про неактивність надіслано
+alter table app_user add column if not exists data_purged_at       timestamptz;   -- медіа/прогони почищено за неактивність
+create index if not exists idx_user_lastactive on app_user(last_active_at);
+create index if not exists idx_user_deleted on app_user(deleted_at) where deleted_at is not null;
