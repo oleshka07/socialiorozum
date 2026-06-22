@@ -538,6 +538,7 @@ const esc = s => String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt
 const STEP  = {1:'extract_ideas',3:'drafts',4:'tone',5:'format',6:'deai',7:'strategy'};
 const ORDER = [1,3,4,5,6,7];
 const SET = {mkt:'marketing_context', tov:'tone_of_voice', deai:'deai_rules', strat:'content_strategy', voiceExamples:'voice_examples'};
+const AUTORUN_WARN='Авто-прогін запускатиме повну AI-генерацію постів на КОЖНУ нову статтю/зустріч — це витрачає кошти на AI. Увімкнути?';
 const SAMPLE = `Клієнт: я постійно відкладаю важливі справи, сідаю за роботу і одразу лізу в телефон.
 Коуч: давай подивимось, що відбувається в момент перед тим, як ти береш телефон. Який це стан?
 Клієнт: тривога. Ніби боюся почати, бо раптом не вийде ідеально.
@@ -1009,13 +1010,13 @@ async function loadRss(){
     o.querySelectorAll('.card[data-id]').forEach(c=>{ const id=c.dataset.id;
       c.querySelectorAll('.rchip').forEach(l=>{ const cb=l.querySelector('input'); l.classList.toggle('on',cb.checked); cb.addEventListener('change',()=>l.classList.toggle('on',cb.checked)); });
       c.querySelector('.rssActive').addEventListener('change',e=>api('/sources/rss/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:e.target.checked})}).catch(()=>{}));
-      c.querySelector('.rssAutoT').addEventListener('change',e=>api('/sources/rss/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({autoRun:e.target.checked})}).catch(()=>{}));
+      c.querySelector('.rssAutoT').addEventListener('change',e=>{ if(e.target.checked && !confirm(AUTORUN_WARN)){ e.target.checked=false; return; } api('/sources/rss/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({autoRun:e.target.checked})}).catch(()=>{}); });
       c.querySelector('.rssPull').onclick=async(ev)=>{ const b=ev.target; b.disabled=true; b.textContent='…'; try{ const r=await api('/sources/rss/'+id+'/pull',{method:'POST'}); b.textContent='+'+r.created; await loadRss(); await loadRecent(); }catch(e){ b.textContent='⚠'; flash(e.message); } finally{ setTimeout(()=>{b.disabled=false;b.textContent='↓';},1500); } };
       c.querySelector('.rssDel').onclick=async()=>{ if(!confirm('Видалити стрічку?'))return; try{ await api('/sources/rss/'+id,{method:'DELETE'}); await loadRss(); }catch(e){ flash(e.message); } };
     });
   }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }
-$('rssAdd').onclick=async()=>{ const url=$('rssUrl').value.trim(); const m=$('rssMsg'); if(!url){ m.style.color='var(--danger)'; m.textContent='Вкажи URL'; return; } m.style.color='var(--muted)'; m.textContent='додаю…'; try{ await api('/sources/rss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,autoRun:$('rssAuto').checked})}); $('rssUrl').value=''; $('rssAuto').checked=false; m.style.color='var(--brand)'; m.textContent='додано ✓'; await loadRss(); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
+$('rssAdd').onclick=async()=>{ const url=$('rssUrl').value.trim(); const m=$('rssMsg'); if(!url){ m.style.color='var(--danger)'; m.textContent='Вкажи URL'; return; } if($('rssAuto').checked && !confirm(AUTORUN_WARN)) $('rssAuto').checked=false; m.style.color='var(--muted)'; m.textContent='додаю…'; try{ await api('/sources/rss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,autoRun:$('rssAuto').checked})}); $('rssUrl').value=''; $('rssAuto').checked=false; m.style.color='var(--brand)'; m.textContent='додано ✓'; await loadRss(); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
 
 // ---------- останні джерела ----------
 async function loadRecent(){
@@ -1090,6 +1091,7 @@ $('gdDisconnect').onclick=async()=>{ if(!confirm('Відключити Google Dr
 async function loadFF(){ try{ const c=await api('/integrations/transcription'); if(c.hasKey) $('ffKey').placeholder='•••••••• (ключ збережено)'; if($('ffHook')) $('ffHook').value=c.webhookUrl||''; if(c.hasSecret&&$('ffSecret')) $('ffSecret').placeholder='•••••••• (секрет збережено)'; if($('ffAuto')) $('ffAuto').checked=!!c.autoRun; }catch(e){} }
 $('ffHookCopy').onclick=()=>{ const v=$('ffHook').value; if(v){ navigator.clipboard.writeText(v); flashSaved(); } };
 $('ffSave').onclick=async()=>{ try{ await api('/integrations/transcription',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({apiKey:$('ffKey').value,webhookSecret:$('ffSecret').value,autoRun:$('ffAuto').checked})}); $('ffKey').value=''; $('ffSecret').value=''; $('ffMsg').style.color='var(--brand)'; $('ffMsg').textContent='збережено ✓'; await loadFF(); }catch(e){ $('ffMsg').style.color='var(--danger)'; $('ffMsg').textContent='⚠ '+e.message; } };
+if($('ffAuto')) $('ffAuto').onchange=(e)=>{ if(e.target.checked && !confirm(AUTORUN_WARN)) e.target.checked=false; };
 $('ffTest').onclick=async()=>{ $('ffMsg').style.color='var(--muted)'; $('ffMsg').textContent='перевіряю…'; try{ const l=await api('/transcription/list'); $('ffMsg').style.color='var(--brand)'; $('ffMsg').textContent='ОК, зустрічей: '+l.length; }catch(e){ $('ffMsg').style.color='var(--danger)'; $('ffMsg').textContent='⚠ '+e.message; } };
 $('ffImport').onclick=async()=>{
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='60';
