@@ -466,6 +466,7 @@
 
       <!-- ============ SETTINGS ============ -->
       <section class="viewsec" data-view="settings">
+        <div class="panel"><label class="fl">🕒 Часовий пояс</label><select id="tzSel"></select><div class="hint">Час планування й календаря рахується за цим поясом (визначається автоматично, можна змінити).</div></div>
         <div class="panel">
           <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--tg)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M22 4L2 11l6 2 2 6 3-4 5 4 4-15z"></path></svg></span>Telegram</div>
           <div class="hint" style="line-height:1.7">1. @BotFather → <code>/newbot</code> → токен. 2. Додай бота <b>адміном</b> у канал і групу. 3. Встав токен; канал — <code>@username</code> або id; група — числовий id. 4. «Перевірити».</div>
@@ -539,9 +540,14 @@ const STEP  = {1:'extract_ideas',3:'drafts',4:'tone',5:'format',6:'deai',7:'stra
 const ORDER = [1,3,4,5,6,7];
 const SET = {mkt:'marketing_context', tov:'tone_of_voice', deai:'deai_rules', strat:'content_strategy', voiceExamples:'voice_examples'};
 const AUTORUN_WARN='Авто-прогін запускатиме повну AI-генерацію постів на КОЖНУ нову статтю/зустріч — це витрачає кошти на AI. Увімкнути?';
-// час: інпути планування трактуємо як ЛОКАЛЬНИЙ, у БД — UTC; показуємо назад у локальному
-const locDate=(d)=>{const x=new Date(d);return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');};
-const locHM=(d)=>{const x=new Date(d);return String(x.getHours()).padStart(2,'0')+':'+String(x.getMinutes()).padStart(2,'0');};
+// час: усе планування рахуємо в поясі TZ (обирається в Налаштуваннях); у БД — UTC
+let TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Kyiv';
+const TZS=['Europe/Kyiv','Europe/Warsaw','Europe/Berlin','Europe/London','Europe/Lisbon','America/New_York','America/Chicago','America/Los_Angeles','Asia/Dubai','Asia/Jerusalem','UTC'];
+function buildTzSel(){ const sel=$('tzSel'); if(!sel) return; const list=TZS.includes(TZ)?TZS:[TZ].concat(TZS); sel.innerHTML=list.map(z=>'<option'+(z===TZ?' selected':'')+'>'+z+'</option>').join(''); }
+const locDate=(d)=>new Intl.DateTimeFormat('en-CA',{timeZone:TZ,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(d));
+const locHM=(d)=>new Intl.DateTimeFormat('en-GB',{timeZone:TZ,hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(d));
+function tzOffMs(date){ const p=new Intl.DateTimeFormat('en-US',{timeZone:TZ,hour12:false,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}).formatToParts(date).reduce((a,x)=>{a[x.type]=x.value;return a;},{}); const asUTC=Date.UTC(+p.year,+p.month-1,+p.day,+p.hour,+p.minute,+(p.second||0)); return asUTC-date.getTime(); }
+function zonedToUTCISO(dateStr,timeStr){ const [Y,Mo,D]=dateStr.split('-').map(Number); const [h,m]=timeStr.split(':').map(Number); const guess=Date.UTC(Y,Mo-1,D,h,m); return new Date(guess - tzOffMs(new Date(guess))).toISOString(); }
 const SAMPLE = `Клієнт: я постійно відкладаю важливі справи, сідаю за роботу і одразу лізу в телефон.
 Коуч: давай подивимось, що відбувається в момент перед тим, як ти береш телефон. Який це стан?
 Клієнт: тривога. Ніби боюся почати, бо раптом не вийде ідеально.
@@ -633,6 +639,7 @@ async function loadSettings(){
     const map = Object.fromEntries(rows.map(r=>[r.key, r.content]));
     for(const [tid,key] of Object.entries(SET)){ if(map[key]!=null && $(tid)) $(tid).value = map[key]; }
     if(map.output_language && $('langSel')) $('langSel').value = map.output_language;
+    TZ = map.timezone || TZ; buildTzSel();
     if(map.tone_of_voice_derived) renderDerived(map.tone_of_voice_derived);
     $('srvDot').style.background='var(--brand)';
   }catch(e){ $('srvDot').style.background='var(--danger)'; }
@@ -642,6 +649,7 @@ function flashSaved(){ const s=$('saved'); if(!s) return; s.style.opacity='1'; c
 async function saveSetting(key,val){ try{ await api('/settings/'+key,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:val})}); flashSaved(); }catch(e){} }
 for(const tid of Object.keys(SET)){ const el=$(tid); if(el) el.addEventListener('input', ()=>{ clearTimeout(saveT); saveT=setTimeout(()=>saveSetting(SET[tid],el.value),700); }); }
 $('langSel').onchange=()=>saveSetting('output_language',$('langSel').value);
+buildTzSel(); if($('tzSel')) $('tzSel').onchange=()=>{ TZ=$('tzSel').value; saveSetting('timezone',TZ); buildTzSel(); try{ if(curView==='publish') loadPublish(); }catch(e){} };
 function renderDerived(text){
   const o=$('derivedVoice'); if(!o) return; if(!text){ o.innerHTML=''; return; }
   o.innerHTML='<div class="card" style="margin-top:10px"><div style="font-size:12px;color:var(--muted);margin-bottom:6px">Запропонований голос (ще не застосовано):</div><div class="post">'+esc(text)+'</div><div class="btnrow"><button class="primary" id="acceptVoice">Прийняти → у Tone of Voice</button></div></div>';
@@ -814,7 +822,7 @@ async function openComposer(postId, opts){
   ov.querySelector('#cmpFile').onchange=async(e)=>{ const file=e.target.files&&e.target.files[0]; if(!file) return; msg.style.color='var(--muted)'; msg.textContent=' завантаження фото…'; try{ const fd=new FormData(); fd.append('file',file); const r=await fetch('/api/media',{method:'POST',body:fd,credentials:'same-origin'}); const j=await r.json(); if(!r.ok||j.error) throw new Error(j.error||('HTTP '+r.status)); const up=(j.saved||[])[0]; if(!up) throw new Error('файл не збережено'); await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:up.id})}); mediaFilename=up.url.replace('/media/',''); ov.querySelector('#cmpMedia').innerHTML=mediaHtml(); msg.style.color='var(--brand)'; msg.textContent=' фото додано ✓'; }catch(err){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+err.message; } };
   const saveCh=()=>api('/posts/'+postId+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:C})});
   ov.querySelector('#cmpNow').onclick=async(e)=>{ const b=e.target.closest('button'); b.disabled=true; msg.style.color='var(--muted)'; msg.textContent=' публікую…'; try{ await saveCh(); const r=await api('/posts/'+postId+'/publish-all',{method:'POST'}); const res=r.results||[]; const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); msg.style.color=err.length?'var(--danger)':'var(--brand)'; msg.textContent=' '+(ok.length?('✓ '+ok.join(', ')):'')+(err.length?(' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; ')):''); if(!err.length){ try{await refresh();}catch(_){} setTimeout(close,1300);} }catch(e2){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+e2.message; } finally{ b.disabled=false; } };
-  ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ msg.style.color='var(--danger)'; msg.textContent=' вкажи дату й час'; return; } const sel=Object.keys(C).filter(k=>C[k]&&C[k].on); if(!sel.length){ msg.style.color='var(--danger)'; msg.textContent=' оберіть мережі'; return; } const b=e.target.closest('button'); b.disabled=true; msg.style.color='var(--muted)'; msg.textContent=' зберігаю…'; const at=new Date(d+'T'+t).toISOString(); try{ await saveCh(); if(opts.slotId){ await api('/schedule/'+opts.slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:at})}); } else { await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:at})}); } msg.style.color='var(--brand)'; msg.textContent=' заплановано ✓'; try{await loadPublish();}catch(_){} setTimeout(close,900); }catch(e2){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+e2.message; b.disabled=false; } };
+  ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ msg.style.color='var(--danger)'; msg.textContent=' вкажи дату й час'; return; } const sel=Object.keys(C).filter(k=>C[k]&&C[k].on); if(!sel.length){ msg.style.color='var(--danger)'; msg.textContent=' оберіть мережі'; return; } const b=e.target.closest('button'); b.disabled=true; msg.style.color='var(--muted)'; msg.textContent=' зберігаю…'; const at=zonedToUTCISO(d,t); try{ await saveCh(); if(opts.slotId){ await api('/schedule/'+opts.slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:at})}); } else { await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:at})}); } msg.style.color='var(--brand)'; msg.textContent=' заплановано ✓'; try{await loadPublish();}catch(_){} setTimeout(close,900); }catch(e2){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+e2.message; b.disabled=false; } };
 }
 function openDayScheduler(iso){
   const posts=(Pub&&Pub.bank)?Pub.bank:[];
@@ -824,7 +832,7 @@ function openDayScheduler(iso){
   document.body.appendChild(ov); const close=()=>ov.remove();
   ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
   ov.querySelector('#dsClose').onclick=close;
-  ov.querySelectorAll('.card[data-id]').forEach(c=>c.onclick=()=>{ close(); openComposer(c.dataset.id,{scheduledAt:new Date(iso+'T11:00').toISOString()}); });
+  ov.querySelectorAll('.card[data-id]').forEach(c=>c.onclick=()=>{ close(); openComposer(c.dataset.id,{scheduledAt:zonedToUTCISO(iso,'11:00')}); });
 }
 
 // ---------- прогін ----------
@@ -907,7 +915,7 @@ function renderCal(){
     cell.addEventListener('dragover',ev=>{ev.preventDefault();cell.classList.add('over');});
     cell.addEventListener('dragleave',()=>cell.classList.remove('over'));
     cell.addEventListener('drop',async ev=>{ev.preventDefault();cell.classList.remove('over');const d=ev.dataTransfer.getData('text/plain'); if(d.indexOf('post:')!==0) return; const postId=d.slice(5);
-      try{ await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:new Date(iso+'T09:00').toISOString()})}); await loadPublish(); }catch(e){ flash(e.message); } });
+      try{ await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:zonedToUTCISO(iso,'09:00')})}); await loadPublish(); }catch(e){ flash(e.message); } });
     cell.addEventListener('click',ev=>{ if(ev.target.closest('.pchip')) return; openDayScheduler(iso); });
     cal.appendChild(cell);
   }

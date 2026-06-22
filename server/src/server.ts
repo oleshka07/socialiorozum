@@ -1106,6 +1106,18 @@ app.delete("/api/schedule/:id", async (req: any, reply) => {
 
 // авто-розподіл затверджених постів за розкладом зі Стратегії (дні + час).
 // Чистить незапощені planned-слоти й розкладає заново — передбачуваний календар без дублів.
+// конвертація «стінного» часу в поясі tz -> UTC (для автопланування за поясом воркспейсу)
+function tzOffsetMs(date: Date, tz: string): number {
+  const p: any = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    .formatToParts(date).reduce((a: any, x) => { a[x.type] = x.value; return a; }, {});
+  const asUTC = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+  return asUTC - date.getTime();
+}
+function zonedToUTC(y: number, mo: number, d: number, h: number, mi: number, tz: string): Date {
+  const guess = Date.UTC(y, mo - 1, d, h, mi);
+  return new Date(guess - tzOffsetMs(new Date(guess), tz));
+}
+
 app.post("/api/schedule/auto", async (req: any) => {
   const ws = req.user.workspace_id;
   // 1) прибрати всі незапощені (planned) слоти воркспейсу — і старі plan-based, і post-based
@@ -1133,15 +1145,20 @@ app.post("/api/schedule/auto", async (req: any) => {
   let times: string[] = Array.isArray(strat?.data?.times)
     ? strat!.data.times.map((t: any) => String(t)).filter((t: string) => /^\d{1,2}:\d{2}$/.test(t)) : [];
   if (!times.length) times = ["11:00"];
-  // 4) times.length постів/день у дозволені дні; надлишок — на наступні тижні
-  const base = new Date(); base.setUTCHours(0, 0, 0, 0);
+  // часовий пояс воркспейсу — щоб час публікацій був «стінним» у поясі користувача
+  const tzRow = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='timezone'`, [ws]);
+  const tz = tzRow?.content || "Europe/Kyiv";
+  // 4) times.length постів/день у дозволені дні (за поясом); надлишок — на наступні тижні
+  const tzToday = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()).split("-").map(Number);
+  const cursor = new Date(Date.UTC(tzToday[0], tzToday[1] - 1, tzToday[2], 12, 0, 0)); // календарний курсор (полудень UTC, без DST-стрибків)
   let count = 0, off = 1, i = 0;
   while (i < units.length && off <= 120) {
-    const d = new Date(base); d.setUTCDate(d.getUTCDate() + off);
-    if (bestDays.length && !bestDays.includes(d.getUTCDay())) { off++; continue; }
+    const c = new Date(cursor); c.setUTCDate(c.getUTCDate() + off);
+    const Y = c.getUTCFullYear(), Mo = c.getUTCMonth() + 1, D = c.getUTCDate();
+    if (bestDays.length && !bestDays.includes(c.getUTCDay())) { off++; continue; }
     for (let k = 0; k < times.length && i < units.length; k++, i++) {
       const [h, m] = times[k].split(":").map(Number);
-      const dd = new Date(d); dd.setUTCHours(h, m, 0, 0);
+      const dd = zonedToUTC(Y, Mo, D, h, m, tz);
       await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [units[i].id, dd.toISOString()]);
       count++;
     }
