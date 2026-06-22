@@ -4,337 +4,513 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>socialio — кабінет</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --line:#2a3340;
-    --txt:#e6edf3; --muted:#8b98a8; --accent:#4f8cff; --accent2:#6fe3c2;
-    --warn:#f5b54a; --stale:#f5704a; --ok:#3fb950; --radius:14px;
+    --bg:#FBFAF8; --surface:#FFFFFF; --surface2:#F5F2EC; --surface3:#EFEBE3;
+    --ink:#1C1B17; --ink2:#3D3B34; --muted:#76746B; --faint:#A6A299;
+    --line:#E8E3DA; --line2:#DCD6CB;
+    --brand:#15795A; --brand2:#1C9170; --brand-ink:#FFFFFF; --brand-soft:#E4F0EA; --brand-soft2:#D2E7DD;
+    --amber:#B9762A; --amber-soft:#F6EAD7; --danger:#BC4530; --danger-soft:#F7E4DF;
+    --tg:#2AABEE; --ig:#E1306C; --fb:#1877F2; --th:#101010;
+    --shadow:0 1px 2px rgba(28,40,33,.04), 0 4px 14px rgba(28,40,33,.06);
+    --shadow-lg:0 8px 40px rgba(28,40,33,.14); --r:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0E1311; --surface:#161C19; --surface2:#1D2421; --surface3:#252D29;
+    --ink:#E8EDE9; --ink2:#C5CCC7; --muted:#8B948D; --faint:#646C66;
+    --line:#28302C; --line2:#323B36;
+    --brand:#37B488; --brand2:#42C496; --brand-ink:#06120D; --brand-soft:#13251D; --brand-soft2:#173026;
+    --amber:#D99B4E; --amber-soft:#241B0F; --danger:#E0654A; --danger-soft:#2A140E;
+    --tg:#2AABEE; --ig:#F25C9A; --fb:#4D90F5; --th:#E8EDE9;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 6px 22px rgba(0,0,0,.4); --shadow-lg:0 12px 48px rgba(0,0,0,.55);
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.5 -apple-system,Segoe UI,Roboto,Inter,sans-serif}
-  a{color:var(--accent)}
+  html,body{margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:'Hanken Grotesk',-apple-system,Segoe UI,Roboto,sans-serif;font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  h1,h2,h3,.disp{font-family:'Bricolage Grotesque','Hanken Grotesk',sans-serif;letter-spacing:-.01em}
+  a{color:var(--brand);text-decoration:none}
+  ::selection{background:var(--brand-soft2);color:var(--ink)}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  @keyframes pop{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:var(--line2);border-radius:8px;border:3px solid var(--bg)}
+  details[open] summary svg.chev{transform:rotate(180deg)}
   /* layout */
   .layout{display:flex;min-height:100vh}
-  .sidebar{width:236px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--line);padding:18px 14px;display:flex;flex-direction:column;gap:2px;position:sticky;top:0;height:100vh;overflow:auto}
-  .sidebar .ws{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
-  .sidebar .wsname{font-weight:800;font-size:18px;margin:2px 0 14px}
-  .navgroup{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 4px;padding:0 8px}
-  .navitem{padding:9px 12px;border-radius:9px;cursor:pointer;color:var(--txt);font-size:14px;font-weight:500;border:1px solid transparent}
-  .navitem:hover{background:var(--panel2)}
-  .navitem.active{background:var(--accent);color:#06122b;font-weight:700}
-  .sidebar .foot{margin-top:auto;font-size:12px;color:var(--muted);padding-top:14px}
-  main.content{flex:1;min-width:0;padding:26px 30px 70px;max-width:1000px}
-  .viewsec{display:none}
+  .sidebar{width:248px;flex:none;background:var(--surface);border-right:1px solid var(--line);padding:16px 14px;display:flex;flex-direction:column;gap:3px;position:sticky;top:0;height:100vh;overflow:auto}
+  .brandrow{display:flex;align-items:center;gap:10px;padding:6px 8px 14px}
+  .logo{width:30px;height:30px;border-radius:9px;background:var(--brand);display:grid;place-items:center;color:var(--brand-ink);flex:none}
+  .wordmark{font-family:'Bricolage Grotesque';font-weight:700;font-size:19px}
+  .pro{margin-left:auto;font-size:11px;font-weight:600;color:var(--brand);background:var(--brand-soft);padding:3px 8px;border-radius:6px}
+  .navgroup{font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;padding:12px 8px 5px}
+  .navitem{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:10px;cursor:pointer;color:var(--ink2);font-size:14px;font-weight:500;transition:.12s}
+  .navitem svg{flex:none}
+  .navitem:hover{background:var(--surface2)}
+  .navitem.active{background:var(--brand-soft);color:var(--brand);font-weight:700}
+  .navitem .lbl{flex:1}
+  .usercard{display:flex;align-items:center;gap:10px;padding:10px 8px;margin-top:8px;border-top:1px solid var(--line)}
+  .avatar{width:30px;height:30px;border-radius:50%;background:var(--brand-soft2);color:var(--brand);display:grid;place-items:center;font-weight:700;font-size:13px;flex:none}
+  main.main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .topbar{position:sticky;top:0;z-index:20;background:color-mix(in srgb, var(--bg) 86%, transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);padding:13px 30px;display:flex;align-items:center;gap:16px}
+  .ptitle{font-family:'Bricolage Grotesque';font-weight:600;font-size:20px;line-height:1.1}
+  .psub{font-size:12.5px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .content{padding:24px 30px 80px;max-width:1180px;width:100%}
+  .viewsec{display:none;animation:fadeUp .3s ease}
   .viewsec.active{display:block}
-  .pagehead h1{font-size:24px;margin:0 0 4px;letter-spacing:.2px}
-  .pagehead p{color:var(--muted);font-size:14px;margin:0 0 22px}
-  /* shared */
-  .fld label{display:block;font-size:12px;color:var(--muted);margin:0 0 5px;text-transform:uppercase;letter-spacing:.5px}
-  textarea,select,input.txt{width:100%;background:#0b0e13;border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:10px 12px;font:13px/1.5 inherit;resize:vertical}
-  textarea{min-height:64px}
-  .settings{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:18px;overflow:hidden}
-  .settings .body{padding:18px;display:grid;gap:14px}
-  .pipe{position:relative;display:grid;gap:0}
-  .step{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;margin:0 0 0 34px}
-  .step+.step{margin-top:26px}
-  .step::before{content:"";position:absolute;left:-34px;top:24px;width:18px;height:18px;border-radius:50%;background:var(--panel2);border:2px solid var(--accent);z-index:2}
-  .step::after{content:"";position:absolute;left:-26px;top:42px;width:2px;height:calc(100% + 26px);background:var(--line);z-index:1}
-  .step:last-child::after{display:none}
-  .step.done::before{background:var(--accent);box-shadow:0 0 0 4px rgba(79,140,255,.15)}
-  .step.stale::before{border-color:var(--stale);background:var(--panel2)}
-  .shead{display:flex;align-items:center;gap:10px;justify-content:space-between}
-  .shead .t{font-weight:600;font-size:15px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
-  .num{font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:1px 7px}
-  .badge{font-size:11px;padding:2px 8px;border-radius:20px;border:1px solid var(--line);color:var(--muted)}
-  .badge.stale{color:var(--stale);border-color:var(--stale)}
-  .badge.ok{color:var(--ok);border-color:var(--ok)}
-  .badge.run{color:var(--accent);border-color:var(--accent)}
-  .badge.soon{color:var(--warn);border-color:var(--warn)}
-  .ctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0 0}
-  .netchip{font-size:12px;padding:5px 11px;border-radius:8px;margin:0 6px 6px 0;border:1px solid var(--line);background:transparent;color:var(--txt);cursor:pointer}
-  .netchip.on{background:var(--ok);border-color:var(--ok);color:#04140d}
+  /* buttons */
+  button,.btn{cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;gap:7px;background:var(--surface);border:1px solid var(--line2);color:var(--ink2);border-radius:11px;padding:10px 15px;font-size:14px;font-weight:600;transition:.13s}
+  button:hover,.btn:hover{border-color:var(--brand)}
+  button.primary,.btn.primary{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
+  button.primary:hover,.btn.primary:hover{filter:brightness(1.06)}
+  button.ghost,.btn.ghost{background:transparent}
+  button.ok,.btn.ok{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
+  button.danger,.btn.danger{background:var(--danger);border-color:var(--danger);color:#fff}
+  button.icon,.btn.icon{padding:0;width:32px;height:32px;border-radius:9px;color:var(--muted);font-size:14px}
+  button.icon:hover,.btn.icon:hover{color:var(--brand)}
+  button:disabled,.btn:disabled{opacity:.45;cursor:not-allowed}
+  button.approve{border:1px solid var(--brand);background:var(--brand);color:var(--brand-ink);font-weight:700}
+  button.approve.on{background:var(--brand-soft);color:var(--brand)}
+  .btnrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}
+  /* inputs */
+  label.fl{display:block;font-size:12.5px;font-weight:600;color:var(--ink2);margin-bottom:6px}
+  input.txt,textarea,select{width:100%;background:var(--bg);border:1px solid var(--line2);color:var(--ink);border-radius:11px;padding:11px 13px;font:inherit;font-size:14px;resize:vertical}
+  input.txt:focus,textarea:focus,select:focus{outline:none;border-color:var(--brand)}
+  textarea{min-height:90px;line-height:1.6}
+  .fld{margin-bottom:2px}
+  /* surfaces */
+  .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:18px;margin-bottom:18px}
+  .panel h3,.panel .ph{font-weight:700;font-size:15px;margin:0 0 6px;display:flex;align-items:center;gap:9px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:12px 14px}
+  .empty{color:var(--faint);font-size:13px;font-style:italic;padding:4px 0}
+  .hint{font-size:12.5px;color:var(--muted);line-height:1.6;margin-top:6px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+  .out{display:grid;gap:10px;margin-top:12px}
+  .spin{display:inline-block;width:13px;height:13px;border:2px solid color-mix(in srgb,var(--brand) 30%,transparent);border-top-color:var(--brand);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px}
+  .badge{font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;border:1px solid var(--line);color:var(--muted)}
+  .badge.ok{color:var(--brand);border-color:var(--brand);background:var(--brand-soft)}
+  .badge.run{color:var(--brand);border-color:var(--brand)}
+  .badge.soon,.badge.warn{color:var(--amber);border-color:var(--amber);background:var(--amber-soft)}
+  .badge.stale{color:var(--danger);border-color:var(--danger)}
+  /* pills, chips */
+  .pill{font-size:11px;font-weight:700;color:var(--brand);background:var(--brand-soft);padding:3px 9px;border-radius:7px}
+  .statuspill{font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px}
+  .statuspill.sp-ok{color:var(--brand-ink);background:var(--brand)}
+  .statuspill.sp-soft{color:var(--brand);background:var(--brand-soft)}
+  .statuspill.sp-warn{color:var(--amber);background:var(--amber-soft)}
+  .cdot{width:18px;height:18px;border-radius:50%;display:inline-grid;place-items:center;vertical-align:middle;margin-right:3px}
+  .netchip{font-size:13px;font-weight:600;padding:6px 12px;border-radius:9px;border:1px solid var(--line2);background:transparent;color:var(--muted)}
+  .netchip.on{background:var(--brand-soft);border-color:var(--brand);color:var(--brand)}
   .netchip:disabled{opacity:.4;cursor:not-allowed}
-  button{cursor:pointer;border:1px solid var(--line);background:var(--panel2);color:var(--txt);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;transition:.15s}
-  button:hover{border-color:var(--accent)}
-  button.primary{background:var(--accent);border-color:var(--accent);color:#06122b}
-  button.ghost{background:transparent}
-  button:disabled{opacity:.45;cursor:not-allowed}
-  .out{margin-top:13px;display:grid;gap:10px}
-  .card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 13px}
-  .idea{display:flex;gap:10px;align-items:flex-start}
-  .idea input[type=checkbox]{margin-top:4px;width:16px;height:16px;accent-color:var(--accent)}
-  .idea .it{flex:1}
-  .idea .it .ang{color:var(--muted);font-size:12px;margin-top:3px}
+  .chip{flex:none;width:210px;background:var(--surface2);border:1px solid var(--line2);border-radius:11px;padding:11px 12px;cursor:grab}
+  .chip.placed{opacity:.5}
+  .chip b{display:block;font-size:13px;font-weight:600;line-height:1.4;margin-bottom:5px}
+  .chip small{color:var(--faint);font-size:11.5px}
+  .tray{display:flex;gap:11px;overflow-x:auto;padding-bottom:4px;margin-top:12px}
+  /* segmented tabs */
+  .tabs{display:inline-flex;background:var(--surface2);border:1px solid var(--line);border-radius:12px;padding:4px;gap:3px}
+  .tab{display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600;color:var(--muted);transition:.12s}
+  .tab.on{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+  .ftabs{display:flex;gap:6px}
+  .ftab{display:flex;align-items:center;gap:5px;padding:6px 12px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600;border:1px solid var(--line2);background:transparent;color:var(--muted)}
+  .ftab.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand)}
+  .cchip{flex:1;text-align:center;padding:9px;border-radius:9px;cursor:pointer;font-size:14px;font-weight:700;border:1px solid var(--line2);color:var(--ink2)}
+  .cchip.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand)}
+  .rchip{display:inline-flex;align-items:center;gap:5px;padding:6px 11px;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:600;border:1px solid var(--line2);color:var(--muted)}
+  .rchip input{display:none}
+  .rchip.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand)}
+  /* studio */
+  .crow{display:grid;grid-template-columns:320px 1fr;gap:22px;align-items:start}
+  .rail{display:flex;flex-direction:column;gap:16px;position:sticky;top:90px}
+  .studio-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px}
+  .pcard{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden;animation:fadeUp .4s ease}
+  .pcard.appr{border-color:var(--brand)}
+  .pcard-h{padding:13px 15px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .pcard-img{margin:12px 15px 0}
+  .pcard-img img{width:100%;max-height:140px;object-fit:cover;border-radius:10px}
+  .pcard-text{padding:12px 15px;font-size:13.5px;line-height:1.62;white-space:pre-wrap;flex:1;outline:none}
+  .pcard-text:focus{background:var(--brand-soft)}
+  .pcard-f{padding:9px 15px;border-top:1px solid var(--line);display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .chars{font-size:11.5px;color:var(--faint);margin-right:auto}
+  /* inbox */
+  .inbox{display:grid;grid-template-columns:360px 1fr;gap:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden;min-height:520px}
+  .inlist{border-right:1px solid var(--line);padding:8px;display:flex;flex-direction:column;gap:2px;overflow:auto}
+  .inrow{padding:13px 14px;border-radius:11px;cursor:pointer;border:1px solid transparent}
+  .inrow:hover{background:var(--surface2)}
+  .inrow.on{border-color:var(--brand);background:var(--brand-soft)}
+  .inrow-t{font-size:13px;font-weight:600;line-height:1.4;margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .indet{display:flex;flex-direction:column}
+  .indet-h{padding:15px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .indet-text{flex:1;padding:20px 22px;font-size:15px;line-height:1.7;white-space:pre-wrap;outline:none;min-height:200px}
+  .indet-text:focus{background:var(--brand-soft)}
+  .indet-f{padding:13px 18px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  /* how-it-was-made */
+  .hstep{display:flex;align-items:center;gap:11px;padding:8px 0;border-bottom:1px solid var(--line)}
+  .hdot{width:24px;height:24px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:12px;font-weight:700;background:var(--surface2);color:var(--muted);border:1.5px solid var(--line2)}
+  .hdot.done{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
+  .hdot.run{background:var(--amber-soft);color:var(--amber);border-color:var(--amber)}
+  .hstep-t{flex:1;font-size:13px;font-weight:600}
+  details.disc{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow)}
+  details.disc>summary{list-style:none;padding:14px 16px;display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;font-size:14px}
+  details.disc>summary::-webkit-details-marker{display:none}
+  /* pipeline */
+  .pipe{display:grid;gap:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:20px}
+  .step{display:flex;gap:14px}
+  .stepline{display:flex;flex-direction:column;align-items:center;flex:none}
+  .stepdot{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:13px;background:var(--surface2);color:var(--muted);border:2px solid var(--line2)}
+  .step.done .stepdot{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
+  .step.stale .stepdot{background:var(--danger-soft);color:var(--danger);border-color:var(--danger)}
+  .stepbar{width:2px;flex:1;background:var(--line);min-height:26px}
+  .step:last-child .stepbar{display:none}
+  .stepbody{flex:1;min-width:0;padding-bottom:18px}
+  .shead{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .shead .t{font-weight:600;font-size:14.5px}
+  .num{font-size:12px;color:var(--muted);background:var(--surface2);border:1px solid var(--line);border-radius:6px;padding:1px 7px}
   .post{white-space:pre-wrap}
-  .tg{background:#17212b;border:1px solid #233140;border-left:3px solid #4f8cff;border-radius:10px;padding:12px 14px;white-space:pre-wrap;position:relative}
-  .tg .copy{position:absolute;top:8px;right:8px;font-size:11px;padding:4px 9px}
-  .empty{color:var(--muted);font-size:13px;font-style:italic}
-  .tray{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
-  .chip{background:#17212b;border:1px solid #2c3a4a;border-left:3px solid var(--accent2);border-radius:9px;padding:8px 10px;font-size:12px;max-width:230px;cursor:grab}
-  .chip b{display:block;font-size:12px;margin-bottom:2px}
-  .chip small{color:var(--muted)}
-  .chip.placed{opacity:.4}
-  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:14px}
-  .cal .dow{font-size:11px;color:var(--muted);text-align:center;padding:2px 0}
-  .day{min-height:84px;background:#0b0e13;border:1px solid var(--line);border-radius:9px;padding:5px;font-size:11px}
-  .day.over{border-color:var(--accent);background:#101826}
-  .day .dn{color:var(--muted);font-size:10px;margin-bottom:4px}
-  .day .pchip{background:#17212b;border:1px solid #2c3a4a;border-radius:6px;padding:4px 6px;margin-bottom:4px;font-size:10px;cursor:grab;position:relative}
-  .day .pchip .x{position:absolute;top:1px;right:4px;color:var(--muted);cursor:pointer}
-  .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:s .7s linear infinite;vertical-align:-2px}
-  @keyframes s{to{transform:rotate(360deg)}}
-  .hint{font-size:12px;color:var(--muted);margin-top:8px}
-  #saved{color:var(--ok);opacity:0;transition:.3s}
-  #saved.show{opacity:1}
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--stale);display:inline-block}
-  .dot.on{background:var(--ok)}
-  @media(max-width:760px){.layout{flex-direction:column}.sidebar{width:auto;height:auto;position:static;flex-direction:row;flex-wrap:wrap;align-items:center}.sidebar .foot{margin:0 0 0 auto}.navgroup{display:none}main.content{padding:18px}}
+  .idea{display:flex;gap:10px;align-items:flex-start}
+  .idea input[type=checkbox]{margin-top:4px;width:16px;height:16px;accent-color:var(--brand)}
+  .idea .ang{color:var(--muted);font-size:12px;margin-top:3px}
+  /* calendar */
+  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:7px;margin-top:7px}
+  .dow{text-align:center;font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.04em;padding-bottom:2px}
+  .day{min-height:96px;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:7px 8px;display:flex;flex-direction:column;gap:5px}
+  .day.over{border-color:var(--brand);background:var(--brand-soft)}
+  .day .dn{font-size:12px;font-weight:600;color:var(--faint)}
+  .pchip{background:var(--surface2);border-left:3px solid var(--brand);border-radius:6px;padding:4px 6px;cursor:pointer;font-size:11px}
+  .pchip b{font-size:10.5px;color:var(--muted);font-weight:700}
+  /* stat cards / charts */
+  .stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:16px 17px}
+  .stat .l{font-size:12.5px;color:var(--muted);font-weight:600}
+  .stat .v{font-family:'Bricolage Grotesque';font-weight:600;font-size:28px;margin-top:6px}
+  .stat .d{font-size:12px;color:var(--muted);margin-top:3px;font-weight:600}
+  .bars{display:flex;align-items:flex-end;gap:12px;height:170px}
+  .bar{flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;height:100%;justify-content:flex-end}
+  .bar .b{width:100%;max-width:34px;border-radius:7px 7px 3px 3px;background:var(--brand-soft2);transition:height .4s ease}
+  .bar .lab{font-size:11px;color:var(--faint);font-weight:600}
+  /* toast + modal */
+  #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:90;background:var(--ink);color:var(--bg);padding:12px 20px;border-radius:12px;box-shadow:var(--shadow-lg);font-size:14px;font-weight:600;opacity:0;pointer-events:none;transition:.25s}
+  #toast.show{opacity:1}
+  .modal{position:fixed;inset:0;z-index:60;background:rgba(20,28,23,.55);backdrop-filter:blur(6px);display:grid;place-items:center;padding:20px;overflow:auto}
+  .modal-card{width:100%;max-width:560px;background:var(--surface);border:1px solid var(--line);border-radius:22px;box-shadow:var(--shadow-lg);overflow:hidden;animation:pop .35s ease}
+  @media(max-width:860px){
+    .layout{flex-direction:column}
+    .sidebar{width:auto;height:auto;position:static;flex-direction:row;flex-wrap:nowrap;align-items:center;overflow-x:auto;overflow-y:hidden;border-right:none;border-bottom:1px solid var(--line);padding:9px 12px;gap:6px}
+    .sidebar .navgroup,.usercard{display:none}
+    .navitem .lbl{white-space:nowrap}
+    .content{padding:18px 16px 70px}
+    .crow,.grid2,.inbox{grid-template-columns:1fr !important}
+    .rail{position:static}
+    .stat-grid{grid-template-columns:repeat(2,1fr)}
+  }
 </style>
 <script src="https://apis.google.com/js/api.js"></script>
 </head>
-<body>
-<div id="onboarding" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);place-items:center;z-index:100;padding:16px">
-  <div class="settings" style="max-width:560px;width:100%;margin:0"><div class="body">
-    <div style="font-weight:800;font-size:18px">👋 Ласкаво просимо в socialio</div>
-    <div id="obTitle" style="font-weight:600;margin-top:6px"></div>
-    <textarea id="obInput" style="min-height:120px"></textarea>
-    <div class="ctl"><button id="obBack" class="ghost">← Назад</button><button class="primary" id="obNext">Далі →</button><button id="obSkip" class="ghost">Пропустити</button><span id="obMsg" style="font-size:12px;color:var(--muted)"></span></div>
-  </div></div>
+<body data-theme="light">
+<!-- ONBOARDING -->
+<div id="onboarding" class="modal" style="display:none">
+  <div class="modal-card">
+    <div style="height:5px;background:var(--surface3)"><div id="obBar" style="height:100%;background:var(--brand);width:33%;transition:width .35s ease"></div></div>
+    <div style="padding:30px 34px">
+      <div id="obStep" style="font-size:12.5px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px">Крок 1 з 3</div>
+      <h2 id="obTitle" style="font-size:24px;font-weight:600;margin:0 0 8px"></h2>
+      <p id="obDesc" style="color:var(--muted);font-size:14.5px;margin:0 0 18px"></p>
+      <textarea id="obInput" style="min-height:120px"></textarea>
+      <div class="btnrow" style="margin-top:18px">
+        <button id="obBack" class="ghost">← Назад</button>
+        <button id="obNext" class="primary">Далі →</button>
+        <button id="obSkip" class="ghost" style="margin-left:auto;border:none;color:var(--faint)">Пропустити</button>
+        <span id="obMsg" style="font-size:12px;color:var(--muted)"></span>
+      </div>
+    </div>
+  </div>
 </div>
+
 <div class="layout">
   <aside class="sidebar">
-    <div class="ws">Робочий простір</div>
-    <div class="wsname">socialio</div>
-    <div class="navgroup">Бренд</div>
-    <div class="navitem" data-view="brand">🧠 База бренду</div>
-    <div class="navitem" data-view="sources">📥 Джерела</div>
-    <div class="navitem" data-view="strategy">🎯 Стратегія</div>
-    <div class="navgroup">Робота</div>
-    <div class="navitem active" data-view="create">✍️ Створення</div>
-    <div class="navitem" data-view="publish">📅 Публікація</div>
-    <div class="navitem" data-view="analytics">📊 Аналітика</div>
-    <div class="navgroup">Акаунт</div>
-    <div class="navitem" data-view="settings">🔌 Налаштування</div>
-    <div class="foot">
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><span class="dot" id="srvDot"></span><span id="saved">збережено ✓</span></div>
-      <div id="userEmail" style="margin-bottom:8px;word-break:break-all"></div>
-      <button id="logoutBtn" class="ghost" style="width:100%">Вийти</button>
+    <div class="brandrow">
+      <div class="logo"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14c4-7 12-7 16 0"></path><path d="M4 19c4-7 12-7 16 0"></path><path d="M9 6.5l3-3 3 3"></path></svg></div>
+      <div class="wordmark">socialio</div>
+      <div class="pro">Pro</div>
     </div>
+
+    <div class="navgroup">Щодня</div>
+    <div class="navitem active" data-view="create"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L18 10a2.8 2.8 0 00-4-4L4 16v4z"></path><path d="M13 7l4 4"></path></svg><span class="lbl">Створення</span></div>
+    <div class="navitem" data-view="publish"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M4 9h16M8 3v3M16 3v3"></path></svg><span class="lbl">Публікація</span></div>
+
+    <div class="navgroup">Основа</div>
+    <div class="navitem" data-view="brand"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a4 4 0 014 4 3.5 3.5 0 01.5 6.9A4 4 0 0112 21a4 4 0 01-4.5-7.1A3.5 3.5 0 018 7a4 4 0 014-4z"></path><path d="M12 3v18"></path></svg><span class="lbl">База бренду</span></div>
+    <div class="navitem" data-view="strategy"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3"></circle></svg><span class="lbl">Стратегія</span></div>
+    <div class="navitem" data-view="sources"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v4a2 2 0 002 2h12a2 2 0 002-2v-4M12 3v11M8 10l4 4 4-4"></path></svg><span class="lbl">Джерела</span></div>
+
+    <div style="margin-top:auto"></div>
+    <div class="navitem" data-view="analytics"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V11M12 20V4M19 20v-6M3 20h18"></path></svg><span class="lbl">Аналітика</span></div>
+    <div class="navitem" data-view="settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 5v4M8 15v4"></path></svg><span class="lbl">Налаштування</span></div>
+
+    <div class="usercard">
+      <div class="avatar" id="avatar">О</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Акаунт</div>
+        <div id="userEmail" style="font-size:11.5px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+      </div>
+      <div id="logoutBtn" title="Вийти" style="cursor:pointer;color:var(--faint);padding:4px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"></path></svg></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--faint);padding:4px 8px"><span class="cdot" id="srvDot" style="width:8px;height:8px;background:var(--danger)"></span><span id="saved" style="opacity:0;transition:.3s;color:var(--brand)">збережено ✓</span></div>
   </aside>
 
-  <main class="content">
+  <main class="main">
+    <div class="topbar">
+      <div style="min-width:0">
+        <div class="ptitle" id="pageTitle">Створення</div>
+        <div class="psub" id="pageSub">Переглянь і затвердь готові пости</div>
+      </div>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:9px">
+        <button class="primary" id="genPostsBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.8L19 9l-5.1 1.2L12 15l-1.9-4.8L5 9l5.1-1.2z"></path></svg>Згенерувати пости</button>
+        <button class="icon" id="themeToggle" title="Тема" style="width:40px;height:40px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path id="themeIcon" d="M21 12.8A9 9 0 1111.2 3a7 7 0 109.8 9.8z"></path></svg></button>
+      </div>
+    </div>
 
-    <section class="viewsec" data-view="brand">
-      <div class="pagehead"><h1>База бренду</h1><p>Факти про бренд — вводяться раз. AI тягне це у стратегію й у кожен пост.</p></div>
-      <div class="settings"><div class="body">
-        <div class="fld"><label>Мова виводу (застосовується до всіх кроків)</label>
-          <select id="langSel">
-            <option>Українська</option><option>Російська</option><option>English</option><option>Polski</option><option>Deutsch</option>
-          </select></div>
-        <div class="fld"><label>Приклади ваших постів (3-5) — AI виведе голос</label>
-          <textarea id="voiceExamples" placeholder="Встав 3-5 своїх найкращих постів…"></textarea>
-          <div class="ctl"><button class="primary" id="deriveVoiceBtn">✨ Вивести голос із прикладів</button><span id="voiceMsg" style="font-size:12px;color:var(--muted)"></span></div>
+    <div class="content">
+
+      <!-- ============ CREATE ============ -->
+      <section class="viewsec active" data-view="create">
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;flex-wrap:wrap">
+          <div class="tabs" id="layoutTabs">
+            <div class="tab on" data-lay="studio"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="7" height="14"></rect><rect x="13" y="5" width="7" height="6"></rect><rect x="13" y="14" width="7" height="5"></rect></svg>Студія</div>
+            <div class="tab" data-lay="pipeline"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"></path></svg>Конвеєр</div>
+            <div class="tab" data-lay="inbox"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 11h6l2 3h2l2-3h6"></path></svg>Інбокс</div>
+          </div>
+          <div class="hint" id="layoutHint" style="margin:0"></div>
+        </div>
+
+        <!-- STUDIO -->
+        <div id="layStudio" class="crow">
+          <div class="rail">
+            <div class="panel" style="margin:0;padding:0;overflow:hidden">
+              <div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 001 1h4"></path><path d="M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z"></path></svg><span style="font-weight:700;font-size:14px">Джерело</span></div>
+              <div style="padding:14px 16px" id="srcCard"><div class="empty">Немає активного джерела.</div></div>
+            </div>
+            <details class="disc">
+              <summary><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 5v4M8 15v4"></path></svg>Налаштування генерації<svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--faint)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-left:auto"><path d="M6 9l6 6 6-6"></path></svg></summary>
+              <div style="padding:2px 16px 16px;display:flex;flex-direction:column;gap:14px">
+                <div><div style="font-size:12.5px;font-weight:600;color:var(--ink2);margin-bottom:8px">Скільки постів</div><div style="display:flex;gap:6px" id="countChips"></div><input type="hidden" id="ideaCount" value="6"></div>
+                <div><div style="font-size:12.5px;font-weight:600;color:var(--ink2);margin-bottom:8px">Рубрики в міксі</div><div style="display:flex;flex-wrap:wrap;gap:6px" id="ideaRubrics"></div></div>
+              </div>
+            </details>
+            <details class="disc">
+              <summary><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M3 12h3M18 12h3M12 3v3M12 18v3"></path></svg>Як це зроблено<span class="badge" style="margin-left:auto">6 кроків</span></summary>
+              <div style="padding:4px 16px 16px" id="studioSteps"></div>
+            </details>
+          </div>
+          <div>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+              <div class="disp" style="font-weight:600;font-size:17px">На перегляд</div>
+              <div class="ftabs" id="studioFilters"></div>
+              <button class="ghost" id="studioMore" style="margin-left:auto"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v4h4"></path></svg>Згенерувати ще</button>
+            </div>
+            <div class="studio-grid" id="studioGrid"></div>
+          </div>
+        </div>
+
+        <!-- PIPELINE -->
+        <div id="layPipeline" class="crow" style="display:none">
+          <div class="pipe" id="pipe">
+            <section class="step" id="s1"><div class="stepline"><span class="stepdot">1</span><div class="stepbar"></div></div><div class="stepbody">
+              <div class="shead"><span class="t">Витяг ідей</span><span class="badge" id="b1">очікує</span><div class="btnrow" style="margin:0 0 0 auto"><button class="primary" data-run="1">▷ Запустити</button><button class="ghost" data-from="1">↻ донизу</button></div></div>
+              <div class="out" id="o1"><div class="empty">Ідеї з'являться тут — кожну можна вимкнути перед чернетками.</div></div>
+            </div></section>
+            <section class="step" id="s3"><div class="stepline"><span class="stepdot">2</span><div class="stepbar"></div></div><div class="stepbody">
+              <div class="shead"><span class="t">Чорнові пости</span><span class="badge" id="b3">очікує</span><div class="btnrow" style="margin:0 0 0 auto"><button class="primary" data-run="3">▷ Запустити</button><button class="ghost" data-from="3">↻ донизу</button></div></div>
+              <div class="out" id="o3"><div class="empty">Спершу відбери ідеї на кроці 1.</div></div>
+            </div></section>
+            <section class="step" id="s4"><div class="stepline"><span class="stepdot">3</span><div class="stepbar"></div></div><div class="stepbody">
+              <div class="shead"><span class="t">Tone of Voice</span><span class="badge" id="b4">очікує</span><div class="btnrow" style="margin:0 0 0 auto"><button class="primary" data-run="4">▷ Запустити</button><button class="ghost" data-from="4">↻ донизу</button></div></div>
+              <div class="out" id="o4"><div class="empty">—</div></div>
+            </div></section>
+            <section class="step" id="s5"><div class="stepline"><span class="stepdot">4</span><div class="stepbar"></div></div><div class="stepbody">
+              <div class="shead"><span class="t">Формат під канали</span><span class="badge" id="b5">очікує</span><div class="btnrow" style="margin:0 0 0 auto"><button class="primary" data-run="5">▷ Запустити</button><button class="ghost" data-from="5">↻ донизу</button></div></div>
+              <div class="out" id="o5"><div class="empty">—</div></div>
+            </div></section>
+            <section class="step" id="s6"><div class="stepline"><span class="stepdot">5</span><div class="stepbar"></div></div><div class="stepbody">
+              <div class="shead"><span class="t">Де-AI</span><span class="badge" id="b6">очікує</span><div class="btnrow" style="margin:0 0 0 auto"><button class="primary" data-run="6">▷ Запустити</button><button class="ghost" data-from="6">↻ донизу</button></div></div>
+              <div class="out" id="o6"><div class="empty">Готові пости — повний перегляд у «Студії».</div></div>
+            </div></section>
+            <section class="step" id="s7"><div class="stepline"><span class="stepdot">6</span><div class="stepbar"></div></div><div class="stepbody">
+              <div class="shead"><span class="t">Контент-план</span><span class="badge" id="b7">очікує</span><div class="btnrow" style="margin:0 0 0 auto"><button class="primary" data-run="7">▷ Запустити</button><button class="ghost" data-from="7">↻ донизу</button></div></div>
+              <div class="out" id="o7"><div class="empty">План публікацій з'явиться тут.</div></div>
+            </div></section>
+          </div>
+          <div class="panel" style="position:sticky;top:90px;margin:0">
+            <div style="font-weight:700;font-size:14px;margin-bottom:6px">Керування</div>
+            <div class="hint" id="runLabel" style="margin:0 0 12px"></div>
+            <button class="primary" id="runAll" style="width:100%;margin-bottom:9px">⚡ Прогнати весь конвеєр</button>
+            <button class="ghost" id="newRun" style="width:100%">＋ Новий прогін</button>
+            <button id="stopBtn" class="danger" style="width:100%;margin-top:9px;display:none">⛔ Зупинити</button>
+            <div class="hint" id="srcInfo" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)"></div>
+          </div>
+        </div>
+
+        <!-- INBOX -->
+        <div id="layInbox" class="inbox" style="display:none">
+          <div class="inlist" id="inboxList"></div>
+          <div class="indet" id="inboxDetail"></div>
+        </div>
+      </section>
+      <!-- ============ PUBLISH ============ -->
+      <section class="viewsec" data-view="publish">
+        <div class="panel">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <div class="ph" style="margin:0">🏦 Банк публікацій <span class="badge" id="bankCount">0</span></div>
+            <div class="btnrow" style="margin:0 0 0 auto"><button class="primary" id="aiDistribute"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.8L19 9l-5.1 1.2L12 15l-1.9-4.8L5 9l5.1-1.2z"></path></svg>AI-розподіл</button><button class="ghost" id="reloadPub">↻ Оновити</button><span id="pubMsg" style="font-size:12px;color:var(--muted)"></span></div>
+          </div>
+          <div class="hint">Сюди потрапляють пости, які ви «Затвердили». Перетягни картку на день у календарі (час за замовч. 09:00) або «AI-розподіл».</div>
+          <div class="tray" id="bank"></div>
+        </div>
+        <div class="panel">
+          <div class="ph">📅 Календар</div>
+          <div class="cal" id="cal"></div>
+        </div>
+      </section>
+
+      <!-- ============ BRAND ============ -->
+      <section class="viewsec" data-view="brand">
+        <div class="panel">
+          <div class="ph">✨ Виведи свій голос за прикладами</div>
+          <div class="hint" style="margin-bottom:10px">Встав 3–5 своїх постів — AI опише твій тон, щоб усі тексти звучали як ти.</div>
+          <textarea id="voiceExamples" placeholder="Встав сюди 3–5 своїх найкращих постів…" style="min-height:96px"></textarea>
+          <div class="btnrow"><button class="primary" id="deriveVoiceBtn">✨ Вивести голос</button><span id="voiceMsg" style="font-size:12px;color:var(--muted)"></span></div>
           <div id="derivedVoice"></div>
         </div>
-        <div class="fld"><label>Голос бренду (Tone of Voice)</label><textarea id="tov"></textarea></div>
-        <div class="fld"><label>Аудиторія / Marketing Context</label><textarea id="mkt"></textarea></div>
-        <div class="fld"><label>Загальна контент-стратегія (нотатки)</label><textarea id="strat"></textarea></div>
-        <div class="fld"><label>Правила De-AI</label><textarea id="deai"></textarea></div>
-      </div></div>
-      <p class="hint">Далі тут зʼявляться деталі аудиторії.</p>
-    </section>
+        <div class="grid2">
+          <div class="panel" style="margin:0"><label class="fl">🗣️ Голос бренду (Tone of Voice)</label><textarea id="tov"></textarea></div>
+          <div class="panel" style="margin:0"><label class="fl">👥 Аудиторія / Marketing Context</label><textarea id="mkt"></textarea></div>
+          <div class="panel" style="margin:0"><label class="fl">🛡️ Правила «Де-AI»</label><textarea id="deai"></textarea></div>
+          <div class="panel" style="margin:0"><label class="fl">📋 Загальна контент-стратегія (нотатки)</label><textarea id="strat"></textarea></div>
+          <div class="panel" style="margin:0;grid-column:1/-1"><label class="fl">🌐 Мова виводу (застосовується до всіх кроків)</label><select id="langSel"><option>Українська</option><option>Російська</option><option>English</option><option>Polski</option><option>Deutsch</option></select><div class="hint">Збереження автоматичне.</div></div>
+        </div>
+      </section>
 
-    <section class="viewsec" data-view="sources">
-      <div class="pagehead"><h1>Джерела</h1><p>Звідки беремо матеріал. Зараз — ручний транскрипт/нотатка (інші джерела — далі).</p></div>
-      <div class="settings"><div class="body">
-        <b>📝 Ручне джерело</b>
-        <div class="fld" style="margin-top:8px"><label>Транскрипт / нотатка</label>
-          <textarea id="transcript" style="min-height:140px"></textarea>
-          <div class="ctl"><button class="ghost" id="sampleBtn">Підставити приклад</button><button class="ghost" id="ffImport">📥 Імпорт із Fireflies</button><button id="toCreate">▷ У роботу (ручний)</button><button class="primary" id="autopilotBtn" style="background:var(--ok);border-color:var(--ok)">🟢 Автопілот</button></div>
+      <!-- ============ STRATEGY ============ -->
+      <section class="viewsec" data-view="strategy">
+        <div class="panel">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <div class="ph" style="margin:0">🤖 Згенерована стратегія <span class="badge" id="stratStatus">—</span></div>
+            <div class="btnrow" style="margin:0 0 0 auto"><button class="primary" id="genStrat">✨ Згенерувати</button><span id="stratMsg" style="font-size:12px;color:var(--muted)"></span></div>
+          </div>
+          <div class="hint">AI бере нішу/аудиторію/голос із Бази бренду → рубрики, частота, дні, теми. Рубрики застосовуються одразу (редагуй у списку нижче).</div>
+          <div id="stratView" class="out"></div>
+        </div>
+        <div class="panel">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <div class="ph" style="margin:0">🗂️ Контент-мікс (рубрики)</div>
+            <div class="btnrow" style="margin:0 0 0 auto"><button class="ghost" id="addRubric">＋ Рубрика</button><button class="primary" id="saveRubrics">Зберегти рубрики</button><span id="rubSum" style="font-size:12px;color:var(--muted)"></span></div>
+          </div>
+          <div class="hint">AI тримає ці теми й пропорції при генерації.</div>
+          <div id="rubBar" style="display:flex;height:12px;border-radius:7px;overflow:hidden;margin:12px 0;background:var(--surface2)"></div>
+          <div id="rubList" class="out"></div>
+        </div>
+      </section>
+
+      <!-- ============ SOURCES ============ -->
+      <section class="viewsec" data-view="sources">
+        <div class="panel">
+          <div class="ph">📝 Встав транскрипт або думку</div>
+          <div class="hint" style="margin-bottom:10px">Найшвидший шлях — вставити текст і натиснути «У роботу».</div>
+          <textarea id="transcript" placeholder="Встав транскрипт сесії, голосову нотатку чи думку…" style="min-height:130px"></textarea>
+          <div class="btnrow"><button class="primary" id="toCreate">У роботу →</button><button class="ghost" id="autopilotBtn">🟢 Автопілот</button><button class="ghost" id="ffImport">📥 Fireflies</button><button class="ghost" id="sampleBtn">Підставити приклад</button></div>
           <div class="hint" id="lockHint"></div>
         </div>
-      </div></div>
-      <div class="settings"><div class="body">
-        <b>🖼️ Медіа-бібліотека (фото)</b>
-        <div class="hint">Завантаж фото — потім прикріпиш до постів (обов'язково для Instagram). Згодом сюди ж тягнутиме Google Drive.</div>
-        <div class="ctl" style="margin-top:8px"><input type="file" id="mediaFile" accept="image/*" multiple style="font-size:13px"><button class="primary" id="mediaUpload">Завантажити</button><span id="mediaMsg" style="font-size:12px;color:var(--muted)"></span></div>
-        <div id="mediaGrid" class="out" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"></div>
-      </div></div>
-      <div class="settings"><div class="body">
-        <b>📡 RSS-стрічки (авто-інжест)</b>
-        <div class="hint">Додай URL RSS/Atom-стрічки — поллер кожні ~15 хв тягне нові статті у «Джерела». «Авто-пілот» = одразу проганяти кишку для нових (обережно з вартістю AI).</div>
-        <div class="ctl" style="margin-top:8px"><input class="txt" id="rssUrl" placeholder="https://example.com/feed.xml" style="flex:1;min-width:220px"><label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="rssAuto"> авто-пілот</label><button class="primary" id="rssAdd">Додати</button></div>
-        <div id="rssMsg" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
-        <div id="rssList" class="out" style="margin-top:10px"></div>
-      </div></div>
-      <div class="settings"><div class="body">
-        <b>📁 Google Drive (фото з папок)</b>
-        <div class="hint">Підключи Google Drive, тоді через рідний вибір Google познач папку — поллер кожні ~15 хв тягне нові фото з неї у медіа-бібліотеку. Доступ лише до обраних папок (scope drive.file, без верифікації).</div>
-        <div class="ctl" style="margin-top:8px"><span id="gdStatus" style="font-size:13px;color:var(--muted)">…</span></div>
-        <div class="ctl"><a id="gdConnect" class="primary" href="/api/integrations/gdrive/connect" style="display:none;text-decoration:none">🔗 Підключити Google Drive</a><button class="ghost" id="gdDisconnect" style="display:none">Відключити</button></div>
-        <div id="gdFolderBox" style="display:none;margin-top:10px">
-          <div class="ctl"><button class="primary" id="gdPick">📂 Обрати папку з Google Drive</button></div>
-          <div id="gdMsg" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
-          <div id="gdList" class="out" style="margin-top:8px"></div>
-        </div>
-      </div></div>
-      <div class="settings"><div class="body">
-        <div style="display:flex;align-items:center;justify-content:space-between"><b>🗂️ Останні джерела</b><button class="ghost" id="recReload">↻</button></div>
-        <div class="hint">Усе, що підтягнулося (RSS / Fireflies / вручну). «Відкрити» — щоб працювати з ним у «Створенні».</div>
-        <div id="recList" class="out" style="margin-top:8px"></div>
-      </div></div>
-    </section>
-
-    <section class="viewsec" data-view="strategy">
-      <div class="pagehead"><h1>Стратегія</h1><p>Згенеруй стратегію з Бази бренду, переглянь і застосуй — рубрики підуть у редактор нижче.</p></div>
-      <div class="settings"><div class="body">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-          <b>🤖 Згенерована стратегія <span class="badge" id="stratStatus">—</span></b>
-          <div class="ctl" style="margin:0"><button class="primary" id="genStrat">✨ Згенерувати</button><span id="stratMsg" style="font-size:12px;color:var(--muted)"></span></div>
-        </div>
-        <div class="hint">AI бере нішу/аудиторію/голос із Бази бренду → рубрики, частота, дні, теми. Рубрики застосовуються одразу (редагуй у списку нижче).</div>
-        <div id="stratView" class="out"></div>
-      </div></div>
-      <div class="settings"><div class="body">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-          <b>🗂️ Рубрики (контент-мікс)</b>
-          <div class="ctl" style="margin:0"><button id="addRubric" class="ghost">+ Рубрика</button><button class="primary" id="saveRubrics">Зберегти рубрики</button><span id="rubSum" style="font-size:12px;color:var(--muted)"></span></div>
-        </div>
-        <div class="hint">AI орієнтується на ці теми й пропорції при генерації ідей, чернеток і плану.</div>
-        <div id="rubBar" style="display:flex;height:10px;border-radius:6px;overflow:hidden;margin:10px 0;background:var(--panel2)"></div>
-        <div id="rubList" class="out"></div>
-      </div></div>
-      <p class="hint">Далі сюди додамо деталі Аудиторії, Конкурентів і Дослідження.</p>
-    </section>
-
-    <section class="viewsec active" data-view="create">
-      <div class="pagehead"><h1>Створення</h1><p>Джерело — у вкладці «Джерела» (▷ У роботу). Тут проганяєш кроки. <span id="runLabel" style="color:var(--muted)"></span></p>
-      <div id="srcInfo" class="hint" style="margin-top:8px"></div></div>
-      <div class="ctl" style="margin:0 0 18px">
-        <button class="primary" id="runAll">⚡ Прогнати всю кишку</button>
-        <button class="ghost" id="newRun">＋ Новий прогін</button>
-        <button id="stopBtn" style="display:none;background:var(--stale);border-color:var(--stale);color:#fff">⛔ Зупинити</button>
-      </div>
-      <div class="pipe" id="pipe">
-        <section class="step" id="s1">
-          <div class="shead"><div class="t"><span class="num">1</span> Витяг ідей</div><span class="badge" id="b1">очікує</span></div>
-          <div class="ctl"><button class="primary" data-run="1">▷ Запустити</button><button class="ghost" data-from="1">↻ Звідси донизу</button></div>
-          <div class="ctl" style="margin-top:8px">
-            <label style="font-size:12px;color:var(--muted)">Кількість ідей: <input id="ideaCount" type="number" min="1" max="12" value="6" class="txt" style="width:62px;display:inline-block;padding:5px 8px"></label>
-            <details style="border:1px dashed var(--line);border-radius:9px"><summary style="cursor:pointer;padding:6px 12px;font-size:12px;color:var(--muted)">Рубрики для цієї генерації</summary><div id="ideaRubrics" style="padding:4px 12px 10px"></div></details>
+        <div class="grid2">
+          <div class="panel" style="margin:0">
+            <div class="ph">🖼️ Медіа-бібліотека</div>
+            <div class="hint">Фото для постів (потрібні для Instagram).</div>
+            <div class="btnrow"><input type="file" id="mediaFile" accept="image/*" multiple style="font-size:13px"><button class="primary" id="mediaUpload">Завантажити</button><span id="mediaMsg" style="font-size:12px;color:var(--muted)"></span></div>
+            <div id="mediaGrid" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"></div>
           </div>
-          <div class="out" id="o1"><div class="empty">Ідеї з'являться тут — кожну можна вимкнути перед чернетками.</div></div>
-        </section>
-        <section class="step" id="s3">
-          <div class="shead"><div class="t"><span class="num">2–3</span> Чорнові пости</div><span class="badge" id="b3">очікує</span></div>
-          <div class="ctl"><button class="primary" data-run="3">▷ Запустити</button><button class="ghost" data-from="3">↻ Звідси донизу</button></div>
-          <div class="out" id="o3"><div class="empty">Спершу відбери ідеї на кроці 1.</div></div>
-        </section>
-        <section class="step" id="s4">
-          <div class="shead"><div class="t"><span class="num">4</span> Tone of Voice</div><span class="badge" id="b4">очікує</span></div>
-          <div class="ctl"><button class="primary" data-run="4">▷ Запустити</button><button class="ghost" data-from="4">↻ Звідси донизу</button></div>
-          <div class="out" id="o4"><div class="empty">—</div></div>
-        </section>
-        <section class="step" id="s5">
-          <div class="shead"><div class="t"><span class="num">5</span> Формат</div><span class="badge" id="b5">очікує</span></div>
-          <div class="ctl"><button class="primary" data-run="5">▷ Запустити</button><button class="ghost" data-from="5">↻ Звідси донизу</button></div>
-          <div class="out" id="o5"><div class="empty">—</div></div>
-        </section>
-        <section class="step" id="s6">
-          <div class="shead"><div class="t"><span class="num">6</span> Де-AI</div><span class="badge" id="b6">очікує</span></div>
-          <div class="ctl"><button class="primary" data-run="6">▷ Запустити</button><button class="ghost" data-from="6">↻ Звідси донизу</button></div>
-          <div class="out" id="o6"><div class="empty">Готові пости з кнопками публікації в Telegram.</div></div>
-        </section>
-        <section class="step" id="s7">
-          <div class="shead"><div class="t"><span class="num">7</span> Контент-стратегія</div><span class="badge" id="b7">очікує</span></div>
-          <div class="ctl"><button class="primary" data-run="7">▷ Запустити</button><button class="ghost" data-from="7">↻ Звідси донизу</button></div>
-          <div class="out" id="o7"><div class="empty">План публікацій з'явиться тут.</div></div>
-        </section>
-      </div>
-    </section>
+          <div class="panel" style="margin:0">
+            <div class="ph">📁 Google Drive</div>
+            <div class="hint">Познач папку через рідний вибір Google — поллер тягне нові фото в медіа (scope drive.file, без верифікації).</div>
+            <div class="btnrow"><span id="gdStatus" style="font-size:13px;color:var(--muted)">…</span></div>
+            <div class="btnrow"><a id="gdConnect" class="btn primary" href="/api/integrations/gdrive/connect" style="display:none">🔗 Підключити</a><button class="ghost" id="gdDisconnect" style="display:none">Відключити</button></div>
+            <div id="gdFolderBox" style="display:none;margin-top:10px">
+              <div class="btnrow"><button class="primary" id="gdPick">📂 Обрати папку</button></div>
+              <div id="gdMsg" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
+              <div id="gdList" class="out" style="margin-top:8px"></div>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="ph">📡 RSS-стрічки (авто-інжест)</div>
+          <div class="hint">Поллер кожні ~15 хв тягне нові статті у «Джерела». «Авто» = одразу проганяти кишку (обережно з вартістю AI).</div>
+          <div class="btnrow"><input class="txt" id="rssUrl" placeholder="https://example.com/feed.xml" style="flex:1;min-width:220px"><label class="rchip"><input type="checkbox" id="rssAuto"> авто-пілот</label><button class="primary" id="rssAdd">Додати</button></div>
+          <div id="rssMsg" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
+          <div id="rssList" class="out" style="margin-top:10px"></div>
+        </div>
+        <div class="panel">
+          <div style="display:flex;align-items:center;justify-content:space-between"><div class="ph" style="margin:0">🗂️ Останні джерела</div><button class="ghost" id="recReload">↻</button></div>
+          <div class="hint">Усе, що підтягнулося (RSS / Fireflies / вручну). «Відкрити» — щоб працювати з ним.</div>
+          <div id="recList" class="out" style="margin-top:8px"></div>
+        </div>
+      </section>
 
-    <section class="viewsec" data-view="publish">
-      <div class="pagehead"><h1>Публікація</h1><p>Зверху — банк затверджених публікацій. Перетягни юніт на день у календарі (час за замовч. 09:00; клікни слот, щоб змінити). Або «AI-розподіл».</p></div>
-      <div class="settings"><div class="body">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-          <b>🏦 Банк публікацій <span class="badge" id="bankCount">0</span></b>
-          <div class="ctl" style="margin:0"><button class="primary" id="aiDistribute">✨ AI-розподіл</button><button class="ghost" id="reloadPub">↻ Оновити</button><span id="pubMsg" style="font-size:12px;color:var(--muted)"></span></div>
-        </div>
-        <div class="hint">Сюди потрапляють пости, які ви «Затвердили» у Створенні.</div>
-        <div class="tray" id="bank"></div>
-      </div></div>
-      <div class="settings"><div class="body">
-        <b>📅 Календар</b>
-        <div class="cal" id="cal"></div>
-      </div></div>
-    </section>
+      <!-- ============ ANALYTICS ============ -->
+      <section class="viewsec" data-view="analytics">
+        <div id="analyticsBox"><div class="empty">Завантаження…</div></div>
+      </section>
 
-    <section class="viewsec" data-view="analytics">
-      <div class="pagehead"><h1>Аналітика</h1><p>Витрати на генерацію. Ефективність постів — після підключення статистики.</p></div>
-      <div class="settings"><div class="body" id="usageBox"><div class="empty">Завантаження…</div></div></div>
-    </section>
+      <!-- ============ SETTINGS ============ -->
+      <section class="viewsec" data-view="settings">
+        <div class="panel">
+          <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--tg)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M22 4L2 11l6 2 2 6 3-4 5 4 4-15z"></path></svg></span>Telegram</div>
+          <div class="hint" style="line-height:1.7">1. @BotFather → <code>/newbot</code> → токен. 2. Додай бота <b>адміном</b> у канал і групу. 3. Встав токен; канал — <code>@username</code> або id; група — числовий id. 4. «Перевірити».</div>
+          <div class="fld" style="margin-top:10px"><label class="fl">Bot Token</label><input class="txt" type="password" id="tgToken" placeholder="123456:ABC-..."></div>
+          <div class="fld" style="margin-top:8px"><label class="fl">Канал (chat id або @username)</label><input class="txt" id="tgChannel" placeholder="@my_channel або -1001234567890"></div>
+          <div class="fld" style="margin-top:8px"><label class="fl">Група (chat id)</label><input class="txt" id="tgGroup" placeholder="-1001234567890"></div>
+          <div class="btnrow"><button class="primary" id="tgSave">Зберегти</button><button class="ghost" id="tgTest">Перевірити з'єднання</button></div>
+          <div id="tgResult" class="out"></div>
+        </div>
+        <div class="grid2">
+          <div class="panel" style="margin:0">
+            <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--th)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M12 3c5 0 8 3 8 9s-3 9-8 9-8-3-8-9c0-2 .5-3.5 1.5-4.5"></path></svg></span>Threads</div>
+            <div class="hint">Окремий OAuth (вхід через Threads). Потрібні <code>threads_content_publish</code> + <code>threads_manage_insights</code>, акаунт у Threads Testers.</div>
+            <div class="btnrow"><span id="thStatus" style="font-size:13px;color:var(--muted)">…</span></div>
+            <div class="btnrow"><a id="thConnect" class="btn primary" href="/api/integrations/threads/connect" style="display:none">🔗 Підключити Threads</a><button class="ghost" id="thDisconnect" style="display:none">Відключити</button></div>
+          </div>
+          <div class="panel" style="margin:0">
+            <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--ig)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M7 3h10a4 4 0 014 4v10a4 4 0 01-4 4H7a4 4 0 01-4-4V7a4 4 0 014-4zm5 5a4 4 0 100 8 4 4 0 000-8z"></path></svg></span>Facebook + Instagram</div>
+            <div class="hint">Постинг у FB-Сторінку + аналітика FB/IG. IG-публікація потребує фото.</div>
+            <div class="btnrow"><span id="mtStatus" style="font-size:13px;color:var(--muted)">…</span></div>
+            <div class="btnrow" id="mtPageRow" style="display:none"><label style="font-size:12px;color:var(--muted)">Акаунт:</label><select id="mtPage" style="width:auto;min-width:200px;font-size:12px;padding:6px 8px"></select></div>
+            <div class="btnrow"><a id="mtConnect" class="btn primary" href="/api/integrations/meta/connect" style="display:none">🔗 Підключити</a><button class="ghost" id="mtStats" style="display:none">📊 Статистика</button><button class="ghost" id="mtDisconnect" style="display:none">Відключити</button></div>
+            <div id="mtStatsOut" class="out"></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--brand)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M8.5 12.5l2.5 2.5 4.5-5"></path></svg></span>Транскрибація (Fireflies)</div>
+          <div class="hint">Ключ: Fireflies → Settings → Developer Settings → API Key. Імпортуй вручну («Джерела» → 📥) або налаштуй авто-імпорт (вебхук).</div>
+          <div class="fld" style="margin-top:10px"><label class="fl">Fireflies API Key</label><input class="txt" type="password" id="ffKey" placeholder="вставте ключ"></div>
+          <div class="fld" style="margin-top:8px"><label class="fl">🔔 Авто-імпорт: цей URL встав у Fireflies → Webhooks</label><div style="display:flex;gap:8px"><input class="txt" id="ffHook" readonly placeholder="(зʼявиться після збереження ключа)" style="font-size:12px"><button class="ghost" type="button" id="ffHookCopy">Копіювати</button></div></div>
+          <div class="fld" style="margin-top:8px"><label class="fl">Webhook Secret (16-32 символи)</label><input class="txt" type="password" id="ffSecret" placeholder="вставте секрет"></div>
+          <label class="rchip" style="margin:8px 0"><input type="checkbox" id="ffAuto"> Авто-прогін Автопілота для імпортованих зустрічей</label>
+          <div class="btnrow"><button class="primary" id="ffSave">Зберегти</button><button class="ghost" id="ffTest">Перевірити</button><span id="ffMsg" style="font-size:12px;color:var(--muted)"></span></div>
+        </div>
+      </section>
 
-    <section class="viewsec" data-view="settings">
-      <div class="pagehead"><h1>Налаштування</h1><p>Інтеграції та акаунт.</p></div>
-      <div class="settings"><div class="body">
-        <b>🔌 Telegram (публікація постів)</b>
-        <div class="hint" style="line-height:1.7">
-          1. У Telegram відкрий <b>@BotFather</b> → <code>/newbot</code> → отримаєш <b>токен</b>.<br>
-          2. Додай бота <b>адміністратором</b> у канал (право «Publish messages») і у групу.<br>
-          3. Встав токен; канал — <code>@username</code> або числовий id; група — числовий id (напр. <code>-1001234567890</code>).<br>
-          4. Тисни «Перевірити з'єднання». Не знаєш id? Бот <code>@getidsbot</code>.
-        </div>
-        <div class="fld"><label>Bot Token</label><input class="txt" type="password" id="tgToken" placeholder="123456:ABC-..."></div>
-        <div class="fld"><label>Канал (chat id або @username)</label><input class="txt" id="tgChannel" placeholder="@my_channel або -1001234567890"></div>
-        <div class="fld"><label>Група (chat id)</label><input class="txt" id="tgGroup" placeholder="-1001234567890"></div>
-        <div class="ctl"><button class="primary" id="tgSave">Зберегти</button><button class="ghost" id="tgTest">Перевірити з'єднання</button></div>
-        <div id="tgResult" class="out"></div>
-      </div></div>
-      <div class="settings"><div class="body">
-        <b>🧵 Threads (Meta)</b>
-        <div class="hint" style="line-height:1.7">
-          Постинг і аналітика через офіційний Threads API (окремий OAuth — вхід через Threads).<br>
-          У Meta-застосунку мають бути дозволи <code>threads_content_publish</code> + <code>threads_manage_insights</code>, а ваш Threads-акаунт — у списку <b>Threads Testers</b>.
-        </div>
-        <div class="ctl"><span id="thStatus" style="font-size:13px;color:var(--muted)">…</span></div>
-        <div class="ctl"><a id="thConnect" class="primary" href="/api/integrations/threads/connect" style="display:none;text-decoration:none">🔗 Підключити Threads</a><button class="ghost" id="thDisconnect" style="display:none">Відключити</button></div>
-      </div></div>
-      <div class="settings"><div class="body">
-        <b>📘 Facebook + Instagram (Meta)</b>
-        <div class="hint" style="line-height:1.7">
-          Постинг у Facebook-Сторінку + аналітика FB/IG (підключення через вхід у Facebook).<br>
-          Instagram підключається й показує статистику; <b>публікація в IG</b> потребує зображення (пости текстові) — увімкнемо згодом.<br>
-          На сервері мають бути <code>META_APP_ID</code>/<code>META_APP_SECRET</code>, а у Facebook Login → Redirect URI — <code>…/api/integrations/meta/callback</code>.
-        </div>
-        <div class="ctl"><span id="mtStatus" style="font-size:13px;color:var(--muted)">…</span></div>
-        <div class="ctl" id="mtPageRow" style="display:none"><label style="font-size:12px;color:var(--muted)">Акаунт:</label><select id="mtPage" style="min-width:240px;font-size:12px;padding:5px 8px"></select></div>
-        <div class="ctl"><a id="mtConnect" class="primary" href="/api/integrations/meta/connect" style="display:none;text-decoration:none">🔗 Підключити Facebook/Instagram</a><button class="ghost" id="mtStats" style="display:none">📊 Статистика</button><button class="ghost" id="mtDisconnect" style="display:none">Відключити</button></div>
-        <div id="mtStatsOut" class="out"></div>
-      </div></div>
-      <div class="settings"><div class="body">
-        <b>🎙️ Транскрибація (Fireflies)</b>
-        <div class="hint">API-ключ: Fireflies → Settings → Developer Settings → API Key. Імпортуй вручну («Джерела» → 📥) або налаштуй авто-імпорт (вебхук) нижче.</div>
-        <div class="fld"><label>Fireflies API Key</label><input class="txt" type="password" id="ffKey" placeholder="вставте ключ"></div>
-        <div class="fld" style="margin-top:6px"><label>🔔 Авто-імпорт: встав цей URL у Fireflies → Settings → Developer Settings → Webhooks</label>
-          <div style="display:flex;gap:8px"><input class="txt" id="ffHook" readonly placeholder="(зʼявиться після збереження ключа)" style="font-size:12px"><button class="ghost" type="button" id="ffHookCopy">Копіювати</button></div>
-        </div>
-        <div class="fld"><label>Webhook Secret (той самий, що задаси у Fireflies; 16-32 символи)</label><input class="txt" type="password" id="ffSecret" placeholder="вставте секрет"></div>
-        <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:4px 0"><input type="checkbox" id="ffAuto"> Авто-прогін Автопілота для імпортованих зустрічей</label>
-        <div class="ctl"><button class="primary" id="ffSave">Зберегти</button><button class="ghost" id="ffTest">Перевірити</button><span id="ffMsg" style="font-size:12px;color:var(--muted)"></span></div>
-      </div></div>
-    </section>
-
+    </div>
   </main>
 </div>
+
+<div id="toast"></div>
 
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-
 const STEP  = {1:'extract_ideas',3:'drafts',4:'tone',5:'format',6:'deai',7:'strategy'};
 const ORDER = [1,3,4,5,6,7];
 const SET = {mkt:'marketing_context', tov:'tone_of_voice', deai:'deai_rules', strat:'content_strategy', voiceExamples:'voice_examples'};
-
 const SAMPLE = `Клієнт: я постійно відкладаю важливі справи, сідаю за роботу і одразу лізу в телефон.
 Коуч: давай подивимось, що відбувається в момент перед тим, як ти береш телефон. Який це стан?
 Клієнт: тривога. Ніби боюся почати, бо раптом не вийде ідеально.
@@ -347,6 +523,7 @@ const SAMPLE = `Клієнт: я постійно відкладаю важли�
 let runId = localStorage.getItem('kg_run') || null;
 let S = {plan:[], schedule:{}};
 let busy = false;
+let Finals = [];
 
 async function api(path, opts){
   const r = await fetch('/api'+path, opts||{});
@@ -354,61 +531,94 @@ async function api(path, opts){
   const ct = r.headers.get('content-type')||'';
   return ct.includes('json') ? r.json() : r.text();
 }
+let _toastT; function flash(m){ const t=$('toast'); if(!t) return; t.textContent=m; t.classList.add('show'); clearTimeout(_toastT); _toastT=setTimeout(()=>t.classList.remove('show'),2300); }
+
+// ---------- тема ----------
+const MOON='M21 12.8A9 9 0 1111.2 3a7 7 0 109.8 9.8z';
+const SUN='M12 4V2M12 22v-2M4 12H2M22 12h-2M6 6L4.5 4.5M19.5 19.5L18 18M6 18l-1.5 1.5M19.5 4.5L18 6M12 8a4 4 0 100 8 4 4 0 000-8z';
+function setTheme(t){ document.body.setAttribute('data-theme',t); localStorage.setItem('kg_theme',t); const ic=$('themeIcon'); if(ic) ic.setAttribute('d', t==='light'?MOON:SUN); }
+$('themeToggle').onclick=()=>setTheme(document.body.getAttribute('data-theme')==='light'?'dark':'light');
 
 // ---------- навігація ----------
-document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>{
-  document.querySelectorAll('.navitem').forEach(x=>x.classList.remove('active'));
-  document.querySelectorAll('.viewsec').forEach(x=>x.classList.remove('active'));
-  n.classList.add('active');
-  const v=document.querySelector('.viewsec[data-view="'+n.dataset.view+'"]'); if(v) v.classList.add('active');
-  if(n.dataset.view==='analytics') loadUsage();
-  if(n.dataset.view==='publish') loadPublish();
-});
-async function loadUsage(){
-  try{ const u=await api('/usage'); const toks=((u.prompt_tokens||0)+(u.completion_tokens||0));
-    $('usageBox').innerHTML='<div class="card" style="font-size:18px"><b>$'+(Number(u.cost)||0).toFixed(4)+'</b> витрачено на генерацію</div>'
-      +'<div class="card">'+toks.toLocaleString('uk')+' токенів · '+(u.calls||0)+' AI-викликів</div>'
-      +'<div class="hint">Підрахунок із OpenRouter по вашому акаунту (усі прогони).</div>';
-  }catch(e){ $('usageBox').innerHTML='<div class="empty">Не вдалося завантажити лічильник.</div>'; }
+const PAGES={create:['Створення','Переглянь і затвердь готові пости'],publish:['Публікація','Запланований контент і календар'],brand:['База бренду','Факти про бренд — вводяться раз, працюють всюди'],strategy:['Стратегія','Рубрики, частота й теми контенту'],sources:['Джерела','Звідки беремо матеріал для постів'],analytics:['Аналітика','Ефективність контенту і витрати'],settings:['Налаштування','Канали публікації та інтеграції']};
+function selectView(v){
+  document.querySelectorAll('.navitem').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
+  document.querySelectorAll('.viewsec').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
+  const p=PAGES[v]||['','']; $('pageTitle').textContent=p[0]; $('pageSub').textContent=p[1];
+  $('genPostsBtn').style.display=v==='create'?'inline-flex':'none';
+  if(v==='analytics') loadAnalytics();
+  if(v==='publish') loadPublish();
+}
+function go(v){ selectView(v); }
+document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>selectView(n.dataset.view));
+
+// ---------- layout switcher (Студія/Конвеєр/Інбокс) ----------
+function setLayout(l){
+  const map={studio:'layStudio',pipeline:'layPipeline',inbox:'layInbox'};
+  for(const k in map){ const el=$(map[k]); if(el) el.style.display = k===l?'':'none'; }
+  document.querySelectorAll('#layoutTabs .tab').forEach(t=>t.classList.toggle('on',t.dataset.lay===l));
+  const H={studio:'Картки постів — переглянь, відредагуй, затвердь',pipeline:'Покроковий конвеєр — повний контроль над кожним етапом',inbox:'Список + редактор — швидке тріаж-затвердження'};
+  $('layoutHint').textContent=H[l]||'';
+}
+document.querySelectorAll('#layoutTabs .tab').forEach(t=>t.onclick=()=>setLayout(t.dataset.lay));
+
+// ---------- аналітика ----------
+async function loadAnalytics(){
+  const box=$('analyticsBox'); if(!box) return;
+  let usage={},slots=[],bank=[];
+  try{ usage=await api('/usage'); }catch(e){}
+  try{ slots=await api('/schedule'); }catch(e){}
+  try{ bank=await api('/bank'); }catch(e){}
+  const posted=slots.filter(s=>s.status==='posted'); const queued=slots.filter(s=>s.status==='planned');
+  const toks=(usage.prompt_tokens||0)+(usage.completion_tokens||0);
+  const stats=[['Опубліковано',posted.length,'усього'],['У черзі',queued.length,'заплановано'],['Витрати на AI','$'+(Number(usage.cost)||0).toFixed(2),toks.toLocaleString('uk')+' токенів'],['У банку',bank.length,'затверджених']];
+  const now=new Date(); const wk=[0,0,0,0,0,0,0,0];
+  const weekStart=new Date(now); weekStart.setDate(weekStart.getDate()-49); weekStart.setHours(0,0,0,0);
+  posted.forEach(s=>{ if(!s.scheduled_at) return; const diff=Math.floor((new Date(s.scheduled_at)-weekStart)/(7*864e5)); if(diff>=0&&diff<8) wk[diff]++; });
+  const mx=Math.max(1,...wk);
+  const chCount={telegram:0,instagram:0,facebook:0,threads:0}; let chTot=0;
+  posted.forEach(s=>{ const ch=s.channels||{}; Object.keys(chCount).forEach(k=>{ if(ch[k]&&ch[k].on){ chCount[k]++; chTot++; } }); });
+  const CHN={telegram:['Telegram','--tg'],instagram:['Instagram','--ig'],facebook:['Facebook','--fb'],threads:['Threads','--th']};
+  box.innerHTML=
+    '<div class="stat-grid" style="margin-bottom:18px">'+stats.map(s=>'<div class="stat"><div class="l">'+s[0]+'</div><div class="v">'+s[1]+'</div><div class="d">'+s[2]+'</div></div>').join('')+'</div>'
+    +'<div class="grid2" style="grid-template-columns:1.5fr 1fr">'
+    +'<div class="panel" style="margin:0"><div style="font-weight:700;font-size:14px;margin-bottom:18px">Опубліковано за тиждень</div><div class="bars">'+wk.map((v,i)=>'<div class="bar"><div class="b" style="height:'+(v/mx*100)+'%;background:'+(i===7?'var(--brand)':'var(--brand-soft2)')+'"></div><div class="lab">Т'+(i+1)+'</div></div>').join('')+'</div></div>'
+    +'<div class="panel" style="margin:0"><div style="font-weight:700;font-size:14px;margin-bottom:14px">За каналами</div>'
+      +(chTot?Object.keys(CHN).map(k=>{ const pct=Math.round(chCount[k]/chTot*100); return '<div style="margin-bottom:14px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="width:11px;height:11px;border-radius:4px;background:var('+CHN[k][1]+')"></span><span style="font-size:13px;font-weight:600;flex:1">'+CHN[k][0]+'</span><span style="font-size:13px;font-weight:700">'+pct+'%</span></div><div style="height:7px;border-radius:5px;background:var(--surface2);overflow:hidden"><div style="width:'+pct+'%;height:100%;background:var('+CHN[k][1]+')"></div></div></div>'; }).join(''):'<div class="empty">Ще немає опублікованих постів.</div>')
+      +'<div style="margin-top:14px;padding:13px;border-radius:11px;background:var(--brand-soft);font-size:12.5px;color:var(--brand)">Підключи канали в Налаштуваннях, щоб бачити охоплення й реакції.</div></div>'
+    +'</div>';
 }
 
-// ---------- settings ----------
+// ---------- база бренду (settings) ----------
 async function loadSettings(){
   try{
     const rows = await api('/settings');
     const map = Object.fromEntries(rows.map(r=>[r.key, r.content]));
-    for(const [tid,key] of Object.entries(SET)){ if(map[key]!=null) $(tid).value = map[key]; }
-    if(map.output_language) $('langSel').value = map.output_language;
+    for(const [tid,key] of Object.entries(SET)){ if(map[key]!=null && $(tid)) $(tid).value = map[key]; }
+    if(map.output_language && $('langSel')) $('langSel').value = map.output_language;
     if(map.tone_of_voice_derived) renderDerived(map.tone_of_voice_derived);
-    $('srvDot').classList.add('on');
-  }catch(e){ $('srvDot').classList.remove('on'); }
+    $('srvDot').style.background='var(--brand)';
+  }catch(e){ $('srvDot').style.background='var(--danger)'; }
 }
 let saveT;
-function flashSaved(){ const s=$('saved'); s.classList.add('show'); clearTimeout(flashSaved._t); flashSaved._t=setTimeout(()=>s.classList.remove('show'),1500); }
+function flashSaved(){ const s=$('saved'); if(!s) return; s.style.opacity='1'; clearTimeout(flashSaved._t); flashSaved._t=setTimeout(()=>s.style.opacity='0',1500); }
 async function saveSetting(key,val){ try{ await api('/settings/'+key,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:val})}); flashSaved(); }catch(e){} }
-for(const tid of Object.keys(SET)){
-  $(tid).addEventListener('input', ()=>{ clearTimeout(saveT); saveT=setTimeout(()=>saveSetting(SET[tid],$(tid).value),700); });
-}
+for(const tid of Object.keys(SET)){ const el=$(tid); if(el) el.addEventListener('input', ()=>{ clearTimeout(saveT); saveT=setTimeout(()=>saveSetting(SET[tid],el.value),700); }); }
 $('langSel').onchange=()=>saveSetting('output_language',$('langSel').value);
 function renderDerived(text){
   const o=$('derivedVoice'); if(!o) return; if(!text){ o.innerHTML=''; return; }
-  o.innerHTML='<div class="card" style="margin-top:10px"><div style="font-size:12px;color:var(--muted);margin-bottom:6px">Запропонований голос (ще не застосовано):</div><div class="post">'+esc(text)+'</div><div class="ctl"><button class="primary" id="acceptVoice">Прийняти → у Tone of Voice</button></div></div>';
-  $('acceptVoice').onclick=()=>{ $('tov').value=text; saveSetting('tone_of_voice',$('tov').value); $('derivedVoice').querySelector('.ctl').innerHTML='<span style="color:var(--ok);font-size:12px">✓ застосовано до Tone of Voice</span>'; };
+  o.innerHTML='<div class="card" style="margin-top:10px"><div style="font-size:12px;color:var(--muted);margin-bottom:6px">Запропонований голос (ще не застосовано):</div><div class="post">'+esc(text)+'</div><div class="btnrow"><button class="primary" id="acceptVoice">Прийняти → у Tone of Voice</button></div></div>';
+  $('acceptVoice').onclick=()=>{ $('tov').value=text; saveSetting('tone_of_voice',$('tov').value); $('derivedVoice').querySelector('.btnrow').innerHTML='<span style="color:var(--brand);font-size:12px">✓ застосовано до Tone of Voice</span>'; };
 }
-$('deriveVoiceBtn').onclick=async()=>{ const m=$('voiceMsg'); m.style.color='var(--muted)'; m.textContent='аналізую приклади…'; try{ const r=await api('/brand/derive-voice',{method:'POST'}); m.textContent=''; renderDerived(r.derived); }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; } };
-
-// ---------- render ----------
+$('deriveVoiceBtn').onclick=async()=>{ const m=$('voiceMsg'); m.style.color='var(--muted)'; m.textContent='аналізую приклади…'; try{ const r=await api('/brand/derive-voice',{method:'POST'}); m.textContent=''; renderDerived(r.derived); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
+// ---------- стан прогону ----------
 const badge=(n,cls,txt)=>{const b=$('b'+n); if(b){ b.className='badge '+(cls||''); b.innerHTML=txt; }};
 const stepEl=n=>$('s'+n);
-
 function applyState(d){
-  const byKey = Object.fromEntries((d.steps||[]).map(s=>[s.step_key,s]));
-  for(const n of ORDER){
-    const s = byKey[STEP[n]];
-    if(s){
-      const map={fresh:['ok','готово'],stale:['stale','застаріло'],running:['run','<span class="spin"></span> генерую'],error:['stale','помилка'],idle:['','очікує']};
-      const [c,t]=map[s.status]||['','очікує'];
-      badge(n,c,t); stepEl(n).classList.toggle('done',s.status==='fresh'); stepEl(n).classList.toggle('stale',s.status==='stale'||s.status==='error');
+  const byKey=Object.fromEntries((d.steps||[]).map(s=>[s.step_key,s]));
+  for(const n of ORDER){ const s=byKey[STEP[n]];
+    if(s){ const map={fresh:['ok','готово'],stale:['stale','застаріло'],running:['run','<span class="spin"></span> генерую'],error:['stale','помилка'],idle:['','очікує']};
+      const [c,t]=map[s.status]||['','очікує']; badge(n,c,t); stepEl(n).classList.toggle('done',s.status==='fresh'); stepEl(n).classList.toggle('stale',s.status==='stale'||s.status==='error');
     } else { badge(n,'','очікує'); stepEl(n).classList.remove('done','stale'); }
   }
   renderIdeas(d.ideas||[]);
@@ -417,212 +627,178 @@ function applyState(d){
   renderPosts('o3',byStage.draft,'Спершу відбери ідеї на кроці 1.');
   renderPosts('o4',byStage.toned);
   renderPosts('o5',byStage.formatted);
-  renderFinals(byStage.final,d.published||[]);
+  Finals=(byStage.final||[]).filter(p=>p.review!=='archived');
+  renderFinals(byStage.final);
+  renderStudio(); renderInbox(); renderStudioSteps(byKey);
   S.plan=(d.plan||[]).map(p=>({id:p.id,title:p.title,content:p.post_content||p.title,type:p.type,dayOffset:p.day_offset||0}));
   renderPlan();
-  const si=$('srcInfo'); if(si) si.innerHTML = d.source
-    ? ('📄 <b>Активне джерело:</b> '+esc(d.source.title||'(вставлений текст)')+' <span style="color:var(--muted)">· '+(d.source.len||0)+' симв.</span><div style="color:var(--muted);margin-top:3px">'+esc(d.source.snippet||'')+'…</div>')
-    : '';
+  renderSourceCard(d.source);
+  const si=$('srcInfo'); if(si) si.innerHTML = d.source ? ('📄 <b>'+esc(d.source.title||'(вставлений текст)')+'</b> · '+(d.source.len||0)+' симв.') : 'Немає активного джерела.';
 }
 function renderIdeas(ideas){
-  const o=$('o1');
+  const o=$('o1'); if(!o) return;
   if(!ideas.length){ o.innerHTML='<div class="empty">Ідеї з\'являться тут після кроку 1.</div>'; return; }
   o.innerHTML='';
   ideas.forEach(it=>{ const d=document.createElement('div'); d.className='card idea';
-    d.innerHTML='<input type="checkbox" '+(it.selected?'checked':'')+' data-id="'+it.id+'"><div class="it"><b>'+esc(it.idea)+'</b>'+(it.angle?'<div class="ang">↳ '+esc(it.angle)+'</div>':'')+'</div>';
+    d.innerHTML='<input type="checkbox" '+(it.selected?'checked':'')+' data-id="'+it.id+'"><div style="flex:1"><b>'+esc(it.idea)+'</b>'+(it.angle?'<div class="ang">↳ '+esc(it.angle)+'</div>':'')+'</div>';
     o.appendChild(d); });
   o.querySelectorAll('input').forEach(c=>c.onchange=saveSelection);
 }
-async function saveSelection(){
-  if(!runId) return;
-  const ids=[...$('o1').querySelectorAll('input:checked')].map(c=>c.dataset.id);
-  try{ await api('/runs/'+runId+'/ideas/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({selectedIds:ids})}); flashSaved(); }catch(e){}
-}
-function renderPosts(oid,posts,emptyTxt){
-  const o=$(oid); if(!o) return;
-  if(!posts||!posts.length){ o.innerHTML='<div class="empty">'+(emptyTxt||'—')+'</div>'; return; }
-  o.innerHTML=posts.map(p=>'<div class="card post">'+esc(p.content)+'</div>').join('');
-}
+async function saveSelection(){ if(!runId) return; const ids=[...$('o1').querySelectorAll('input:checked')].map(c=>c.dataset.id); try{ await api('/runs/'+runId+'/ideas/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({selectedIds:ids})}); flashSaved(); }catch(e){} }
+function renderPosts(oid,posts,emptyTxt){ const o=$(oid); if(!o) return; if(!posts||!posts.length){ o.innerHTML='<div class="empty">'+(emptyTxt||'—')+'</div>'; return; } o.innerHTML=posts.map(p=>'<div class="card post">'+esc(p.content)+'</div>').join(''); }
+
+// ---------- мережі ----------
 const NETS=[['telegram','Telegram'],['instagram','Instagram'],['facebook','Facebook'],['threads','Threads']];
-let ChanStatus={}, PostChannels={};
+const NETVAR={telegram:'--tg',instagram:'--ig',facebook:'--fb',threads:'--th'};
+const NETICON={telegram:'M22 4L2 11l6 2 2 6 3-4 5 4 4-15z',instagram:'M7 3h10a4 4 0 014 4v10a4 4 0 01-4 4H7a4 4 0 01-4-4V7a4 4 0 014-4zm5 5a4 4 0 100 8 4 4 0 000-8z',facebook:'M14 9V7c0-1 .5-1.5 1.5-1.5H17V2h-3c-2.5 0-4 1.5-4 4v3H7v3h3v9h4v-9h3l.5-3H14z',threads:'M12 3c5 0 8 3 8 9s-3 9-8 9-8-3-8-9c0-2 .5-3.5 1.5-4.5'};
+let ChanStatus={};
 async function loadChanStatus(){ try{ ChanStatus=await api('/channels/status'); }catch(e){ ChanStatus={}; } }
-function variantsHtml(ch){
-  return NETS.filter(n=>ch[n[0]]&&ch[n[0]].on).map(n=>{ const t=(ch[n[0]].text||''); if(!t) return ''; return '<div style="font-size:12px;border:1px solid var(--line);border-radius:8px;padding:6px 9px;margin-top:6px"><b>'+n[1]+'</b> <span style="color:var(--muted)">'+t.length+' симв.</span><div style="color:var(--muted);margin-top:2px;white-space:pre-wrap">'+esc(t.slice(0,180))+(t.length>180?'…':'')+'</div></div>'; }).join('');
+function chanDots(ch){ if(!ch) return ''; return NETS.filter(n=>ch[n[0]]&&ch[n[0]].on).map(n=>'<span class="cdot" title="'+n[1]+'" style="background:var('+NETVAR[n[0]]+')"><svg width="11" height="11" viewBox="0 0 24 24" fill="#fff"><path d="'+NETICON[n[0]]+'"></path></svg></span>').join(''); }
+function chanIcons(ch){ if(!ch) return ''; const I={telegram:'✈️',instagram:'📸',facebook:'📘',threads:'🧵'}; return Object.keys(I).filter(k=>ch[k]&&ch[k].on).map(k=>I[k]).join(''); }
+function statusPill(rv){ if(rv==='approved') return ['Затверджено','sp-ok']; if(rv==='needs_work') return ['Доопрацювати','sp-warn']; return ['Готово до перегляду','sp-soft']; }
+
+// ---------- фінальні пости: Конвеєр (компактно) / Студія / Інбокс ----------
+function renderFinals(posts){
+  const o=$('o6'); if(!o) return; const vis=(posts||[]).filter(p=>p.review!=='archived');
+  if(!vis.length){ o.innerHTML='<div class="empty">Готові пости зʼявляться тут — повний перегляд у «Студії».</div>'; return; }
+  o.innerHTML=vis.map(p=>'<div class="card post">'+esc((p.content||'').slice(0,200))+((p.content||'').length>200?'…':'')+'</div>').join('')+'<div class="hint" style="margin-top:8px">'+vis.length+' постів — відредагуй і затвердь у «Студії».</div>';
 }
-function renderFinals(posts,published){
-  const o=$('o6');
-  const visible=(posts||[]).filter(p=>p.review!=='archived');
-  if(!visible.length){ o.innerHTML='<div class="empty">Готові пости з\'являться тут — затвердь і тисни «Опублікувати / запланувати».</div>'; return; }
-  o.innerHTML=visible.map(p=>{
-    const st=p.review==='approved'?'<span class="badge ok">✓ затверджено</span>':p.review==='needs_work'?'<span class="badge soon">доопрацювати</span>':'';
-    const ic=chanIcons(p.channels);
-    return '<div class="tg" data-post="'+p.id+'"><div class="pcontent">'+esc(p.content)+'</div>'
-      +(p.media_filename?'<div style="margin-top:8px"><img src="/media/'+esc(p.media_filename)+'" style="max-height:120px;border-radius:8px"></div>':'')
-      +'<div class="ctl" style="margin-top:10px">'+st
-      +'<button class="act" data-a="edit">✎</button>'
-      +'<button class="act" data-a="approve">✓ Затвердити</button>'
-      +'<button class="act" data-a="needs">Доопрацювати</button>'
-      +'<button class="act" data-a="regen">↻</button>'
-      +'<button class="act" data-a="archive">🗄</button>'
-      +'<button class="act" data-a="copy">Копіювати</button>'
-      +'<button class="primary cmpOpen">📣 Опублікувати / запланувати</button>'
-      +(ic?'<span style="font-size:13px;color:var(--muted);margin-left:4px">'+ic+'</span>':'')
+async function saveContent(id,v){ try{ await api('/posts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:v})}); flashSaved(); }catch(e){} }
+let StudioFilter='all';
+function renderStudio(){
+  const grid=$('studioGrid'); if(!grid) return;
+  const all=Finals; const appr=all.filter(p=>p.review==='approved').length; const rev=all.length-appr;
+  const ft=$('studioFilters'); if(ft){ ft.innerHTML=[['all','Усі',all.length],['review','На перегляд',rev],['approved','Затверджені',appr]].map(f=>'<div class="ftab'+(StudioFilter===f[0]?' on':'')+'" data-sf="'+f[0]+'">'+f[1]+' <span style="opacity:.6">'+f[2]+'</span></div>').join(''); ft.querySelectorAll('[data-sf]').forEach(t=>t.onclick=()=>{ StudioFilter=t.dataset.sf; renderStudio(); }); }
+  let show=all; if(StudioFilter==='review') show=all.filter(p=>p.review!=='approved'); if(StudioFilter==='approved') show=all.filter(p=>p.review==='approved');
+  if(!show.length){ grid.innerHTML='<div class="empty" style="grid-column:1/-1">Поки порожньо. Додай джерело у «Джерела» і натисни «Згенерувати пости».</div>'; return; }
+  grid.innerHTML=show.map(p=>{ const sp=statusPill(p.review); const ap=p.review==='approved';
+    return '<div class="pcard'+(ap?' appr':'')+'" data-post="'+p.id+'">'
+      +'<div class="pcard-h">'+chanDots(p.channels)+'<span class="statuspill '+sp[1]+'" style="margin-left:auto">'+sp[0]+'</span></div>'
+      +(p.media_filename?'<div class="pcard-img"><img src="/media/'+esc(p.media_filename)+'"></div>':'')
+      +'<div class="pcard-text pcontent" contenteditable="true">'+esc(p.content)+'</div>'
+      +'<div class="pcard-f"><span class="chars">'+(p.content||'').replace(/\n/g,'').length+' симв.</span>'
+        +'<button class="icon" data-a="regen" title="Переробити">↻</button>'
+        +'<button class="icon" data-a="copy" title="Копіювати">⧉</button>'
+        +'<button class="icon" data-a="archive" title="В архів">🗄</button>'
+        +'<button class="icon" data-a="composer" title="Опублікувати / запланувати">📣</button>'
+        +'<button class="approve'+(ap?' on':'')+'" data-a="approve"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg>'+(ap?'Затверджено':'Затвердити')+'</button>'
       +'</div></div>';
   }).join('');
-  o.querySelectorAll('.tg').forEach(card=>{ const id=card.dataset.post;
-    card.querySelectorAll('.act[data-a]').forEach(b=>b.onclick=()=>postAction(card,id,b.dataset.a));
-    card.querySelector('.cmpOpen').onclick=()=>openComposer(id);
+  grid.querySelectorAll('.pcard').forEach(card=>{ const id=card.dataset.post; const cont=card.querySelector('.pcontent');
+    cont.addEventListener('blur',()=>saveContent(id,cont.textContent));
+    card.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(id); return; } postAction(card,id,a); });
   });
 }
-async function toggleNet(card,id,net){
-  const ch=PostChannels[id]||{}; ch[net]=ch[net]||{text:''}; ch[net].on=!ch[net].on; PostChannels[id]=ch;
-  card.querySelector('.netchip[data-net="'+net+'"]').classList.toggle('on',ch[net].on);
-  try{ await api('/posts/'+id+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:ch})}); }catch(e){}
+let InboxSel=null;
+function renderInbox(){
+  const list=$('inboxList'), det=$('inboxDetail'); if(!list||!det) return;
+  const posts=Finals;
+  if(!posts.length){ list.innerHTML='<div class="empty">Порожньо.</div>'; det.innerHTML='<div class="empty" style="margin:auto">Згенеруй пости.</div>'; return; }
+  if(!InboxSel||!posts.some(p=>p.id===InboxSel)) InboxSel=posts[0].id;
+  list.innerHTML=posts.map(p=>{ const on=p.id===InboxSel; const sp=statusPill(p.review);
+    return '<div class="inrow'+(on?' on':'')+'" data-id="'+p.id+'"><div>'+chanDots(p.channels)+'</div><div class="inrow-t">'+esc((p.content||'').split('\n')[0].slice(0,90))+'</div><div class="statuspill '+sp[1]+'" style="margin-top:6px;display:inline-block">'+sp[0]+'</div></div>';
+  }).join('');
+  list.querySelectorAll('[data-id]').forEach(r=>r.onclick=()=>{ InboxSel=r.dataset.id; renderInbox(); });
+  const p=posts.find(x=>x.id===InboxSel); const sp=statusPill(p.review); const ap=p.review==='approved';
+  det.innerHTML='<div class="indet-h">'+chanDots(p.channels)+'<span class="statuspill '+sp[1]+'" style="margin-left:auto">'+sp[0]+'</span></div>'
+    +'<div class="indet-text pcontent" contenteditable="true">'+esc(p.content)+'</div>'
+    +'<div class="indet-f"><span class="chars">'+(p.content||'').replace(/\n/g,'').length+' символів</span><button data-a="regen">↻ Переробити</button><button class="primary" data-a="composer">📣 Опублікувати</button><button class="approve'+(ap?' on':'')+'" data-a="approve">✓ '+(ap?'Затверджено':'Затвердити')+'</button></div>';
+  const cont=det.querySelector('.pcontent'); cont.addEventListener('blur',()=>saveContent(p.id,cont.textContent));
+  det.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(p.id); return; } postAction(det,p.id,a); });
 }
-async function adaptNets(card,id){
-  const ch=PostChannels[id]||{}; const sel=Object.keys(ch).filter(k=>ch[k]&&ch[k].on); const msg=card.querySelector('.pubmsg');
-  if(!sel.length){ if(msg){msg.style.color='var(--stale)';msg.textContent=' оберіть мережі';} return; }
-  if(msg){msg.style.color='var(--muted)';msg.textContent=' AI підлаштовує…';}
-  try{ const r=await api('/posts/'+id+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:sel})}); PostChannels[id]=r.channels; card.querySelector('.variants').innerHTML=variantsHtml(r.channels); if(msg){msg.style.color='var(--ok)';msg.textContent=' готово ✓';} }
-  catch(e){ if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+e.message;} }
+const STEPNAMES={1:'Витяг ідей',3:'Чорнові пости',4:'Tone of Voice',5:'Формат під канали',6:'Де-AI',7:'Контент-план'};
+function renderStudioSteps(byKey){
+  const o=$('studioSteps'); if(!o) return;
+  o.innerHTML=ORDER.map((n,i)=>{ const s=byKey[STEP[n]]; const done=s&&s.status==='fresh'; const run=s&&s.status==='running';
+    return '<div class="hstep"><span class="hdot'+(done?' done':'')+(run?' run':'')+'">'+(i+1)+'</span><div class="hstep-t">'+STEPNAMES[n]+'</div><button class="icon" data-rerun="'+n+'" title="Перезапустити">↻</button></div>';
+  }).join('');
+  o.querySelectorAll('[data-rerun]').forEach(b=>b.onclick=()=>run(+b.dataset.rerun));
 }
-async function publishAll(card,id,btn){
-  const msg=card.querySelector('.pubmsg'); const old=btn.textContent; btn.disabled=true; btn.innerHTML='<span class="spin"></span>'; if(msg)msg.textContent='';
-  try{ const r=await api('/posts/'+id+'/publish-all',{method:'POST'}); const res=r.results||[];
-    const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error');
-    btn.disabled=false; btn.textContent=old;
-    if(msg){ msg.style.color=err.length?'var(--stale)':'var(--ok)'; msg.textContent=' '+(ok.length?('✓ '+ok.join(', ')):'')+(err.length?(' ⚠ '+err.map(e=>e.channel+': '+e.error).join('; ')):''); }
-  }catch(e){ btn.disabled=false; btn.textContent=old; if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+e.message;} }
+function renderSourceCard(src){
+  const o=$('srcCard'); if(!o) return;
+  if(!src){ o.innerHTML='<div class="empty">Немає активного джерела. Додай у «Джерела».</div>'; return; }
+  o.innerHTML='<div style="font-weight:600;font-size:14px;margin-bottom:5px">'+esc(src.title||'(вставлений текст)')+'</div>'
+    +'<div style="font-size:13px;color:var(--muted);line-height:1.55;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">'+esc(src.snippet||'')+'…</div>'
+    +'<div style="margin-top:9px;font-size:12px;color:var(--faint)">'+(src.len||0)+' симв.</div>'
+    +'<button id="srcChange" style="width:100%;margin-top:11px">Змінити джерело</button>';
+  o.querySelector('#srcChange').onclick=()=>go('sources');
+}
+function renderCountChips(){ const o=$('countChips'); if(!o) return; const cur=+($('ideaCount').value)||6;
+  o.innerHTML=[3,6,9,12].map(n=>'<div class="cchip'+(n===cur?' on':'')+'" data-n="'+n+'">'+n+'</div>').join('');
+  o.querySelectorAll('[data-n]').forEach(c=>c.onclick=()=>{ $('ideaCount').value=c.dataset.n; renderCountChips(); });
 }
 async function postAction(card,id,a){
   const cont=card.querySelector('.pcontent');
-  if(a==='copy'){ navigator.clipboard.writeText(cont.textContent); flashSaved(); return; }
-  if(a==='edit'){
-    const cur=cont.textContent;
-    cont.innerHTML='<textarea class="editta" style="min-height:130px"></textarea><div class="ctl"><button class="primary doSave">Зберегти</button><button class="ghost doCancel">Скасувати</button></div>';
-    cont.querySelector('.editta').value=cur;
-    cont.querySelector('.doSave').onclick=async()=>{ try{ await api('/posts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:cont.querySelector('.editta').value})}); await refresh(); flashSaved(); }catch(e){ alert('Помилка: '+e.message); } };
-    cont.querySelector('.doCancel').onclick=()=>refresh();
-    return;
-  }
-  if(a==='regen'){ cont.innerHTML='<span class="spin"></span> перегенерація…'; try{ await api('/posts/'+id+'/regenerate',{method:'POST'}); await refresh(); flashSaved(); }catch(e){ alert('Помилка: '+e.message); await refresh(); } return; }
+  if(a==='copy'){ navigator.clipboard.writeText(cont?cont.textContent:''); flash('Скопійовано'); return; }
+  if(a==='regen'){ if(cont) cont.innerHTML='<span class="spin"></span> перегенерація…'; try{ await api('/posts/'+id+'/regenerate',{method:'POST'}); await refresh(); flashSaved(); }catch(e){ flash('⚠ '+e.message); await refresh(); } return; }
   const map={approve:'approved',needs:'needs_work',archive:'archived'};
-  if(map[a]){ try{ await api('/posts/'+id+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:map[a]})}); await refresh(); flashSaved(); }catch(e){ alert('Помилка: '+e.message); } }
+  if(map[a]){ try{ await api('/posts/'+id+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:map[a]})}); await refresh(); flashSaved(); }catch(e){ flash('⚠ '+e.message); } }
 }
-async function publishUnit(card,id,target,btn){
-  const msg=card.querySelector('.pubmsg'); const old=btn.textContent; btn.disabled=true; btn.innerHTML='<span class="spin"></span>'; if(msg) msg.textContent='';
-  try{ const r=await api('/posts/'+id+'/publish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({targets:[target]})}); const res=(r.results||[]).find(x=>x.target===target)||{};
-    if(res.status==='sent'){ btn.textContent=(target==='channel'?'✓ канал':'✓ група'); } else { btn.disabled=false; btn.textContent=old; if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+(res.error||'помилка');} }
-  }catch(e){ btn.disabled=false; btn.textContent=old; if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+e.message;} }
-}
-
-async function publishThreads(card,id,btn){
-  const msg=card.querySelector('.pubmsg'); const old=btn.textContent; btn.disabled=true; btn.innerHTML='<span class="spin"></span>'; if(msg) msg.textContent='';
-  try{ await api('/posts/'+id+'/publish/threads',{method:'POST'}); btn.textContent='✓ Threads'; }
-  catch(e){ btn.disabled=false; btn.textContent=old; if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+e.message;} }
-}
-async function threadsStats(card,id){
-  const msg=card.querySelector('.pubmsg'); if(msg){msg.style.color='var(--muted)';msg.textContent=' завантаження…';}
-  try{ const s=await api('/posts/'+id+'/threads-insights'); if(msg){msg.style.color='var(--ok)';msg.textContent=' 👁 '+(s.views||0)+' · ❤ '+(s.likes||0)+' · 💬 '+(s.replies||0)+' · 🔁 '+(s.reposts||0)+' · ❝ '+(s.quotes||0);} }
-  catch(e){ if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+e.message;} }
-}
-
-async function publishFacebook(card,id,btn){
-  const msg=card.querySelector('.pubmsg'); const old=btn.textContent; btn.disabled=true; btn.innerHTML='<span class="spin"></span>'; if(msg) msg.textContent='';
-  try{ await api('/posts/'+id+'/publish/facebook',{method:'POST'}); btn.textContent='✓ Facebook'; }
-  catch(e){ btn.disabled=false; btn.textContent=old; if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+e.message;} }
-}
-async function facebookStats(card,id){
-  const msg=card.querySelector('.pubmsg'); if(msg){msg.style.color='var(--muted)';msg.textContent=' завантаження…';}
-  try{ const s=await api('/posts/'+id+'/facebook-insights'); if(msg){msg.style.color='var(--ok)';msg.textContent=' 👁 '+(s.post_impressions||0)+' · 🙋 '+(s.post_impressions_unique||0)+' · 🖱 '+(s.post_clicks||0);} }
-  catch(e){ if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+e.message;} }
-}
-
-async function publishInstagram(card,id,btn){
-  const msg=card.querySelector('.pubmsg'); const old=btn.textContent; btn.disabled=true; btn.innerHTML='<span class="spin"></span>'; if(msg) msg.textContent='';
-  try{ await api('/posts/'+id+'/publish/instagram',{method:'POST'}); btn.textContent='✓ Instagram'; }
-  catch(e){ btn.disabled=false; btn.textContent=old; if(msg){msg.style.color='var(--stale)';msg.textContent=' ⚠ '+e.message;} }
-}
-async function pickMedia(id){
-  let media=[]; try{ media=await api('/media'); }catch(e){ alert('Не вдалося завантажити бібліотеку: '+e.message); return; }
-  const imgs=media.filter(m=>m.kind==='image');
-  const ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;z-index:50;padding:16px';
-  const grid=imgs.length?imgs.map(m=>'<img src="/media/'+esc(m.filename)+'" data-id="'+m.id+'" style="height:90px;border-radius:8px;cursor:pointer">').join(''):'<div class="empty">Бібліотека порожня — завантаж фото у «Джерела».</div>';
-  ov.innerHTML='<div class="settings" style="max-width:640px;width:100%;margin:0"><div class="body"><b>Обери фото для поста</b><div class="out" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">'+grid+'</div><div class="ctl"><button class="ghost" id="mClose">Закрити</button><button class="act" id="mDetach">Прибрати фото</button></div></div></div>';
-  document.body.appendChild(ov);
-  const close=()=>ov.remove(); ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
-  ov.querySelector('#mClose').onclick=close;
-  ov.querySelector('#mDetach').onclick=async()=>{ try{ await api('/posts/'+id+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:null})}); close(); await refresh(); }catch(e){ alert(e.message); } };
-  ov.querySelectorAll('img[data-id]').forEach(im=>im.onclick=async()=>{ try{ await api('/posts/'+id+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:im.dataset.id})}); close(); await refresh(); }catch(e){ alert(e.message); } });
-}
-
+// ---------- вибір фото ----------
 function chooseMedia(){ return new Promise(async resolve=>{
-  let media=[]; try{ media=await api('/media'); }catch(e){ alert('Не вдалося завантажити бібліотеку'); resolve(undefined); return; }
+  let media=[]; try{ media=await api('/media'); }catch(e){ flash('Не вдалося завантажити бібліотеку'); resolve(undefined); return; }
   const imgs=media.filter(m=>m.kind==='image');
-  const ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;z-index:70;padding:16px';
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
   const grid=imgs.length?imgs.map(m=>'<img src="/media/'+esc(m.filename)+'" data-id="'+m.id+'" data-fn="'+esc(m.filename)+'" style="height:84px;border-radius:8px;cursor:pointer">').join(''):'<div class="empty">Бібліотека порожня — завантаж фото у «Джерела».</div>';
-  ov.innerHTML='<div class="settings" style="max-width:620px;width:100%;margin:0"><div class="body"><b>Обери фото</b><div class="out" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">'+grid+'</div><div class="ctl"><button class="ghost" id="cmClose">Скасувати</button><button class="act" id="cmDetach">Без фото</button></div></div></div>';
+  ov.innerHTML='<div class="modal-card" style="max-width:620px;padding:20px"><b>Обери фото</b><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">'+grid+'</div><div class="btnrow"><button class="ghost" id="cmClose">Скасувати</button><button id="cmDetach">Без фото</button></div></div>';
   document.body.appendChild(ov); const close=()=>ov.remove();
   ov.addEventListener('click',e=>{ if(e.target===ov){ close(); resolve(undefined); } });
   ov.querySelector('#cmClose').onclick=()=>{ close(); resolve(undefined); };
   ov.querySelector('#cmDetach').onclick=()=>{ close(); resolve({id:null,filename:null}); };
   ov.querySelectorAll('img[data-id]').forEach(im=>im.onclick=()=>{ close(); resolve({id:im.dataset.id, filename:im.dataset.fn}); });
 }); }
+// ---------- композер: опублікувати / запланувати ----------
 async function openComposer(postId, opts){
   opts=opts||{};
-  let full; try{ full=await api('/posts/'+postId+'/full'); }catch(e){ alert('Не вдалося відкрити: '+e.message); return; }
+  let full; try{ full=await api('/posts/'+postId+'/full'); }catch(e){ flash('Не вдалося відкрити: '+e.message); return; }
   const C=full.channels||{}; let mediaFilename=full.media_filename||null;
   const initDate=opts.scheduledAt?String(opts.scheduledAt).slice(0,10):''; const initTime=opts.scheduledAt?(String(opts.scheduledAt).slice(11,16)||'11:00'):'11:00';
-  const ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);display:grid;place-items:center;z-index:60;padding:16px;overflow:auto';
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='60';
   const chipsHtml=()=>NETS.map(n=>{ const on=C[n[0]]&&C[n[0]].on; const conn=ChanStatus[n[0]]; return '<button class="netchip'+(on?' on':'')+'" data-net="'+n[0]+'"'+(conn?'':' disabled title="не підключено"')+'>'+n[1]+'</button>'; }).join('');
   const prevHtml=()=>{ const sel=NETS.filter(n=>C[n[0]]&&C[n[0]].on); if(!sel.length) return '<div style="font-size:12px;color:var(--muted)">Обери мережі вище.</div>'; return sel.map(n=>{ const t=(C[n[0]].text||full.content||''); return '<div style="font-size:12px;border:1px solid var(--line);border-radius:8px;padding:6px 9px;margin-top:6px"><b>'+n[1]+'</b> <span style="color:var(--muted)">'+t.length+' симв.</span><div style="color:var(--muted);margin-top:2px;white-space:pre-wrap">'+esc(t.slice(0,200))+(t.length>200?'…':'')+'</div></div>'; }).join(''); };
-  const mediaHtml=()=>mediaFilename?'<img src="/media/'+esc(mediaFilename)+'" style="height:74px;border-radius:8px">':'<div style="width:74px;height:74px;border-radius:8px;background:var(--panel2);display:grid;place-items:center;color:var(--muted);font-size:11px">нема фото</div>';
-  ov.innerHTML='<div class="settings" style="max-width:600px;width:100%;margin:0"><div class="body">'
-    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><b>📣 Опублікувати / запланувати</b><button class="ghost" id="cmpX" style="margin-left:auto">✕</button></div>'
-    +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Канали</div><div id="cmpChips" class="netchips">'+chipsHtml()+'</div>'
-    +'<div class="ctl" style="margin:8px 0"><button class="act" id="cmpAdapt">✨ Підлаштувати під мережі</button><span id="cmpMsg" style="font-size:12px"></span></div>'
-    +'<div style="display:flex;gap:10px;align-items:flex-start"><div style="flex:1;min-width:0" id="cmpPrev">'+prevHtml()+'</div><div style="text-align:center"><div id="cmpMedia">'+mediaHtml()+'</div><button class="ghost" id="cmpPhoto" style="margin-top:6px;font-size:12px">📎 Фото</button></div></div>'
-    +'<div class="ctl" style="margin-top:12px;gap:12px"><label style="font-size:12px;color:var(--muted)">Дата <input type="date" id="cmpDate" class="txt" value="'+initDate+'" style="width:auto;display:inline-block;padding:5px 8px"></label><label style="font-size:12px;color:var(--muted)">Час <input type="time" id="cmpTime" class="txt" value="'+initTime+'" style="width:auto;display:inline-block;padding:5px 8px"></label></div>'
-    +'<div class="ctl" style="margin-top:14px"><button class="primary" id="cmpNow">📣 Опублікувати зараз</button><button id="cmpSched" style="background:var(--ok);border-color:var(--ok);color:#04140d">🗓 Запланувати</button></div>'
-    +'</div></div>';
+  const mediaHtml=()=>mediaFilename?'<img src="/media/'+esc(mediaFilename)+'" style="height:74px;border-radius:8px">':'<div style="width:74px;height:74px;border-radius:8px;background:var(--surface2);display:grid;place-items:center;color:var(--muted);font-size:11px">нема фото</div>';
+  ov.innerHTML='<div class="modal-card" style="max-width:600px;padding:20px">'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px"><b style="font-size:16px">📣 Опублікувати / запланувати</b><button class="icon" id="cmpX" style="margin-left:auto">✕</button></div>'
+    +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Канали</div><div id="cmpChips" style="display:flex;gap:6px;flex-wrap:wrap">'+chipsHtml()+'</div>'
+    +'<div class="btnrow"><button id="cmpAdapt">✨ Підлаштувати під мережі</button><span id="cmpMsg" style="font-size:12px"></span></div>'
+    +'<div style="display:flex;gap:10px;align-items:flex-start;margin-top:6px"><div style="flex:1;min-width:0" id="cmpPrev">'+prevHtml()+'</div><div style="text-align:center"><div id="cmpMedia">'+mediaHtml()+'</div><button class="ghost" id="cmpPhoto" style="margin-top:6px;font-size:12px;padding:6px 10px">📎 Фото</button></div></div>'
+    +'<div class="btnrow" style="margin-top:14px;gap:12px"><label style="font-size:12px;color:var(--muted)">Дата <input type="date" id="cmpDate" class="txt" value="'+initDate+'" style="width:auto;padding:7px 9px"></label><label style="font-size:12px;color:var(--muted)">Час <input type="time" id="cmpTime" class="txt" value="'+initTime+'" style="width:auto;padding:7px 9px"></label></div>'
+    +'<div class="btnrow" style="margin-top:16px"><button class="primary" id="cmpNow">📣 Опублікувати зараз</button><button class="ok" id="cmpSched">🗓 Запланувати</button></div>'
+    +'</div>';
   document.body.appendChild(ov); const close=()=>ov.remove();
   ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
   const msg=ov.querySelector('#cmpMsg');
   ov.querySelector('#cmpX').onclick=close;
   ov.querySelectorAll('#cmpChips .netchip').forEach(b=>{ if(b.disabled) return; b.onclick=()=>{ const net=b.dataset.net; C[net]=C[net]||{text:''}; C[net].on=!C[net].on; b.classList.toggle('on',C[net].on); ov.querySelector('#cmpPrev').innerHTML=prevHtml(); }; });
-  ov.querySelector('#cmpAdapt').onclick=async()=>{ const sel=Object.keys(C).filter(k=>C[k]&&C[k].on); if(!sel.length){ msg.style.color='var(--stale)'; msg.textContent=' оберіть мережі'; return; } msg.style.color='var(--muted)'; msg.textContent=' AI підлаштовує…'; try{ const r=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:sel})}); Object.keys(r.channels||{}).forEach(k=>C[k]=r.channels[k]); ov.querySelector('#cmpPrev').innerHTML=prevHtml(); msg.style.color='var(--ok)'; msg.textContent=' готово ✓'; }catch(e){ msg.style.color='var(--stale)'; msg.textContent=' ⚠ '+e.message; } };
-  ov.querySelector('#cmpPhoto').onclick=async()=>{ const sel=await chooseMedia(); if(sel===undefined) return; try{ await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:sel.id})}); mediaFilename=sel.filename; ov.querySelector('#cmpMedia').innerHTML=mediaHtml(); }catch(e){ alert(e.message); } };
+  ov.querySelector('#cmpAdapt').onclick=async()=>{ const sel=Object.keys(C).filter(k=>C[k]&&C[k].on); if(!sel.length){ msg.style.color='var(--danger)'; msg.textContent=' оберіть мережі'; return; } msg.style.color='var(--muted)'; msg.textContent=' AI підлаштовує…'; try{ const r=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:sel})}); Object.keys(r.channels||{}).forEach(k=>C[k]=r.channels[k]); ov.querySelector('#cmpPrev').innerHTML=prevHtml(); msg.style.color='var(--brand)'; msg.textContent=' готово ✓'; }catch(e){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+e.message; } };
+  ov.querySelector('#cmpPhoto').onclick=async()=>{ const sel=await chooseMedia(); if(sel===undefined) return; try{ await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:sel.id})}); mediaFilename=sel.filename; ov.querySelector('#cmpMedia').innerHTML=mediaHtml(); }catch(e){ flash(e.message); } };
   const saveCh=()=>api('/posts/'+postId+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:C})});
-  ov.querySelector('#cmpNow').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent=' публікую…'; try{ await saveCh(); const r=await api('/posts/'+postId+'/publish-all',{method:'POST'}); const res=r.results||[]; const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); msg.style.color=err.length?'var(--stale)':'var(--ok)'; msg.textContent=' '+(ok.length?('✓ '+ok.join(', ')):'')+(err.length?(' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; ')):''); if(!err.length){ if(typeof refresh==='function'){try{await refresh();}catch(_){}} setTimeout(close,1300);} }catch(e2){ msg.style.color='var(--stale)'; msg.textContent=' ⚠ '+e2.message; } finally{ b.disabled=false; } };
-  ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ msg.style.color='var(--stale)'; msg.textContent=' вкажи дату й час'; return; } const sel=Object.keys(C).filter(k=>C[k]&&C[k].on); if(!sel.length){ msg.style.color='var(--stale)'; msg.textContent=' оберіть мережі'; return; } const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent=' зберігаю…'; const at=d+'T'+t+':00.000Z'; try{ await saveCh(); if(opts.slotId){ await api('/schedule/'+opts.slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:at})}); } else { await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:at})}); } msg.style.color='var(--ok)'; msg.textContent=' заплановано ✓'; if(typeof loadPublish==='function'){try{await loadPublish();}catch(_){}} setTimeout(close,900); }catch(e2){ msg.style.color='var(--stale)'; msg.textContent=' ⚠ '+e2.message; b.disabled=false; } };
+  ov.querySelector('#cmpNow').onclick=async(e)=>{ const b=e.target.closest('button'); b.disabled=true; msg.style.color='var(--muted)'; msg.textContent=' публікую…'; try{ await saveCh(); const r=await api('/posts/'+postId+'/publish-all',{method:'POST'}); const res=r.results||[]; const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); msg.style.color=err.length?'var(--danger)':'var(--brand)'; msg.textContent=' '+(ok.length?('✓ '+ok.join(', ')):'')+(err.length?(' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; ')):''); if(!err.length){ try{await refresh();}catch(_){} setTimeout(close,1300);} }catch(e2){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+e2.message; } finally{ b.disabled=false; } };
+  ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ msg.style.color='var(--danger)'; msg.textContent=' вкажи дату й час'; return; } const sel=Object.keys(C).filter(k=>C[k]&&C[k].on); if(!sel.length){ msg.style.color='var(--danger)'; msg.textContent=' оберіть мережі'; return; } const b=e.target.closest('button'); b.disabled=true; msg.style.color='var(--muted)'; msg.textContent=' зберігаю…'; const at=d+'T'+t+':00.000Z'; try{ await saveCh(); if(opts.slotId){ await api('/schedule/'+opts.slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:at})}); } else { await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:at})}); } msg.style.color='var(--brand)'; msg.textContent=' заплановано ✓'; try{await loadPublish();}catch(_){} setTimeout(close,900); }catch(e2){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+e2.message; b.disabled=false; } };
 }
 function openDayScheduler(iso){
-  const posts=(typeof Pub!=='undefined'&&Pub.bank)?Pub.bank:[];
-  const ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;z-index:62;padding:16px';
-  const list=posts.length?posts.map(p=>'<div class="card" data-id="'+p.id+'" style="cursor:pointer">'+esc((p.content||'').replace(/\n+/g,' ').slice(0,90))+'…</div>').join(''):'<div class="empty">Немає затверджених постів. Затвердь пост у «Створенні».</div>';
-  ov.innerHTML='<div class="settings" style="max-width:560px;width:100%;margin:0"><div class="body"><b>Що запланувати на '+iso+'?</b><div class="out" style="margin-top:10px">'+list+'</div><div class="ctl"><button class="ghost" id="dsClose">Закрити</button></div></div></div>';
+  const posts=(Pub&&Pub.bank)?Pub.bank:[];
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='62';
+  const list=posts.length?posts.map(p=>'<div class="card" data-id="'+p.id+'" style="cursor:pointer;margin-bottom:8px">'+esc((p.content||'').replace(/\n+/g,' ').slice(0,90))+'…</div>').join(''):'<div class="empty">Немає затверджених постів. Затвердь пост у «Студії».</div>';
+  ov.innerHTML='<div class="modal-card" style="max-width:560px;padding:20px"><b>Що запланувати на '+iso+'?</b><div style="margin-top:12px">'+list+'</div><div class="btnrow"><button class="ghost" id="dsClose">Закрити</button></div></div>';
   document.body.appendChild(ov); const close=()=>ov.remove();
   ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
   ov.querySelector('#dsClose').onclick=close;
   ov.querySelectorAll('.card[data-id]').forEach(c=>c.onclick=()=>{ close(); openComposer(c.dataset.id,{scheduledAt:iso+'T11:00:00.000Z'}); });
 }
-function updRunLabel(){ $('runLabel').textContent = runId ? ('· прогін '+runId.slice(0,8)) : '· новий прогін'; $('lockHint').textContent = runId ? 'Прогін створено з цього транскрипту. «Новий прогін», щоб почати з іншого тексту.' : ''; }
+
+// ---------- прогін ----------
+function updRunLabel(){ const rl=$('runLabel'); if(rl) rl.textContent = runId ? ('Прогін '+runId.slice(0,8)) : 'Новий прогін'; const lh=$('lockHint'); if(lh) lh.textContent = runId ? 'Прогін створено з цього транскрипту. «Новий прогін», щоб почати з іншого тексту.' : ''; }
 async function refresh(){ if(!runId) return; const d=await api('/runs/'+runId); applyState(d); }
 async function ensureRun(){
   const transcript=$('transcript').value.trim();
-  if(transcript){ // є новий текст у «Джерелах» → робимо новий прогін саме з нього (а не зі старого)
-    const r=await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript})});
-    if(r.error) throw new Error(r.error);
-    runId=r.runId; localStorage.setItem('kg_run',runId); $('transcript').value=''; updRunLabel(); return runId;
-  }
+  if(transcript){ const r=await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript})}); if(r.error) throw new Error(r.error); runId=r.runId; localStorage.setItem('kg_run',runId); $('transcript').value=''; updRunLabel(); return runId; }
   if(runId) return runId;
   throw new Error('Спершу вставте транскрипт у вкладці «Джерела».');
 }
-
-// ---------- run ----------
-function setBusy(b){ busy=b; document.querySelectorAll('.pipe button, #runAll').forEach(x=>x.disabled=b); const sb=$('stopBtn'); if(sb){ sb.style.display=b?'inline-block':'none'; if(!b) sb.textContent='⛔ Зупинити'; } }
+function setBusy(b){ busy=b; document.querySelectorAll('#pipe button, #runAll, #genPostsBtn, #studioMore').forEach(x=>x.disabled=b); const sb=$('stopBtn'); if(sb){ sb.style.display=b?'block':'none'; if(!b) sb.textContent='⛔ Зупинити'; } }
 function ideaOpts(){ return { count: Math.max(1,Math.min(12,(+($('ideaCount')&&$('ideaCount').value))||6)), rubrics: [...document.querySelectorAll('.ideaRub:checked')].map(c=>c.value) }; }
-function renderIdeaRubrics(){ const o=$('ideaRubrics'); if(!o) return; o.innerHTML = Rubrics.length ? Rubrics.map(r=>'<label style="display:block;font-size:13px;margin:3px 0"><input type="checkbox" class="ideaRub" value="'+esc(r.name)+'" checked> '+(r.emoji||'')+' '+esc(r.name)+'</label>').join('') : '<div class="empty">нема рубрик</div>'; }
+function renderIdeaRubrics(){ const o=$('ideaRubrics'); if(!o) return; o.innerHTML = Rubrics.length ? Rubrics.map(r=>'<label class="rchip"><input type="checkbox" class="ideaRub" value="'+esc(r.name)+'" checked> '+(r.emoji||'')+' '+esc(r.name)+'</label>').join('') : '<div class="empty">нема рубрик</div>'; o.querySelectorAll('.rchip').forEach(l=>{ const cb=l.querySelector('input'); const upd=()=>l.classList.toggle('on',cb.checked); upd(); cb.addEventListener('change',upd); }); }
 async function run(n){
   if(busy) return; setBusy(true);
   try{ await ensureRun(); badge(n,'run','<span class="spin"></span> генерую'); stepEl(n).classList.remove('stale');
@@ -636,27 +812,33 @@ async function runFrom(startN){
   try{ await ensureRun(); for(const k of ORDER.slice(ORDER.indexOf(startN))) badge(k,'run','<span class="spin"></span> у черзі');
     const body=startN===1?JSON.stringify(ideaOpts()):null;
     await api('/runs/'+runId+'/run-from/'+STEP[startN], body?{method:'POST',headers:{'Content-Type':'application/json'},body}:{method:'POST'});
-  }catch(e){ alert('Помилка: '+e.message); }
+  }catch(e){ flash('⚠ '+e.message); }
   finally{ try{ await refresh(); }catch(_){} setBusy(false); }
 }
-
-// ---------- стратегія: прев'ю плану (крок 7) ----------
+async function genPosts(){
+  if(busy) return;
+  let rid; try{ rid=await ensureRun(); }catch(e){ go('sources'); flash('Спершу додай джерело у «Джерела».'); return; }
+  if(!confirm('Згенерувати пости? Це прожене весь конвеєр (кілька AI-викликів, ~1–2 хв).')) return;
+  setBusy(true); setLayout('studio');
+  ORDER.forEach(n=>badge(n,'run','<span class="spin"></span> у черзі'));
+  try{ await api('/runs/'+rid+'/autopilot',{method:'POST'}); await refresh(); flash('Готово — переглянь і затвердь пости.'); }
+  catch(e){ flash('⚠ '+e.message); try{await refresh();}catch(_){} }
+  finally{ setBusy(false); }
+}
+$('genPostsBtn').onclick=genPosts; $('studioMore').onclick=genPosts;
 function renderPlan(){
-  const o=$('o7');
+  const o=$('o7'); if(!o) return;
   if(!S.plan.length){ o.innerHTML='<div class="empty">План з\'явиться тут. Затверджені пости підуть у Банк (вкладка Публікація).</div>'; return; }
-  o.innerHTML='';
-  S.plan.forEach((p,i)=>{ const prev=((p.content||p.title||'')).replace(/\n+/g,' ').slice(0,140); o.innerHTML+='<div class="card"><div>'+esc(prev)+'…</div><small style="color:var(--muted)">'+esc(p.type||'пост')+'</small></div>'; });
+  o.innerHTML=S.plan.map(p=>{ const prev=((p.content||p.title||'')).replace(/\n+/g,' ').slice(0,140); return '<div class="card"><div>'+esc(prev)+'…</div><small style="color:var(--muted)">'+esc(p.type||'пост')+'</small></div>'; }).join('');
 }
 
-// ---------- Публікація: банк + календар (рівень workspace) ----------
+// ---------- Публікація ----------
 let Pub = { bank: [], slots: [] };
-async function loadPublish(){
-  try{ const [bank,slots]=await Promise.all([api('/bank'),api('/schedule')]); Pub.bank=bank||[]; Pub.slots=slots||[]; renderBank(); renderCal(); }catch(e){}
-}
+async function loadPublish(){ try{ const [bank,slots]=await Promise.all([api('/bank'),api('/schedule')]); Pub.bank=bank||[]; Pub.slots=slots||[]; renderBank(); renderCal(); }catch(e){} }
 function renderBank(){
   const o=$('bank'); if(!o) return; const sch=new Set(Pub.slots.map(s=>s.post_id));
   $('bankCount').textContent=Pub.bank.length;
-  if(!Pub.bank.length){ o.innerHTML='<div class="empty">Порожньо. Затвердьте пости у «Створенні» — вони зʼявляться тут.</div>'; return; }
+  if(!Pub.bank.length){ o.innerHTML='<div class="empty">Порожньо. Затвердьте пости у «Студії» — вони зʼявляться тут.</div>'; return; }
   o.innerHTML='';
   Pub.bank.forEach(p=>{ const placed=sch.has(p.id);
     const c=document.createElement('div'); c.className='chip'+(placed?' placed':''); c.draggable=true; c.dataset.post=p.id;
@@ -667,7 +849,6 @@ function renderBank(){
 }
 function calMonday(){const d=new Date();const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);d.setHours(0,0,0,0);return d;}
 function calISO(off){const d=calMonday();d.setDate(d.getDate()+off);return d.toISOString().slice(0,10);}
-function chanIcons(ch){ if(!ch) return ''; const I={telegram:'✈️',instagram:'📸',facebook:'📘',threads:'🧵'}; return Object.keys(I).filter(k=>ch[k]&&ch[k].on).map(k=>I[k]).join(''); }
 function renderCal(){
   const cal=$('cal'); if(!cal) return; cal.innerHTML='';
   ['Пн','Вт','Ср','Чт','Пт','Сб','Нд'].forEach(d=>{const h=document.createElement('div');h.className='dow';h.textContent=d;cal.appendChild(h);});
@@ -677,36 +858,18 @@ function renderCal(){
     const dt=new Date(iso); cell.innerHTML='<div class="dn">'+dt.getDate()+'.'+(dt.getMonth()+1)+'</div>';
     (byDay[iso]||[]).sort((a,b)=>String(a.scheduled_at).localeCompare(String(b.scheduled_at))).forEach(s=>{
       const time=String(s.scheduled_at).slice(11,16); const posted=s.status==='posted';
-      const ch=document.createElement('div'); ch.className='pchip'; ch.style.cursor='pointer';
-      ch.innerHTML='<b style="color:var(--accent2)">'+time+(posted?' ✓':'')+'</b> '+chanIcons(s.channels)+' '+esc((s.content||'').replace(/\n+/g,' ').slice(0,18));
+      const ch=document.createElement('div'); ch.className='pchip';
+      ch.innerHTML='<b>'+time+(posted?' ✓':'')+'</b> '+chanIcons(s.channels)+' '+esc((s.content||'').replace(/\n+/g,' ').slice(0,18));
       ch.onclick=(ev)=>{ ev.stopPropagation(); openComposer(s.post_id,{scheduledAt:s.scheduled_at,slotId:s.id}); }; cell.appendChild(ch);
     });
     cell.addEventListener('dragover',ev=>{ev.preventDefault();cell.classList.add('over');});
     cell.addEventListener('dragleave',()=>cell.classList.remove('over'));
     cell.addEventListener('drop',async ev=>{ev.preventDefault();cell.classList.remove('over');const d=ev.dataTransfer.getData('text/plain'); if(d.indexOf('post:')!==0) return; const postId=d.slice(5);
-      try{ await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:iso+'T09:00:00.000Z'})}); await loadPublish(); }catch(e){ alert(e.message); } });
-    cell.style.cursor='pointer';
+      try{ await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:iso+'T09:00:00.000Z'})}); await loadPublish(); }catch(e){ flash(e.message); } });
     cell.addEventListener('click',ev=>{ if(ev.target.closest('.pchip')) return; openDayScheduler(iso); });
     cal.appendChild(cell);
   }
 }
-function slotDialog(s){
-  const day=String(s.scheduled_at).slice(0,10), time=String(s.scheduled_at).slice(11,16);
-  const ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;z-index:50;padding:16px';
-  ov.innerHTML='<div class="settings" style="max-width:520px;width:100%;margin:0"><div class="body">'
-    +'<b>Слот · '+day+'</b>'
-    +'<div class="card post" style="max-height:170px;overflow:auto">'+esc(s.content||'')+'</div>'
-    +'<div class="fld"><label>Час публікації (UTC)</label><input class="txt" type="time" id="slotTime" value="'+time+'"></div>'
-    +'<div class="ctl"><button class="primary" id="slotSave">Зберегти час</button><button id="slotRegen">↻ Перегенерувати</button><button class="ghost" id="slotDel">🗑 Прибрати зі слоту</button><button class="ghost" id="slotClose">Закрити</button></div>'
-    +'<div id="slotMsg" class="hint"></div></div></div>';
-  document.body.appendChild(ov);
-  const close=()=>ov.remove(); ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
-  ov.querySelector('#slotClose').onclick=close;
-  ov.querySelector('#slotSave').onclick=async()=>{ const t=ov.querySelector('#slotTime').value||'09:00'; try{ await api('/schedule/'+s.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:day+'T'+t+':00.000Z'})}); close(); await loadPublish(); }catch(e){ ov.querySelector('#slotMsg').textContent='⚠ '+e.message; } };
-  ov.querySelector('#slotDel').onclick=async()=>{ try{ await api('/schedule/'+s.id,{method:'DELETE'}); close(); await loadPublish(); }catch(e){ ov.querySelector('#slotMsg').textContent='⚠ '+e.message; } };
-  ov.querySelector('#slotRegen').onclick=async()=>{ ov.querySelector('#slotMsg').textContent='перегенерація…'; try{ await api('/posts/'+s.post_id+'/regenerate',{method:'POST'}); close(); await loadPublish(); }catch(e){ ov.querySelector('#slotMsg').textContent='⚠ '+e.message; } };
-}
-
 // ---------- wiring ----------
 document.querySelectorAll('[data-run]').forEach(b=>b.onclick=()=>run(+b.dataset.run));
 document.querySelectorAll('[data-from]').forEach(b=>b.onclick=()=>runFrom(+b.dataset.from));
@@ -715,181 +878,112 @@ $('stopBtn').onclick=async()=>{ if(!runId) return; $('stopBtn').textContent='⛔
 $('sampleBtn').onclick=()=>{ $('transcript').value=SAMPLE; };
 $('toCreate').onclick=async()=>{
   const transcript=$('transcript').value.trim();
-  if(!transcript){ alert('Спершу вставте транскрипт або імпортуйте джерело.'); return; }
-  try{
-    const r=await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript})});
-    if(r.error) throw new Error(r.error);
+  if(!transcript){ flash('Спершу вставте транскрипт або імпортуйте джерело.'); return; }
+  try{ const r=await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript})}); if(r.error) throw new Error(r.error);
     runId=r.runId; localStorage.setItem('kg_run',runId);
-    ['o1','o3','o4','o5','o6','o7'].forEach(id=>$(id).innerHTML='<div class="empty">—</div>');
-    [1,3,4,5,6,7].forEach(n=>{badge(n,'','очікує');stepEl(n).classList.remove('done','stale');});
-    $('transcript').value='';
-    updRunLabel();
-    document.querySelector('.navitem[data-view="create"]').click();
-    refresh().catch(()=>{});
-  }catch(e){ alert('Помилка: '+e.message); }
+    ['o1','o3','o4','o5','o6','o7'].forEach(id=>{const e=$(id); if(e) e.innerHTML='<div class="empty">—</div>';});
+    ORDER.forEach(n=>{badge(n,'','очікує');stepEl(n).classList.remove('done','stale');});
+    $('transcript').value=''; updRunLabel(); go('create'); setLayout('pipeline'); refresh().catch(()=>{});
+  }catch(e){ flash('Помилка: '+e.message); }
 };
 $('autopilotBtn').onclick=async()=>{
   const transcript=$('transcript').value.trim();
-  if(!transcript){ alert('Спершу вставте транскрипт або імпортуйте джерело.'); return; }
-  if(!confirm('Автопілот прожене ВСЮ кишку (кілька AI-викликів, ~1-2 хв) і покладе чернетки на підтвердження. Продовжити?')) return;
+  if(!transcript){ flash('Спершу вставте транскрипт або імпортуйте джерело.'); return; }
+  if(!confirm('Автопілот прожене ВСЮ кишку (кілька AI-викликів, ~1-2 хв) і покладе пости на підтвердження. Продовжити?')) return;
   const btn=$('autopilotBtn'); const old=btn.textContent; btn.disabled=true; btn.textContent='🟢 працюю…';
-  try{
-    const r=await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript})});
-    if(r.error) throw new Error(r.error);
+  try{ const r=await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript})}); if(r.error) throw new Error(r.error);
     runId=r.runId; localStorage.setItem('kg_run',runId); $('transcript').value=''; updRunLabel();
-    document.querySelector('.navitem[data-view="create"]').click();
-    [1,3,4,5,6,7].forEach(n=>badge(n,'run','<span class="spin"></span> у черзі'));
-    await api('/runs/'+runId+'/autopilot',{method:'POST'});
-    await refresh();
-    alert('Готово! Перегляньте чернетки (крок 6) і затвердьте потрібні — вони підуть у Банк публікацій.');
-  }catch(e){ alert('Помилка: '+e.message); try{ await refresh(); }catch(_){} }
+    go('create'); setLayout('studio'); ORDER.forEach(n=>badge(n,'run','<span class="spin"></span> у черзі'));
+    await api('/runs/'+runId+'/autopilot',{method:'POST'}); await refresh(); flash('Готово! Перегляньте й затвердьте пости у «Студії».');
+  }catch(e){ flash('Помилка: '+e.message); try{ await refresh(); }catch(_){} }
   finally{ btn.disabled=false; btn.textContent=old; }
 };
-$('aiDistribute').onclick=async()=>{ if(!confirm('Перерозподілити всі незапощені пости заново за розкладом зі Стратегії? Раніше заплановані (але не опубліковані) слоти буде перекладено.')) return; const m=$('pubMsg'); m.style.color='var(--muted)'; m.textContent='розподіляю…'; try{ const r=await api('/schedule/auto',{method:'POST'}); m.style.color='var(--ok)'; m.textContent='розподілено: '+r.count; await loadPublish(); }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; } };
+$('aiDistribute').onclick=async()=>{ if(!confirm('Перерозподілити всі незапощені пости за розкладом зі Стратегії? Раніше заплановані (але не опубліковані) слоти буде перекладено.')) return; const m=$('pubMsg'); m.style.color='var(--muted)'; m.textContent='розподіляю…'; try{ const r=await api('/schedule/auto',{method:'POST'}); m.style.color='var(--brand)'; m.textContent='розподілено: '+r.count; await loadPublish(); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
 $('reloadPub').onclick=()=>loadPublish();
 $('newRun').onclick=()=>{
   if(busy) return;
   if(runId && !confirm('Почати новий прогін? Поточні результати лишаться на сервері, але зникнуть з екрана.')) return;
-  runId=null; localStorage.removeItem('kg_run'); S={plan:[],schedule:{}};
-  const si=$('srcInfo'); if(si) si.innerHTML='';
-  ['o1','o3','o4','o5','o6','o7'].forEach(id=>$(id).innerHTML='<div class="empty">—</div>');
+  runId=null; localStorage.removeItem('kg_run'); S={plan:[],schedule:{}}; Finals=[];
+  ['o1','o3','o4','o5','o6','o7'].forEach(id=>{const e=$(id); if(e) e.innerHTML='<div class="empty">—</div>';});
   $('transcript').value='';
-  [1,3,4,5,6,7].forEach(n=>{badge(n,'','очікує');stepEl(n).classList.remove('done','stale');});
+  ORDER.forEach(n=>{badge(n,'','очікує');stepEl(n).classList.remove('done','stale');});
+  renderStudio(); renderInbox(); renderStudioSteps({}); renderSourceCard(null);
   updRunLabel();
 };
 $('logoutBtn').onclick=async()=>{ try{ await api('/auth/logout',{method:'POST'}); }catch(e){} location.href='/login'; };
 
-// ---------- Telegram ----------
-async function loadTelegram(){
-  try{ const c=await api('/integrations/telegram');
-    $('tgChannel').value=c.channelChatId||''; $('tgGroup').value=c.groupChatId||'';
-    if(c.hasToken) $('tgToken').placeholder='•••••••• (токен збережено — лиши порожнім, щоб не міняти)';
-  }catch(e){}
-}
+// ---------- Telegram / Threads / Meta ----------
+async function loadTelegram(){ try{ const c=await api('/integrations/telegram'); $('tgChannel').value=c.channelChatId||''; $('tgGroup').value=c.groupChatId||''; if(c.hasToken) $('tgToken').placeholder='•••••••• (токен збережено — лиши порожнім, щоб не міняти)'; }catch(e){} }
 async function loadThreads(){
-  try{ const c=await api('/integrations/threads');
-    const st=$('thStatus'), conn=$('thConnect'), dis=$('thDisconnect'); if(!st) return;
-    if(!c.configured){ st.textContent='⚠ Threads App ID не налаштований на сервері (THREADS_APP_ID).'; if(conn)conn.style.display='none'; if(dis)dis.style.display='none'; return; }
-    if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.username?(' як <b>@'+esc(c.username)+'</b>'):'')+(c.expiresAt?(' · токен дійсний до '+new Date(c.expiresAt).toLocaleDateString()):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-block'; }
-    else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-block'; if(dis)dis.style.display='none'; }
+  try{ const c=await api('/integrations/threads'); const st=$('thStatus'), conn=$('thConnect'), dis=$('thDisconnect'); if(!st) return;
+    if(!c.configured){ st.textContent='⚠ Threads App ID не налаштований (THREADS_APP_ID).'; if(conn)conn.style.display='none'; if(dis)dis.style.display='none'; return; }
+    if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.username?(' як <b>@'+esc(c.username)+'</b>'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-flex'; }
+    else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-flex'; if(dis)dis.style.display='none'; }
   }catch(e){}
 }
 $('thDisconnect').onclick=async()=>{ if(!confirm('Відключити Threads?')) return; try{ await api('/integrations/threads/disconnect',{method:'POST'}); await loadThreads(); }catch(e){} };
 async function loadMeta(){
-  try{ const c=await api('/integrations/meta');
-    const st=$('mtStatus'), conn=$('mtConnect'), dis=$('mtDisconnect'), stats=$('mtStats'); if(!st) return;
-    if(!c.configured){ st.textContent='⚠ META_APP_ID не налаштований на сервері.'; [conn,dis,stats].forEach(b=>b&&(b.style.display='none')); return; }
+  try{ const c=await api('/integrations/meta'); const st=$('mtStatus'), conn=$('mtConnect'), dis=$('mtDisconnect'), stats=$('mtStats'); if(!st) return;
+    if(!c.configured){ st.textContent='⚠ META_APP_ID не налаштований.'; [conn,dis,stats].forEach(b=>b&&(b.style.display='none')); return; }
     const row=$('mtPageRow');
-    if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.pageName?(' · FB: <b>'+esc(c.pageName)+'</b>'):'')+(c.igUsername?(' · IG: <b>@'+esc(c.igUsername)+'</b>'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-block'; if(stats)stats.style.display='inline-block'; if(row)row.style.display='flex'; loadMetaPages(); }
-    else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-block'; if(dis)dis.style.display='none'; if(stats)stats.style.display='none'; if(row)row.style.display='none'; }
+    if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.pageName?(' · FB: <b>'+esc(c.pageName)+'</b>'):'')+(c.igUsername?(' · IG: <b>@'+esc(c.igUsername)+'</b>'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-flex'; if(stats)stats.style.display='inline-flex'; if(row)row.style.display='flex'; loadMetaPages(); }
+    else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-flex'; if(dis)dis.style.display='none'; if(stats)stats.style.display='none'; if(row)row.style.display='none'; }
   }catch(e){}
 }
 $('mtDisconnect').onclick=async()=>{ if(!confirm('Відключити Facebook/Instagram?')) return; try{ await api('/integrations/meta/disconnect',{method:'POST'}); await loadMeta(); }catch(e){} };
-async function loadMetaPages(){
-  const sel=$('mtPage'); if(!sel) return;
-  try{ const pages=await api('/integrations/meta/pages');
-    if(!Array.isArray(pages)||!pages.length){ sel.innerHTML='<option>—</option>'; return; }
-    sel.innerHTML=pages.map(p=>'<option value="'+p.id+'"'+(p.current?' selected':'')+'>'+esc(p.name)+(p.ig?(' · IG @'+esc(p.ig)):'')+'</option>').join('');
-  }catch(e){ sel.innerHTML='<option>—</option>'; }
-}
-$('mtPage').onchange=async(e)=>{ try{ await api('/integrations/meta/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pageId:e.target.value})}); await loadMeta(); flashSaved(); }catch(err){ alert('Не вдалося змінити акаунт: '+err.message); } };
+async function loadMetaPages(){ const sel=$('mtPage'); if(!sel) return; try{ const pages=await api('/integrations/meta/pages'); if(!Array.isArray(pages)||!pages.length){ sel.innerHTML='<option>—</option>'; return; } sel.innerHTML=pages.map(p=>'<option value="'+p.id+'"'+(p.current?' selected':'')+'>'+esc(p.name)+(p.ig?(' · IG @'+esc(p.ig)):'')+'</option>').join(''); }catch(e){ sel.innerHTML='<option>—</option>'; } }
+$('mtPage').onchange=async(e)=>{ try{ await api('/integrations/meta/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pageId:e.target.value})}); await loadMeta(); flashSaved(); }catch(err){ flash('Не вдалося змінити акаунт: '+err.message); } };
 $('mtStats').onclick=async()=>{ const o=$('mtStatsOut'); o.innerHTML='<div class="empty"><span class="spin"></span> завантаження…</div>';
-  try{ const s=await api('/integrations/meta/stats');
-    o.innerHTML=(s.facebook?('<div class="card">📘 <b>'+esc(s.facebook.name||'FB')+'</b>: '+(s.facebook.followers_count||s.facebook.fan_count||0)+' підписників</div>'):'')
-      +(s.instagram?('<div class="card">📸 <b>@'+esc(s.instagram.username||'')+'</b>: '+(s.instagram.followers_count||0)+' підписників · '+(s.instagram.media_count||0)+' постів</div>'):'')
-      +(!s.facebook&&!s.instagram?'<div class="empty">Немає даних.</div>':'');
-  }catch(e){ o.innerHTML='<div class="card" style="color:var(--stale)">⚠ '+esc(e.message)+'</div>'; } };
-$('tgSave').onclick=async()=>{
-  try{ await api('/integrations/telegram',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({botToken:$('tgToken').value,channelChatId:$('tgChannel').value,groupChatId:$('tgGroup').value})});
-    $('tgToken').value=''; $('tgToken').placeholder='•••••••• (токен збережено)';
-    $('tgResult').innerHTML='<div class="card" style="color:var(--ok)">Збережено ✓</div>';
-  }catch(e){ $('tgResult').innerHTML='<div class="card" style="color:var(--stale)">⚠ '+esc(e.message)+'</div>'; }
-};
-$('tgTest').onclick=async()=>{
-  $('tgResult').innerHTML='<div class="empty"><span class="spin"></span> перевіряю…</div>';
+  try{ const s=await api('/integrations/meta/stats'); o.innerHTML=(s.facebook?('<div class="card">📘 <b>'+esc(s.facebook.name||'FB')+'</b>: '+(s.facebook.followers_count||s.facebook.fan_count||0)+' підписників</div>'):'')+(s.instagram?('<div class="card">📸 <b>@'+esc(s.instagram.username||'')+'</b>: '+(s.instagram.followers_count||0)+' підписників · '+(s.instagram.media_count||0)+' постів</div>'):'')+(!s.facebook&&!s.instagram?'<div class="empty">Немає даних.</div>':''); }catch(e){ o.innerHTML='<div class="card" style="color:var(--danger)">⚠ '+esc(e.message)+'</div>'; } };
+$('tgSave').onclick=async()=>{ try{ await api('/integrations/telegram',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({botToken:$('tgToken').value,channelChatId:$('tgChannel').value,groupChatId:$('tgGroup').value})}); $('tgToken').value=''; $('tgToken').placeholder='•••••••• (токен збережено)'; $('tgResult').innerHTML='<div class="card" style="color:var(--brand)">Збережено ✓</div>'; }catch(e){ $('tgResult').innerHTML='<div class="card" style="color:var(--danger)">⚠ '+esc(e.message)+'</div>'; } };
+$('tgTest').onclick=async()=>{ $('tgResult').innerHTML='<div class="empty"><span class="spin"></span> перевіряю…</div>';
   try{ const r=await api('/integrations/telegram/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({botToken:$('tgToken').value,channelChatId:$('tgChannel').value,groupChatId:$('tgGroup').value})});
-    const line=(label,c)=>{ if(!c) return '<div class="card"><b>'+label+':</b> <span style="color:var(--muted)">не вказано</span></div>';
-      if(!c.ok) return '<div class="card"><b>'+label+':</b> <span style="color:var(--stale)">⚠ '+esc(c.error||'недоступно')+'</span></div>';
-      return '<div class="card"><b>'+label+':</b> <span style="color:var(--ok)">✓ '+esc(c.title)+'</span> '+(c.isAdmin?'<span style="color:var(--ok)">· бот адмін</span>':'<span style="color:var(--warn)">· бот НЕ адмін</span>')+'</div>'; };
-    $('tgResult').innerHTML='<div class="card" style="color:var(--ok)">Бот: @'+esc(r.bot.username||'?')+' ✓</div>'+line('Канал',r.channel)+line('Група',r.group);
-  }catch(e){ $('tgResult').innerHTML='<div class="card" style="color:var(--stale)">⚠ '+esc(e.message)+'</div>'; }
+    const line=(label,c)=>{ if(!c) return '<div class="card"><b>'+label+':</b> <span style="color:var(--muted)">не вказано</span></div>'; if(!c.ok) return '<div class="card"><b>'+label+':</b> <span style="color:var(--danger)">⚠ '+esc(c.error||'недоступно')+'</span></div>'; return '<div class="card"><b>'+label+':</b> <span style="color:var(--brand)">✓ '+esc(c.title)+'</span> '+(c.isAdmin?'<span style="color:var(--brand)">· бот адмін</span>':'<span style="color:var(--amber)">· бот НЕ адмін</span>')+'</div>'; };
+    $('tgResult').innerHTML='<div class="card" style="color:var(--brand)">Бот: @'+esc(r.bot.username||'?')+' ✓</div>'+line('Канал',r.channel)+line('Група',r.group);
+  }catch(e){ $('tgResult').innerHTML='<div class="card" style="color:var(--danger)">⚠ '+esc(e.message)+'</div>'; }
 };
 
-// ---------- модель + промпт на кожен крок ----------
+// ---------- модель + промпт на кожен крок (Конвеєр) ----------
 const STEP_BY_SEC = {s1:'extract_ideas', s3:'drafts', s4:'tone', s5:'format', s6:'deai', s7:'strategy'};
-const MODELS = [
-  ['anthropic/claude-sonnet-4.5','Claude Sonnet 4.5 (якість)'],
-  ['anthropic/claude-sonnet-4.6','Claude Sonnet 4.6'],
-  ['anthropic/claude-haiku-4.5','Claude Haiku 4.5 (швидко)'],
-  ['openai/gpt-4o-mini','GPT-4o mini (дешево)'],
-  ['anthropic/claude-opus-4.5','Claude Opus 4.5 (макс)'],
-];
+const MODELS = [['anthropic/claude-sonnet-4.5','Claude Sonnet 4.5 (якість)'],['anthropic/claude-sonnet-4.6','Claude Sonnet 4.6'],['anthropic/claude-haiku-4.5','Claude Haiku 4.5 (швидко)'],['openai/gpt-4o-mini','GPT-4o mini (дешево)'],['anthropic/claude-opus-4.5','Claude Opus 4.5 (макс)']];
 async function loadPrompts(){
   let cfg=[]; try{ cfg=await api('/prompts'); }catch(e){ return; }
   const byStep=Object.fromEntries(cfg.map(c=>[c.step_key,c]));
   for(const sec in STEP_BY_SEC){
-    const step=STEP_BY_SEC[sec]; const ctl=document.querySelector('#'+sec+' .ctl');
-    if(!ctl || ctl.querySelector('.stepModel')) continue;
+    const step=STEP_BY_SEC[sec]; const ctl=document.querySelector('#'+sec+' .btnrow'); const body=document.querySelector('#'+sec+' .stepbody');
+    if(!ctl || !body || ctl.querySelector('.stepModel')) continue;
     const cur=byStep[step]||{model:'',content:''};
-    const sel=document.createElement('select'); sel.className='stepModel'; sel.dataset.step=step;
-    sel.style.cssText='width:auto;min-width:165px;font-size:12px;padding:6px 8px';
+    const sel=document.createElement('select'); sel.className='stepModel'; sel.dataset.step=step; sel.style.cssText='width:auto;min-width:150px;font-size:12px;padding:6px 8px';
     let opts=MODELS.slice(); if(cur.model && !opts.some(m=>m[0]===cur.model)) opts.unshift([cur.model,cur.model]);
     sel.innerHTML=opts.map(m=>'<option value="'+m[0]+'"'+(m[0]===cur.model?' selected':'')+'>'+m[1]+'</option>').join('');
     sel.onchange=()=>savePrompt(step); ctl.appendChild(sel);
-    const det=document.createElement('details'); det.style.cssText='margin-top:10px;border:1px dashed var(--line);border-radius:9px';
-    det.innerHTML='<summary style="cursor:pointer;padding:8px 12px;font-size:12px;color:var(--muted)">✎ Промпт кроку</summary><div style="padding:0 12px 12px"><textarea class="stepPrompt" data-step="'+step+'" style="min-height:90px"></textarea><button class="savePrompt" data-step="'+step+'" style="margin-top:8px">Зберегти промпт</button><button class="resetPrompt ghost" data-step="'+step+'" style="margin:8px 0 0 8px">↺ Стандартний</button></div>';
+    const det=document.createElement('details'); det.style.cssText='margin:10px 0 0;border:1px dashed var(--line2);border-radius:9px';
+    det.innerHTML='<summary style="cursor:pointer;padding:8px 12px;font-size:12px;color:var(--muted)">✎ Промпт кроку</summary><div style="padding:0 12px 12px"><textarea class="stepPrompt" data-step="'+step+'" style="min-height:90px"></textarea><div class="btnrow"><button class="savePrompt" data-step="'+step+'">Зберегти промпт</button><button class="resetPrompt ghost" data-step="'+step+'">↺ Стандартний</button></div></div>';
     det.querySelector('textarea').value=cur.content||'';
     det.querySelector('.savePrompt').onclick=()=>savePrompt(step);
     det.querySelector('.resetPrompt').onclick=()=>resetPrompt(step);
-    ctl.parentNode.insertBefore(det, ctl.nextSibling);
+    const out=body.querySelector('.out'); body.insertBefore(det, out);
   }
 }
-async function savePrompt(step){
-  const sel=document.querySelector('.stepModel[data-step="'+step+'"]'); const ta=document.querySelector('.stepPrompt[data-step="'+step+'"]');
-  if(!sel||!ta) return;
-  try{ await api('/prompts/'+step,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:sel.value,content:ta.value})}); flashSaved(); }
-  catch(e){ alert('Не вдалося зберегти промпт: '+e.message); }
-}
-async function resetPrompt(step){
-  if(!confirm('Повернути стандартний промпт цього кроку? Твої правки тут зітруться.')) return;
-  try{
-    await api('/prompts/'+step,{method:'DELETE'});
-    const cfg=await api('/prompts'); const c=cfg.find(x=>x.step_key===step)||{model:'',content:''};
-    const sel=document.querySelector('.stepModel[data-step="'+step+'"]'); const ta=document.querySelector('.stepPrompt[data-step="'+step+'"]');
-    if(ta) ta.value=c.content||'';
-    if(sel){ if(c.model && !Array.from(sel.options).some(o=>o.value===c.model)){ const op=document.createElement('option'); op.value=c.model; op.textContent=c.model; sel.appendChild(op); } sel.value=c.model; }
-    flashSaved();
-  }catch(e){ alert('Не вдалося скинути: '+e.message); }
-}
-
-// ---------- Fireflies (транскрибація) ----------
-// ---------- RSS-стрічки ----------
+async function savePrompt(step){ const sel=document.querySelector('.stepModel[data-step="'+step+'"]'); const ta=document.querySelector('.stepPrompt[data-step="'+step+'"]'); if(!sel||!ta) return; try{ await api('/prompts/'+step,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:sel.value,content:ta.value})}); flashSaved(); }catch(e){ flash('Не вдалося зберегти промпт: '+e.message); } }
+async function resetPrompt(step){ if(!confirm('Повернути стандартний промпт цього кроку? Твої правки тут зітруться.')) return; try{ await api('/prompts/'+step,{method:'DELETE'}); const cfg=await api('/prompts'); const c=cfg.find(x=>x.step_key===step)||{model:'',content:''}; const sel=document.querySelector('.stepModel[data-step="'+step+'"]'); const ta=document.querySelector('.stepPrompt[data-step="'+step+'"]'); if(ta) ta.value=c.content||''; if(sel){ if(c.model && !Array.from(sel.options).some(o=>o.value===c.model)){ const op=document.createElement('option'); op.value=c.model; op.textContent=c.model; sel.appendChild(op); } sel.value=c.model; } flashSaved(); }catch(e){ flash('Не вдалося скинути: '+e.message); } }
+// ---------- RSS ----------
 async function loadRss(){
   const o=$('rssList'); if(!o) return;
   try{ const feeds=await api('/sources/rss');
     if(!feeds.length){ o.innerHTML='<div class="empty">Поки немає стрічок.</div>'; return; }
-    o.innerHTML=feeds.map(f=>'<div class="card" data-id="'+f.id+'"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">'
-      +'<div style="min-width:0;flex:1"><div style="word-break:break-all">'+esc(f.url)+'</div>'
-      +'<div style="font-size:12px;color:var(--muted)">'+(f.last_pulled_at?('останнє: '+new Date(f.last_pulled_at).toLocaleString()):'ще не тягнулось')+(f.last_error?(' · ⚠ '+esc(f.last_error)):'')+'</div></div>'
-      +'<div class="ctl" style="margin:0;flex-wrap:nowrap">'
-      +'<label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" class="rssActive" '+(f.active?'checked':'')+'> активна</label>'
-      +'<label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" class="rssAutoT" '+(f.auto_run?'checked':'')+'> авто</label>'
-      +'<button class="ghost rssPull">↓ Тягнути</button><button class="act rssDel">🗑</button></div></div></div>').join('');
+    o.innerHTML=feeds.map(f=>'<div class="card" data-id="'+f.id+'"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap"><div style="min-width:0;flex:1"><div style="word-break:break-all">'+esc(f.url)+'</div><div style="font-size:12px;color:var(--muted)">'+(f.last_pulled_at?('останнє: '+new Date(f.last_pulled_at).toLocaleString()):'ще не тягнулось')+(f.last_error?(' · ⚠ '+esc(f.last_error)):'')+'</div></div><div class="btnrow" style="margin:0;flex-wrap:nowrap"><label class="rchip"><input type="checkbox" class="rssActive" '+(f.active?'checked':'')+'> активна</label><label class="rchip"><input type="checkbox" class="rssAutoT" '+(f.auto_run?'checked':'')+'> авто</label><button class="ghost rssPull">↓</button><button class="rssDel">🗑</button></div></div></div>').join('');
     o.querySelectorAll('.card[data-id]').forEach(c=>{ const id=c.dataset.id;
-      c.querySelector('.rssActive').onchange=e=>api('/sources/rss/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:e.target.checked})}).catch(()=>{});
-      c.querySelector('.rssAutoT').onchange=e=>api('/sources/rss/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({autoRun:e.target.checked})}).catch(()=>{});
-      c.querySelector('.rssPull').onclick=async(ev)=>{ const b=ev.target; b.disabled=true; b.textContent='…'; try{ const r=await api('/sources/rss/'+id+'/pull',{method:'POST'}); b.textContent='+'+r.created; await loadRss(); await loadRecent(); }catch(e){ b.textContent='⚠'; alert(e.message); } finally{ setTimeout(()=>{b.disabled=false;b.textContent='↓ Тягнути';},1500); } };
-      c.querySelector('.rssDel').onclick=async()=>{ if(!confirm('Видалити стрічку?'))return; try{ await api('/sources/rss/'+id,{method:'DELETE'}); await loadRss(); }catch(e){ alert(e.message); } };
+      c.querySelectorAll('.rchip').forEach(l=>{ const cb=l.querySelector('input'); l.classList.toggle('on',cb.checked); cb.addEventListener('change',()=>l.classList.toggle('on',cb.checked)); });
+      c.querySelector('.rssActive').addEventListener('change',e=>api('/sources/rss/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:e.target.checked})}).catch(()=>{}));
+      c.querySelector('.rssAutoT').addEventListener('change',e=>api('/sources/rss/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({autoRun:e.target.checked})}).catch(()=>{}));
+      c.querySelector('.rssPull').onclick=async(ev)=>{ const b=ev.target; b.disabled=true; b.textContent='…'; try{ const r=await api('/sources/rss/'+id+'/pull',{method:'POST'}); b.textContent='+'+r.created; await loadRss(); await loadRecent(); }catch(e){ b.textContent='⚠'; flash(e.message); } finally{ setTimeout(()=>{b.disabled=false;b.textContent='↓';},1500); } };
+      c.querySelector('.rssDel').onclick=async()=>{ if(!confirm('Видалити стрічку?'))return; try{ await api('/sources/rss/'+id,{method:'DELETE'}); await loadRss(); }catch(e){ flash(e.message); } };
     });
   }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }
-$('rssAdd').onclick=async()=>{
-  const url=$('rssUrl').value.trim(); const m=$('rssMsg');
-  if(!url){ m.style.color='var(--stale)'; m.textContent='Вкажи URL'; return; }
-  m.style.color='var(--muted)'; m.textContent='додаю…';
-  try{ await api('/sources/rss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,autoRun:$('rssAuto').checked})}); $('rssUrl').value=''; $('rssAuto').checked=false; m.style.color='var(--ok)'; m.textContent='додано ✓'; await loadRss(); }
-  catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; }
-};
+$('rssAdd').onclick=async()=>{ const url=$('rssUrl').value.trim(); const m=$('rssMsg'); if(!url){ m.style.color='var(--danger)'; m.textContent='Вкажи URL'; return; } m.style.color='var(--muted)'; m.textContent='додаю…'; try{ await api('/sources/rss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,autoRun:$('rssAuto').checked})}); $('rssUrl').value=''; $('rssAuto').checked=false; m.style.color='var(--brand)'; m.textContent='додано ✓'; await loadRss(); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
+
 // ---------- останні джерела ----------
 async function loadRecent(){
   const o=$('recList'); if(!o) return;
@@ -897,96 +991,87 @@ async function loadRecent(){
     if(!rows.length){ o.innerHTML='<div class="empty">Поки порожньо.</div>'; return; }
     const ICON={rss:'📡',fireflies:'🎙️',manual:'📝'};
     o.innerHTML=rows.map(s=>'<div class="card" data-run="'+s.run_id+'" style="display:flex;justify-content:space-between;gap:8px;align-items:center"><div style="min-width:0"><div>'+(ICON[s.origin]||'📄')+' '+esc(s.title||'(без назви)')+'</div><div style="font-size:12px;color:var(--muted)">'+esc(s.origin||'')+' · '+new Date(s.created_at).toLocaleString()+'</div></div><button class="ghost recOpen">Відкрити</button></div>').join('');
-    o.querySelectorAll('.card[data-run]').forEach(c=>{ c.querySelector('.recOpen').onclick=async()=>{ runId=c.dataset.run; localStorage.setItem('kg_run',runId); updRunLabel(); document.querySelector('.navitem[data-view="create"]').click(); try{ await refresh(); }catch(e){} }; });
+    o.querySelectorAll('.card[data-run]').forEach(c=>{ c.querySelector('.recOpen').onclick=async()=>{ runId=c.dataset.run; localStorage.setItem('kg_run',runId); updRunLabel(); go('create'); setLayout('studio'); try{ await refresh(); }catch(e){} }; });
   }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }
 $('recReload').onclick=()=>loadRecent();
-// ---------- медіа-бібліотека ----------
+
+// ---------- медіа ----------
 async function loadMedia(){
   const o=$('mediaGrid'); if(!o) return;
   try{ const m=await api('/media');
     if(!m.length){ o.innerHTML='<div class="empty">Порожньо.</div>'; return; }
     o.innerHTML=m.map(x=>'<div style="position:relative" data-id="'+x.id+'">'+(x.kind==='video'?'<video src="/media/'+esc(x.filename)+'" style="height:90px;border-radius:8px"></video>':'<img src="/media/'+esc(x.filename)+'" style="height:90px;border-radius:8px">')+'<button class="mediaDel" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;padding:1px 6px">✕</button></div>').join('');
-    o.querySelectorAll('[data-id]').forEach(c=>{ c.querySelector('.mediaDel').onclick=async()=>{ if(!confirm('Видалити фото?'))return; try{ await api('/media/'+c.dataset.id,{method:'DELETE'}); await loadMedia(); }catch(e){ alert(e.message); } }; });
+    o.querySelectorAll('[data-id]').forEach(c=>{ c.querySelector('.mediaDel').onclick=async()=>{ if(!confirm('Видалити фото?'))return; try{ await api('/media/'+c.dataset.id,{method:'DELETE'}); await loadMedia(); }catch(e){ flash(e.message); } }; });
   }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }
 $('mediaUpload').onclick=async()=>{
-  const f=$('mediaFile').files; const m=$('mediaMsg');
-  if(!f||!f.length){ m.style.color='var(--stale)'; m.textContent='Обери файл(и)'; return; }
-  const fd=new FormData(); for(const file of f) fd.append('file',file);
-  m.style.color='var(--muted)'; m.textContent='завантаження…';
-  try{ const r=await fetch('/api/media',{method:'POST',body:fd,credentials:'same-origin'}); const j=await r.json(); if(!r.ok||j.error) throw new Error(j.error||('HTTP '+r.status)); $('mediaFile').value=''; m.style.color='var(--ok)'; m.textContent='завантажено: '+((j.saved||[]).length); await loadMedia(); }
-  catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; }
+  const f=$('mediaFile').files; const m=$('mediaMsg'); if(!f||!f.length){ m.style.color='var(--danger)'; m.textContent='Обери файл(и)'; return; }
+  const fd=new FormData(); for(const file of f) fd.append('file',file); m.style.color='var(--muted)'; m.textContent='завантаження…';
+  try{ const r=await fetch('/api/media',{method:'POST',body:fd,credentials:'same-origin'}); const j=await r.json(); if(!r.ok||j.error) throw new Error(j.error||('HTTP '+r.status)); $('mediaFile').value=''; m.style.color='var(--brand)'; m.textContent='завантажено: '+((j.saved||[]).length); await loadMedia(); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; }
 };
+
 // ---------- Google Drive ----------
 async function loadGdrive(){
   const st=$('gdStatus'); if(!st) return;
-  try{ const c=await api('/integrations/gdrive');
-    const conn=$('gdConnect'), dis=$('gdDisconnect'), box=$('gdFolderBox');
+  try{ const c=await api('/integrations/gdrive'); const conn=$('gdConnect'), dis=$('gdDisconnect'), box=$('gdFolderBox');
     if(!c.configured){ st.textContent='⚠ Google OAuth не налаштований на сервері.'; [conn,dis].forEach(b=>b&&(b.style.display='none')); if(box)box.style.display='none'; return; }
-    if(c.connected){ st.innerHTML='✅ Підключено'+(c.email?(' ('+esc(c.email)+')'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-block'; if(box)box.style.display='block'; loadGdriveFolders(); }
-    else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-block'; if(dis)dis.style.display='none'; if(box)box.style.display='none'; }
+    if(c.connected){ st.innerHTML='✅ Підключено'+(c.email?(' ('+esc(c.email)+')'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-flex'; if(box)box.style.display='block'; loadGdriveFolders(); }
+    else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-flex'; if(dis)dis.style.display='none'; if(box)box.style.display='none'; }
   }catch(e){}
 }
 async function loadGdriveFolders(){
   const o=$('gdList'); if(!o) return;
   try{ const folders=await api('/sources/gdrive');
     if(!folders.length){ o.innerHTML='<div class="empty">Папок ще немає.</div>'; return; }
-    o.innerHTML=folders.map(f=>'<div class="card" data-id="'+f.id+'"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap"><div style="min-width:0;flex:1"><div style="word-break:break-all">'+esc(f.name||f.folder_id)+'</div><div style="font-size:12px;color:var(--muted)">'+(f.last_pulled_at?('останнє: '+new Date(f.last_pulled_at).toLocaleString()):'ще не тягнулось')+(f.last_error?(' · ⚠ '+esc(f.last_error)):'')+'</div></div><div class="ctl" style="margin:0;flex-wrap:nowrap"><label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" class="gdActive" '+(f.active?'checked':'')+'> активна</label><button class="ghost gdPull">↓ Тягнути</button><button class="act gdDel">🗑</button></div></div></div>').join('');
+    o.innerHTML=folders.map(f=>'<div class="card" data-id="'+f.id+'"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap"><div style="min-width:0;flex:1"><div style="word-break:break-all">'+esc(f.name||f.folder_id)+'</div><div style="font-size:12px;color:var(--muted)">'+(f.last_pulled_at?('останнє: '+new Date(f.last_pulled_at).toLocaleString()):'ще не тягнулось')+(f.last_error?(' · ⚠ '+esc(f.last_error)):'')+'</div></div><div class="btnrow" style="margin:0;flex-wrap:nowrap"><label class="rchip"><input type="checkbox" class="gdActive" '+(f.active?'checked':'')+'> активна</label><button class="ghost gdPull">↓</button><button class="gdDel">🗑</button></div></div></div>').join('');
     o.querySelectorAll('.card[data-id]').forEach(c=>{ const id=c.dataset.id;
-      c.querySelector('.gdActive').onchange=e=>api('/sources/gdrive/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:e.target.checked})}).catch(()=>{});
-      c.querySelector('.gdPull').onclick=async(ev)=>{ const b=ev.target; b.disabled=true; b.textContent='…'; try{ const r=await api('/sources/gdrive/'+id+'/pull',{method:'POST'}); b.textContent='+'+r.created; await loadGdriveFolders(); await loadMedia(); }catch(e){ b.textContent='⚠'; alert(e.message); } finally{ setTimeout(()=>{b.disabled=false;b.textContent='↓ Тягнути';},1500); } };
-      c.querySelector('.gdDel').onclick=async()=>{ if(!confirm('Видалити папку?'))return; try{ await api('/sources/gdrive/'+id,{method:'DELETE'}); await loadGdriveFolders(); }catch(e){ alert(e.message); } };
+      c.querySelectorAll('.rchip').forEach(l=>{ const cb=l.querySelector('input'); l.classList.toggle('on',cb.checked); cb.addEventListener('change',()=>l.classList.toggle('on',cb.checked)); });
+      c.querySelector('.gdActive').addEventListener('change',e=>api('/sources/gdrive/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:e.target.checked})}).catch(()=>{}));
+      c.querySelector('.gdPull').onclick=async(ev)=>{ const b=ev.target; b.disabled=true; b.textContent='…'; try{ const r=await api('/sources/gdrive/'+id+'/pull',{method:'POST'}); b.textContent='+'+r.created; await loadGdriveFolders(); await loadMedia(); }catch(e){ b.textContent='⚠'; flash(e.message); } finally{ setTimeout(()=>{b.disabled=false;b.textContent='↓';},1500); } };
+      c.querySelector('.gdDel').onclick=async()=>{ if(!confirm('Видалити папку?'))return; try{ await api('/sources/gdrive/'+id,{method:'DELETE'}); await loadGdriveFolders(); }catch(e){ flash(e.message); } };
     });
   }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }
 let _pickerReady=false;
-function loadPickerApi(cb){ if(_pickerReady){cb();return;} if(typeof gapi==='undefined'){ alert('Google API ще вантажиться — спробуй за мить'); return; } gapi.load('picker',()=>{ _pickerReady=true; cb(); }); }
+function loadPickerApi(cb){ if(_pickerReady){cb();return;} if(typeof gapi==='undefined'){ flash('Google API ще вантажиться — спробуй за мить'); return; } gapi.load('picker',()=>{ _pickerReady=true; cb(); }); }
 $('gdPick').onclick=async()=>{
   const m=$('gdMsg'); m.style.color='var(--muted)'; m.textContent='відкриваю вибір…';
-  let cfg; try{ cfg=await api('/integrations/gdrive/picker-token'); }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; return; }
+  let cfg; try{ cfg=await api('/integrations/gdrive/picker-token'); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; return; }
   loadPickerApi(()=>{
     m.textContent='';
     const view=new google.picker.DocsView(google.picker.ViewId.FOLDERS).setSelectFolderEnabled(true).setMimeTypes('application/vnd.google-apps.folder');
-    const picker=new google.picker.PickerBuilder()
-      .setOAuthToken(cfg.token).setDeveloperKey(cfg.apiKey).setAppId(cfg.appId)
-      .addView(view)
+    const picker=new google.picker.PickerBuilder().setOAuthToken(cfg.token).setDeveloperKey(cfg.apiKey).setAppId(cfg.appId).addView(view)
       .setCallback(async(d)=>{ if(d.action===google.picker.Action.PICKED){ const f=d.docs[0];
         try{ const r=await api('/sources/gdrive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folderId:f.id,name:f.name})});
-          m.style.color='var(--ok)'; m.textContent=(r.duplicate?'папка вже додана':'додано: '+(f.name||''))+' — тягну…'; await loadGdriveFolders();
-          try{ await api('/sources/gdrive/'+r.id+'/pull',{method:'POST'}); await loadGdriveFolders(); await loadMedia(); m.textContent='готово ✓'; }
-          catch(e){ m.textContent='папку додано; фото підтягнуться за розкладом'; }
-        }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; }
-      } })
-      .build();
+          m.style.color='var(--brand)'; m.textContent=(r.duplicate?'папка вже додана':'додано: '+(f.name||''))+' — тягну…'; await loadGdriveFolders();
+          try{ await api('/sources/gdrive/'+r.id+'/pull',{method:'POST'}); await loadGdriveFolders(); await loadMedia(); m.textContent='готово ✓'; }catch(e){ m.textContent='папку додано; фото підтягнуться за розкладом'; }
+        }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; }
+      } }).build();
     picker.setVisible(true);
   });
 };
 $('gdDisconnect').onclick=async()=>{ if(!confirm('Відключити Google Drive?')) return; try{ await api('/integrations/gdrive/disconnect',{method:'POST'}); await loadGdrive(); }catch(e){} };
-async function loadFF(){ try{ const c=await api('/integrations/transcription');
-  if(c.hasKey) $('ffKey').placeholder='•••••••• (ключ збережено)';
-  if($('ffHook')) $('ffHook').value=c.webhookUrl||'';
-  if(c.hasSecret&&$('ffSecret')) $('ffSecret').placeholder='•••••••• (секрет збережено)';
-  if($('ffAuto')) $('ffAuto').checked=!!c.autoRun;
-}catch(e){} }
+
+// ---------- Fireflies ----------
+async function loadFF(){ try{ const c=await api('/integrations/transcription'); if(c.hasKey) $('ffKey').placeholder='•••••••• (ключ збережено)'; if($('ffHook')) $('ffHook').value=c.webhookUrl||''; if(c.hasSecret&&$('ffSecret')) $('ffSecret').placeholder='•••••••• (секрет збережено)'; if($('ffAuto')) $('ffAuto').checked=!!c.autoRun; }catch(e){} }
 $('ffHookCopy').onclick=()=>{ const v=$('ffHook').value; if(v){ navigator.clipboard.writeText(v); flashSaved(); } };
-$('ffSave').onclick=async()=>{ try{ await api('/integrations/transcription',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({apiKey:$('ffKey').value,webhookSecret:$('ffSecret').value,autoRun:$('ffAuto').checked})}); $('ffKey').value=''; $('ffSecret').value=''; $('ffMsg').style.color='var(--ok)'; $('ffMsg').textContent='збережено ✓'; await loadFF(); }catch(e){ $('ffMsg').style.color='var(--stale)'; $('ffMsg').textContent='⚠ '+e.message; } };
-$('ffTest').onclick=async()=>{ $('ffMsg').style.color='var(--muted)'; $('ffMsg').textContent='перевіряю…'; try{ const l=await api('/transcription/list'); $('ffMsg').style.color='var(--ok)'; $('ffMsg').textContent='ОК, зустрічей: '+l.length; }catch(e){ $('ffMsg').style.color='var(--stale)'; $('ffMsg').textContent='⚠ '+e.message; } };
+$('ffSave').onclick=async()=>{ try{ await api('/integrations/transcription',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({apiKey:$('ffKey').value,webhookSecret:$('ffSecret').value,autoRun:$('ffAuto').checked})}); $('ffKey').value=''; $('ffSecret').value=''; $('ffMsg').style.color='var(--brand)'; $('ffMsg').textContent='збережено ✓'; await loadFF(); }catch(e){ $('ffMsg').style.color='var(--danger)'; $('ffMsg').textContent='⚠ '+e.message; } };
+$('ffTest').onclick=async()=>{ $('ffMsg').style.color='var(--muted)'; $('ffMsg').textContent='перевіряю…'; try{ const l=await api('/transcription/list'); $('ffMsg').style.color='var(--brand)'; $('ffMsg').textContent='ОК, зустрічей: '+l.length; }catch(e){ $('ffMsg').style.color='var(--danger)'; $('ffMsg').textContent='⚠ '+e.message; } };
 $('ffImport').onclick=async()=>{
-  const ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;z-index:50;padding:16px';
-  ov.innerHTML='<div class="settings" style="max-width:560px;width:100%;margin:0"><div class="body"><b>Імпорт із Fireflies</b><div id="ffList" class="out"><div class="empty"><span class="spin"></span> завантаження…</div></div><div class="ctl"><button class="ghost" id="ffClose">Закрити</button></div></div></div>';
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='60';
+  ov.innerHTML='<div class="modal-card" style="max-width:560px;padding:20px"><b>Імпорт із Fireflies</b><div id="ffList" class="out"><div class="empty"><span class="spin"></span> завантаження…</div></div><div class="btnrow"><button class="ghost" id="ffClose">Закрити</button></div></div>';
   document.body.appendChild(ov); const close=()=>ov.remove(); ov.addEventListener('click',e=>{if(e.target===ov)close();}); ov.querySelector('#ffClose').onclick=close;
   try{ const l=await api('/transcription/list'); const el=ov.querySelector('#ffList');
     if(!l.length){ el.innerHTML='<div class="empty">Немає зустрічей (або ще обробляються).</div>'; return; }
     el.innerHTML='';
-    l.forEach(t=>{ const d=document.createElement('div'); d.className='card'; d.style.cursor='pointer';
-      const dt=t.date?new Date(+t.date).toISOString().slice(0,10):''; d.innerHTML='<b>'+esc(t.title||'Без назви')+'</b> <small style="color:var(--muted)"> '+dt+'</small>';
-      d.onclick=async()=>{ el.innerHTML='<div class="empty"><span class="spin"></span> імпорт…</div>'; try{ const r=await api('/transcription/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:t.id})}); runId=r.runId; localStorage.setItem('kg_run',runId); $('transcript').value=''; close(); updRunLabel(); await refresh(); alert('Імпортовано: '+(r.title||'')+'. Тепер запустіть кишку.'); }catch(e){ el.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; } };
+    l.forEach(t=>{ const d=document.createElement('div'); d.className='card'; d.style.cursor='pointer'; const dt=t.date?new Date(+t.date).toISOString().slice(0,10):''; d.innerHTML='<b>'+esc(t.title||'Без назви')+'</b> <small style="color:var(--muted)"> '+dt+'</small>';
+      d.onclick=async()=>{ el.innerHTML='<div class="empty"><span class="spin"></span> імпорт…</div>'; try{ const r=await api('/transcription/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:t.id})}); runId=r.runId; localStorage.setItem('kg_run',runId); $('transcript').value=''; close(); updRunLabel(); go('create'); setLayout('studio'); await refresh(); flash('Імпортовано: '+(r.title||'')+'. Тепер «Згенерувати пости».'); }catch(e){ el.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; } };
       el.appendChild(d); });
   }catch(e){ ov.querySelector('#ffList').innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 };
 
-// ---------- Стратегія (згенерована) ----------
+// ---------- Стратегія ----------
 let STRAT = { data:{}, status:"none" };
 const WEEK=[['mon','Пн'],['tue','Вт'],['wed','Ср'],['thu','Чт'],['fri','Пт'],['sat','Сб'],['sun','Нд']];
 function renderStrategy(){
@@ -999,15 +1084,14 @@ function renderStrategy(){
   const sel=new Set((d.best_days||[]).map(x=>String(x).toLowerCase().slice(0,3)));
   const times=(Array.isArray(d.times)&&d.times.length?d.times:['11:00']).join(', ');
   o.innerHTML='<div class="card"><b>Рубрики:</b> '+(rubs||'—')+'</div>'
-    +'<div class="card"><b>🗓️ Розклад постингу</b>'
-      +'<div class="hint" style="margin:6px 0">Дні й час підібрані під нішу та канал. Скоригуй за потреби — планувальник бере саме це.</div>'
-      +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">'+WEEK.map(w=>'<label style="font-size:12px;border:1px solid var(--line);border-radius:8px;padding:4px 9px;cursor:pointer"><input type="checkbox" class="stDay" value="'+w[0]+'"'+(sel.has(w[0])?' checked':'')+'> '+w[1]+'</label>').join('')+'</div>'
-      +'<label style="font-size:12px;color:var(--muted)">Час (HH:MM, через кому = кілька на день): <input id="stTimes" class="txt" value="'+esc(times)+'" style="width:170px;display:inline-block;padding:6px 9px"></label>'
-      +'<div class="ctl" style="margin-top:10px"><button class="primary" id="saveSched">Зберегти розклад</button><span id="schedMsg" style="font-size:12px;color:var(--muted)"></span></div>'
-      +(d.schedule_rationale?'<div class="hint" style="margin-top:8px">💡 '+esc(d.schedule_rationale)+'</div>':'')
-    +'</div>'
+    +'<div class="card"><b>🗓️ Розклад постингу</b><div class="hint" style="margin:6px 0">Дні й час підібрані під нішу та канал. Скоригуй — планувальник бере саме це.</div>'
+      +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">'+WEEK.map(w=>'<label class="rchip"><input type="checkbox" class="stDay" value="'+w[0]+'"'+(sel.has(w[0])?' checked':'')+'> '+w[1]+'</label>').join('')+'</div>'
+      +'<label style="font-size:12px;color:var(--muted)">Час (HH:MM, через кому = кілька на день): <input id="stTimes" class="txt" value="'+esc(times)+'" style="width:170px;display:inline-block;padding:7px 9px"></label>'
+      +'<div class="btnrow"><button class="primary" id="saveSched">Зберегти розклад</button><span id="schedMsg" style="font-size:12px;color:var(--muted)"></span></div>'
+      +(d.schedule_rationale?'<div class="hint" style="margin-top:8px">💡 '+esc(d.schedule_rationale)+'</div>':'')+'</div>'
     +'<div class="card"><b>Частота:</b> '+((d.frequency&&d.frequency.posts_per_week)||'?')+' пост/тиж · <b>Канали:</b> '+esc((d.channels||[]).join(', ')||'—')+'</div>'
     +(themes?'<div class="card"><b>Теми:</b> '+themes+'</div>':'');
+  o.querySelectorAll('.stDay').forEach(cb=>{ const l=cb.closest('.rchip'); l.classList.toggle('on',cb.checked); cb.addEventListener('change',()=>l.classList.toggle('on',cb.checked)); });
   const sb=$('saveSched'); if(sb) sb.onclick=saveSchedule;
 }
 async function saveSchedule(){
@@ -1015,30 +1099,21 @@ async function saveSchedule(){
   const times=(($('stTimes')||{}).value||'').split(',').map(s=>s.trim()).filter(s=>/^\d{1,2}:\d{2}$/.test(s));
   STRAT.data=STRAT.data||{}; STRAT.data.best_days=days; STRAT.data.times=times;
   const m=$('schedMsg'); if(m){m.style.color='var(--muted)'; m.textContent='зберігаю…';}
-  try{ await api('/strategy',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:STRAT.data})}); if(m){m.style.color='var(--ok)'; m.textContent='збережено ✓';} }
-  catch(e){ if(m){m.style.color='var(--stale)'; m.textContent='⚠ '+e.message;} }
+  try{ await api('/strategy',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:STRAT.data})}); if(m){m.style.color='var(--brand)'; m.textContent='збережено ✓';} }
+  catch(e){ if(m){m.style.color='var(--danger)'; m.textContent='⚠ '+e.message;} }
 }
 async function loadStrategy(){ try{ STRAT=await api('/strategy'); }catch(e){ STRAT={data:{},status:'none'}; } renderStrategy(); }
-$('genStrat').onclick=async()=>{ const m=$('stratMsg'); m.style.color='var(--muted)'; m.textContent='генерую…'; try{ const r=await api('/strategy/generate',{method:'POST'}); STRAT={data:r.data,status:r.status||'applied'}; renderStrategy(); await loadRubrics(); m.style.color='var(--ok)'; m.textContent='готово — рубрики застосовано ✓'; }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; } };
+$('genStrat').onclick=async()=>{ const m=$('stratMsg'); m.style.color='var(--muted)'; m.textContent='генерую…'; try{ const r=await api('/strategy/generate',{method:'POST'}); STRAT={data:r.data,status:r.status||'applied'}; renderStrategy(); await loadRubrics(); m.style.color='var(--brand)'; m.textContent='готово — рубрики застосовано ✓'; }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
 
 // ---------- Рубрики ----------
 let Rubrics = [];
-const RUB_COLORS = ['#5b8cff','#f5704a','#f5b54a','#3fb950','#a982ff','#6fe3c2','#e36fb0'];
+const RUB_COLORS = ['var(--brand)','var(--tg)','var(--amber)','var(--ig)','var(--fb)','var(--brand2)','var(--danger)'];
 function rubSum(){ return Rubrics.reduce((a,r)=>a+(+r.share||0),0); }
-function renderRubBar(){
-  const s=rubSum(); const el=$('rubSum'); el.textContent='сума: '+s+'%'+(s===100?' ✓':' (бажано 100%)'); el.style.color=s===100?'var(--ok)':'var(--warn)';
-  $('rubBar').innerHTML=Rubrics.map((r,i)=>'<div style="width:'+(+r.share||0)+'%;background:'+RUB_COLORS[i%RUB_COLORS.length]+'"></div>').join('');
-}
+function renderRubBar(){ const s=rubSum(); const el=$('rubSum'); el.textContent='сума: '+s+'%'+(s===100?' ✓':' (бажано 100%)'); el.style.color=s===100?'var(--brand)':'var(--amber)'; $('rubBar').innerHTML=Rubrics.map((r,i)=>'<div style="width:'+(+r.share||0)+'%;background:'+RUB_COLORS[i%RUB_COLORS.length]+'"></div>').join(''); }
 function renderRubrics(){
-  const list=$('rubList'); if(!list) return;
-  renderRubBar(); list.innerHTML='';
-  Rubrics.forEach((r,i)=>{
-    const c=document.createElement('div'); c.className='card'; c.style.cssText='display:flex;gap:8px;align-items:center;flex-wrap:wrap';
-    c.innerHTML='<input class="txt" style="width:46px;text-align:center" data-f="emoji" value="'+esc(r.emoji||'')+'">'
-      +'<input class="txt" style="flex:1;min-width:110px" data-f="name" value="'+esc(r.name||'')+'" placeholder="Назва">'
-      +'<input class="txt" style="flex:2;min-width:150px" data-f="description" value="'+esc(r.description||'')+'" placeholder="Опис тем">'
-      +'<input class="txt" type="number" min="0" max="100" style="width:62px" data-f="share" value="'+(+r.share||0)+'"><span style="color:var(--muted)">%</span>'
-      +'<button class="ghost" data-rm="'+i+'" style="padding:6px 10px">✕</button>';
+  const list=$('rubList'); if(!list) return; renderRubBar(); list.innerHTML='';
+  Rubrics.forEach((r,i)=>{ const c=document.createElement('div'); c.className='card'; c.style.cssText='display:flex;gap:8px;align-items:center;flex-wrap:wrap';
+    c.innerHTML='<input class="txt" style="width:46px;text-align:center" data-f="emoji" value="'+esc(r.emoji||'')+'"><input class="txt" style="flex:1;min-width:110px" data-f="name" value="'+esc(r.name||'')+'" placeholder="Назва"><input class="txt" style="flex:2;min-width:150px" data-f="description" value="'+esc(r.description||'')+'" placeholder="Опис тем"><input class="txt" type="number" min="0" max="100" style="width:62px" data-f="share" value="'+(+r.share||0)+'"><span style="color:var(--muted)">%</span><button class="ghost" data-rm="'+i+'" style="padding:8px 11px">✕</button>';
     c.querySelectorAll('[data-f]').forEach(inp=>inp.oninput=()=>{ Rubrics[i][inp.dataset.f]= inp.dataset.f==='share'?(+inp.value||0):inp.value; if(inp.dataset.f==='share') renderRubBar(); });
     c.querySelector('[data-rm]').onclick=()=>{ Rubrics.splice(i,1); renderRubrics(); };
     list.appendChild(c);
@@ -1046,21 +1121,23 @@ function renderRubrics(){
 }
 async function loadRubrics(){ try{ Rubrics=await api('/rubrics')||[]; }catch(e){ Rubrics=[]; } renderRubrics(); renderIdeaRubrics(); }
 $('addRubric').onclick=()=>{ Rubrics.push({name:'',emoji:'',description:'',share:0}); renderRubrics(); };
-$('saveRubrics').onclick=async()=>{ try{ await api('/rubrics',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rubrics:Rubrics})}); flashSaved(); }catch(e){ alert('Не вдалося зберегти рубрики: '+e.message); } };
+$('saveRubrics').onclick=async()=>{ try{ await api('/rubrics',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rubrics:Rubrics})}); flashSaved(); flash('Рубрики збережено ✓'); }catch(e){ flash('Не вдалося зберегти рубрики: '+e.message); } };
 
 // ---------- онбординг ----------
 const OB_STEPS=[
-  {title:'Про що ваш бренд і для кого?', key:'marketing_context', ph:'Ніша + аудиторія: хто ви, для кого пишете, який результат даєте…', req:true},
-  {title:'Ваш голос — встав 3-5 своїх постів', key:'voice_examples', ph:'Приклади постів, щоб AI вивів ваш стиль…'},
-  {title:'Перше джерело (необовʼязково)', key:'__transcript', ph:'Встав транскрипт/нотатку — зробимо перший контент…'},
+  {title:'Про що ваш бренд і для кого?', desc:'Кілька речень про те, чим ти займаєшся і для кого. Ми використаємо це як контекст у кожному пості.', key:'marketing_context', ph:'Ніша + аудиторія: хто ви, для кого пишете, який результат даєте…', req:true},
+  {title:'Ваш голос — встав 3-5 своїх постів', desc:'За ними AI виведе твій тон голосу, щоб тексти звучали як ти, а не як AI.', key:'voice_examples', ph:'Приклади постів, щоб AI вивів ваш стиль…'},
+  {title:'Перше джерело (необовʼязково)', desc:'Встав транскрипт сесії або просто думку — і ми одразу покажемо готові пости.', key:'__transcript', ph:'Встав транскрипт/нотатку — зробимо перший контент…'},
 ];
 let obIdx=0;
 function showOnboarding(){ obIdx=0; $('onboarding').style.display='grid'; renderOb(); }
 function renderOb(){
   const s=OB_STEPS[obIdx];
-  $('obTitle').textContent='Крок '+(obIdx+1)+'/'+OB_STEPS.length+': '+s.title;
+  $('obStep').textContent='Крок '+(obIdx+1)+' з '+OB_STEPS.length;
+  $('obTitle').textContent=s.title; $('obDesc').textContent=s.desc;
   $('obInput').placeholder=s.ph; $('obInput').value=s._val||'';
-  $('obBack').style.display=obIdx>0?'inline-block':'none';
+  $('obBar').style.width=((obIdx+1)/OB_STEPS.length*100)+'%';
+  $('obBack').style.display=obIdx>0?'inline-flex':'none';
   $('obNext').textContent=obIdx===OB_STEPS.length-1?'Завершити ✨':'Далі →';
   $('obMsg').textContent='';
 }
@@ -1081,36 +1158,30 @@ $('obNext').onclick=async()=>{
     await saveSetting('onboarded','1');
     $('onboarding').style.display='none';
     await loadSettings(); await loadStrategy(); await loadRubrics(); updRunLabel();
-    document.querySelector('.navitem[data-view="strategy"]').click();
-    alert('Готово! Ми згенерували чернетку стратегії — перегляньте й застосуйте.');
+    go('create'); setLayout('studio');
+    flash('Готово! Додай джерело й натисни «Згенерувати пости».');
   }catch(e){ $('obMsg').textContent='⚠ '+e.message; }
   finally{ $('obNext').disabled=false; }
 };
 
 // ---------- init ----------
 (async()=>{
-  try{ const me=await api('/auth/me'); $('userEmail').textContent=me.email; }
+  setTheme(localStorage.getItem('kg_theme')||'light');
+  selectView('create'); setLayout('studio'); renderCountChips();
+  renderStudio(); renderInbox(); renderStudioSteps({}); renderSourceCard(null);
+  try{ const me=await api('/auth/me'); $('userEmail').textContent=me.email; if(me.email) $('avatar').textContent=(me.email[0]||'О').toUpperCase(); }
   catch(e){ location.href='/login'; return; }
   await loadSettings();
-  await loadTelegram();
-  loadThreads();
-  loadMeta();
+  await loadTelegram(); loadThreads(); loadMeta();
   const _sp=new URLSearchParams(location.search); const _thq=_sp.get('threads'), _mtq=_sp.get('meta'), _gdq=_sp.get('gdrive');
   if(_thq||_mtq||_gdq) history.replaceState(null,'',location.pathname);
-  if(_thq) alert(_thq==='ok'?'Threads підключено ✓':'Не вдалося підключити Threads. Перевірте дозволи й Redirect URI у Meta.');
-  if(_mtq) alert(_mtq==='ok'?'Facebook/Instagram підключено ✓':(_mtq==='nopage'?'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).':'Не вдалося підключити Facebook/Instagram. Перевірте дозволи й Redirect URI.'));
-  if(_gdq) alert(_gdq==='ok'?'Google Drive підключено ✓':'Не вдалося підключити Google Drive. Перевір, що додано scope drive.readonly й Redirect URI.');
+  if(_thq){ go('settings'); alert(_thq==='ok'?'Threads підключено ✓':'Не вдалося підключити Threads. Перевірте дозволи й Redirect URI у Meta.'); }
+  if(_mtq){ go('settings'); alert(_mtq==='ok'?'Facebook/Instagram підключено ✓':(_mtq==='nopage'?'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).':'Не вдалося підключити Facebook/Instagram.')); }
+  if(_gdq){ go('sources'); alert(_gdq==='ok'?'Google Drive підключено ✓':'Не вдалося підключити Google Drive.'); }
   await loadPrompts();
-  loadRubrics();
-  loadStrategy();
-  loadFF();
-  loadRss();
-  loadRecent();
-  loadMedia();
-  loadGdrive();
+  loadRubrics(); loadStrategy(); loadFF(); loadRss(); loadRecent(); loadMedia(); loadGdrive();
   await loadChanStatus();
   try{ const st=await api('/settings'); if(!st.some(r=>r.key==='onboarded')) showOnboarding(); }catch(e){}
-  loadUsage();
   updRunLabel();
   if(runId){ try{ await refresh(); }catch(e){ runId=null; localStorage.removeItem('kg_run'); updRunLabel(); } }
   loadPublish();
