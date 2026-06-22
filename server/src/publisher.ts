@@ -24,8 +24,8 @@ async function thValidToken(ws: string): Promise<{ token: string; userId: string
 export type PubResult = { channel: string; status: "sent" | "error"; error?: string };
 
 // Публікує пост у кожну ввімкнену в post.channels мережу (своїм текстом + медіа).
-// fallbackTelegram: якщо мережі не обрані — постимо в Telegram базовим текстом (legacy-розклад).
-export async function publishPostToChannels(ws: string, postId: string, opts: { fallbackTelegram?: boolean } = {}): Promise<PubResult[]> {
+// Якщо жодної мережі не обрано — нічого не публікує (порожній результат), без тихого fallback.
+export async function publishPostToChannels(ws: string, postId: string): Promise<PubResult[]> {
   const post = await one<{ content: string; channels: any; filename: string | null }>(
     `select p.content, p.channels, ma.filename from post p
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
@@ -33,8 +33,7 @@ export async function publishPostToChannels(ws: string, postId: string, opts: { 
      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
   if (!post) throw new Error("пост не знайдено");
   const ch = post.channels || {};
-  let enabled = Object.keys(ch).filter((k) => ch[k] && ch[k].on);
-  if (!enabled.length && opts.fallbackTelegram) enabled = ["telegram"];
+  const enabled = Object.keys(ch).filter((k) => ch[k] && ch[k].on);
   const textOf = (k: string) => (ch[k] && ch[k].text) || post.content;
   const imageUrl = post.filename ? `${env.appBaseUrl}/media/${post.filename}` : null;
   const results: PubResult[] = [];

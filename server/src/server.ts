@@ -1096,6 +1096,11 @@ app.post("/api/schedule", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   const postId = String(req.body?.postId ?? "");
   if (!(await postOwned(postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  // якщо мережі не обрані (drag&drop) — типово Telegram, але ЯВНО (видно в календарі), не тихо
+  const cur = await one<{ channels: any }>(`select channels from post where id=$1`, [postId]);
+  const cch = cur?.channels || {};
+  if (!Object.keys(cch).some((k) => cch[k] && cch[k].on))
+    await q(`update post set channels=$2 where id=$1`, [postId, JSON.stringify({ telegram: { on: true } })]);
   const r = await one<{ id: string }>(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned') returning id`,
     [postId, req.body?.scheduledAt ?? null]);
   return { ok: true, id: r!.id };
@@ -1131,6 +1136,9 @@ app.post("/api/schedule/auto", async (req: any) => {
      where s.workspace_id=$1 and p.stage='final' and p.review='approved'
        and not exists(select 1 from schedule_slot ss where ss.post_id=p.id and ss.status in ('posting','posted'))
      order by p.created_at`, [ws]);
+  // типово Telegram для постів без обраних мереж (явно — щоб autopost мав куди публікувати, не тихо)
+  if (units.length) await q(`update post set channels=$2 where id = any($1) and (channels is null or channels = '{}'::jsonb)`,
+    [units.map((u) => u.id), JSON.stringify({ telegram: { on: true } })]);
   // 3) розклад зі Стратегії: дні (best_days) + час (times). Фолбек: щодня, 11:00.
   const strat = await one<{ data: any }>(`select data from strategy where workspace_id=$1`, [ws]);
   const DMAP: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };

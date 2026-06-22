@@ -22,7 +22,7 @@ async function tick(): Promise<void> {
     const claimed = await one(`update schedule_slot set status='posting' where id=$1 and status='planned' returning id`, [slot.id]);
     if (!claimed) continue;
     try {
-      const results = await publishPostToChannels(slot.workspace_id, slot.post_id, { fallbackTelegram: true });
+      const results = await publishPostToChannels(slot.workspace_id, slot.post_id);
       const anyOk = results.some((r) => r.status === "sent");
       await q(`update schedule_slot set status=$2 where id=$1`, [slot.id, anyOk ? "posted" : "failed"]);
       const ok = results.filter((r) => r.status === "sent").map((r) => r.channel).join(", ");
