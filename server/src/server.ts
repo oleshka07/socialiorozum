@@ -430,28 +430,6 @@ app.post("/api/posts/:postId/media", async (req: any, reply) => {
   return { ok: true };
 });
 
-// публікація в Instagram (потрібне прикріплене фото)
-app.post("/api/posts/:postId/publish/instagram", async (req: any, reply) => {
-  const ws = req.user.workspace_id;
-  const post = await one<{ content: string; media_id: string | null; filename: string | null }>(
-    `select p.content, p.media_id, ma.filename from post p
-       join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
-       left join media_asset ma on ma.id=p.media_id
-     where p.id=$1 and s.workspace_id=$2`, [req.params.postId, ws]);
-  if (!post) return reply.code(404).send({ error: "пост не знайдено" });
-  if (!post.media_id || !post.filename) return reply.code(400).send({ error: "Для Instagram прикріпіть фото (кнопка 📎 Фото)" });
-  const c = await metaCfg(ws);
-  if (!c?.ig_user_id || !c.page_token) return reply.code(400).send({ error: "Instagram не підключений (Налаштування → Meta)" });
-  try {
-    const r = await meta.publishToInstagram(c.ig_user_id, c.page_token, `${env.appBaseUrl}/media/${post.filename}`, post.content);
-    await q(`insert into meta_publish(post_id, channel, external_id, status) values($1,'instagram',$2,'sent')`, [req.params.postId, r.mediaId]);
-    return { ok: true, mediaId: r.mediaId };
-  } catch (e: any) {
-    await q(`insert into meta_publish(post_id, channel, status, error) values($1,'instagram','error',$2)`, [req.params.postId, e.message]);
-    await logEvent("error", "meta", `IG публікація: ${e.message}`, null, req.user.id);
-    return reply.code(500).send({ error: e.message });
-  }
-});
 
 // ===================== КОМПОЗЕР (мульти-мережевий постинг) =====================
 // які мережі взагалі підключені (для чипів у композері)
@@ -775,37 +753,6 @@ app.post("/api/integrations/telegram/test", async (req: any, reply) => {
   return { bot: { id: me.id, username: me.username, name: me.first_name }, channel, group };
 });
 
-app.post("/api/posts/:postId/publish", async (req: any, reply) => {
-  const ws = req.user.workspace_id;
-  const cfg = await tgConfig(ws);
-  if (!cfg || !cfg.bot_token) return reply.code(400).send({ error: "Telegram не підключений — додайте Bot Token у Інтеграціях" });
-  // власність: пост належить workspace юзера
-  const post = await one<{ content: string }>(
-    `select p.content from post p
-       join pipeline_run r on r.id=p.run_id
-       join source s on s.id=r.source_id
-     where p.id=$1 and s.workspace_id=$2`, [req.params.postId, ws]);
-  if (!post) return reply.code(404).send({ error: "пост не знайдено" });
-  const targets: string[] = Array.isArray(req.body?.targets) ? req.body.targets : [];
-  const chatOf: Record<string, string | null> = { channel: cfg.channel_chat_id, group: cfg.group_chat_id };
-  const results: any[] = [];
-  for (const t of targets) {
-    const chatId = chatOf[t];
-    if (!chatId) { results.push({ target: t, status: "error", error: "не налаштовано" }); continue; }
-    try {
-      const r = await tg.sendMessage(cfg.bot_token, chatId, post.content);
-      await q(`insert into telegram_publish(post_id, target, chat_id, message_id, status) values($1,$2,$3,$4,'sent')`,
-        [req.params.postId, t, chatId, r.message_id]);
-      results.push({ target: t, status: "sent", messageId: r.message_id });
-    } catch (e: any) {
-      await q(`insert into telegram_publish(post_id, target, chat_id, status, error) values($1,$2,$3,'error',$4)`,
-        [req.params.postId, t, chatId, e.message]);
-      await logEvent("error", "telegram", `публікація в ${t}: ${e.message}`, null, req.user.id);
-      results.push({ target: t, status: "error", error: e.message });
-    }
-  }
-  return { ok: true, results };
-});
 
 // ===================== THREADS (Meta) =====================
 const THREADS_REDIRECT = `${env.appBaseUrl}/api/integrations/threads/callback`;
@@ -875,22 +822,6 @@ app.post("/api/integrations/threads/disconnect", async (req: any) => {
   return { ok: true };
 });
 
-app.post("/api/posts/:postId/publish/threads", async (req: any, reply) => {
-  const ws = req.user.workspace_id;
-  const post = await postOwned(req.params.postId, ws);
-  if (!post) return reply.code(404).send({ error: "пост не знайдено" });
-  const tok = await thValidToken(ws);
-  if (!tok) return reply.code(400).send({ error: "Threads не підключений — підключіть у Налаштуваннях" });
-  try {
-    const r = await threads.publish(tok.token, tok.userId, post.content);
-    await q(`insert into threads_publish(post_id, media_id, status) values($1,$2,'sent')`, [req.params.postId, r.mediaId]);
-    return { ok: true, mediaId: r.mediaId };
-  } catch (e: any) {
-    await q(`insert into threads_publish(post_id, status, error) values($1,'error',$2)`, [req.params.postId, e.message]);
-    await logEvent("error", "threads", `публікація: ${e.message}`, null, req.user.id);
-    return reply.code(500).send({ error: e.message });
-  }
-});
 
 app.get("/api/posts/:postId/threads-insights", async (req: any, reply) => {
   const ws = req.user.workspace_id;
@@ -967,29 +898,6 @@ app.post("/api/integrations/meta/disconnect", async (req: any) => {
   return { ok: true };
 });
 
-app.post("/api/posts/:postId/publish/facebook", async (req: any, reply) => {
-  const ws = req.user.workspace_id;
-  const post = await one<{ content: string; filename: string | null }>(
-    `select p.content, ma.filename from post p
-       join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
-       left join media_asset ma on ma.id=p.media_id
-     where p.id=$1 and s.workspace_id=$2`, [req.params.postId, ws]);
-  if (!post) return reply.code(404).send({ error: "пост не знайдено" });
-  const c = await metaCfg(ws);
-  if (!c?.page_id || !c.page_token) return reply.code(400).send({ error: "Facebook не підключений — підключіть у Налаштуваннях" });
-  try {
-    const r = post.filename
-      ? await meta.publishPhotoToPage(c.page_id, c.page_token, post.content, `${env.appBaseUrl}/media/${post.filename}`)
-      : await meta.publishToPage(c.page_id, c.page_token, post.content);
-    const eid = (r as any).post_id || r.id;
-    await q(`insert into meta_publish(post_id, channel, external_id, status) values($1,'facebook',$2,'sent')`, [req.params.postId, eid]);
-    return { ok: true, externalId: eid };
-  } catch (e: any) {
-    await q(`insert into meta_publish(post_id, channel, status, error) values($1,'facebook','error',$2)`, [req.params.postId, e.message]);
-    await logEvent("error", "meta", `публікація FB: ${e.message}`, null, req.user.id);
-    return reply.code(500).send({ error: e.message });
-  }
-});
 
 app.get("/api/posts/:postId/facebook-insights", async (req: any, reply) => {
   const ws = req.user.workspace_id;
@@ -1106,14 +1014,6 @@ app.put("/api/strategy", async (req: any) => {
            on conflict (workspace_id) do update set data=excluded.data, updated_at=now()`,
     [req.user.workspace_id, JSON.stringify(req.body?.data ?? {})]);
   return { ok: true };
-});
-app.post("/api/strategy/apply", async (req: any) => {
-  const ws = req.user.workspace_id;
-  const r = await one<{ data: any }>(`select data from strategy where workspace_id=$1`, [ws]);
-  const rubrics = Array.isArray(r?.data?.rubrics) ? r!.data.rubrics : [];
-  const count = await saveRubrics(ws, rubrics);
-  await q(`update strategy set status='applied', updated_at=now() where workspace_id=$1`, [ws]);
-  return { ok: true, rubrics: count };
 });
 
 // ===================== РУБРИКИ (контент-мікс) =====================
