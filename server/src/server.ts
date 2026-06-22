@@ -1029,8 +1029,13 @@ app.get("/api/strategy", async (req: any) => {
   return r ?? { data: {}, status: "none" };
 });
 app.post("/api/strategy/generate", async (req: any, reply) => {
-  try { return { data: await generateStrategy(req.user.workspace_id), status: "draft" }; }
-  catch (e: any) { return reply.code(400).send({ error: e.message }); }
+  try {
+    const ws = req.user.workspace_id;
+    const data = await generateStrategy(ws);
+    if (Array.isArray(data?.rubrics)) await saveRubrics(ws, data.rubrics);  // авто-застосування: рубрики одразу в роботі (без прихованого «Застосувати»)
+    await q(`update strategy set status='applied', updated_at=now() where workspace_id=$1`, [ws]);
+    return { data, status: "applied" };
+  } catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
 app.put("/api/strategy", async (req: any) => {
   await q(`insert into strategy(workspace_id,data,status,updated_at) values($1,$2,'draft',now())

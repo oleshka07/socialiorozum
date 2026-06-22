@@ -190,9 +190,9 @@
       <div class="settings"><div class="body">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
           <b>🤖 Згенерована стратегія <span class="badge" id="stratStatus">—</span></b>
-          <div class="ctl" style="margin:0"><button class="primary" id="genStrat">✨ Згенерувати</button><button id="applyStrat">Застосувати</button><span id="stratMsg" style="font-size:12px;color:var(--muted)"></span></div>
+          <div class="ctl" style="margin:0"><button class="primary" id="genStrat">✨ Згенерувати</button><span id="stratMsg" style="font-size:12px;color:var(--muted)"></span></div>
         </div>
-        <div class="hint">AI бере нішу/аудиторію/голос із Бази бренду → рубрики, частота, дні, теми. «Застосувати» переносить рубрики в редактор нижче (і пайплайн їх враховує).</div>
+        <div class="hint">AI бере нішу/аудиторію/голос із Бази бренду → рубрики, частота, дні, теми. Рубрики застосовуються одразу (редагуй у списку нижче).</div>
         <div id="stratView" class="out"></div>
       </div></div>
       <div class="settings"><div class="body">
@@ -1019,8 +1019,7 @@ async function saveSchedule(){
   catch(e){ if(m){m.style.color='var(--stale)'; m.textContent='⚠ '+e.message;} }
 }
 async function loadStrategy(){ try{ STRAT=await api('/strategy'); }catch(e){ STRAT={data:{},status:'none'}; } renderStrategy(); }
-$('genStrat').onclick=async()=>{ const m=$('stratMsg'); m.style.color='var(--muted)'; m.textContent='генерую…'; try{ const r=await api('/strategy/generate',{method:'POST'}); STRAT={data:r.data,status:'draft'}; renderStrategy(); m.textContent=''; }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; } };
-$('applyStrat').onclick=async()=>{ const m=$('stratMsg'); m.style.color='var(--muted)'; m.textContent='застосовую…'; try{ const r=await api('/strategy/apply',{method:'POST'}); STRAT.status='applied'; renderStrategy(); m.style.color='var(--ok)'; m.textContent='рубрик застосовано: '+r.rubrics; await loadRubrics(); }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; } };
+$('genStrat').onclick=async()=>{ const m=$('stratMsg'); m.style.color='var(--muted)'; m.textContent='генерую…'; try{ const r=await api('/strategy/generate',{method:'POST'}); STRAT={data:r.data,status:r.status||'applied'}; renderStrategy(); await loadRubrics(); m.style.color='var(--ok)'; m.textContent='готово — рубрики застосовано ✓'; }catch(e){ m.style.color='var(--stale)'; m.textContent='⚠ '+e.message; } };
 
 // ---------- Рубрики ----------
 let Rubrics = [];
