@@ -539,6 +539,9 @@ const STEP  = {1:'extract_ideas',3:'drafts',4:'tone',5:'format',6:'deai',7:'stra
 const ORDER = [1,3,4,5,6,7];
 const SET = {mkt:'marketing_context', tov:'tone_of_voice', deai:'deai_rules', strat:'content_strategy', voiceExamples:'voice_examples'};
 const AUTORUN_WARN='Авто-прогін запускатиме повну AI-генерацію постів на КОЖНУ нову статтю/зустріч — це витрачає кошти на AI. Увімкнути?';
+// час: інпути планування трактуємо як ЛОКАЛЬНИЙ, у БД — UTC; показуємо назад у локальному
+const locDate=(d)=>{const x=new Date(d);return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');};
+const locHM=(d)=>{const x=new Date(d);return String(x.getHours()).padStart(2,'0')+':'+String(x.getMinutes()).padStart(2,'0');};
 const SAMPLE = `Клієнт: я постійно відкладаю важливі справи, сідаю за роботу і одразу лізу в телефон.
 Коуч: давай подивимось, що відбувається в момент перед тим, як ти береш телефон. Який це стан?
 Клієнт: тривога. Ніби боюся почати, бо раптом не вийде ідеально.
@@ -596,19 +599,21 @@ $('toCalendar').onclick=()=>go('publish');
 // ---------- аналітика ----------
 async function loadAnalytics(){
   const box=$('analyticsBox'); if(!box) return;
-  let usage={},slots=[],bank=[];
+  let usage={},slots=[],bank=[],pub={posts:0,sends:0,recent:[]};
   try{ usage=await api('/usage'); }catch(e){}
   try{ slots=await api('/schedule'); }catch(e){}
   try{ bank=await api('/bank'); }catch(e){}
-  const posted=slots.filter(s=>s.status==='posted'); const queued=slots.filter(s=>s.status==='planned');
+  try{ pub=await api('/published'); }catch(e){}
+  const queued=slots.filter(s=>s.status==='planned').length; const failed=slots.filter(s=>s.status==='failed').length;
   const toks=(usage.prompt_tokens||0)+(usage.completion_tokens||0);
-  const stats=[['Опубліковано',posted.length,'усього'],['У черзі',queued.length,'заплановано'],['Витрати на AI','$'+(Number(usage.cost)||0).toFixed(2),toks.toLocaleString('uk')+' токенів'],['У банку',bank.length,'затверджених']];
-  const now=new Date(); const wk=[0,0,0,0,0,0,0,0];
-  const weekStart=new Date(now); weekStart.setDate(weekStart.getDate()-49); weekStart.setHours(0,0,0,0);
-  posted.forEach(s=>{ if(!s.scheduled_at) return; const diff=Math.floor((new Date(s.scheduled_at)-weekStart)/(7*864e5)); if(diff>=0&&diff<8) wk[diff]++; });
+  const stats=[['Опубліковано',pub.posts,pub.sends+' у мережах'],['У черзі',queued,'заплановано'+(failed?(' · '+failed+' ⚠'):'')],['Витрати на AI','$'+(Number(usage.cost)||0).toFixed(2),toks.toLocaleString('uk')+' токенів'],['У банку',bank.length,'затверджених']];
+  const rec=pub.recent||[];
+  const wk=[0,0,0,0,0,0,0,0];
+  const weekStart=new Date(); weekStart.setHours(0,0,0,0); weekStart.setDate(weekStart.getDate()-49);
+  rec.forEach(r=>{ const diff=Math.floor((new Date(r.created_at)-weekStart)/(7*864e5)); if(diff>=0&&diff<8) wk[diff]++; });
   const mx=Math.max(1,...wk);
   const chCount={telegram:0,instagram:0,facebook:0,threads:0}; let chTot=0;
-  posted.forEach(s=>{ const ch=s.channels||{}; Object.keys(chCount).forEach(k=>{ if(ch[k]&&ch[k].on){ chCount[k]++; chTot++; } }); });
+  rec.forEach(r=>{ if(chCount[r.net]!=null){ chCount[r.net]++; chTot++; } });
   const CHN={telegram:['Telegram','--tg'],instagram:['Instagram','--ig'],facebook:['Facebook','--fb'],threads:['Threads','--th']};
   box.innerHTML=
     '<div class="stat-grid" style="margin-bottom:18px">'+stats.map(s=>'<div class="stat"><div class="l">'+s[0]+'</div><div class="v">'+s[1]+'</div><div class="d">'+s[2]+'</div></div>').join('')+'</div>'
@@ -616,8 +621,9 @@ async function loadAnalytics(){
     +'<div class="panel" style="margin:0"><div style="font-weight:700;font-size:14px;margin-bottom:18px">Опубліковано за тиждень</div><div class="bars">'+wk.map((v,i)=>'<div class="bar"><div class="b" style="height:'+(v/mx*100)+'%;background:'+(i===7?'var(--brand)':'var(--brand-soft2)')+'"></div><div class="lab">Т'+(i+1)+'</div></div>').join('')+'</div></div>'
     +'<div class="panel" style="margin:0"><div style="font-weight:700;font-size:14px;margin-bottom:14px">За каналами</div>'
       +(chTot?Object.keys(CHN).map(k=>{ const pct=Math.round(chCount[k]/chTot*100); return '<div style="margin-bottom:14px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="width:11px;height:11px;border-radius:4px;background:var('+CHN[k][1]+')"></span><span style="font-size:13px;font-weight:600;flex:1">'+CHN[k][0]+'</span><span style="font-size:13px;font-weight:700">'+pct+'%</span></div><div style="height:7px;border-radius:5px;background:var(--surface2);overflow:hidden"><div style="width:'+pct+'%;height:100%;background:var('+CHN[k][1]+')"></div></div></div>'; }).join(''):'<div class="empty">Ще немає опублікованих постів.</div>')
-      +'<div style="margin-top:14px;padding:13px;border-radius:11px;background:var(--brand-soft);font-size:12.5px;color:var(--brand)">Підключи канали в Налаштуваннях, щоб бачити охоплення й реакції.</div></div>'
-    +'</div>';
+      +'<div style="margin-top:14px;padding:13px;border-radius:11px;background:var(--brand-soft);font-size:12.5px;color:var(--brand)">Показники охоплення й реакцій додамо згодом.</div></div>'
+    +'</div>'
+    +'<div class="panel" style="margin:18px 0 0"><div style="font-weight:700;font-size:14px;margin-bottom:6px">Останні публікації</div>'+(rec.length?rec.slice(0,12).map(r=>'<div style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--line)"><span style="font-size:15px">'+({telegram:"✈️",instagram:"📸",facebook:"📘",threads:"🧵"}[r.net]||"•")+'</span><div style="flex:1;min-width:0"><div style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc((r.content||"").replace(/\n+/g," ").slice(0,80))+'</div><div style="font-size:11px;color:var(--muted)">'+(CHN[r.net]?CHN[r.net][0]:r.net)+" · "+new Date(r.created_at).toLocaleString("uk")+'</div></div></div>').join(""):'<div class="empty">Ще нічого не опубліковано. Опублікуй пост — і він зʼявиться тут.</div>')+'</div>';
 }
 
 // ---------- база бренду (settings) ----------
@@ -784,7 +790,7 @@ async function openComposer(postId, opts){
   opts=opts||{};
   let full; try{ full=await api('/posts/'+postId+'/full'); }catch(e){ flash('Не вдалося відкрити: '+e.message); return; }
   const C=full.channels||{}; let mediaFilename=full.media_filename||null;
-  const initDate=opts.scheduledAt?String(opts.scheduledAt).slice(0,10):''; const initTime=opts.scheduledAt?(String(opts.scheduledAt).slice(11,16)||'11:00'):'11:00';
+  const initDate=opts.scheduledAt?locDate(opts.scheduledAt):''; const initTime=opts.scheduledAt?locHM(opts.scheduledAt):'11:00';
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='60';
   const chipsHtml=()=>NETS.map(n=>{ const on=C[n[0]]&&C[n[0]].on; const conn=ChanStatus[n[0]]; return '<button class="netchip'+(on?' on':'')+'" data-net="'+n[0]+'"'+(conn?'':' disabled title="не підключено"')+'>'+n[1]+'</button>'; }).join('');
   const prevHtml=()=>{ const sel=NETS.filter(n=>C[n[0]]&&C[n[0]].on); if(!sel.length) return '<div style="font-size:12px;color:var(--muted)">Обери мережі вище.</div>'; return sel.map(n=>{ const t=(C[n[0]].text||full.content||''); return '<div style="font-size:12px;border:1px solid var(--line);border-radius:8px;padding:6px 9px;margin-top:6px"><b>'+n[1]+'</b> <span style="color:var(--muted)">'+t.length+' симв.</span><div style="color:var(--muted);margin-top:2px;white-space:pre-wrap">'+esc(t.slice(0,200))+(t.length>200?'…':'')+'</div></div>'; }).join(''); };
@@ -808,7 +814,7 @@ async function openComposer(postId, opts){
   ov.querySelector('#cmpFile').onchange=async(e)=>{ const file=e.target.files&&e.target.files[0]; if(!file) return; msg.style.color='var(--muted)'; msg.textContent=' завантаження фото…'; try{ const fd=new FormData(); fd.append('file',file); const r=await fetch('/api/media',{method:'POST',body:fd,credentials:'same-origin'}); const j=await r.json(); if(!r.ok||j.error) throw new Error(j.error||('HTTP '+r.status)); const up=(j.saved||[])[0]; if(!up) throw new Error('файл не збережено'); await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:up.id})}); mediaFilename=up.url.replace('/media/',''); ov.querySelector('#cmpMedia').innerHTML=mediaHtml(); msg.style.color='var(--brand)'; msg.textContent=' фото додано ✓'; }catch(err){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+err.message; } };
   const saveCh=()=>api('/posts/'+postId+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:C})});
   ov.querySelector('#cmpNow').onclick=async(e)=>{ const b=e.target.closest('button'); b.disabled=true; msg.style.color='var(--muted)'; msg.textContent=' публікую…'; try{ await saveCh(); const r=await api('/posts/'+postId+'/publish-all',{method:'POST'}); const res=r.results||[]; const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); msg.style.color=err.length?'var(--danger)':'var(--brand)'; msg.textContent=' '+(ok.length?('✓ '+ok.join(', ')):'')+(err.length?(' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; ')):''); if(!err.length){ try{await refresh();}catch(_){} setTimeout(close,1300);} }catch(e2){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+e2.message; } finally{ b.disabled=false; } };
-  ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ msg.style.color='var(--danger)'; msg.textContent=' вкажи дату й час'; return; } const sel=Object.keys(C).filter(k=>C[k]&&C[k].on); if(!sel.length){ msg.style.color='var(--danger)'; msg.textContent=' оберіть мережі'; return; } const b=e.target.closest('button'); b.disabled=true; msg.style.color='var(--muted)'; msg.textContent=' зберігаю…'; const at=d+'T'+t+':00.000Z'; try{ await saveCh(); if(opts.slotId){ await api('/schedule/'+opts.slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:at})}); } else { await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:at})}); } msg.style.color='var(--brand)'; msg.textContent=' заплановано ✓'; try{await loadPublish();}catch(_){} setTimeout(close,900); }catch(e2){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+e2.message; b.disabled=false; } };
+  ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ msg.style.color='var(--danger)'; msg.textContent=' вкажи дату й час'; return; } const sel=Object.keys(C).filter(k=>C[k]&&C[k].on); if(!sel.length){ msg.style.color='var(--danger)'; msg.textContent=' оберіть мережі'; return; } const b=e.target.closest('button'); b.disabled=true; msg.style.color='var(--muted)'; msg.textContent=' зберігаю…'; const at=new Date(d+'T'+t).toISOString(); try{ await saveCh(); if(opts.slotId){ await api('/schedule/'+opts.slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:at})}); } else { await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:at})}); } msg.style.color='var(--brand)'; msg.textContent=' заплановано ✓'; try{await loadPublish();}catch(_){} setTimeout(close,900); }catch(e2){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+e2.message; b.disabled=false; } };
 }
 function openDayScheduler(iso){
   const posts=(Pub&&Pub.bank)?Pub.bank:[];
@@ -818,7 +824,7 @@ function openDayScheduler(iso){
   document.body.appendChild(ov); const close=()=>ov.remove();
   ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
   ov.querySelector('#dsClose').onclick=close;
-  ov.querySelectorAll('.card[data-id]').forEach(c=>c.onclick=()=>{ close(); openComposer(c.dataset.id,{scheduledAt:iso+'T11:00:00.000Z'}); });
+  ov.querySelectorAll('.card[data-id]').forEach(c=>c.onclick=()=>{ close(); openComposer(c.dataset.id,{scheduledAt:new Date(iso+'T11:00').toISOString()}); });
 }
 
 // ---------- прогін ----------
@@ -886,20 +892,22 @@ function calISO(off){const d=calMonday();d.setDate(d.getDate()+off);return d.toI
 function renderCal(){
   const cal=$('cal'); if(!cal) return; cal.innerHTML='';
   ['Пн','Вт','Ср','Чт','Пт','Сб','Нд'].forEach(d=>{const h=document.createElement('div');h.className='dow';h.textContent=d;cal.appendChild(h);});
-  const byDay={}; Pub.slots.forEach(s=>{ if(!s.scheduled_at) return; const iso=String(s.scheduled_at).slice(0,10); (byDay[iso]=byDay[iso]||[]).push(s); });
+  const byDay={}; Pub.slots.forEach(s=>{ if(!s.scheduled_at) return; const iso=locDate(s.scheduled_at); (byDay[iso]=byDay[iso]||[]).push(s); });
   for(let off=0;off<28;off++){
     const iso=calISO(off); const cell=document.createElement('div'); cell.className='day'; cell.dataset.iso=iso;
     const dt=new Date(iso); cell.innerHTML='<div class="dn">'+dt.getDate()+'.'+(dt.getMonth()+1)+'</div>';
     (byDay[iso]||[]).sort((a,b)=>String(a.scheduled_at).localeCompare(String(b.scheduled_at))).forEach(s=>{
-      const time=String(s.scheduled_at).slice(11,16); const posted=s.status==='posted';
-      const ch=document.createElement('div'); ch.className='pchip';
-      ch.innerHTML='<b>'+time+(posted?' ✓':'')+'</b> '+chanIcons(s.channels)+' '+esc((s.content||'').replace(/\n+/g,' ').slice(0,18));
+      const time=locHM(s.scheduled_at); const st=s.status;
+      const icon=st==='posted'?' ✅':(st==='failed'?' ⚠️':(st==='posting'?' ⏳':''));
+      const ch=document.createElement('div'); ch.className='pchip'+(st==='failed'?' failed':'')+(st==='posted'?' posted':'');
+      ch.title=s.result||(st==='planned'?'заплановано':st);
+      ch.innerHTML='<b>'+time+icon+'</b> '+chanIcons(s.channels)+' '+esc((s.content||'').replace(/\n+/g,' ').slice(0,18));
       ch.onclick=(ev)=>{ ev.stopPropagation(); openComposer(s.post_id,{scheduledAt:s.scheduled_at,slotId:s.id}); }; cell.appendChild(ch);
     });
     cell.addEventListener('dragover',ev=>{ev.preventDefault();cell.classList.add('over');});
     cell.addEventListener('dragleave',()=>cell.classList.remove('over'));
     cell.addEventListener('drop',async ev=>{ev.preventDefault();cell.classList.remove('over');const d=ev.dataTransfer.getData('text/plain'); if(d.indexOf('post:')!==0) return; const postId=d.slice(5);
-      try{ await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:iso+'T09:00:00.000Z'})}); await loadPublish(); }catch(e){ flash(e.message); } });
+      try{ await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:new Date(iso+'T09:00').toISOString()})}); await loadPublish(); }catch(e){ flash(e.message); } });
     cell.addEventListener('click',ev=>{ if(ev.target.closest('.pchip')) return; openDayScheduler(iso); });
     cal.appendChild(cell);
   }

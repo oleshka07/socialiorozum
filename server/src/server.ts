@@ -1145,12 +1145,29 @@ app.get("/api/bank", async (req: any) => {
 });
 
 app.get("/api/schedule", async (req: any) => {
-  return q(`select ss.id, ss.scheduled_at, ss.status, p.id as post_id, p.content, p.channels
+  return q(`select ss.id, ss.scheduled_at, ss.status, ss.result, p.id as post_id, p.content, p.channels
             from schedule_slot ss
               left join plan_item pi on pi.id=ss.plan_item_id
               join post p on p.id = coalesce(ss.post_id, pi.post_id)
               join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
             where s.workspace_id=$1 order by ss.scheduled_at`, [req.user.workspace_id]);
+});
+
+// реально опубліковані пости (ручні + планові) з усіх мереж — для Аналітики
+app.get("/api/published", async (req: any) => {
+  const ws = req.user.workspace_id;
+  const recent = await q<{ post_id: string; net: string; created_at: string; content: string }>(
+    `select x.post_id, x.net, x.created_at, p.content from (
+        select post_id, 'telegram'::text as net, created_at from telegram_publish where status='sent'
+        union all select post_id, 'threads', created_at from threads_publish where status='sent'
+        union all select post_id, channel, created_at from meta_publish where status='sent'
+     ) x
+     join post p on p.id=x.post_id
+     join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+     where s.workspace_id=$1
+     order by x.created_at desc limit 100`, [ws]);
+  const posts = new Set(recent.map((r) => r.post_id)).size;
+  return { posts, sends: recent.length, recent };
 });
 
 async function slotOwned(slotId: string, ws: string) {

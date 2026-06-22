@@ -24,13 +24,14 @@ async function tick(): Promise<void> {
     try {
       const results = await publishPostToChannels(slot.workspace_id, slot.post_id);
       const anyOk = results.some((r) => r.status === "sent");
-      await q(`update schedule_slot set status=$2 where id=$1`, [slot.id, anyOk ? "posted" : "failed"]);
       const ok = results.filter((r) => r.status === "sent").map((r) => r.channel).join(", ");
       const err = results.filter((r) => r.status === "error").map((r) => `${r.channel}: ${r.error}`).join("; ");
+      const summary = [ok ? `✓ ${ok}` : "", err ? `⚠ ${err}` : ""].filter(Boolean).join(" · ") || "немає обраних каналів";
+      await q(`update schedule_slot set status=$2, result=$3 where id=$1`, [slot.id, anyOk ? "posted" : "failed", summary]);
       if (anyOk) await logEvent("info", "autopost", `slot ${slot.id} → ${ok}${err ? ` (помилки: ${err})` : ""}`);
       else await logEvent("warn", "autopost", `slot ${slot.id} не опубліковано: ${err || "немає каналів"}`);
     } catch (e: any) {
-      await q(`update schedule_slot set status='failed' where id=$1`, [slot.id]);
+      await q(`update schedule_slot set status='failed', result=$2 where id=$1`, [slot.id, e.message]);
       await logEvent("error", "autopost", `slot ${slot.id}: ${e.message}`);
     }
   }

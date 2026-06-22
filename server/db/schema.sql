@@ -355,3 +355,6 @@ alter table app_user add column if not exists inactivity_warned_at timestamptz; 
 alter table app_user add column if not exists data_purged_at       timestamptz;   -- медіа/прогони почищено за неактивність
 create index if not exists idx_user_lastactive on app_user(last_active_at);
 create index if not exists idx_user_deleted on app_user(deleted_at) where deleted_at is not null;
+
+-- підсумок останньої спроби автопостингу слота (для статусу в календарі: ✓ мережі / ⚠ помилки)
+alter table schedule_slot add column if not exists result text;
