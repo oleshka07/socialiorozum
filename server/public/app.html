@@ -311,6 +311,7 @@
               <div class="disp" style="font-weight:600;font-size:17px">На перегляд</div>
               <div class="ftabs" id="studioFilters"></div>
               <button class="ghost" id="studioMore" style="margin-left:auto"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v4h4"></path></svg>Згенерувати ще</button>
+              <button class="primary" id="toCalendar" style="display:none">До календаря →</button>
             </div>
             <div class="studio-grid" id="studioGrid"></div>
           </div>
@@ -349,6 +350,7 @@
             <div class="hint" id="runLabel" style="margin:0 0 12px"></div>
             <button class="primary" id="runAll" style="width:100%;margin-bottom:9px">⚡ Прогнати весь конвеєр</button>
             <button class="ghost" id="newRun" style="width:100%">＋ Новий прогін</button>
+            <button class="ghost" id="toStudio" style="width:100%;margin-top:9px">→ Переглянути й затвердити пости</button>
             <button id="stopBtn" class="danger" style="width:100%;margin-top:9px;display:none">⛔ Зупинити</button>
             <div class="hint" id="srcInfo" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)"></div>
           </div>
@@ -587,6 +589,8 @@ function setLayout(l){
   $('layoutHint').textContent=H[l]||'';
 }
 document.querySelectorAll('#layoutTabs .tab').forEach(t=>t.onclick=()=>setLayout(t.dataset.lay));
+$('toStudio').onclick=()=>setLayout('studio');
+$('toCalendar').onclick=()=>go('publish');
 
 // ---------- аналітика ----------
 async function loadAnalytics(){
@@ -694,6 +698,7 @@ let StudioFilter='all';
 function renderStudio(){
   const grid=$('studioGrid'); if(!grid) return;
   const all=Finals; const appr=all.filter(p=>p.review==='approved').length; const rev=all.length-appr;
+  const tc=$('toCalendar'); if(tc){ tc.style.display=appr>0?'':'none'; tc.textContent='До календаря ('+appr+') →'; }
   const ft=$('studioFilters'); if(ft){ ft.innerHTML=[['all','Усі',all.length],['review','На перегляд',rev],['approved','Затверджені',appr]].map(f=>'<div class="ftab'+(StudioFilter===f[0]?' on':'')+'" data-sf="'+f[0]+'">'+f[1]+' <span style="opacity:.6">'+f[2]+'</span></div>').join(''); ft.querySelectorAll('[data-sf]').forEach(t=>t.onclick=()=>{ StudioFilter=t.dataset.sf; renderStudio(); }); }
   let show=all; if(StudioFilter==='review') show=all.filter(p=>p.review!=='approved'); if(StudioFilter==='approved') show=all.filter(p=>p.review==='approved');
   if(!show.length){ grid.innerHTML='<div class="empty" style="grid-column:1/-1">Поки порожньо. Додай джерело у «Джерела» і натисни «Згенерувати пости».</div>'; return; }
@@ -899,7 +904,7 @@ function renderCal(){
 // ---------- wiring ----------
 document.querySelectorAll('[data-run]').forEach(b=>b.onclick=()=>run(+b.dataset.run));
 document.querySelectorAll('[data-from]').forEach(b=>b.onclick=()=>runFrom(+b.dataset.from));
-$('runAll').onclick=()=>runFrom(1);
+$('runAll').onclick=async()=>{ await runFrom(1); setLayout('studio'); flash('Готово — переглянь і затвердь пости.'); };
 $('stopBtn').onclick=async()=>{ if(!runId) return; $('stopBtn').textContent='⛔ зупиняю…'; try{ await api('/runs/'+runId+'/cancel',{method:'POST'}); }catch(e){} };
 $('sampleBtn').onclick=()=>{ $('transcript').value=SAMPLE; };
 $('toCreate').onclick=async()=>{
