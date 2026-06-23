@@ -9,6 +9,9 @@ export const env = {
     referer: process.env.OPENROUTER_REFERER ?? "",
     title: process.env.OPENROUTER_TITLE ?? "KontentGrov",
   },
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY ?? "",   // прямий OpenAI для Lite (дешевше за наценку OpenRouter)
+  },
   resend: {
     apiKey: process.env.RESEND_API_KEY ?? "",
     from: process.env.RESEND_FROM ?? "socialio <onboarding@resend.dev>",
