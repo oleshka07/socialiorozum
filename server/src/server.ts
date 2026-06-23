@@ -22,7 +22,7 @@ import { sendVerifyEmail, sendResetEmail, sendDeletionScheduledEmail, sendEmailC
 import { logEvent } from "./log.js";
 import { startAutopost } from "./autopost.js";
 import { startRssPoller, pullFeed } from "./rss-poller.js";
-import { MEDIA_DIR, saveMedia, deleteMediaFile, convertAllHeif } from "./media.js";
+import { MEDIA_DIR, saveMedia, deleteMediaFile, convertAllHeif, getThumb } from "./media.js";
 import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
 import * as gdrive from "./gdrive.js";
 import { publishPostToChannels } from "./publisher.js";
@@ -39,6 +39,14 @@ await app.register(fstatic, { root: join(__dirname, "..", "public"), prefix: "/"
 // медіа-сховище: файли на диску (Docker-volume), віддаємо публічно за /media/<uuid>.<ext>
 await app.register(multipart, { limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
 await app.register(fstatic, { root: MEDIA_DIR, prefix: "/media/", decorateReply: false });
+// мініатюри (sharp + диск-кеш) — щоб сітки не вантажили повні зображення; публічно, як і /media
+app.get("/thumb/:name", async (req: any, reply) => {
+  const buf = await getThumb(String(req.params.name));
+  if (!buf) return reply.code(404).send();
+  reply.header("Cache-Control", "public, max-age=604800");
+  reply.type("image/jpeg");
+  return reply.send(buf);
+});
 
 // зберігаємо сирий JSON-боді (для HMAC-перевірки вебхуків), парсинг лишаємо як був
 app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body, done) => {

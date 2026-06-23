@@ -3,14 +3,31 @@
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
-import { writeFile, unlink, readFile } from "node:fs/promises";
+import { writeFile, unlink, readFile, stat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import heicConvert from "heic-convert";
+import sharp from "sharp";
 import { q } from "./db.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const MEDIA_DIR = join(__dirname, "..", "media");
 mkdirSync(MEDIA_DIR, { recursive: true });
+const THUMB_DIR = join(MEDIA_DIR, "thumbs");
+mkdirSync(THUMB_DIR, { recursive: true });
+
+// Мініатюра (≤400px, JPEG) з диск-кешем — щоб бібліотека/сітки не вантажили повні зображення.
+export async function getThumb(name: string): Promise<Buffer | null> {
+  const safe = (name || "").replace(/[^a-zA-Z0-9._-]/g, "");
+  if (!safe || safe.includes("..")) return null;
+  const out = join(THUMB_DIR, safe + ".jpg");
+  try { return await readFile(out); } catch { /* ще нема — генеруємо */ }
+  try {
+    await stat(join(MEDIA_DIR, safe)); // переконатися, що оригінал існує
+    const buf = await sharp(join(MEDIA_DIR, safe)).resize(400, 400, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 72 }).toBuffer();
+    writeFile(out, buf).catch(() => {}); // кеш на диск, не блокуючи відповідь
+    return buf;
+  } catch { return null; }
+}
 
 export async function saveMedia(
   ws: string,

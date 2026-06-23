@@ -791,7 +791,7 @@ function renderStudio(){
   grid.innerHTML=show.map(p=>{ const sp=statusPill(p.review); const ap=p.review==='approved';
     return '<div class="pcard'+(ap?' appr':'')+'" data-post="'+p.id+'">'
       +'<div class="pcard-h">'+chanDots(p.channels)+'<span class="statuspill '+sp[1]+'" style="margin-left:auto">'+sp[0]+'</span></div>'
-      +(p.media_filename?'<div class="pcard-img"><img src="/media/'+esc(p.media_filename)+'"></div>':'')
+      +(p.media_filename?'<div class="pcard-img"><img loading="lazy" src="/thumb/'+esc(p.media_filename)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(p.media_filename)+'\'"></div>':'')
       +'<div class="pcard-text pcontent" contenteditable="true">'+esc(p.content)+'</div>'
       +'<div class="pcard-f"><span class="chars">'+(p.content||'').replace(/\n/g,'').length+' симв.</span>'
         +'<button class="icon" data-a="regen" title="Переробити">↻</button>'
@@ -859,7 +859,7 @@ function chooseMedia(){ return new Promise(async resolve=>{
   let media=[]; try{ media=await api('/media'); }catch(e){ flash('Не вдалося завантажити бібліотеку'); resolve(undefined); return; }
   const imgs=media.filter(m=>m.kind==='image');
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
-  const grid=imgs.length?imgs.map(m=>'<img src="/media/'+esc(m.filename)+'" data-id="'+m.id+'" data-fn="'+esc(m.filename)+'" style="height:84px;border-radius:8px;cursor:pointer">').join(''):'<div class="empty">Бібліотека порожня — завантаж фото у «Джерела».</div>';
+  const grid=imgs.length?imgs.map(m=>'<img loading="lazy" src="/thumb/'+esc(m.filename)+'" data-id="'+m.id+'" data-fn="'+esc(m.filename)+'" onerror="this.style.opacity=.3" style="height:84px;border-radius:8px;cursor:pointer;background:var(--surface2)">').join(''):'<div class="empty">Бібліотека порожня — завантаж фото у «Джерела».</div>';
   ov.innerHTML='<div class="modal-card" style="max-width:620px;padding:20px"><b>Обери фото</b><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">'+grid+'</div><div class="btnrow"><button class="ghost" id="cmClose">Скасувати</button><button id="cmDetach">Без фото</button></div></div>';
   document.body.appendChild(ov); const close=()=>ov.remove();
   ov.addEventListener('click',e=>{ if(e.target===ov){ close(); resolve(undefined); } });
@@ -1152,7 +1152,7 @@ async function loadMedia(){
   const o=$('mediaGrid'); if(!o) return;
   try{ const m=await api('/media');
     if(!m.length){ o.innerHTML='<div class="empty">Порожньо.</div>'; return; }
-    o.innerHTML=m.map(x=>'<div style="position:relative" data-id="'+x.id+'">'+(x.kind==='video'?'<video src="/media/'+esc(x.filename)+'" style="height:90px;border-radius:8px"></video>':'<img src="/media/'+esc(x.filename)+'" style="height:90px;border-radius:8px">')+'<button class="mediaDel" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;padding:1px 6px">✕</button></div>').join('');
+    o.innerHTML=m.map(x=>'<div style="position:relative" data-id="'+x.id+'">'+(x.kind==='video'?'<video src="/media/'+esc(x.filename)+'" style="height:90px;border-radius:8px"></video>':'<img loading="lazy" src="/thumb/'+esc(x.filename)+'" onerror="this.style.opacity=.3" style="height:90px;border-radius:8px;background:var(--surface2)">')+'<button class="mediaDel" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;padding:1px 6px">✕</button></div>').join('');
     o.querySelectorAll('[data-id]').forEach(c=>{ c.querySelector('.mediaDel').onclick=async()=>{ if(!confirm('Видалити фото?'))return; try{ await api('/media/'+c.dataset.id,{method:'DELETE'}); await loadMedia(); }catch(e){ flash(e.message); } }; });
   }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }
