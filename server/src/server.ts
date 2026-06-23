@@ -917,6 +917,24 @@ app.post("/api/integrations/meta/disconnect", async (req: any) => {
   return { ok: true };
 });
 
+// вивести голос бренду з останніх постів Instagram (читаємо підписи -> voice_examples -> deriveVoice)
+app.post("/api/integrations/meta/import-voice", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const c = await metaCfg(ws);
+  if (!c?.ig_user_id || !c.page_token) return reply.code(400).send({ error: "Instagram не підключений" });
+  let media;
+  try { media = await meta.getRecentMedia(c.ig_user_id, c.page_token, 20); }
+  catch (e: any) { return reply.code(400).send({ error: "Не вдалося прочитати пости IG: " + e.message }); }
+  const captions = media.map((m) => (m.caption || "").trim()).filter((t) => t.length > 15);
+  if (captions.length < 2) return reply.code(400).send({ error: "Замало текстових постів в Instagram для аналізу голосу" });
+  await q(`insert into settings_block(workspace_id, key, content) values($1,'voice_examples',$2)
+           on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`,
+    [ws, captions.slice(0, 20).join("\n\n---\n\n")]);
+  const derived = await deriveVoice(ws);
+  await logEvent("info", "meta", `голос виведено з ${captions.length} IG-постів`, null, req.user.id);
+  return { ok: true, count: captions.length, derived };
+});
+
 
 app.get("/api/posts/:postId/facebook-insights", async (req: any, reply) => {
   const ws = req.user.workspace_id;

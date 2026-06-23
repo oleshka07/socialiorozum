@@ -103,6 +103,16 @@ export async function publishPhotoToPage(pageId: string, pageToken: string, mess
   });
 }
 
+// останні N постів IG-акаунта (підписи) — для виведення голосу бренду з реальних дописів
+export async function getRecentMedia(igUserId: string, pageToken: string, limit = 20): Promise<Array<{ caption: string; like_count?: number; comments_count?: number; timestamp?: string }>> {
+  const u = new URL(`${GRAPH}/${igUserId}/media`);
+  u.searchParams.set("fields", "caption,media_type,permalink,timestamp,like_count,comments_count");
+  u.searchParams.set("limit", String(limit));
+  u.searchParams.set("access_token", pageToken);
+  const j = await fbFetch<{ data: Array<any> }>(u.toString());
+  return (j.data || []).map((m) => ({ caption: m.caption || "", like_count: m.like_count, comments_count: m.comments_count, timestamp: m.timestamp }));
+}
+
 // Instagram: двокроковий публіш (контейнер із image_url+caption -> media_publish)
 export async function publishToInstagram(igUserId: string, pageToken: string, imageUrl: string, caption: string) {
   const cbody = new URLSearchParams({ image_url: imageUrl, caption, access_token: pageToken });

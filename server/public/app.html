@@ -220,6 +220,7 @@
       <h2 id="obTitle" style="font-size:24px;font-weight:600;margin:0 0 8px"></h2>
       <p id="obDesc" style="color:var(--muted);font-size:14.5px;margin:0 0 18px"></p>
       <textarea id="obInput" style="min-height:120px"></textarea>
+      <div id="obConnect" style="display:none;margin-top:4px"></div>
       <div class="btnrow" style="margin-top:18px">
         <button id="obBack" class="ghost">← Назад</button>
         <button id="obNext" class="primary">Далі →</button>
@@ -488,7 +489,7 @@
             <div class="hint">Постинг у FB-Сторінку + аналітика FB/IG. IG-публікація потребує фото.</div>
             <div class="btnrow"><span id="mtStatus" style="font-size:13px;color:var(--muted)">…</span></div>
             <div class="btnrow" id="mtPageRow" style="display:none"><label style="font-size:12px;color:var(--muted)">Акаунт:</label><select id="mtPage" style="width:auto;min-width:200px;font-size:12px;padding:6px 8px"></select></div>
-            <div class="btnrow"><a id="mtConnect" class="btn primary" href="/api/integrations/meta/connect" style="display:none">🔗 Підключити</a><button class="ghost" id="mtStats" style="display:none">📊 Статистика</button><button class="ghost" id="mtDisconnect" style="display:none">Відключити</button></div>
+            <div class="btnrow"><a id="mtConnect" class="btn primary" href="/api/integrations/meta/connect" style="display:none">🔗 Підключити</a><button class="ghost" id="mtStats" style="display:none">📊 Статистика</button><button class="ghost" id="mtVoice" style="display:none">✨ Голос з Instagram</button><button class="ghost" id="mtDisconnect" style="display:none">Відключити</button></div>
             <div id="mtStatsOut" class="out"></div>
           </div>
         </div>
@@ -976,11 +977,12 @@ async function loadMeta(){
   try{ const c=await api('/integrations/meta'); const st=$('mtStatus'), conn=$('mtConnect'), dis=$('mtDisconnect'), stats=$('mtStats'); if(!st) return;
     if(!c.configured){ st.textContent='⚠ META_APP_ID не налаштований.'; [conn,dis,stats].forEach(b=>b&&(b.style.display='none')); return; }
     const row=$('mtPageRow');
-    if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.pageName?(' · FB: <b>'+esc(c.pageName)+'</b>'):'')+(c.igUsername?(' · IG: <b>@'+esc(c.igUsername)+'</b>'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-flex'; if(stats)stats.style.display='inline-flex'; if(row)row.style.display='flex'; loadMetaPages(); }
-    else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-flex'; if(dis)dis.style.display='none'; if(stats)stats.style.display='none'; if(row)row.style.display='none'; }
+    if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.pageName?(' · FB: <b>'+esc(c.pageName)+'</b>'):'')+(c.igUsername?(' · IG: <b>@'+esc(c.igUsername)+'</b>'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-flex'; if(stats)stats.style.display='inline-flex'; if($('mtVoice'))$('mtVoice').style.display=c.igUsername?'inline-flex':'none'; if(row)row.style.display='flex'; loadMetaPages(); }
+    else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-flex'; if(dis)dis.style.display='none'; if(stats)stats.style.display='none'; if($('mtVoice'))$('mtVoice').style.display='none'; if(row)row.style.display='none'; }
   }catch(e){}
 }
 $('mtDisconnect').onclick=async()=>{ if(!confirm('Відключити Facebook/Instagram?')) return; try{ await api('/integrations/meta/disconnect',{method:'POST'}); await loadMeta(); }catch(e){} };
+$('mtVoice').onclick=async()=>{ const b=$('mtVoice'); const o=b.textContent; b.disabled=true; b.textContent='…читаю пости'; try{ const r=await api('/integrations/meta/import-voice',{method:'POST'}); flash('✨ Голос виведено з '+r.count+' постів Instagram'); if(r.derived&&typeof renderDerived==='function') renderDerived(r.derived); await loadSettings(); }catch(e){ flash('⚠ '+e.message); } finally{ b.disabled=false; b.textContent=o; } };
 async function loadMetaPages(){ const sel=$('mtPage'); if(!sel) return; try{ const pages=await api('/integrations/meta/pages'); if(!Array.isArray(pages)||!pages.length){ sel.innerHTML='<option>—</option>'; return; } sel.innerHTML=pages.map(p=>'<option value="'+p.id+'"'+(p.current?' selected':'')+'>'+esc(p.name)+(p.ig?(' · IG @'+esc(p.ig)):'')+'</option>').join(''); }catch(e){ sel.innerHTML='<option>—</option>'; } }
 $('mtPage').onchange=async(e)=>{ try{ await api('/integrations/meta/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pageId:e.target.value})}); await loadMeta(); flashSaved(); }catch(err){ flash('Не вдалося змінити акаунт: '+err.message); } };
 $('mtStats').onclick=async()=>{ const o=$('mtStatsOut'); o.innerHTML='<div class="empty"><span class="spin"></span> завантаження…</div>';
@@ -1187,6 +1189,7 @@ $('saveRubrics').onclick=async()=>{ try{ await api('/rubrics',{method:'PUT',head
 
 // ---------- онбординг ----------
 const OB_STEPS=[
+  {title:'Підключи Instagram', desc:'Ми прочитаємо твої останні пости й автоматично виведемо голос бренду — найшвидший старт. Або тисни «Далі», щоб пропустити.', key:'connect', type:'connect'},
   {title:'Про що ваш бренд і для кого?', desc:'Кілька речень про те, чим ти займаєшся і для кого. Ми використаємо це як контекст у кожному пості.', key:'marketing_context', ph:'Ніша + аудиторія: хто ви, для кого пишете, який результат даєте…', req:true},
   {title:'Ваш голос — встав 3-5 своїх постів', desc:'За ними AI виведе твій тон голосу, щоб тексти звучали як ти, а не як AI.', key:'voice_examples', ph:'Приклади постів, щоб AI вивів ваш стиль…'},
   {title:'Перше джерело (необовʼязково)', desc:'Встав транскрипт сесії або просто думку — і ми одразу покажемо готові пости.', key:'__transcript', ph:'Встав транскрипт/нотатку — зробимо перший контент…'},
@@ -1197,11 +1200,25 @@ function renderOb(){
   const s=OB_STEPS[obIdx];
   $('obStep').textContent='Крок '+(obIdx+1)+' з '+OB_STEPS.length;
   $('obTitle').textContent=s.title; $('obDesc').textContent=s.desc;
-  $('obInput').placeholder=s.ph; $('obInput').value=s._val||'';
   $('obBar').style.width=((obIdx+1)/OB_STEPS.length*100)+'%';
   $('obBack').style.display=obIdx>0?'inline-flex':'none';
   $('obNext').textContent=obIdx===OB_STEPS.length-1?'Завершити ✨':'Далі →';
   $('obMsg').textContent='';
+  const oc=$('obConnect');
+  if(s.type==='connect'){
+    $('obInput').style.display='none'; oc.style.display='block'; oc.innerHTML='<div style="font-size:13px;color:var(--muted)">Перевіряю підключення…</div>';
+    api('/channels/status').then(st=>{
+      if(st&&st.instagram){
+        oc.innerHTML='<div style="padding:12px;border-radius:10px;background:var(--brand-soft);color:var(--brand);font-weight:600">✅ Instagram підключено</div><div id="obIgMsg" style="font-size:13px;color:var(--muted);margin-top:8px"></div>';
+        if(!s._imported){ s._imported=true; const m=$('obIgMsg'); if(m)m.innerHTML='<span class="spin"></span> Виводжу голос із твоїх постів…'; api('/integrations/meta/import-voice',{method:'POST'}).then(r=>{ const m2=$('obIgMsg'); if(m2)m2.textContent='✨ Голос виведено з '+r.count+' постів.'; }).catch(e=>{ const m2=$('obIgMsg'); if(m2)m2.textContent='Не вдалося прочитати пости: '+e.message; }); }
+      } else {
+        oc.innerHTML='<a class="btn primary" href="/api/integrations/meta/connect" style="display:inline-flex;text-decoration:none">📸 Підключити Instagram</a><div style="font-size:12.5px;color:var(--muted);margin-top:8px">Після підключення автоматично виведемо твій голос. Немає бізнес-IG? Тисни «Далі».</div>';
+      }
+    }).catch(()=>{ oc.innerHTML='<a class="btn primary" href="/api/integrations/meta/connect" style="display:inline-flex;text-decoration:none">📸 Підключити Instagram</a>'; });
+  } else {
+    $('obInput').style.display=''; oc.style.display='none';
+    $('obInput').placeholder=s.ph||''; $('obInput').value=s._val||'';
+  }
 }
 $('obBack').onclick=()=>{ OB_STEPS[obIdx]._val=$('obInput').value; if(obIdx>0){obIdx--;renderOb();} };
 $('obSkip').onclick=async()=>{ await saveSetting('onboarded','1'); $('onboarding').style.display='none'; };
@@ -1212,13 +1229,14 @@ $('obNext').onclick=async()=>{
   else if(s.key==='voice_examples'){ await saveSetting('voice_examples',val); if($('voiceExamples'))$('voiceExamples').value=val; }
   if(obIdx<OB_STEPS.length-1){ obIdx++; renderOb(); return; }
   $('obNext').disabled=true; $('obMsg').textContent='Налаштовую кабінет…';
-  try{ if((OB_STEPS[1]._val||'').trim()){ try{ await api('/brand/derive-voice',{method:'POST'}); }catch(e){} }
+  const valByKey=(k)=>{ const x=OB_STEPS.find(o=>o.key===k); return ((x&&x._val)||'').trim(); };
+  try{ if(valByKey('voice_examples')){ try{ await api('/brand/derive-voice',{method:'POST'}); }catch(e){} }
        try{ await api('/strategy/generate',{method:'POST'}); }catch(e){}
        await saveSetting('onboarded','1');
        await loadSettings(); await loadStrategy(); await loadRubrics();
   }catch(e){}
   // створити run (із транскрипту або з Бази бренду) і прогнати з екраном прогресу
-  const tr=(OB_STEPS[2]._val||'').trim(); let rid=null;
+  const tr=valByKey('__transcript'); let rid=null;
   try{ const r=tr?await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript:tr})}):await api('/generate/from-brand',{method:'POST'}); rid=r.runId; }catch(e){}
   if(rid){ runId=rid; localStorage.setItem('kg_run',rid); updRunLabel(); await runOnbProgress(rid); }
   $('onboarding').style.display='none';
