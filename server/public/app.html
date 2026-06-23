@@ -271,6 +271,7 @@
       </div>
       <div style="margin-left:auto;display:flex;align-items:center;gap:9px">
         <button class="primary" id="genPostsBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.8L19 9l-5.1 1.2L12 15l-1.9-4.8L5 9l5.1-1.2z"></path></svg>Згенерувати пости</button>
+        <button id="proPill" title="Режим ПРО" style="background:transparent;border:1px solid var(--line2);border-radius:9px;padding:7px 11px;font:inherit;font-weight:700;font-size:13px;cursor:pointer;color:var(--muted)">⚡ PRO</button>
         <button class="icon" id="themeToggle" title="Тема" style="width:40px;height:40px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path id="themeIcon" d="M21 12.8A9 9 0 1111.2 3a7 7 0 109.8 9.8z"></path></svg></button>
       </div>
     </div>
@@ -282,7 +283,7 @@
         <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;flex-wrap:wrap">
           <div class="tabs" id="layoutTabs">
             <div class="tab on" data-lay="studio"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="7" height="14"></rect><rect x="13" y="5" width="7" height="6"></rect><rect x="13" y="14" width="7" height="5"></rect></svg>Студія</div>
-            <div class="tab" data-lay="pipeline"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"></path></svg>Конвеєр</div>
+            <div class="tab" data-lay="pipeline"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"></path></svg>Конвеєр <span id="pipePro" style="display:none;font-size:9px;font-weight:800;background:var(--brand);color:var(--brand-ink);border-radius:5px;padding:1px 5px;margin-left:3px">PRO</span></div>
             <div class="tab" data-lay="inbox"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 11h6l2 3h2l2-3h6"></path></svg>Інбокс</div>
           </div>
           <div class="hint" id="layoutHint" style="margin:0"></div>
@@ -601,7 +602,11 @@ function setLayout(l){
   const H={studio:'Картки постів — переглянь, відредагуй, затвердь',pipeline:'Покроковий конвеєр — повний контроль над кожним етапом',inbox:'Список + редактор — швидке тріаж-затвердження'};
   $('layoutHint').textContent=H[l]||'';
 }
-document.querySelectorAll('#layoutTabs .tab').forEach(t=>t.onclick=()=>setLayout(t.dataset.lay));
+let PRO=false;
+function updateProUI(){ const p=$('proPill'); if(p){ p.innerHTML=PRO?'⚡ PRO ✓':'⚡ PRO'; p.style.color=PRO?'var(--brand)':'var(--muted)'; p.style.borderColor=PRO?'var(--brand)':'var(--line2)'; } if($('pipePro')) $('pipePro').style.display=PRO?'none':'inline-block'; }
+function openProModal(){ const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70'; ov.innerHTML='<div class="modal-card" style="max-width:480px;padding:24px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="font-size:18px">⚡ Конвеєр — режим ПРО</b><button class="icon" id="proX" style="margin-left:auto">✕</button></div><p style="color:var(--muted);font-size:14px;margin:0 0 12px;line-height:1.6">У <b>Lite</b> пости генеруються в один прохід — швидко й дешево. <b>ПРО</b> відкриває покроковий конвеєр: кожен етап окремо (ідеї → чернетки → тон → формат → де-AI → план), власний <b>промт і модель на кожному кроці</b> — повний контроль над якістю.</p><div style="font-size:12.5px;color:var(--faint);margin-bottom:14px">Оплата зʼявиться згодом. Зараз можна увімкнути для тесту.</div><div class="btnrow"><button class="primary" id="proEnable">Увімкнути ПРО (тест)</button></div></div>'; document.body.appendChild(ov); const close=()=>ov.remove(); ov.addEventListener("click",e=>{if(e.target===ov)close();}); ov.querySelector("#proX").onclick=close; ov.querySelector("#proEnable").onclick=async()=>{ try{ await saveSetting("pro","1"); PRO=true; updateProUI(); close(); setLayout("pipeline"); flash("ПРО увімкнено ✓"); }catch(e){ flash("⚠ "+e.message); } }; }
+document.querySelectorAll('#layoutTabs .tab').forEach(t=>t.onclick=()=>{ if(t.dataset.lay==='pipeline' && !PRO){ openProModal(); return; } setLayout(t.dataset.lay); });
+if($('proPill')) $('proPill').onclick=async()=>{ if(PRO){ if(confirm('Вимкнути ПРО? Повернешся до простого режиму Lite.')){ try{ await saveSetting('pro','0'); PRO=false; updateProUI(); if($('layPipeline')&&$('layPipeline').style.display!=='none') setLayout('studio'); flash('ПРО вимкнено'); }catch(e){} } } else openProModal(); };
 $('toStudio').onclick=()=>setLayout('studio');
 $('toCalendar').onclick=()=>go('publish');
 
@@ -643,6 +648,7 @@ async function loadSettings(){
     for(const [tid,key] of Object.entries(SET)){ if(map[key]!=null && $(tid)) $(tid).value = map[key]; }
     if(map.output_language && $('langSel')) $('langSel').value = map.output_language;
     TZ = map.timezone || TZ; buildTzSel();
+    PRO = (map.pro==='1'); updateProUI();
     if(map.tone_of_voice_derived) renderDerived(map.tone_of_voice_derived);
     $('srvDot').style.background='var(--brand)';
   }catch(e){ $('srvDot').style.background='var(--danger)'; }
@@ -1203,6 +1209,7 @@ function renderOb(){
   const s=OB_STEPS[obIdx];
   $('obStep').textContent='Крок '+(obIdx+1)+' з '+OB_STEPS.length;
   $('obTitle').textContent=s.title; $('obDesc').textContent=s.desc;
+  if(s.key==='voice_examples' && obVoiceImported) $('obDesc').textContent='✅ Голос уже виведено з твого Instagram. Можеш одразу «Далі» — або додай ще приклади постів.';
   $('obBar').style.width=((obIdx+1)/OB_STEPS.length*100)+'%';
   $('obBack').style.display=obIdx>0?'inline-flex':'none';
   $('obNext').textContent=obIdx===OB_STEPS.length-1?'Завершити ✨':'Далі →';
@@ -1216,28 +1223,32 @@ function renderOb(){
   }
 }
 $('obBack').onclick=()=>{ OB_STEPS[obIdx]._val=$('obInput').value; if(obIdx>0){obIdx--;renderOb();} };
-$('obSkip').onclick=async()=>{ await saveSetting('onboarded','1'); $('onboarding').style.display='none'; };
+$('obSkip').onclick=async()=>{ OB_STEPS[obIdx]._val=($('obInput').style.display!=='none'?$('obInput').value:''); await finishOnboarding(); };
 $('obNext').onclick=async()=>{
   const s=OB_STEPS[obIdx]; const val=$('obInput').value.trim(); s._val=val;
   if(s.req && !val){ $('obMsg').textContent='Заповніть це поле'; return; }
   if(s.key==='marketing_context'){ await saveSetting('marketing_context',val); if($('mkt'))$('mkt').value=val; }
   else if(s.key==='voice_examples'){ await saveSetting('voice_examples',val); if($('voiceExamples'))$('voiceExamples').value=val; }
   if(obIdx<OB_STEPS.length-1){ obIdx++; renderOb(); return; }
-  $('obNext').disabled=true; $('obMsg').textContent='Налаштовую кабінет…';
+  await finishOnboarding();
+};
+// завершити онбординг тим, що ВЖЕ маємо (включно з «Пропустити»): голос/бренд → run → генерація
+async function finishOnboarding(){
+  if($('obNext')) $('obNext').disabled=true; if($('obMsg')) $('obMsg').textContent='Налаштовую кабінет…';
   const valByKey=(k)=>{ const x=OB_STEPS.find(o=>o.key===k); return ((x&&x._val)||'').trim(); };
   try{ if(valByKey('voice_examples')){ try{ await api('/brand/derive-voice',{method:'POST'}); }catch(e){} }
        try{ await api('/strategy/generate',{method:'POST'}); }catch(e){}
        await saveSetting('onboarded','1');
        await loadSettings(); await loadStrategy(); await loadRubrics();
   }catch(e){}
-  // створити run (із транскрипту або з Бази бренду) і прогнати з екраном прогресу
+  // run з транскрипту, інакше з Бази бренду (вона вже містить голос з IG, якщо підключав)
   const tr=valByKey('__transcript'); let rid=null;
   try{ const r=tr?await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript:tr})}):await api('/generate/from-brand',{method:'POST'}); rid=r.runId; }catch(e){}
   if(rid){ runId=rid; localStorage.setItem('kg_run',rid); updRunLabel(); await runOnbProgress(rid); }
   $('onboarding').style.display='none';
   go('create'); setLayout('studio'); try{ await refresh(); }catch(e){}
   flash(rid?'Готово — ось твої перші пости 🎉':'Готово! Додай джерело й натисни «Згенерувати пости».');
-};
+}
 async function runOnbProgress(rid){
   const card=$('onboarding').querySelector('.modal-card');
   if(card) card.innerHTML='<div style="padding:40px 34px;text-align:center"><h2 style="font-size:21px;font-weight:600;margin:0 0 8px">Створюю твої перші пости…</h2><p style="color:var(--muted);font-size:14px;margin:0 0 16px">Це ~10-30 секунд — не закривай вкладку.</p><div><span class="spin"></span></div></div>';
