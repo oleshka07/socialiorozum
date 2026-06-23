@@ -522,6 +522,22 @@
           <div class="btnrow"><button class="primary" id="ffSave">Зберегти</button><button class="ghost" id="ffTest">Перевірити</button><span id="ffMsg" style="font-size:12px;color:var(--muted)"></span></div>
         </div>
         <div class="panel">
+          <div class="ph">💎 Тариф</div>
+          <div class="grid2" style="margin-top:6px">
+            <div id="planLite" style="border:2px solid var(--line);border-radius:12px;padding:16px">
+              <div style="font-weight:800;font-size:16px">Lite <span style="font-weight:600;color:var(--muted);font-size:13px">· безкоштовно</span></div>
+              <ul style="margin:10px 0;padding-left:18px;font-size:13px;color:var(--ink2);line-height:1.8"><li>Генерація постів в 1 прохід</li><li>Блок «Ідеї → пости»</li><li>Зображення + заголовки</li><li>Усі канали + календар</li></ul>
+              <button class="ghost" id="planLiteBtn" style="width:100%">Поточний</button>
+            </div>
+            <div id="planPro" style="border:2px solid var(--brand);border-radius:12px;padding:16px">
+              <div style="font-weight:800;font-size:16px;color:var(--brand)">PRO <span style="font-weight:600;color:var(--muted);font-size:13px">· скоро платно</span></div>
+              <ul style="margin:10px 0;padding-left:18px;font-size:13px;color:var(--ink2);line-height:1.8"><li>Усе з Lite</li><li>Покроковий конвеєр (6 кроків)</li><li>Свій промт на кожен крок</li><li>Вибір моделі на кожен крок</li></ul>
+              <button class="primary" id="planProBtn" style="width:100%">Перейти на ПРО</button>
+            </div>
+          </div>
+          <div class="hint" style="margin-top:10px">Тестовий режим — оплата зʼявиться згодом. ПРО можна вмикати/вимикати безкоштовно.</div>
+        </div>
+        <div class="panel">
           <div class="ph">👤 Акаунт</div>
           <div class="hint" id="accInfo">…</div>
           <div class="grid2" style="margin-top:12px">
@@ -606,7 +622,7 @@ function selectView(v){
   $('genPostsBtn').style.display=v==='create'?'inline-flex':'none';
   if(v==='analytics') loadAnalytics();
   if(v==='publish') loadPublish();
-  if(v==='settings') loadAccount();
+  if(v==='settings'){ loadAccount(); loadPlans(); }
   if(typeof loadTasks==='function') loadTasks();
 }
 function go(v){ selectView(v); }
@@ -622,6 +638,13 @@ function openTasksModal(){ const tasks=window._tasks||[]; const SECN={create:'С
   order.concat(Object.keys(bySec).filter(s=>!order.includes(s))).forEach(sec=>{ const list=bySec[sec]; if(!list) return; html+='<div style="font-weight:700;font-size:12.5px;color:var(--muted);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.03em">'+(SECN[sec]||sec)+'</div>'; list.forEach(t=>{ html+='<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)"><span style="width:22px;height:22px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:12px;'+(t.done?'background:var(--brand);color:#fff':'border:2px solid var(--line2);color:var(--faint)')+'">'+(t.done?'✓':'')+'</span><div style="flex:1;font-size:13.5px;'+(t.done?'color:var(--faint);text-decoration:line-through':'')+'">'+esc(t.label)+'</div><span style="font-size:12px;color:var(--muted)">+'+t.points+'</span>'+(t.done?'':(t.id==='plans'?'<button class="ghost tkAck" data-key="seen_plans" style="padding:5px 10px;font-size:12px">Зрозуміло</button>':'<button class="ghost tkGo" data-sec="'+t.section+'" style="padding:5px 10px;font-size:12px">Перейти</button>'))+'</div>'; }); });
   html+='</div>'; const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='75'; ov.innerHTML=html; document.body.appendChild(ov); const close=()=>ov.remove(); ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#tkX').onclick=close; ov.querySelectorAll('.tkGo').forEach(b=>b.onclick=()=>{ close(); go(b.dataset.sec); }); ov.querySelectorAll('.tkAck').forEach(b=>b.onclick=async()=>{ try{ await api('/tasks/ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:b.dataset.key})}); close(); loadTasks(); }catch(e){} }); }
 if($('scorePill')) $('scorePill').onclick=openTasksModal;
+function loadPlans(){ const lite=$('planLiteBtn'), pro=$('planProBtn'); if(!pro) return;
+  if(PRO){ pro.textContent='✓ Активно — вимкнути'; pro.className='ghost'; if(lite){ lite.textContent='Обрати Lite'; lite.className='ghost'; } }
+  else { pro.textContent='Перейти на ПРО'; pro.className='primary'; if(lite){ lite.textContent='Поточний'; lite.className='ghost'; } }
+  api('/tasks/ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'seen_plans'})}).then(()=>{ if(typeof loadTasks==='function') loadTasks(); }).catch(()=>{});
+}
+if($('planProBtn')) $('planProBtn').onclick=async()=>{ try{ const next=PRO?'0':'1'; await saveSetting('pro',next); PRO=(next==='1'); if(typeof updateProUI==='function') updateProUI(); loadPlans(); if(typeof loadTasks==='function') loadTasks(); flash(PRO?'ПРО увімкнено ✓':'ПРО вимкнено'); if(!PRO&&$('layPipeline')&&$('layPipeline').style.display!=='none') setLayout('studio'); }catch(e){ flash('⚠ '+e.message); } };
+if($('planLiteBtn')) $('planLiteBtn').onclick=async()=>{ if(!PRO) return; try{ await saveSetting('pro','0'); PRO=false; if(typeof updateProUI==='function') updateProUI(); loadPlans(); if(typeof loadTasks==='function') loadTasks(); flash('Lite активний'); if($('layPipeline')&&$('layPipeline').style.display!=='none') setLayout('studio'); }catch(e){} };
 function setLayout(l){
   const map={studio:'layStudio',pipeline:'layPipeline',inbox:'layInbox'};
   for(const k in map){ const el=$(map[k]); if(el) el.style.display = k===l?'':'none'; }
