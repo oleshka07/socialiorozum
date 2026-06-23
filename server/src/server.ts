@@ -689,7 +689,7 @@ app.post("/api/runs/:id/generate-lite", async (req: any, reply) => {
   const id = req.params.id; const ws = req.user.workspace_id;
   if (!(await runOwned(id, ws))) return reply.code(404).send({ error: "run не знайдено" });
   try {
-    const count = await generatePostsOnePass(id, Number(req.body?.count) || 6);
+    const count = await generatePostsOnePass(id, Number(req.body?.count) || 6, Array.isArray(req.body?.ideas) ? req.body.ideas : undefined);
     let images = 0;
     if (req.body?.images) {
       const posts = await q<{ id: string }>(`select id from post where run_id=$1 and stage='final'`, [id]);
@@ -698,6 +698,17 @@ app.post("/api/runs/:id/generate-lite", async (req: any, reply) => {
     }
     return { ok: true, count, images };
   } catch (e: any) { await logEvent("error", "lite", e.message, { runId: id }, req.user.id); return reply.code(500).send({ error: e.message }); }
+});
+
+// згенерувати ідеї (дешево) для блоку «💡 Ідеї → пости» у Студії
+app.post("/api/runs/:id/ideas", async (req: any, reply) => {
+  const id = req.params.id;
+  if (!(await runOwned(id, req.user.workspace_id))) return reply.code(404).send({ error: "run не знайдено" });
+  try {
+    await executeStep(id, "extract_ideas", { count: Number(req.body?.count) || 6, rubrics: Array.isArray(req.body?.rubrics) ? req.body.rubrics : undefined });
+    const ideas = await q<{ idea: string; angle: string }>(`select idea, angle from idea where run_id=$1 order by idx`, [id]);
+    return { ok: true, ideas };
+  } catch (e: any) { await logEvent("error", "ideas", e.message, { runId: id }, req.user.id); return reply.code(500).send({ error: e.message }); }
 });
 
 // згенерувати зображення для одного поста (кнопка «🎨 Зображення»)

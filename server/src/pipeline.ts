@@ -300,7 +300,7 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
 
 // ---- LITE: один зібраний промт (усі кроки кишки в одному) ----
 // Зібрати спільний системний промт Lite-генерації (для самої генерації + для перегляду користувачем).
-export async function buildLitePrompt(workspaceId: string, count: number): Promise<{ system: string; model: string }> {
+export async function buildLitePrompt(workspaceId: string, count: number, ideas?: string[]): Promise<{ system: string; model: string }> {
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
   const rubs = await q<{ name: string; share: number; description: string }>(
@@ -308,22 +308,27 @@ export async function buildLitePrompt(workspaceId: string, count: number): Promi
   const rubricsText = rubs.length
     ? "\n\nРубрики (орієнтир тем і пропорцій у наборі): " + rubs.map((r) => `${r.name} ~${r.share}%${r.description ? ` (${r.description})` : ""}`).join("; ") + "."
     : "";
+  const ideasText = (ideas && ideas.length)
+    ? "\n\nНапиши рівно по ОДНОМУ посту на кожну з цих тем (у тому ж порядку):\n" + ideas.map((t, i) => `${i + 1}. ${t}`).join("\n")
+    : "";
+  const n = ideas && ideas.length ? ideas.length : count;
   const system =
     "Ти досвідчений SMM-копірайтер. За вхідним матеріалом нижче згенеруй готові до публікації пости. " +
     "Кожен пост ОДРАЗУ фінальний: у голосі бренду, живою людською мовою без ознак AI (без канцеляризмів, без «варто зазначити/у сучасному світі», без шаблонних списків заради списків), з чітким гачком, користю та мʼяким закликом." +
     (s.marketing_context ? `\n\nБренд і аудиторія: ${s.marketing_context}` : "") +
     (s.tone_of_voice ? `\n\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") +
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
-    rubricsText +
-    `\n\nЗгенеруй рівно ${count} різних постів. Поверни ЛИШЕ валідний JSON-масив обʼєктів: [{"text":"повний текст поста","image_prompt":"короткий опис зображення англійською для генерації — сцена/обʼєкти/настрій, без тексту на зображенні"}, …]. Мова текстів постів: ${lang}.`;
+    rubricsText + ideasText +
+    `\n\nЗгенеруй рівно ${n} різних постів. Поверни ЛИШЕ валідний JSON-масив обʼєктів: [{"text":"повний текст поста","image_prompt":"короткий опис зображення англійською для генерації — сцена/обʼєкти/настрій, без тексту на зображенні"}, …]. Мова текстів постів: ${lang}.`;
   return { system, model: "openai/gpt-4o" };
 }
 
 // Lite-генерація: ОДИН виклик LLM -> N готових постів (замість 5 кроків кишки).
-export async function generatePostsOnePass(runId: string, count: number): Promise<number> {
+export async function generatePostsOnePass(runId: string, count: number, ideas?: string[]): Promise<number> {
   const { workspace_id, transcript } = await runContext(runId);
-  const n = Math.max(1, Math.min(12, Number(count) || 6));
-  const { system, model } = await buildLitePrompt(workspace_id, n);
+  const sel = (ideas || []).map((t) => String(t).trim()).filter(Boolean);
+  const n = Math.max(1, Math.min(12, sel.length ? sel.length : (Number(count) || 6)));
+  const { system, model } = await buildLitePrompt(workspace_id, n, sel.length ? sel : undefined);
   const out = await chat(model, system, `Вхідний матеріал:\n---\n${transcript}`, { workspaceId: workspace_id, step: "lite" });
   let posts: { text: string; image_prompt: string }[] = [];
   try {

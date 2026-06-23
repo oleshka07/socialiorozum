@@ -296,6 +296,13 @@
               <div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 001 1h4"></path><path d="M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z"></path></svg><span style="font-weight:700;font-size:14px">Джерело</span></div>
               <div style="padding:14px 16px" id="srcCard"><div class="empty">Немає активного джерела.</div></div>
             </div>
+            <div class="panel" style="margin:0">
+              <div style="font-weight:700;font-size:14px;margin-bottom:6px">💡 Ідеї → пости</div>
+              <div class="hint" style="margin:0 0 8px">Згенеруй ідеї, обери потрібні — і створимо пости саме з них.</div>
+              <div class="btnrow"><button class="ghost" id="genIdeas">Згенерувати ідеї</button><span id="ideasMsg" style="font-size:12px;color:var(--muted)"></span></div>
+              <div id="ideaList" style="margin-top:8px;display:flex;flex-direction:column;gap:5px"></div>
+              <button class="primary" id="ideasToPosts" style="width:100%;margin-top:10px;display:none">✨ Створити пости з обраних</button>
+            </div>
             <details class="disc">
               <summary><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 5v4M8 15v4"></path></svg>Налаштування генерації<svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--faint)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-left:auto"><path d="M6 9l6 6 6-6"></path></svg></summary>
               <div style="padding:2px 16px 16px;display:flex;flex-direction:column;gap:14px">
@@ -892,6 +899,30 @@ async function genPosts(){
   finally{ setBusy(false); }
 }
 $('genPostsBtn').onclick=genPosts; $('studioMore').onclick=genPosts;
+async function genIdeas(){
+  if(busy) return;
+  let rid; try{ rid=await ensureRun(); }catch(e){ try{ const r=await api('/generate/from-brand',{method:'POST'}); rid=r.runId; runId=rid; localStorage.setItem('kg_run',rid); updRunLabel(); }catch(e2){ go('brand'); flash('Спершу заповни Базу бренду (ніша й аудиторія).'); return; } }
+  const m=$('ideasMsg'); if(m){ m.style.color='var(--muted)'; m.innerHTML='<span class="spin"></span> думаю…'; } setBusy(true);
+  const cnt=Number(($('ideaCount')||{}).value)||6;
+  try{ const r=await api('/runs/'+rid+'/ideas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:cnt})}); renderIdeaList(r.ideas||[]); if(m)m.textContent=''; }
+  catch(e){ if(m){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } }
+  finally{ setBusy(false); }
+}
+function renderIdeaList(ideas){
+  const el=$('ideaList'); if(!el) return;
+  if(!ideas.length){ el.innerHTML='<div class="empty">Ідей нема — спробуй ще.</div>'; $('ideasToPosts').style.display='none'; return; }
+  el.innerHTML=ideas.map(it=>'<label class="rchip" style="display:flex;gap:7px;align-items:flex-start;text-align:left;cursor:pointer"><input type="checkbox" class="ideaCb" data-idea="'+esc(it.idea)+'" checked><span style="font-size:12.5px;line-height:1.4">'+esc(it.idea)+'</span></label>').join('');
+  $('ideasToPosts').style.display='block';
+}
+if($('genIdeas')) $('genIdeas').onclick=genIdeas;
+if($('ideasToPosts')) $('ideasToPosts').onclick=async()=>{
+  const picked=Array.from(document.querySelectorAll('#ideaList .ideaCb:checked')).map(c=>c.dataset.idea).filter(Boolean);
+  if(!picked.length){ flash('Обери хоча б одну ідею'); return; }
+  if(busy||!runId) return; setBusy(true); setLayout('studio'); flash('Створюю пости з обраних ідей…');
+  try{ const r=await api('/runs/'+runId+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ideas:picked})}); await refresh(); flash('Готово — '+(r.count||0)+' постів на перегляд.'); }
+  catch(e){ flash('⚠ '+e.message); }
+  finally{ setBusy(false); }
+};
 if($('viewPrompt')) $('viewPrompt').onclick=async()=>{ try{ const cnt=Number(($('ideaCount')||{}).value)||6; const r=await api('/generate/prompt-preview?count='+cnt); const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70'; ov.innerHTML='<div class="modal-card" style="max-width:680px;padding:20px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b>Спільний промт генерації · '+esc(r.model||'')+'</b><button class="icon" id="vpX" style="margin-left:auto">✕</button></div><pre style="white-space:pre-wrap;font-size:12.5px;line-height:1.5;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;max-height:60vh;overflow:auto;margin:0">'+esc(r.system||'')+'</pre></div>'; document.body.appendChild(ov); const close=()=>ov.remove(); ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#vpX').onclick=close; }catch(e){ flash('⚠ '+e.message); } };
 function renderPlan(){
   const o=$('o7'); if(!o) return;
