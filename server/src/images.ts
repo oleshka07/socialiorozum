@@ -2,6 +2,7 @@
 //  - openai: gpt-image-1 (quality=low) — реюзає OPENAI_API_KEY
 //  - fal:    FLUX.1 [schnell] через fal.ai — найдешевше (FAL_KEY)
 //  - gemini: Gemini 2.5 Flash Image «Nano Banana» (GEMINI_API_KEY)
+import sharp from "sharp";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
 import { saveMedia } from "./media.js";
@@ -73,7 +74,31 @@ export async function generateImage(ws: string, prompt: string): Promise<Img> {
   return img;
 }
 
-// згенерувати зображення для поста (за його image_prompt або з тексту) і прикріпити (post.media_id)
+// ---- накладання заголовка на зображення (sharp + SVG) ----
+function escXml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+// короткий заголовок із суті поста (перший рядок, без markdown, до ~7 слів)
+function deriveHeadline(content: string): string {
+  const first = (content || "").split("\n").map((l) => l.trim()).find(Boolean) || "";
+  const clean = first.replace(/^[#*>\-\s]+/, "").replace(/[*_`#]/g, "").trim();
+  let h = clean.split(/\s+/).slice(0, 7).join(" ");
+  if (h.length > 48) h = h.slice(0, 46).trim() + "…";
+  return h;
+}
+async function overlayHeadline(buf: Buffer, headline: string): Promise<{ buffer: Buffer; mime: string }> {
+  const W = 1024, H = 1024;
+  const base = sharp(buf).resize(W, H, { fit: "cover" });
+  const words = headline.split(/\s+/); const lines: string[] = []; let cur = "";
+  for (const w of words) { if ((cur + " " + w).trim().length > 16) { if (cur) lines.push(cur.trim()); cur = w; } else cur = (cur + " " + w).trim(); }
+  if (cur) lines.push(cur);
+  const fs = 66, lh = 80, pad = 56; const blockH = lines.length * lh + pad;
+  const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.78"/></linearGradient></defs><rect x="0" y="${H - blockH - 40}" width="${W}" height="${blockH + 40}" fill="url(#g)"/>${lines.map((ln, i) => `<text x="${pad}" y="${H - pad - (lines.length - 1 - i) * lh}" font-family="'Segoe UI',Arial,sans-serif" font-size="${fs}" font-weight="800" fill="#fff">${escXml(ln)}</text>`).join("")}</svg>`;
+  const out = await base.composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).jpeg({ quality: 88 }).toBuffer();
+  return { buffer: out, mime: "image/jpeg" };
+}
+
+// згенерувати зображення для поста (за його image_prompt або з тексту) + опційно накласти заголовок, прикріпити (post.media_id)
 export async function generateImageForPost(ws: string, postId: string): Promise<string> {
   const post = await one<{ content: string; image_prompt: string | null }>(
     `select p.content, p.image_prompt from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
@@ -82,8 +107,14 @@ export async function generateImageForPost(ws: string, postId: string): Promise<
   const base = (post.image_prompt || "").trim() || `Зображення для соцмереж за темою: ${(post.content || "").split("\n")[0].slice(0, 200)}`;
   const prompt = `${base}. Стиль: чисте, сучасне, мінімалістичне, привабливе; без тексту на зображенні.`;
   const img = await generateImage(ws, prompt);
-  const ext = img.mime.includes("png") ? "png" : "jpg";
-  const saved = await saveMedia(ws, { buffer: img.buffer, mime: img.mime, name: `ai.${ext}`, source: "ai" });
+  let buf = img.buffer, mime = img.mime;
+  const ov = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='image_overlay'`, [ws]);
+  if ((ov?.content ?? "1") !== "0") {
+    const hl = deriveHeadline(post.content);
+    if (hl) { try { const r = await overlayHeadline(buf, hl); buf = r.buffer; mime = r.mime; } catch { /* оверлей не критичний */ } }
+  }
+  const ext = mime.includes("png") ? "png" : "jpg";
+  const saved = await saveMedia(ws, { buffer: buf, mime, name: `ai.${ext}`, source: "ai" });
   await q(`update post set media_id=$2 where id=$1`, [postId, saved.id]);
   return saved.filename;
 }

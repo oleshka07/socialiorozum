@@ -709,14 +709,25 @@ app.post("/api/posts/:postId/image", async (req: any, reply) => {
 
 // провайдер зображень: статус (які ключі є) + вибір
 app.get("/api/integrations/images", async (req: any) => {
-  const row = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='image_provider'`, [req.user.workspace_id]);
-  return { provider: row?.content || "openai", available: imageProviders() };
+  const ws = req.user.workspace_id;
+  const [prov, ov] = await Promise.all([
+    one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='image_provider'`, [ws]),
+    one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='image_overlay'`, [ws]),
+  ]);
+  return { provider: prov?.content || "openai", overlay: (ov?.content ?? "1") !== "0", available: imageProviders() };
 });
 app.post("/api/integrations/images", async (req: any, reply) => {
-  const p = String(req.body?.provider ?? "");
-  if (!["openai", "fal", "gemini"].includes(p)) return reply.code(400).send({ error: "невідомий провайдер" });
-  await q(`insert into settings_block(workspace_id,key,content) values($1,'image_provider',$2)
-           on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`, [req.user.workspace_id, p]);
+  const ws = req.user.workspace_id;
+  if (req.body?.provider !== undefined) {
+    const p = String(req.body.provider);
+    if (!["openai", "fal", "gemini"].includes(p)) return reply.code(400).send({ error: "невідомий провайдер" });
+    await q(`insert into settings_block(workspace_id,key,content) values($1,'image_provider',$2)
+             on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`, [ws, p]);
+  }
+  if (req.body?.overlay !== undefined) {
+    await q(`insert into settings_block(workspace_id,key,content) values($1,'image_overlay',$2)
+             on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`, [ws, req.body.overlay ? "1" : "0"]);
+  }
   return { ok: true };
 });
 

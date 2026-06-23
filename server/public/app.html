@@ -470,7 +470,7 @@
       <!-- ============ SETTINGS ============ -->
       <section class="viewsec" data-view="settings">
         <div class="panel"><label class="fl">🕒 Часовий пояс</label><select id="tzSel"></select><div class="hint">Час планування й календаря рахується за цим поясом (визначається автоматично, можна змінити).</div></div>
-        <div class="panel"><label class="fl">🎨 Генерація зображень</label><select id="imgProv"></select><div class="hint">Провайдер AI-зображень. Недоступні — треба додати ключ у .env (FAL_KEY / GEMINI_API_KEY).</div></div>
+        <div class="panel"><label class="fl">🎨 Генерація зображень</label><select id="imgProv"></select><label class="rchip" style="margin-top:10px;display:inline-flex"><input type="checkbox" id="imgOverlay"> Накладати заголовок на зображення</label><div class="hint">Провайдер AI-зображень. Недоступні — треба додати ключ у .env (FAL_KEY / GEMINI_API_KEY).</div></div>
         <div class="panel">
           <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--tg)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M22 4L2 11l6 2 2 6 3-4 5 4 4-15z"></path></svg></span>Telegram</div>
           <div class="hint" style="line-height:1.7">1. @BotFather → <code>/newbot</code> → токен. 2. Додай бота <b>адміном</b> у канал і групу. 3. Встав токен; канал — <code>@username</code> або id; група — числовий id. 4. «Перевірити».</div>
@@ -747,7 +747,7 @@ function renderStudio(){
   });
 }
 async function genImageFor(id,btn){ const o=btn.textContent; btn.disabled=true; btn.textContent='⏳'; try{ await api('/posts/'+id+'/image',{method:'POST'}); await refresh(); flash('🎨 Зображення додано'); }catch(e){ flash('⚠ '+e.message); } finally{ btn.disabled=false; btn.textContent=o; } }
-async function loadImageProvider(){ const sel=$('imgProv'); if(!sel) return; try{ const c=await api('/integrations/images'); const A=c.available||{}; const opts=[['openai','OpenAI gpt-image-1',A.openai],['fal','FLUX schnell (fal.ai)',A.fal],['gemini','Nano Banana (Gemini)',A.gemini]]; sel.innerHTML=opts.map(o=>'<option value="'+o[0]+'"'+(c.provider===o[0]?' selected':'')+(o[2]?'':' disabled')+'>'+o[1]+(o[2]?'':' — нема ключа')+'</option>').join(''); sel.onchange=async()=>{ try{ await api('/integrations/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:sel.value})}); flashSaved(); }catch(e){ flash('⚠ '+e.message); } }; }catch(e){} }
+async function loadImageProvider(){ const sel=$('imgProv'); if(!sel) return; try{ const c=await api('/integrations/images'); const A=c.available||{}; const opts=[['openai','OpenAI gpt-image-1',A.openai],['fal','FLUX schnell (fal.ai)',A.fal],['gemini','Nano Banana (Gemini)',A.gemini]]; sel.innerHTML=opts.map(o=>'<option value="'+o[0]+'"'+(c.provider===o[0]?' selected':'')+(o[2]?'':' disabled')+'>'+o[1]+(o[2]?'':' — нема ключа')+'</option>').join(''); sel.onchange=async()=>{ try{ await api('/integrations/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:sel.value})}); flashSaved(); }catch(e){ flash('⚠ '+e.message); } }; const ov=$('imgOverlay'); if(ov){ ov.checked=!!c.overlay; ov.onchange=async()=>{ try{ await api('/integrations/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({overlay:ov.checked})}); flashSaved(); }catch(e){} }; } }catch(e){} }
 let InboxSel=null;
 function renderInbox(){
   const list=$('inboxList'), det=$('inboxDetail'); if(!list||!det) return;
