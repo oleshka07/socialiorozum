@@ -1177,6 +1177,59 @@ app.put("/api/rubrics", async (req: any) =>
   ({ ok: true, count: await saveRubrics(req.user.workspace_id, Array.isArray(req.body?.rubrics) ? req.body.rubrics : []) }));
 
 // ===================== БАНК + ПЛАНУВАННЯ (по постах, рівень workspace) =====================
+// задачі/онбординг-чеклист + бал заповнення (гейміфікація)
+app.get("/api/tasks", async (req: any) => {
+  const ws = req.user.workspace_id;
+  const rows = await q<{ key: string; content: string }>(`select key,content from settings_block where workspace_id=$1`, [ws]);
+  const S: Record<string, string> = {}; for (const r of rows) S[r.key] = (r.content || "").trim();
+  const [tg, th, mt, gd, trc, src, med, posts, appr, sched, pub, strat] = await Promise.all([
+    one<any>(`select bot_token,channel_chat_id,group_chat_id from telegram_config where workspace_id=$1`, [ws]),
+    one<any>(`select access_token from threads_config where workspace_id=$1`, [ws]),
+    one<any>(`select page_token from meta_config where workspace_id=$1`, [ws]),
+    one<any>(`select refresh_token from gdrive_config where workspace_id=$1`, [ws]),
+    one<any>(`select api_key from transcription_config where workspace_id=$1`, [ws]),
+    one<{ n: number }>(`select count(*)::int n from source where workspace_id=$1`, [ws]),
+    one<{ n: number }>(`select count(*)::int n from media_asset where workspace_id=$1`, [ws]),
+    one<{ n: number }>(`select count(*)::int n from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and p.stage='final'`, [ws]),
+    one<{ n: number }>(`select count(*)::int n from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and p.review='approved'`, [ws]),
+    one<{ n: number }>(`select count(*)::int n from schedule_slot ss left join plan_item pi on pi.id=ss.plan_item_id join post p on p.id=coalesce(ss.post_id,pi.post_id) join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1`, [ws]),
+    one<{ n: number }>(`select (select count(*) from telegram_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.status='sent')
+      + (select count(*) from meta_publish mp join post p on p.id=mp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and mp.status='sent')
+      + (select count(*) from threads_publish thp join post p on p.id=thp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and thp.status='sent') as n`, [ws]),
+    one<{ data: any }>(`select data from strategy where workspace_id=$1`, [ws]),
+  ]);
+  const tgOn = !!(tg && tg.bot_token && (tg.channel_chat_id || tg.group_chat_id));
+  const igfbOn = !!(mt && mt.page_token);
+  const thOn = !!(th && th.access_token);
+  const tasks = [
+    { id: "brand", section: "brand", points: 15, label: "Заповнити Базу бренду (ніша й аудиторія)", done: !!S.marketing_context },
+    { id: "voice", section: "brand", points: 10, label: "Налаштувати голос бренду", done: !!S.tone_of_voice },
+    { id: "chan1", section: "settings", points: 15, label: "Підключити хоча б один канал", done: tgOn || igfbOn || thOn },
+    { id: "chanAll", section: "settings", points: 10, label: "Підключити всі канали (Telegram, IG/FB, Threads)", done: tgOn && igfbOn && thOn },
+    { id: "transcriber", section: "settings", points: 5, label: "Підключити транскрибатор (Fireflies)", done: !!(trc && trc.api_key) },
+    { id: "gdrive", section: "sources", points: 5, label: "Підключити Google Drive", done: !!(gd && gd.refresh_token) },
+    { id: "source", section: "sources", points: 5, label: "Додати джерело контенту", done: (src?.n || 0) > 0 },
+    { id: "media", section: "sources", points: 5, label: "Завантажити або згенерувати фото", done: (med?.n || 0) > 0 },
+    { id: "strategy", section: "strategy", points: 5, label: "Згенерувати стратегію", done: !!(strat && strat.data && Object.keys(strat.data).length) },
+    { id: "gen10", section: "create", points: 10, label: "Згенерувати перші 10 постів", done: (posts?.n || 0) >= 10 },
+    { id: "approve", section: "create", points: 5, label: "Затвердити пости", done: (appr?.n || 0) > 0 },
+    { id: "schedule", section: "publish", points: 5, label: "Запланувати пост у календарі", done: (sched?.n || 0) > 0 },
+    { id: "publish", section: "publish", points: 10, label: "Зробити першу публікацію", done: Number(pub?.n || 0) > 0 },
+    { id: "plans", section: "settings", points: 5, label: "Ознайомитися з тарифами", done: S.seen_plans === "1" },
+  ];
+  const total = tasks.reduce((a, t) => a + t.points, 0);
+  const got = tasks.filter((t) => t.done).reduce((a, t) => a + t.points, 0);
+  return { score: Math.round((got / total) * 100), points: got, total, tasks };
+});
+
+// позначити задачу-прапорець виконаною (напр. «Ознайомитися з тарифами»)
+app.post("/api/tasks/ack", async (req: any, reply) => {
+  const key = String(req.body?.key ?? "");
+  if (!["seen_plans"].includes(key)) return reply.code(400).send({ error: "невідома задача" });
+  await q(`insert into settings_block(workspace_id,key,content) values($1,$2,'1') on conflict (workspace_id,key) do update set content='1', updated_at=now()`, [req.user.workspace_id, key]);
+  return { ok: true };
+});
+
 app.get("/api/bank", async (req: any) => {
   return q(`select p.id, p.content, p.review, p.created_at, src.title as source_title
             from post p join pipeline_run r on r.id=p.run_id join source src on src.id=r.source_id
