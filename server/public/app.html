@@ -313,6 +313,7 @@
               <div class="ftabs" id="studioFilters"></div>
               <button class="ghost" id="studioMore" style="margin-left:auto"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v4h4"></path></svg>Згенерувати ще</button>
               <button class="primary" id="toCalendar" style="display:none">До календаря →</button>
+              <button class="ghost" id="viewPrompt" title="Переглянути спільний промт генерації">👁 Промт</button>
             </div>
             <div class="studio-grid" id="studioGrid"></div>
           </div>
@@ -866,15 +867,15 @@ async function runFrom(startN){
 }
 async function genPosts(){
   if(busy) return;
-  let rid; try{ rid=await ensureRun(); }catch(e){ go('sources'); flash('Спершу додай джерело у «Джерела».'); return; }
-  if(!confirm('Згенерувати пости? Це прожене весь конвеєр (кілька AI-викликів, ~1–2 хв).')) return;
-  setBusy(true); setLayout('studio');
-  ORDER.forEach(n=>badge(n,'run','<span class="spin"></span> у черзі'));
-  try{ await api('/runs/'+rid+'/autopilot',{method:'POST'}); await refresh(); flash('Готово — переглянь і затвердь пости.'); }
+  let rid; try{ rid=await ensureRun(); }catch(e){ try{ const r=await api('/generate/from-brand',{method:'POST'}); rid=r.runId; runId=rid; localStorage.setItem('kg_run',rid); updRunLabel(); }catch(e2){ go('brand'); flash('Спершу заповни Базу бренду (ніша й аудиторія).'); return; } }
+  setBusy(true); setLayout('studio'); flash('Генерую пости…');
+  const cnt=Number(($('ideaCount')||{}).value)||6;
+  try{ const r=await api('/runs/'+rid+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:cnt})}); await refresh(); flash('Готово — '+(r.count||0)+' постів на перегляд.'); }
   catch(e){ flash('⚠ '+e.message); try{await refresh();}catch(_){} }
   finally{ setBusy(false); }
 }
 $('genPostsBtn').onclick=genPosts; $('studioMore').onclick=genPosts;
+if($('viewPrompt')) $('viewPrompt').onclick=async()=>{ try{ const cnt=Number(($('ideaCount')||{}).value)||6; const r=await api('/generate/prompt-preview?count='+cnt); const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70'; ov.innerHTML='<div class="modal-card" style="max-width:680px;padding:20px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b>Спільний промт генерації · '+esc(r.model||'')+'</b><button class="icon" id="vpX" style="margin-left:auto">✕</button></div><pre style="white-space:pre-wrap;font-size:12.5px;line-height:1.5;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;max-height:60vh;overflow:auto;margin:0">'+esc(r.system||'')+'</pre></div>'; document.body.appendChild(ov); const close=()=>ov.remove(); ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#vpX').onclick=close; }catch(e){ flash('⚠ '+e.message); } };
 function renderPlan(){
   const o=$('o7'); if(!o) return;
   if(!S.plan.length){ o.innerHTML='<div class="empty">План з\'явиться тут. Затверджені пости підуть у Банк (вкладка Публікація).</div>'; return; }
@@ -1244,14 +1245,10 @@ $('obNext').onclick=async()=>{
   flash(rid?'Готово — ось твої перші пости 🎉':'Готово! Додай джерело й натисни «Згенерувати пости».');
 };
 async function runOnbProgress(rid){
-  const STEPS=[['extract_ideas','Витяг ідей'],['drafts','Чорнові пости'],['tone','Tone of Voice'],['format','Формат під канали'],['deai','Прибираю AI-присмак'],['strategy','Контент-план']];
   const card=$('onboarding').querySelector('.modal-card');
-  if(card) card.innerHTML='<div style="padding:30px 34px"><h2 style="font-size:22px;font-weight:600;margin:0 0 6px">Створюю твої перші пости…</h2><p style="color:var(--muted);font-size:14px;margin:0 0 18px">Це 1–2 хвилини — можна не закривати вкладку.</p><div id="obProg"></div></div>';
-  const draw=(byKey)=>{ const el=$('obProg'); if(!el) return; el.innerHTML=STEPS.map(([k,label])=>{ const st=byKey[k]; const done=st==='fresh'; const run=st==='running'; const ic=done?'✅':(run?'<span class="spin"></span>':'<span style="color:var(--faint)">○</span>'); return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)"><span style="width:20px;text-align:center">'+ic+'</span><span style="font-size:14px;color:'+(done?'var(--ink)':'var(--muted)')+'">'+label+'</span></div>'; }).join(''); };
-  draw({}); let alive=true;
-  (async()=>{ while(alive){ try{ const r=await api('/runs/'+rid); const bk={}; (r.steps||[]).forEach(s=>bk[s.step_key]=s.status); draw(bk); }catch(e){} await new Promise(z=>setTimeout(z,2000)); } })();
-  try{ await api('/runs/'+rid+'/autopilot',{method:'POST'}); }catch(e){}
-  alive=false;
+  if(card) card.innerHTML='<div style="padding:40px 34px;text-align:center"><h2 style="font-size:21px;font-weight:600;margin:0 0 8px">Створюю твої перші пости…</h2><p style="color:var(--muted);font-size:14px;margin:0 0 16px">Це ~10-30 секунд — не закривай вкладку.</p><div><span class="spin"></span></div></div>';
+  const cnt=Number(($('ideaCount')||{}).value)||6;
+  try{ await api('/runs/'+rid+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:cnt})}); }catch(e){}
 }
 
 // ---------- init ----------

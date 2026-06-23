@@ -269,7 +269,8 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
   const tone = s.tone_of_voice ? `\nГолос бренду (зберігай): ${s.tone_of_voice}` : "";
-  const system = "Адаптуй пост під кожну вказану соцмережу, зберігаючи зміст і голос бренду." + tone +
+  const deai = s.deai_rules ? `\nПравила «без AI» (зберігай): ${s.deai_rules}` : "";
+  const system = "Адаптуй пост під кожну вказану соцмережу, зберігаючи зміст, голос бренду й живу людську мову." + tone + deai +
     "\nПравила:\n" + want.map((c) => "- " + rules[c]).join("\n") +
     `\n\nПоверни ЛИШЕ валідний JSON-обʼєкт виду {${want.map((c) => `"${c}":"…"`).join(",")}}. Мова: ${lang}.`;
   const raw = await chat("openai/gpt-4o-mini", system, `Пост:\n---\n${content}`, { workspaceId, step: "format" });
@@ -277,4 +278,52 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
   const out: Record<string, string> = {};
   for (const c of want) if (obj && obj[c]) out[c] = String(obj[c]);
   return out;
+}
+
+// ---- LITE: один зібраний промт (усі кроки кишки в одному) ----
+// Зібрати спільний системний промт Lite-генерації (для самої генерації + для перегляду користувачем).
+export async function buildLitePrompt(workspaceId: string, count: number): Promise<{ system: string; model: string }> {
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const rubs = await q<{ name: string; share: number; description: string }>(
+    `select name, share, description from rubric where workspace_id=$1 order by idx`, [workspaceId]);
+  const rubricsText = rubs.length
+    ? "\n\nРубрики (орієнтир тем і пропорцій у наборі): " + rubs.map((r) => `${r.name} ~${r.share}%${r.description ? ` (${r.description})` : ""}`).join("; ") + "."
+    : "";
+  const system =
+    "Ти досвідчений SMM-копірайтер. За вхідним матеріалом нижче згенеруй готові до публікації пости. " +
+    "Кожен пост ОДРАЗУ фінальний: у голосі бренду, живою людською мовою без ознак AI (без канцеляризмів, без «варто зазначити/у сучасному світі», без шаблонних списків заради списків), з чітким гачком, користю та мʼяким закликом." +
+    (s.marketing_context ? `\n\nБренд і аудиторія: ${s.marketing_context}` : "") +
+    (s.tone_of_voice ? `\n\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") +
+    (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
+    rubricsText +
+    `\n\nЗгенеруй рівно ${count} різних постів. Поверни ЛИШЕ валідний JSON-масив рядків: ["текст першого поста","текст другого", …]. Мова всіх текстів: ${lang}.`;
+  return { system, model: "openai/gpt-4o" };
+}
+
+// Lite-генерація: ОДИН виклик LLM -> N готових постів (замість 5 кроків кишки).
+export async function generatePostsOnePass(runId: string, count: number): Promise<number> {
+  const { workspace_id, transcript } = await runContext(runId);
+  const n = Math.max(1, Math.min(12, Number(count) || 6));
+  const { system, model } = await buildLitePrompt(workspace_id, n);
+  const out = await chat(model, system, `Вхідний матеріал:\n---\n${transcript}`, { workspaceId: workspace_id, step: "lite" });
+  let posts: string[] = [];
+  try {
+    posts = extractJsonArray<any>(out).map((x) => (typeof x === "string" ? x : String(x?.text || x?.content || x?.post || ""))).map((t) => t.trim()).filter(Boolean);
+  } catch { posts = []; }
+  if (!posts.length) throw new Error("Не вдалося згенерувати пости (порожня відповідь моделі)");
+  await q(`delete from post where run_id=$1 and stage='final'`, [runId]);
+  for (const p of posts) await q(`insert into post(run_id, stage, content) values($1,'final',$2)`, [runId, p]);
+  return posts.length;
+}
+
+// Перегенерація одного поста зі СПІЛЬНИМ контекстом (голос + де-AI) — для кнопки «Переробити».
+export async function rewritePost(workspaceId: string, text: string): Promise<string> {
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const system = "Перепиши цей пост іншими словами, зберігаючи зміст і структуру, у голосі бренду й живою людською мовою (без ознак AI)." +
+    (s.tone_of_voice ? `\n\nГолос бренду: ${s.tone_of_voice}` : "") +
+    (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
+    `\n\nПоверни лише текст поста. Мова: ${lang}.`;
+  return chat("openai/gpt-4o", system, `---\n${text}`, { workspaceId, step: "regenerate" });
 }

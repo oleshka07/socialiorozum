@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, rewriteWithStep, deriveVoice, generateStrategy, adaptForChannels } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost } from "./pipeline.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
 import * as meta from "./meta.js";
@@ -663,6 +663,20 @@ app.post("/api/runs/:id/autopilot", async (req: any, reply) => {
   } catch (e: any) { cancelRun.delete(id); await logEvent("error", "autopilot", e.message, { runId: id }, req.user.id); return reply.code(500).send({ error: e.message }); }
 });
 
+// LITE: одна генерація N готових постів (замість 6-крокової кишки) — дешево
+app.post("/api/runs/:id/generate-lite", async (req: any, reply) => {
+  const id = req.params.id;
+  if (!(await runOwned(id, req.user.workspace_id))) return reply.code(404).send({ error: "run не знайдено" });
+  try { const count = await generatePostsOnePass(id, Number(req.body?.count) || 6); return { ok: true, count }; }
+  catch (e: any) { await logEvent("error", "lite", e.message, { runId: id }, req.user.id); return reply.code(500).send({ error: e.message }); }
+});
+
+// перегляд спільного промту Lite-генерації (прозорість: що саме йде в модель)
+app.get("/api/generate/prompt-preview", async (req: any) => {
+  const n = Math.max(1, Math.min(12, Number(req.query?.count) || 6));
+  return buildLitePrompt(req.user.workspace_id, n);
+});
+
 app.post("/api/runs/:id/cancel", async (req: any, reply) => {
   if (!(await runOwned(req.params.id, req.user.workspace_id))) return reply.code(404).send({ error: "run не знайдено" });
   cancelRun.add(req.params.id);
@@ -1010,7 +1024,7 @@ app.post("/api/posts/:postId/regenerate", async (req: any, reply) => {
   const post = await postOwned(req.params.postId, req.user.workspace_id);
   if (!post) return reply.code(404).send({ error: "пост не знайдено" });
   try {
-    const fresh = await rewriteWithStep(req.user.workspace_id, "deai", post.content);
+    const fresh = await rewritePost(req.user.workspace_id, post.content);
     await q(`update post set content=$2, review=null where id=$1`, [req.params.postId, fresh]);
     return { ok: true, content: fresh };
   } catch (e: any) {
