@@ -1029,17 +1029,14 @@ app.post("/api/integrations/meta/import-voice", async (req: any, reply) => {
   await q(`insert into settings_block(workspace_id, key, content) values($1,'voice_examples',$2)
            on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`, [ws, joined]);
   const d = await deriveBrandFromText(ws, joined);
-  // заповнюємо ПОРОЖНІ поля бренду з аналізу IG (введене вручну не перетираємо)
-  const cur = await q<{ key: string; content: string }>(`select key, content from settings_block where workspace_id=$1 and key = any($2)`, [ws, ["marketing_context", "content_strategy", "tone_of_voice"]]);
-  const has: Record<string, string> = {}; for (const r of cur) has[r.key] = (r.content || "").trim();
+  // явна дія «аналізувати IG» -> ПЕРЕЗАПИСУЄМО поля бренду свіжими (інакше при зміні акаунта лишаються старі дані)
   const upsert = (key: string, val: string) => q(`insert into settings_block(workspace_id,key,content) values($1,$2,$3) on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`, [ws, key, val]);
-  if (d.marketing_context && !has.marketing_context) await upsert("marketing_context", d.marketing_context);
-  if (d.content_strategy && !has.content_strategy) await upsert("content_strategy", d.content_strategy);
-  if (d.tone_of_voice && !has.tone_of_voice) await upsert("tone_of_voice", d.tone_of_voice);
-  if (d.tone_of_voice) await upsert("tone_of_voice_derived", d.tone_of_voice);
-  if (["Українська", "Російська", "English", "Polski", "Deutsch"].includes(d.language)) await upsert("output_language", d.language);
+  if (d.marketing_context) await upsert("marketing_context", d.marketing_context);
+  if (d.content_strategy) await upsert("content_strategy", d.content_strategy);
+  if (d.tone_of_voice) { await upsert("tone_of_voice", d.tone_of_voice); await upsert("tone_of_voice_derived", d.tone_of_voice); }
+  if (d.language) await upsert("output_language", d.language); // будь-яка мова, не лише з дропдауна
   await logEvent("info", "meta", `бренд виведено з ${captions.length} IG-постів (мова: ${d.language || "?"})`, null, req.user.id);
-  return { ok: true, count: captions.length, derived: d.tone_of_voice, marketing_context: has.marketing_context || d.marketing_context, language: d.language };
+  return { ok: true, count: captions.length, derived: d.tone_of_voice, marketing_context: d.marketing_context, content_strategy: d.content_strategy, language: d.language };
 });
 
 

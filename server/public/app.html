@@ -410,7 +410,7 @@
           <div class="panel" style="margin:0"><label class="fl">👥 Аудиторія / Marketing Context</label><textarea id="mkt"></textarea></div>
           <div class="panel" style="margin:0"><label class="fl">🛡️ Правила «Де-AI»</label><textarea id="deai"></textarea></div>
           <div class="panel" style="margin:0"><label class="fl">📋 Загальна контент-стратегія (нотатки)</label><textarea id="strat"></textarea></div>
-          <div class="panel" style="margin:0;grid-column:1/-1"><label class="fl">🌐 Мова виводу (застосовується до всіх кроків)</label><select id="langSel"><option>Українська</option><option>Російська</option><option>English</option><option>Polski</option><option>Deutsch</option></select><div class="hint">Збереження автоматичне.</div></div>
+          <div class="panel" style="margin:0;grid-column:1/-1"><label class="fl">🌐 Мова виводу (застосовується до всіх кроків)</label><select id="langSel"><option>Українська</option><option>Російська</option><option>English</option><option>Polski</option><option>Deutsch</option><option>Чеська</option><option>Іспанська</option><option>Французька</option><option>Італійська</option></select><div class="hint">Збереження автоматичне.</div></div>
         </div>
       </section>
 
@@ -707,7 +707,7 @@ async function loadSettings(){
     const rows = await api('/settings');
     const map = Object.fromEntries(rows.map(r=>[r.key, r.content]));
     for(const [tid,key] of Object.entries(SET)){ if(map[key]!=null && $(tid)) $(tid).value = map[key]; }
-    if(map.output_language && $('langSel')) $('langSel').value = map.output_language;
+    if(map.output_language && $('langSel')){ ensureLangOption(map.output_language); $('langSel').value = map.output_language; }
     TZ = map.timezone || TZ; buildTzSel();
     PRO = (map.pro==='1'); updateProUI();
     if(map.tone_of_voice_derived) renderDerived(map.tone_of_voice_derived);
@@ -719,6 +719,7 @@ function flashSaved(){ const s=$('saved'); if(!s) return; s.style.opacity='1'; c
 async function saveSetting(key,val){ try{ await api('/settings/'+key,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:val})}); flashSaved(); }catch(e){} }
 for(const tid of Object.keys(SET)){ const el=$(tid); if(el) el.addEventListener('input', ()=>{ clearTimeout(saveT); saveT=setTimeout(()=>saveSetting(SET[tid],el.value),700); }); }
 $('langSel').onchange=()=>saveSetting('output_language',$('langSel').value);
+function ensureLangOption(lang){ const sel=$('langSel'); if(!sel||!lang) return; if(![].some.call(sel.options,o=>o.value===lang||o.text===lang)){ const o=document.createElement('option'); o.textContent=lang; sel.appendChild(o); } }
 buildTzSel(); if($('tzSel')) $('tzSel').onchange=()=>{ TZ=$('tzSel').value; saveSetting('timezone',TZ); buildTzSel(); try{ if(curView==='publish') loadPublish(); }catch(e){} };
 function renderDerived(text){
   const o=$('derivedVoice'); if(!o) return; if(!text){ o.innerHTML=''; return; }
@@ -1388,7 +1389,7 @@ async function renderObConnect(oc){
   if(pages.length>1) html+='<label style="display:block;font-size:12.5px;color:var(--ink2);margin:10px 0 4px">Акаунт для цього бренду:</label><select id="obIgSel" style="width:100%">'+pages.map(p=>'<option value="'+p.id+'"'+(p.current?' selected':'')+'>'+esc(p.name)+(p.ig?(' · IG @'+esc(p.ig)):'')+'</option>').join('')+'</select>';
   html+='<div id="obIgMsg" style="font-size:13px;color:var(--muted);margin-top:8px"></div>';
   oc.innerHTML=html;
-  const doImport=async()=>{ const m=$('obIgMsg'); if(m)m.innerHTML='<span class="spin"></span> Вивчаю твої пости (голос, ніша, мова)…'; try{ const r=await api('/integrations/meta/import-voice',{method:'POST'}); if(r.marketing_context){ const st=OB_STEPS.find(o=>o.key==='marketing_context'); if(st&&!(st._val&&st._val.trim())) st._val=r.marketing_context; } if(m)m.textContent='✨ Голос, нішу й мову виведено з '+r.count+' постів.'; }catch(e){ if(m)m.textContent='Не вдалося прочитати пости: '+e.message; } };
+  const doImport=async()=>{ const m=$('obIgMsg'); if(m)m.innerHTML='<span class="spin"></span> Вивчаю твої пости (голос, ніша, мова)…'; try{ const r=await api('/integrations/meta/import-voice',{method:'POST'}); if(r.marketing_context){ const st=OB_STEPS.find(o=>o.key==='marketing_context'); if(st) st._val=r.marketing_context; } if(r.language){ ensureLangOption(r.language); if($('langSel')) $('langSel').value=r.language; } if(m)m.textContent='✨ Голос, нішу й мову ('+(r.language||'?')+') виведено з '+r.count+' постів.'; }catch(e){ if(m)m.textContent='Не вдалося прочитати пости: '+e.message; } };
   if($('obIgSel')) $('obIgSel').onchange=async(e)=>{ const m=$('obIgMsg'); if(m)m.textContent='Перемикаю акаунт…'; try{ await api('/integrations/meta/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pageId:e.target.value})}); obVoiceImported=true; await doImport(); }catch(err){ if(m)m.textContent='⚠ '+err.message; } };
   if(!obVoiceImported){ obVoiceImported=true; await doImport(); }
 }

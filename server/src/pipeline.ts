@@ -76,7 +76,7 @@ export async function deriveBrandFromText(workspaceId: string, text: string): Pr
     "1) marketing_context — ніша, тематика й цільова аудиторія (2-4 речення);\n" +
     "2) tone_of_voice — стислий опис тону й стилю автора;\n" +
     "3) content_strategy — короткі нотатки про теми/рубрики, які варто публікувати;\n" +
-    "4) language — мова, якою переважно пише автор: РІВНО одне зі значень Українська|Російська|English|Polski|Deutsch.\n" +
+    "4) language — мова, якою переважно пише автор (назва УКРАЇНСЬКОЮ, напр.: Українська, Англійська, Чеська, Польська, Німецька, Іспанська, Французька, Італійська).\n" +
     "Поверни ЛИШЕ валідний JSON: {\"marketing_context\":\"…\",\"tone_of_voice\":\"…\",\"content_strategy\":\"…\",\"language\":\"…\"}.";
   const raw = await chat("openai/gpt-4o-mini", system, "Пости автора:\n---\n" + text.slice(0, 12000), { workspaceId, step: "derive_brand" });
   const o = (extractJsonObject<any>(raw)) || {};
