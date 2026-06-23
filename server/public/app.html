@@ -439,7 +439,7 @@
             <div class="ph">📁 Google Drive</div>
             <div class="hint">Познач папку через рідний вибір Google — поллер тягне нові фото в медіа (scope drive.file, без верифікації).</div>
             <div class="btnrow"><span id="gdStatus" style="font-size:13px;color:var(--muted)">…</span></div>
-            <div class="btnrow"><a id="gdConnect" class="btn primary" href="/api/integrations/gdrive/connect" style="display:none">🔗 Підключити</a><button class="ghost" id="gdDisconnect" style="display:none">Відключити</button></div>
+            <div class="btnrow"><a id="gdConnect" class="btn primary" href="/api/integrations/gdrive/connect" onclick="return connectPopup('/api/integrations/gdrive/connect')" style="display:none">🔗 Підключити</a><button class="ghost" id="gdDisconnect" style="display:none">Відключити</button></div>
             <div id="gdFolderBox" style="display:none;margin-top:10px">
               <div class="btnrow"><button class="primary" id="gdPick">📂 Обрати папку</button></div>
               <div id="gdMsg" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
@@ -483,14 +483,14 @@
             <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--th)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M12 3c5 0 8 3 8 9s-3 9-8 9-8-3-8-9c0-2 .5-3.5 1.5-4.5"></path></svg></span>Threads</div>
             <div class="hint">Окремий OAuth (вхід через Threads). Потрібні <code>threads_content_publish</code> + <code>threads_manage_insights</code>, акаунт у Threads Testers.</div>
             <div class="btnrow"><span id="thStatus" style="font-size:13px;color:var(--muted)">…</span></div>
-            <div class="btnrow"><a id="thConnect" class="btn primary" href="/api/integrations/threads/connect" style="display:none">🔗 Підключити Threads</a><button class="ghost" id="thDisconnect" style="display:none">Відключити</button></div>
+            <div class="btnrow"><a id="thConnect" class="btn primary" href="/api/integrations/threads/connect" onclick="return connectPopup('/api/integrations/threads/connect')" style="display:none">🔗 Підключити Threads</a><button class="ghost" id="thDisconnect" style="display:none">Відключити</button></div>
           </div>
           <div class="panel" style="margin:0">
             <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--ig)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M7 3h10a4 4 0 014 4v10a4 4 0 01-4 4H7a4 4 0 01-4-4V7a4 4 0 014-4zm5 5a4 4 0 100 8 4 4 0 000-8z"></path></svg></span>Facebook + Instagram</div>
             <div class="hint">Постинг у FB-Сторінку + аналітика FB/IG. IG-публікація потребує фото.</div>
             <div class="btnrow"><span id="mtStatus" style="font-size:13px;color:var(--muted)">…</span></div>
             <div class="btnrow" id="mtPageRow" style="display:none"><label style="font-size:12px;color:var(--muted)">Акаунт:</label><select id="mtPage" style="width:auto;min-width:200px;font-size:12px;padding:6px 8px"></select></div>
-            <div class="btnrow"><a id="mtConnect" class="btn primary" href="/api/integrations/meta/connect" style="display:none">🔗 Підключити</a><button class="ghost" id="mtStats" style="display:none">📊 Статистика</button><button class="ghost" id="mtVoice" style="display:none">✨ Голос з Instagram</button><button class="ghost" id="mtDisconnect" style="display:none">Відключити</button></div>
+            <div class="btnrow"><a id="mtConnect" class="btn primary" href="/api/integrations/meta/connect" onclick="return connectPopup('/api/integrations/meta/connect')" style="display:none">🔗 Підключити</a><button class="ghost" id="mtStats" style="display:none">📊 Статистика</button><button class="ghost" id="mtVoice" style="display:none">✨ Голос з Instagram</button><button class="ghost" id="mtDisconnect" style="display:none">Відключити</button></div>
             <div id="mtStatsOut" class="out"></div>
           </div>
         </div>
@@ -1209,15 +1209,7 @@ function renderOb(){
   $('obMsg').textContent='';
   const oc=$('obConnect');
   if(s.type==='connect'){
-    $('obInput').style.display='none'; oc.style.display='block'; oc.innerHTML='<div style="font-size:13px;color:var(--muted)">Перевіряю підключення…</div>';
-    api('/channels/status').then(st=>{
-      if(st&&st.instagram){
-        oc.innerHTML='<div style="padding:12px;border-radius:10px;background:var(--brand-soft);color:var(--brand);font-weight:600">✅ Instagram підключено</div><div id="obIgMsg" style="font-size:13px;color:var(--muted);margin-top:8px"></div>';
-        if(!s._imported){ s._imported=true; const m=$('obIgMsg'); if(m)m.innerHTML='<span class="spin"></span> Виводжу голос із твоїх постів…'; api('/integrations/meta/import-voice',{method:'POST'}).then(r=>{ const m2=$('obIgMsg'); if(m2)m2.textContent='✨ Голос виведено з '+r.count+' постів.'; }).catch(e=>{ const m2=$('obIgMsg'); if(m2)m2.textContent='Не вдалося прочитати пости: '+e.message; }); }
-      } else {
-        oc.innerHTML='<a class="btn primary" href="/api/integrations/meta/connect" style="display:inline-flex;text-decoration:none">📸 Підключити Instagram</a><div style="font-size:12.5px;color:var(--muted);margin-top:8px">Після підключення автоматично виведемо твій голос. Немає бізнес-IG? Тисни «Далі».</div>';
-      }
-    }).catch(()=>{ oc.innerHTML='<a class="btn primary" href="/api/integrations/meta/connect" style="display:inline-flex;text-decoration:none">📸 Підключити Instagram</a>'; });
+    $('obInput').style.display='none'; oc.style.display='block'; renderObConnect(oc);
   } else {
     $('obInput').style.display=''; oc.style.display='none';
     $('obInput').placeholder=s.ph||''; $('obInput').value=s._val||'';
@@ -1253,8 +1245,31 @@ async function runOnbProgress(rid){
   try{ await api('/runs/'+rid+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:cnt})}); }catch(e){}
 }
 
+// ---------- OAuth у поп-апі (кабінет не закривається) ----------
+let obVoiceImported=false;
+function connectPopup(url){ try{ const w=Math.min(620,screen.width||620), h=Math.min(740,screen.height||740); const x=Math.max(0,((screen.width||w)-w)/2), y=Math.max(0,((screen.height||h)-h)/2); const p=window.open(url,'oauth_connect','width='+w+',height='+h+',left='+x+',top='+y); if(!p) location.href=url; }catch(e){ location.href=url; } return false; }
+window.addEventListener('message',(ev)=>{ if(ev.origin!==location.origin) return; const d=ev.data||{}; if(!d.oauth) return;
+  if(d.meta!=null){ try{loadMeta();}catch(e){} try{loadChanStatus();}catch(e){} const cs=(typeof OB_STEPS!=='undefined')&&OB_STEPS[obIdx]; if($('onboarding')&&$('onboarding').style.display!=='none'&&cs&&cs.type==='connect'){ obVoiceImported=false; renderOb(); } else flash(d.meta==='ok'?'Instagram/Facebook підключено ✓':'Не вдалося підключити Instagram/Facebook.'); }
+  if(d.threads!=null){ try{loadThreads();}catch(e){} try{loadChanStatus();}catch(e){} flash(d.threads==='ok'?'Threads підключено ✓':'Не вдалося підключити Threads.'); }
+  if(d.gdrive!=null){ try{loadGdrive();}catch(e){} flash(d.gdrive==='ok'?'Google Drive підключено ✓':'Не вдалося підключити Google Drive.'); }
+});
+async function renderObConnect(oc){
+  oc.innerHTML='<div style="font-size:13px;color:var(--muted)">Перевіряю підключення…</div>';
+  let st={}; try{ st=await api('/channels/status'); }catch(e){}
+  if(!(st&&st.instagram)){ oc.innerHTML='<button class="btn primary" style="display:inline-flex" onclick="return connectPopup(\'/api/integrations/meta/connect\')">📸 Підключити Instagram</button><div style="font-size:12.5px;color:var(--muted);margin-top:8px">Відкриється в окремому вікні — кабінет не закриється. Після підключення автоматично виведемо твій голос. Немає бізнес-IG? Тисни «Далі».</div>'; return; }
+  let pages=[]; try{ pages=await api('/integrations/meta/pages'); }catch(e){}
+  let html='<div style="padding:12px;border-radius:10px;background:var(--brand-soft);color:var(--brand);font-weight:600">✅ Instagram підключено</div>';
+  if(pages.length>1) html+='<label style="display:block;font-size:12.5px;color:var(--ink2);margin:10px 0 4px">Акаунт для цього бренду:</label><select id="obIgSel" style="width:100%">'+pages.map(p=>'<option value="'+p.id+'"'+(p.current?' selected':'')+'>'+esc(p.name)+(p.ig?(' · IG @'+esc(p.ig)):'')+'</option>').join('')+'</select>';
+  html+='<div id="obIgMsg" style="font-size:13px;color:var(--muted);margin-top:8px"></div>';
+  oc.innerHTML=html;
+  const doImport=async()=>{ const m=$('obIgMsg'); if(m)m.innerHTML='<span class="spin"></span> Виводжу голос із постів…'; try{ const r=await api('/integrations/meta/import-voice',{method:'POST'}); if(m)m.textContent='✨ Голос виведено з '+r.count+' постів.'; }catch(e){ if(m)m.textContent='Не вдалося прочитати пости: '+e.message; } };
+  if($('obIgSel')) $('obIgSel').onchange=async(e)=>{ const m=$('obIgMsg'); if(m)m.textContent='Перемикаю акаунт…'; try{ await api('/integrations/meta/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pageId:e.target.value})}); obVoiceImported=true; await doImport(); }catch(err){ if(m)m.textContent='⚠ '+err.message; } };
+  if(!obVoiceImported){ obVoiceImported=true; await doImport(); }
+}
+
 // ---------- init ----------
 (async()=>{
+  try{ const _q=new URLSearchParams(location.search); if(window.opener && window.opener!==window && (_q.has('meta')||_q.has('threads')||_q.has('gdrive'))){ window.opener.postMessage({oauth:true, meta:_q.get('meta'), threads:_q.get('threads'), gdrive:_q.get('gdrive')}, location.origin); document.body.innerHTML='<div style="padding:40px;text-align:center;font-family:sans-serif;color:#333">Готово ✓ Можна закрити це вікно.</div>'; try{window.close();}catch(e){} return; } }catch(e){}
   setTheme(localStorage.getItem('kg_theme')||'light');
   selectView('create'); setLayout('studio'); renderCountChips();
   renderStudio(); renderInbox(); renderStudioSteps({}); renderSourceCard(null);
