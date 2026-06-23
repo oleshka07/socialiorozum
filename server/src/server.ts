@@ -351,6 +351,25 @@ app.post("/api/sources", async (req: any) => {
   return { sourceId: src!.id, runId: run!.id };
 });
 
+// згенерувати джерело-бриф із Бази бренду — для «миттєвих перших постів» без транскрипту
+app.post("/api/generate/from-brand", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const rows = await q<{ key: string; content: string }>(`select key, content from settings_block where workspace_id=$1`, [ws]);
+  const s: Record<string, string> = {}; for (const r of rows) s[r.key] = r.content || "";
+  const rubs = await q<{ name: string; description: string }>(`select name, description from rubric where workspace_id=$1 order by idx`, [ws]);
+  if (!(s.marketing_context || "").trim() && !rubs.length) return reply.code(400).send({ error: "Спершу заповни Базу бренду (ніша й аудиторія)" });
+  const brief = [
+    s.marketing_context ? `Бренд і аудиторія:\n${s.marketing_context}` : "",
+    s.tone_of_voice ? `Голос бренду:\n${s.tone_of_voice}` : "",
+    s.content_strategy ? `Нотатки стратегії:\n${s.content_strategy}` : "",
+    rubs.length ? `Рубрики контенту:\n${rubs.map((r) => `- ${r.name}${r.description ? `: ${r.description}` : ""}`).join("\n")}` : "",
+    `Завдання: на основі цього бренду згенеруй ідеї та готові дописи для соцмереж. Пиши загальнокорисні пости в межах ніші, без вигаданих фактів про конкретні події.`,
+  ].filter(Boolean).join("\n\n");
+  const src = await one<{ id: string }>(`insert into source(workspace_id, origin, title, transcript) values($1,'brand','Згенеровано з Бази бренду',$2) returning id`, [ws, brief]);
+  const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
+  return { runId: run!.id };
+});
+
 // ----- контент-джерела (RSS) -----
 app.get("/api/sources/rss", async (req: any) =>
   q(`select id, url, title, active, auto_run, last_pulled_at, last_error from content_source

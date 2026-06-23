@@ -1212,19 +1212,29 @@ $('obNext').onclick=async()=>{
   else if(s.key==='voice_examples'){ await saveSetting('voice_examples',val); if($('voiceExamples'))$('voiceExamples').value=val; }
   if(obIdx<OB_STEPS.length-1){ obIdx++; renderOb(); return; }
   $('obNext').disabled=true; $('obMsg').textContent='Налаштовую кабінет…';
-  try{
-    if((OB_STEPS[1]._val||'').trim()){ try{ await api('/brand/derive-voice',{method:'POST'}); }catch(e){} }
-    const tr=(OB_STEPS[2]._val||'').trim();
-    if(tr){ try{ const r=await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript:tr})}); runId=r.runId; localStorage.setItem('kg_run',runId);}catch(e){} }
-    try{ await api('/strategy/generate',{method:'POST'}); }catch(e){}
-    await saveSetting('onboarded','1');
-    $('onboarding').style.display='none';
-    await loadSettings(); await loadStrategy(); await loadRubrics(); updRunLabel();
-    go('create'); setLayout('studio');
-    flash('Готово! Додай джерело й натисни «Згенерувати пости».');
-  }catch(e){ $('obMsg').textContent='⚠ '+e.message; }
-  finally{ $('obNext').disabled=false; }
+  try{ if((OB_STEPS[1]._val||'').trim()){ try{ await api('/brand/derive-voice',{method:'POST'}); }catch(e){} }
+       try{ await api('/strategy/generate',{method:'POST'}); }catch(e){}
+       await saveSetting('onboarded','1');
+       await loadSettings(); await loadStrategy(); await loadRubrics();
+  }catch(e){}
+  // створити run (із транскрипту або з Бази бренду) і прогнати з екраном прогресу
+  const tr=(OB_STEPS[2]._val||'').trim(); let rid=null;
+  try{ const r=tr?await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript:tr})}):await api('/generate/from-brand',{method:'POST'}); rid=r.runId; }catch(e){}
+  if(rid){ runId=rid; localStorage.setItem('kg_run',rid); updRunLabel(); await runOnbProgress(rid); }
+  $('onboarding').style.display='none';
+  go('create'); setLayout('studio'); try{ await refresh(); }catch(e){}
+  flash(rid?'Готово — ось твої перші пости 🎉':'Готово! Додай джерело й натисни «Згенерувати пости».');
 };
+async function runOnbProgress(rid){
+  const STEPS=[['extract_ideas','Витяг ідей'],['drafts','Чорнові пости'],['tone','Tone of Voice'],['format','Формат під канали'],['deai','Прибираю AI-присмак'],['strategy','Контент-план']];
+  const card=$('onboarding').querySelector('.modal-card');
+  if(card) card.innerHTML='<div style="padding:30px 34px"><h2 style="font-size:22px;font-weight:600;margin:0 0 6px">Створюю твої перші пости…</h2><p style="color:var(--muted);font-size:14px;margin:0 0 18px">Це 1–2 хвилини — можна не закривати вкладку.</p><div id="obProg"></div></div>';
+  const draw=(byKey)=>{ const el=$('obProg'); if(!el) return; el.innerHTML=STEPS.map(([k,label])=>{ const st=byKey[k]; const done=st==='fresh'; const run=st==='running'; const ic=done?'✅':(run?'<span class="spin"></span>':'<span style="color:var(--faint)">○</span>'); return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)"><span style="width:20px;text-align:center">'+ic+'</span><span style="font-size:14px;color:'+(done?'var(--ink)':'var(--muted)')+'">'+label+'</span></div>'; }).join(''); };
+  draw({}); let alive=true;
+  (async()=>{ while(alive){ try{ const r=await api('/runs/'+rid); const bk={}; (r.steps||[]).forEach(s=>bk[s.step_key]=s.status); draw(bk); }catch(e){} await new Promise(z=>setTimeout(z,2000)); } })();
+  try{ await api('/runs/'+rid+'/autopilot',{method:'POST'}); }catch(e){}
+  alive=false;
+}
 
 // ---------- init ----------
 (async()=>{
