@@ -361,3 +361,12 @@ alter table schedule_slot add column if not exists result text;
 
 -- промт для генерації зображення поста (його повертає Lite-генерація разом із текстом)
 alter table post add column if not exists image_prompt text;
+
+-- підключення каналу до СПІЛЬНОГО Telegram-бота: код deep-link -> воркспейс, + хто почав діалог
+create table if not exists tg_connect (
+  code         text primary key,
+  workspace_id uuid not null references workspace(id) on delete cascade,
+  tg_user_id   bigint,
+  created_at   timestamptz not null default now()
+);
+create index if not exists idx_tgconnect_user on tg_connect(tg_user_id);

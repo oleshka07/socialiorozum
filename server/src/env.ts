@@ -18,6 +18,11 @@ export const env = {
   gemini: {
     apiKey: process.env.GEMINI_API_KEY ?? "",    // Gemini 2.5 Flash Image (Nano Banana)
   },
+  telegram: {                                     // СПІЛЬНИЙ бот (користувач не створює свій)
+    botToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
+    botUsername: process.env.TELEGRAM_BOT_USERNAME ?? "",
+    webhookSecret: (process.env.TELEGRAM_WEBHOOK_SECRET || process.env.SESSION_SECRET || "tgwh").slice(0, 48),
+  },
   resend: {
     apiKey: process.env.RESEND_API_KEY ?? "",
     from: process.env.RESEND_FROM ?? "socialio <onboarding@resend.dev>",

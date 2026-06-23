@@ -24,6 +24,7 @@ import * as gdrive from "./gdrive.js";
 import { publishPostToChannels } from "./publisher.js";
 import { startLifecycleWorker } from "./lifecycle.js";
 import { generateImageForPost, imageProviders } from "./images.js";
+import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername } from "./tgbot.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = Fastify({ logger: true, trustProxy: true });
@@ -793,7 +794,15 @@ app.get("/api/integrations/telegram", async (req: any) => {
     groupChatId: c?.group_chat_id ?? "",
     channelTitle: c?.channel_title ?? "",
     groupTitle: c?.group_title ?? "",
+    sharedBot: botEnabled(),
   };
+});
+
+// спільний бот: видати deep-link для підключення каналу
+app.post("/api/integrations/telegram/connect-link", async (req: any, reply) => {
+  if (!botEnabled()) return reply.code(400).send({ error: "Спільний бот не налаштований на сервері" });
+  try { return { link: await createConnectLink(req.user.workspace_id), bot: botUsername() }; }
+  catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
 
 app.put("/api/integrations/telegram", async (req: any) => {
@@ -1345,6 +1354,15 @@ app.post("/api/transcription/import", async (req: any, reply) => {
 
 // вебхук Fireflies: «зустріч готова» -> автоімпорт джерела (+ опційно автопілот).
 // Поза auth: маршрутизація через per-workspace токен у URL, автентичність — HMAC-підпис.
+// вебхук спільного Telegram-бота (auth-exempt; секрет у шляху + у заголовку)
+app.post("/api/webhooks/telegram/:secret", async (req: any, reply) => {
+  if (req.params.secret !== env.telegram.webhookSecret) return reply.code(404).send({ error: "not found" });
+  const hdr = req.headers["x-telegram-bot-api-secret-token"];
+  if (hdr && hdr !== env.telegram.webhookSecret) return reply.code(403).send({ error: "bad secret" });
+  handleUpdate(req.body).catch(() => {});
+  return { ok: true };
+});
+
 app.post("/api/webhooks/fireflies/:token", async (req: any, reply) => {
   const cfg = await one<{ workspace_id: string; api_key: string | null; webhook_secret: string | null; auto_run: boolean | null }>(
     `select workspace_id, api_key, webhook_secret, auto_run from transcription_config where webhook_token=$1`, [req.params.token]);
@@ -1405,6 +1423,7 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
   startRssPoller();
   startGdrivePoller();
   startLifecycleWorker();
+  initTelegramBot();
   // одноразово полагодити залишкові iPhone HEIF -> JPEG (у фоні; ідемпотентно)
   convertAllHeif().then((n) => { if (n) app.log.info(`HEIF→JPEG конвертовано: ${n}`); }).catch((e: any) => app.log.error("convertAllHeif: " + e.message));
 });

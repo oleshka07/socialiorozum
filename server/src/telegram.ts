@@ -32,3 +32,7 @@ export const getChatMember = (token: string, chatId: string, userId: number) =>
   tg<{ status: string; can_post_messages?: boolean }>(token, "getChatMember", { chat_id: chatId, user_id: userId });
 export const sendMessage = (token: string, chatId: string, text: string) =>
   tg<{ message_id: number }>(token, "sendMessage", { chat_id: chatId, text, disable_web_page_preview: true });
+export const sendPhoto = (token: string, chatId: string, photoUrl: string, caption: string) =>
+  tg<{ message_id: number }>(token, "sendPhoto", { chat_id: chatId, photo: photoUrl, caption });
+export const setWebhook = (token: string, url: string, secretToken?: string) =>
+  tg(token, "setWebhook", { url, allowed_updates: ["message", "channel_post", "my_chat_member"], ...(secretToken ? { secret_token: secretToken } : {}) });

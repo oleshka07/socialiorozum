@@ -47,9 +47,16 @@ export async function publishPostToChannels(ws: string, postId: string): Promise
       if (k === "telegram") {
         if (!tgc?.bot_token) throw new Error("Telegram не підключено");
         let any = false;
+        const cap = textOf(k);
         for (const [t, chat] of [["channel", tgc.channel_chat_id], ["group", tgc.group_chat_id]] as const) {
           if (!chat) continue;
-          const r = await tg.sendMessage(tgc.bot_token, chat, textOf(k));
+          let r: { message_id: number };
+          if (imageUrl) {
+            r = await tg.sendPhoto(tgc.bot_token, chat, imageUrl, cap.length <= 1024 ? cap : "");
+            if (cap.length > 1024) await tg.sendMessage(tgc.bot_token, chat, cap); // підпис > ліміту Telegram → текст окремо
+          } else {
+            r = await tg.sendMessage(tgc.bot_token, chat, cap);
+          }
           await q(`insert into telegram_publish(post_id,target,chat_id,message_id,status) values($1,$2,$3,$4,'sent')`, [postId, t, chat, r.message_id]);
           any = true;
         }
