@@ -1261,6 +1261,8 @@ async function runOnbProgress(rid){
     +'<div>📝 Генеруємо перші <b>'+cnt+' постів</b> у твоєму голосі</div>'
     +'<div>🎨 Малюємо до них <b>прості зображення</b> (за мінімальним промтом)</div>'
     +'<div>📷 Далі зможеш підключити <b>свій банк фото</b> й покращувати зображення для постів</div>'
+    +'<div>🔗 У <b>Налаштуваннях</b> підключиш інші соцмережі (Telegram, Facebook, Threads)</div>'
+    +'<div>📥 У <b>Джерелах</b> додаси інші джерела контенту (транскрипти, RSS, фото з Google Drive)</div>'
     +'</div><div style="text-align:center;margin-top:20px"><span class="spin"></span> <span style="color:var(--muted);font-size:13px">зачекай ~30-60 секунд…</span></div></div>';
   const minWait=new Promise(z=>setTimeout(z,3500)); // щоб встиг прочитати тези
   try{ await Promise.all([ api('/runs/'+rid+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:cnt,images:true})}), minWait ]); }catch(e){ await minWait; }
