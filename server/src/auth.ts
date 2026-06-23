@@ -24,9 +24,8 @@ export function verifyPassword(pw: string, stored: string): boolean {
 export const newToken = () => randomBytes(32).toString("hex");
 
 // ---- workspace із дефолтними блоками (на кожного юзера свій) ----
-export async function createWorkspaceWithDefaults(name: string): Promise<string> {
-  const ws = await one<{ id: string }>(`insert into workspace(name) values($1) returning id`, [name]);
-  const wsId = ws!.id;
+// засів дефолтних блоків і рубрик у workspace (новий або скинутий «з чистого листа»)
+export async function seedWorkspaceDefaults(wsId: string): Promise<void> {
   for (const [key, content] of Object.entries(DEFAULT_SETTINGS)) {
     await q(
       `insert into settings_block(workspace_id, key, content) values($1,$2,$3)
@@ -39,7 +38,12 @@ export async function createWorkspaceWithDefaults(name: string): Promise<string>
     await q(`insert into rubric(workspace_id,name,emoji,description,share,idx) values($1,$2,$3,$4,$5,$6)`,
       [wsId, r.name, r.emoji, r.description, r.share, i]);
   }
-  return wsId;
+}
+
+export async function createWorkspaceWithDefaults(name: string): Promise<string> {
+  const ws = await one<{ id: string }>(`insert into workspace(name) values($1) returning id`, [name]);
+  await seedWorkspaceDefaults(ws!.id);
+  return ws!.id;
 }
 
 export type User = { id: string; email: string; email_verified: boolean; workspace_id: string };

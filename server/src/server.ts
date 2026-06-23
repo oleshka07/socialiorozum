@@ -234,6 +234,25 @@ app.post("/api/account/delete", async (req: any, reply) => {
   return { ok: true, message: "Акаунт заплановано до видалення через 14 днів. Дані зникли з кабінету. Увійдіть протягом 14 днів, щоб скасувати." };
 });
 
+// почати з чистого листа: стерти весь контент воркспейсу + повернути онбординг (підключення каналів лишаються)
+app.post("/api/account/reset", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  if (String(req.body?.confirm ?? "").trim().toUpperCase() !== "RESET") return reply.code(400).send({ error: "Введіть RESET для підтвердження" });
+  const media = await q<{ filename: string }>(`select filename from media_asset where workspace_id=$1`, [ws]);
+  for (const m of media) await deleteMediaFile(m.filename);
+  await q(`delete from source where workspace_id=$1`, [ws]);          // каскад: runs→posts/ideas/step_run/content_plan→plan_item→schedule_slot(+publish-логи)
+  await q(`delete from media_asset where workspace_id=$1`, [ws]);
+  await q(`delete from content_source where workspace_id=$1`, [ws]);  // RSS
+  await q(`delete from strategy where workspace_id=$1`, [ws]);
+  await q(`delete from rubric where workspace_id=$1`, [ws]);
+  await q(`delete from prompt_template where workspace_id=$1`, [ws]);
+  await q(`delete from settings_block where workspace_id=$1`, [ws]);  // бренд/мова/онбординг-прапор
+  await q(`delete from llm_usage where workspace_id=$1`, [ws]);
+  await auth.seedWorkspaceDefaults(ws);                                // дефолтні налаштування + рубрики
+  await logEvent("info", "account", `чистий старт (reset воркспейсу): ${req.user.email}`, null, req.user.id);
+  return { ok: true, message: "Готово — кабінет очищено. Зараз почнеться онбординг." };
+});
+
 // ---- Google OAuth (вхід через Google; обходить email-верифікацію) ----
 const GOOGLE_REDIRECT = `${env.appBaseUrl}/api/auth/google/callback`;
 const stateCookie = { httpOnly: true, secure: true, sameSite: "lax" as const, path: "/", maxAge: 600 };

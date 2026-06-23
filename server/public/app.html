@@ -525,7 +525,8 @@
         <div class="panel" style="border-color:var(--danger)">
           <div class="ph" style="color:var(--danger)">⚠ Небезпечна зона</div>
           <div class="hint">Видалення акаунта: дані одразу зникнуть з кабінету, остаточно зітруться через 14 днів. Передумаєш — просто увійди протягом цього часу.</div>
-          <div class="btnrow"><button class="danger" id="accDelete">Видалити акаунт</button></div>
+          <div class="hint" style="margin-top:10px">«Почати з чистого листа» — стерти весь контент (бренд, стратегію, пости, календар, медіа) і пройти онбординг заново. Підключені канали лишаються.</div>
+          <div class="btnrow"><button class="ghost" id="accReset">🔄 Почати з чистого листа</button><button class="danger" id="accDelete">Видалити акаунт</button></div>
         </div>
       </section>
 
@@ -1135,6 +1136,7 @@ $('accPwSave').onclick=async()=>{ const m=$('accPwMsg'); m.style.color='var(--mu
 $('accEmailSave').onclick=async()=>{ const m=$('accEmailMsg'); m.style.color='var(--muted)'; m.textContent='…'; try{ const r=await api('/account/email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('accNewEmail').value,password:$('accEmailPw').value})}); $('accEmailPw').value=''; $('accNewEmail').value=''; m.style.color='var(--brand)'; m.textContent='email змінено ✓'; if($('userEmail'))$('userEmail').textContent=r.email; loadAccount(); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
 $('accExport').onclick=()=>{ window.location.href='/api/account/export'; };
 $('accDelete').onclick=async()=>{ const email=prompt('Видалення акаунта.\nДані одразу зникнуть з кабінету, остаточно зітруться через 14 днів (увійди, щоб скасувати).\n\nВведи свій email для підтвердження:'); if(!email) return; try{ const r=await api('/account/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmEmail:email})}); alert(r.message||'Акаунт заплановано до видалення.'); location.href='/login'; }catch(e){ alert('⚠ '+e.message); } };
+$('accReset').onclick=async()=>{ const c=prompt('Це СОТРЕ весь контент: бренд, стратегію, рубрики, джерела, пости, календар, медіа — і поверне онбординг. Канали лишаться підключені.\n\nВведи RESET для підтвердження:'); if(!c) return; try{ const r=await api('/account/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:c})}); alert(r.message||'Готово.'); location.href='/app'; }catch(e){ alert('⚠ '+e.message); } };
 
 // ---------- Стратегія ----------
 let STRAT = { data:{}, status:"none" };
