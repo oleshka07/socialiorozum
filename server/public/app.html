@@ -959,7 +959,8 @@ async function genIdeas(){
 function renderIdeaList(ideas){
   const el=$('ideaList'); if(!el) return;
   if(!ideas.length){ el.innerHTML='<div class="empty">Ідей нема — спробуй ще.</div>'; $('ideasToPosts').style.display='none'; return; }
-  el.innerHTML=ideas.map(it=>'<label class="rchip" style="display:flex;gap:7px;align-items:flex-start;text-align:left;cursor:pointer"><input type="checkbox" class="ideaCb" data-idea="'+esc(it.idea)+'" checked><span style="font-size:12.5px;line-height:1.4">'+esc(it.idea)+'</span></label>').join('');
+  el.innerHTML=ideas.map(it=>'<label class="rchip on ideaChip" style="display:flex;gap:8px;align-items:flex-start;text-align:left;width:100%;padding:9px 12px;font-weight:500;line-height:1.4;margin-bottom:5px"><input type="checkbox" class="ideaCb" data-idea="'+esc(it.idea)+'" checked><span class="ideaCk" style="font-weight:800">✓</span><span style="flex:1">'+esc(it.idea)+'</span></label>').join('');
+  el.querySelectorAll('.ideaChip').forEach(l=>{ const cb=l.querySelector('input'); const upd=()=>{ l.classList.toggle('on',cb.checked); const ck=l.querySelector('.ideaCk'); if(ck) ck.style.visibility=cb.checked?'visible':'hidden'; }; upd(); cb.addEventListener('change',upd); });
   $('ideasToPosts').style.display='block';
 }
 if($('genIdeas')) $('genIdeas').onclick=genIdeas;
