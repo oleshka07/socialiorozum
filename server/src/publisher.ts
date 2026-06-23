@@ -63,7 +63,7 @@ export async function publishPostToChannels(ws: string, postId: string): Promise
         if (!any) throw new Error("Не вказано канал/групу");
       } else if (k === "threads") {
         if (!thTok) throw new Error("Threads не підключено");
-        const r = await threads.publish(thTok.token, thTok.userId, textOf(k));
+        const r = await threads.publish(thTok.token, thTok.userId, textOf(k), imageUrl || undefined);
         await q(`insert into threads_publish(post_id,media_id,status) values($1,$2,'sent')`, [postId, r.mediaId]);
       } else if (k === "facebook") {
         if (!mt?.page_id || !mt.page_token) throw new Error("Facebook не підключено");
