@@ -470,6 +470,7 @@
       <!-- ============ SETTINGS ============ -->
       <section class="viewsec" data-view="settings">
         <div class="panel"><label class="fl">🕒 Часовий пояс</label><select id="tzSel"></select><div class="hint">Час планування й календаря рахується за цим поясом (визначається автоматично, можна змінити).</div></div>
+        <div class="panel"><label class="fl">🎨 Генерація зображень</label><select id="imgProv"></select><div class="hint">Провайдер AI-зображень. Недоступні — треба додати ключ у .env (FAL_KEY / GEMINI_API_KEY).</div></div>
         <div class="panel">
           <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--tg)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M22 4L2 11l6 2 2 6 3-4 5 4 4-15z"></path></svg></span>Telegram</div>
           <div class="hint" style="line-height:1.7">1. @BotFather → <code>/newbot</code> → токен. 2. Додай бота <b>адміном</b> у канал і групу. 3. Встав токен; канал — <code>@username</code> або id; група — числовий id. 4. «Перевірити».</div>
@@ -735,15 +736,18 @@ function renderStudio(){
         +'<button class="icon" data-a="regen" title="Переробити">↻</button>'
         +'<button class="icon" data-a="copy" title="Копіювати">⧉</button>'
         +'<button class="icon" data-a="archive" title="В архів">🗄</button>'
+        +'<button class="icon" data-a="image" title="Згенерувати зображення">🎨</button>'
         +'<button class="icon" data-a="composer" title="Опублікувати / запланувати">📣</button>'
         +'<button class="approve'+(ap?' on':'')+'" data-a="approve"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg>'+(ap?'Затверджено':'Затвердити')+'</button>'
       +'</div></div>';
   }).join('');
   grid.querySelectorAll('.pcard').forEach(card=>{ const id=card.dataset.post; const cont=card.querySelector('.pcontent');
     cont.addEventListener('blur',()=>saveContent(id,cont.textContent));
-    card.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(id); return; } postAction(card,id,a); });
+    card.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(id); return; } if(a==='image'){ genImageFor(id,b); return; } postAction(card,id,a); });
   });
 }
+async function genImageFor(id,btn){ const o=btn.textContent; btn.disabled=true; btn.textContent='⏳'; try{ await api('/posts/'+id+'/image',{method:'POST'}); await refresh(); flash('🎨 Зображення додано'); }catch(e){ flash('⚠ '+e.message); } finally{ btn.disabled=false; btn.textContent=o; } }
+async function loadImageProvider(){ const sel=$('imgProv'); if(!sel) return; try{ const c=await api('/integrations/images'); const A=c.available||{}; const opts=[['openai','OpenAI gpt-image-1',A.openai],['fal','FLUX schnell (fal.ai)',A.fal],['gemini','Nano Banana (Gemini)',A.gemini]]; sel.innerHTML=opts.map(o=>'<option value="'+o[0]+'"'+(c.provider===o[0]?' selected':'')+(o[2]?'':' disabled')+'>'+o[1]+(o[2]?'':' — нема ключа')+'</option>').join(''); sel.onchange=async()=>{ try{ await api('/integrations/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:sel.value})}); flashSaved(); }catch(e){ flash('⚠ '+e.message); } }; }catch(e){} }
 let InboxSel=null;
 function renderInbox(){
   const list=$('inboxList'), det=$('inboxDetail'); if(!list||!det) return;
@@ -1250,10 +1254,16 @@ async function finishOnboarding(){
   flash(rid?'Готово — ось твої перші пости 🎉':'Готово! Додай джерело й натисни «Згенерувати пости».');
 }
 async function runOnbProgress(rid){
-  const card=$('onboarding').querySelector('.modal-card');
-  if(card) card.innerHTML='<div style="padding:40px 34px;text-align:center"><h2 style="font-size:21px;font-weight:600;margin:0 0 8px">Створюю твої перші пости…</h2><p style="color:var(--muted);font-size:14px;margin:0 0 16px">Це ~10-30 секунд — не закривай вкладку.</p><div><span class="spin"></span></div></div>';
   const cnt=Number(($('ideaCount')||{}).value)||6;
-  try{ await api('/runs/'+rid+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:cnt})}); }catch(e){}
+  const card=$('onboarding').querySelector('.modal-card');
+  if(card) card.innerHTML='<div style="padding:34px"><h2 style="font-size:21px;font-weight:600;margin:0 0 14px;text-align:center">Готуємо твій старт ✨</h2>'
+    +'<div style="display:flex;flex-direction:column;gap:11px;font-size:14px;color:var(--ink2)">'
+    +'<div>📝 Генеруємо перші <b>'+cnt+' постів</b> у твоєму голосі</div>'
+    +'<div>🎨 Малюємо до них <b>прості зображення</b> (за мінімальним промтом)</div>'
+    +'<div>📷 Далі зможеш підключити <b>свій банк фото</b> й покращувати зображення для постів</div>'
+    +'</div><div style="text-align:center;margin-top:20px"><span class="spin"></span> <span style="color:var(--muted);font-size:13px">зачекай ~30-60 секунд…</span></div></div>';
+  const minWait=new Promise(z=>setTimeout(z,3500)); // щоб встиг прочитати тези
+  try{ await Promise.all([ api('/runs/'+rid+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:cnt,images:true})}), minWait ]); }catch(e){ await minWait; }
 }
 
 // ---------- OAuth у поп-апі (кабінет не закривається) ----------
@@ -1294,7 +1304,7 @@ async function renderObConnect(oc){
   if(_mtq){ go('settings'); alert(_mtq==='ok'?'Facebook/Instagram підключено ✓':(_mtq==='nopage'?'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).':'Не вдалося підключити Facebook/Instagram.')); }
   if(_gdq){ go('sources'); alert(_gdq==='ok'?'Google Drive підключено ✓':'Не вдалося підключити Google Drive.'); }
   await loadPrompts();
-  loadRubrics(); loadStrategy(); loadFF(); loadRss(); loadRecent(); loadMedia(); loadGdrive();
+  loadRubrics(); loadStrategy(); loadFF(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider();
   await loadChanStatus();
   try{ const st=await api('/settings'); if(!st.some(r=>r.key==='onboarded')) showOnboarding(); }catch(e){}
   updRunLabel();

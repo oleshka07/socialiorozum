@@ -23,6 +23,7 @@ import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
 import * as gdrive from "./gdrive.js";
 import { publishPostToChannels } from "./publisher.js";
 import { startLifecycleWorker } from "./lifecycle.js";
+import { generateImageForPost, imageProviders } from "./images.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = Fastify({ logger: true, trustProxy: true });
@@ -684,10 +685,39 @@ app.post("/api/runs/:id/autopilot", async (req: any, reply) => {
 
 // LITE: одна генерація N готових постів (замість 6-крокової кишки) — дешево
 app.post("/api/runs/:id/generate-lite", async (req: any, reply) => {
-  const id = req.params.id;
-  if (!(await runOwned(id, req.user.workspace_id))) return reply.code(404).send({ error: "run не знайдено" });
-  try { const count = await generatePostsOnePass(id, Number(req.body?.count) || 6); return { ok: true, count }; }
-  catch (e: any) { await logEvent("error", "lite", e.message, { runId: id }, req.user.id); return reply.code(500).send({ error: e.message }); }
+  const id = req.params.id; const ws = req.user.workspace_id;
+  if (!(await runOwned(id, ws))) return reply.code(404).send({ error: "run не знайдено" });
+  try {
+    const count = await generatePostsOnePass(id, Number(req.body?.count) || 6);
+    let images = 0;
+    if (req.body?.images) {
+      const posts = await q<{ id: string }>(`select id from post where run_id=$1 and stage='final'`, [id]);
+      const res = await Promise.allSettled(posts.map((p) => generateImageForPost(ws, p.id)));
+      images = res.filter((r) => r.status === "fulfilled").length;
+    }
+    return { ok: true, count, images };
+  } catch (e: any) { await logEvent("error", "lite", e.message, { runId: id }, req.user.id); return reply.code(500).send({ error: e.message }); }
+});
+
+// згенерувати зображення для одного поста (кнопка «🎨 Зображення»)
+app.post("/api/posts/:postId/image", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  try { const filename = await generateImageForPost(ws, req.params.postId); return { ok: true, filename }; }
+  catch (e: any) { await logEvent("error", "image", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
+});
+
+// провайдер зображень: статус (які ключі є) + вибір
+app.get("/api/integrations/images", async (req: any) => {
+  const row = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='image_provider'`, [req.user.workspace_id]);
+  return { provider: row?.content || "openai", available: imageProviders() };
+});
+app.post("/api/integrations/images", async (req: any, reply) => {
+  const p = String(req.body?.provider ?? "");
+  if (!["openai", "fal", "gemini"].includes(p)) return reply.code(400).send({ error: "невідомий провайдер" });
+  await q(`insert into settings_block(workspace_id,key,content) values($1,'image_provider',$2)
+           on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`, [req.user.workspace_id, p]);
+  return { ok: true };
 });
 
 // перегляд спільного промту Lite-генерації (прозорість: що саме йде в модель)

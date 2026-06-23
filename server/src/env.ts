@@ -10,7 +10,13 @@ export const env = {
     title: process.env.OPENROUTER_TITLE ?? "KontentGrov",
   },
   openai: {
-    apiKey: process.env.OPENAI_API_KEY ?? "",   // прямий OpenAI для Lite (дешевше за наценку OpenRouter)
+    apiKey: process.env.OPENAI_API_KEY ?? "",   // прямий OpenAI для Lite (дешевше за наценку OpenRouter) + gpt-image-1
+  },
+  fal: {
+    apiKey: process.env.FAL_KEY ?? "",           // FLUX schnell (найдешевші зображення)
+  },
+  gemini: {
+    apiKey: process.env.GEMINI_API_KEY ?? "",    // Gemini 2.5 Flash Image (Nano Banana)
   },
   resend: {
     apiKey: process.env.RESEND_API_KEY ?? "",

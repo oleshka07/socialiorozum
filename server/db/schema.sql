@@ -358,3 +358,6 @@ create index if not exists idx_user_deleted on app_user(deleted_at) where delete
 
 -- підсумок останньої спроби автопостингу слота (для статусу в календарі: ✓ мережі / ⚠ помилки)
 alter table schedule_slot add column if not exists result text;
+
+-- промт для генерації зображення поста (його повертає Lite-генерація разом із текстом)
+alter table post add column if not exists image_prompt text;

@@ -297,7 +297,7 @@ export async function buildLitePrompt(workspaceId: string, count: number): Promi
     (s.tone_of_voice ? `\n\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") +
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
     rubricsText +
-    `\n\nЗгенеруй рівно ${count} різних постів. Поверни ЛИШЕ валідний JSON-масив рядків: ["текст першого поста","текст другого", …]. Мова всіх текстів: ${lang}.`;
+    `\n\nЗгенеруй рівно ${count} різних постів. Поверни ЛИШЕ валідний JSON-масив обʼєктів: [{"text":"повний текст поста","image_prompt":"короткий опис зображення англійською для генерації — сцена/обʼєкти/настрій, без тексту на зображенні"}, …]. Мова текстів постів: ${lang}.`;
   return { system, model: "openai/gpt-4o" };
 }
 
@@ -307,13 +307,16 @@ export async function generatePostsOnePass(runId: string, count: number): Promis
   const n = Math.max(1, Math.min(12, Number(count) || 6));
   const { system, model } = await buildLitePrompt(workspace_id, n);
   const out = await chat(model, system, `Вхідний матеріал:\n---\n${transcript}`, { workspaceId: workspace_id, step: "lite" });
-  let posts: string[] = [];
+  let posts: { text: string; image_prompt: string }[] = [];
   try {
-    posts = extractJsonArray<any>(out).map((x) => (typeof x === "string" ? x : String(x?.text || x?.content || x?.post || ""))).map((t) => t.trim()).filter(Boolean);
+    posts = extractJsonArray<any>(out).map((x) => typeof x === "string"
+      ? { text: x, image_prompt: "" }
+      : { text: String(x?.text || x?.content || x?.post || ""), image_prompt: String(x?.image_prompt || x?.image || "") })
+      .map((p) => ({ text: p.text.trim(), image_prompt: p.image_prompt.trim() })).filter((p) => p.text);
   } catch { posts = []; }
   if (!posts.length) throw new Error("Не вдалося згенерувати пости (порожня відповідь моделі)");
   await q(`delete from post where run_id=$1 and stage='final'`, [runId]);
-  for (const p of posts) await q(`insert into post(run_id, stage, content) values($1,'final',$2)`, [runId, p]);
+  for (const p of posts) await q(`insert into post(run_id, stage, content, image_prompt) values($1,'final',$2,$3)`, [runId, p.text, p.image_prompt || null]);
   return posts.length;
 }
 
