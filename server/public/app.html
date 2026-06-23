@@ -628,6 +628,7 @@ function selectView(v){
   $('genPostsBtn').style.display=v==='create'?'inline-flex':'none';
   if(v==='analytics') loadAnalytics();
   if(v==='publish') loadPublish();
+  if(v==='create') loadStudioPosts();
   if(v==='settings'){ loadAccount(); loadPlans(); }
   if(typeof loadTasks==='function') loadTasks();
   curView=v; if(typeof renderTaskStrip==='function') renderTaskStrip(v);
@@ -743,9 +744,9 @@ function applyState(d){
   renderPosts('o3',byStage.draft,'Спершу відбери ідеї на кроці 1.');
   renderPosts('o4',byStage.toned);
   renderPosts('o5',byStage.formatted);
-  Finals=(byStage.final||[]).filter(p=>p.review!=='archived');
   renderFinals(byStage.final);
-  renderStudio(); renderInbox(); renderStudioSteps(byKey);
+  loadStudioPosts();
+  renderStudioSteps(byKey);
   S.plan=(d.plan||[]).map(p=>({id:p.id,title:p.title,content:p.post_content||p.title,type:p.type,dayOffset:p.day_offset||0}));
   renderPlan();
   renderSourceCard(d.source);
@@ -781,6 +782,8 @@ function renderFinals(posts){
 }
 async function saveContent(id,v){ try{ await api('/posts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:v})}); flashSaved(); }catch(e){} }
 let StudioFilter='all';
+// глобальний список усіх фінальних постів воркспейсу (НЕ привʼязаний до активного джерела/прогону)
+async function loadStudioPosts(){ try{ Finals=(await api('/posts/studio'))||[]; }catch(e){} renderStudio(); renderInbox(); }
 function renderStudio(){
   const grid=$('studioGrid'); if(!grid) return;
   const all=Finals; const appr=all.filter(p=>p.review==='approved').length; const rev=all.length-appr;
@@ -827,7 +830,7 @@ async function openImageEditor(postId, onDone){
   ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
   ov.querySelector('#ieX').onclick=close;
   const msg=ov.querySelector('#ieMsg');
-  const done=(r)=>{ fn=r.filename; hasBase=true; ov.querySelector('#iePrev').innerHTML=imgHtml(); const t2=ov.querySelector('#ieText2'); t2.disabled=false; t2.title=''; msg.style.color='var(--brand)'; msg.textContent='готово ✓'; if(onDone)onDone(fn); try{refresh();}catch(e){} };
+  const done=(r)=>{ fn=r.filename; hasBase=true; ov.querySelector('#iePrev').innerHTML=imgHtml(); const t2=ov.querySelector('#ieText2'); t2.disabled=false; t2.title=''; msg.style.color='var(--brand)'; msg.textContent='готово ✓'; if(onDone)onDone(fn); try{loadStudioPosts();}catch(e){} };
   ov.querySelector('#ieGen').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='малюю зображення… (10-30с)'; try{ const r=await api('/posts/'+postId+'/image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headline:ov.querySelector('#ieOv').checked?ov.querySelector('#ieText').value:''})}); done(r); }catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; } finally{ b.disabled=false; } };
   ov.querySelector('#ieText2').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='оновлюю текст…'; try{ const r=await api('/posts/'+postId+'/image-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headline:ov.querySelector('#ieText').value,overlay:ov.querySelector('#ieOv').checked})}); done(r); }catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; } finally{ b.disabled=false; } };
 }
@@ -873,9 +876,9 @@ function renderCountChips(){ const o=$('countChips'); if(!o) return; const cur=+
 async function postAction(card,id,a){
   const cont=card.querySelector('.pcontent');
   if(a==='copy'){ navigator.clipboard.writeText(cont?cont.textContent:''); flash('Скопійовано'); return; }
-  if(a==='regen'){ if(cont) cont.innerHTML='<span class="spin"></span> перегенерація…'; try{ await api('/posts/'+id+'/regenerate',{method:'POST'}); await refresh(); flashSaved(); }catch(e){ flash('⚠ '+e.message); await refresh(); } return; }
+  if(a==='regen'){ if(cont) cont.innerHTML='<span class="spin"></span> перегенерація…'; try{ await api('/posts/'+id+'/regenerate',{method:'POST'}); await loadStudioPosts(); flashSaved(); }catch(e){ flash('⚠ '+e.message); await loadStudioPosts(); } return; }
   const map={approve:'approved',needs:'needs_work',archive:'archived'};
-  if(map[a]){ try{ await api('/posts/'+id+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:map[a]})}); await refresh(); flashSaved(); }catch(e){ flash('⚠ '+e.message); } }
+  if(map[a]){ try{ await api('/posts/'+id+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:map[a]})}); await loadStudioPosts(); flashSaved(); }catch(e){ flash('⚠ '+e.message); } }
 }
 // ---------- вибір фото ----------
 function chooseMedia(){ return new Promise(async resolve=>{
@@ -1076,7 +1079,7 @@ $('reloadPub').onclick=()=>loadPublish();
 $('newRun').onclick=()=>{
   if(busy) return;
   if(runId && !confirm('Почати новий прогін? Поточні результати лишаться на сервері, але зникнуть з екрана.')) return;
-  runId=null; localStorage.removeItem('kg_run'); S={plan:[],schedule:{}}; Finals=[];
+  runId=null; localStorage.removeItem('kg_run'); S={plan:[],schedule:{}};
   ['o1','o3','o4','o5','o6','o7'].forEach(id=>{const e=$(id); if(e) e.innerHTML='<div class="empty">—</div>';});
   $('transcript').value='';
   ORDER.forEach(n=>{badge(n,'','очікує');stepEl(n).classList.remove('done','stale');});
@@ -1435,7 +1438,7 @@ async function renderObConnect(oc){
   if(_mtq){ go('settings'); alert(_mtq==='ok'?'Facebook/Instagram підключено ✓':(_mtq==='nopage'?'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).':'Не вдалося підключити Facebook/Instagram.')); }
   if(_gdq){ go('sources'); alert(_gdq==='ok'?'Google Drive підключено ✓':'Не вдалося підключити Google Drive.'); }
   await loadPrompts();
-  loadRubrics(); loadStrategy(); loadFF(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadTasks();
+  loadRubrics(); loadStrategy(); loadFF(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadTasks(); loadStudioPosts();
   await loadChanStatus();
   try{ const st=await api('/settings'); if(!st.some(r=>r.key==='onboarded')) showOnboarding(); }catch(e){}
   updRunLabel();

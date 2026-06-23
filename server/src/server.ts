@@ -1254,6 +1254,15 @@ app.get("/api/bank", async (req: any) => {
             order by p.created_at desc`, [req.user.workspace_id]);
 });
 
+// усі фінальні пости воркспейсу (Студія/Інбокс — глобальний список, НЕ привʼязаний до активного джерела)
+app.get("/api/posts/studio", async (req: any) => {
+  return q(`select p.id, p.content, p.review, p.channels, ma.filename as media_filename, p.created_at, src.title as source_title
+            from post p join pipeline_run r on r.id=p.run_id join source src on src.id=r.source_id
+            left join media_asset ma on ma.id=p.media_id
+            where src.workspace_id=$1 and p.stage='final' and (p.review is null or p.review <> 'archived')
+            order by p.created_at desc`, [req.user.workspace_id]);
+});
+
 app.get("/api/schedule", async (req: any) => {
   return q(`select ss.id, ss.scheduled_at, ss.status, ss.result, p.id as post_id, p.content, p.channels
             from schedule_slot ss
