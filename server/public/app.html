@@ -226,6 +226,7 @@
       <p id="obDesc" style="color:var(--muted);font-size:14.5px;margin:0 0 18px"></p>
       <textarea id="obInput" style="min-height:120px"></textarea>
       <div id="obConnect" style="display:none;margin-top:4px"></div>
+      <div id="obExtra" style="display:none;margin-top:8px"></div>
       <div class="btnrow" style="margin-top:18px">
         <button id="obBack" class="ghost">← Назад</button>
         <button id="obNext" class="primary">Далі →</button>
@@ -440,7 +441,7 @@
           <div class="ph">📝 Встав транскрипт або думку</div>
           <div class="hint" style="margin-bottom:10px">Найшвидший шлях — вставити текст і натиснути «У роботу».</div>
           <textarea id="transcript" placeholder="Встав транскрипт сесії, голосову нотатку чи думку…" style="min-height:130px"></textarea>
-          <div class="btnrow"><button class="primary" id="toCreate">У роботу →</button><button class="ghost" id="autopilotBtn">🟢 Автопілот</button><button class="ghost" id="ffImport">📥 Fireflies</button><button class="ghost" id="sampleBtn">Підставити приклад</button></div>
+          <div class="btnrow"><button class="primary" id="toCreate">У роботу →</button><button class="ghost" id="autopilotBtn">🟢 Автопілот</button><button class="ghost" id="ffImport">🎙 Транскрибатор</button><button class="ghost" id="sampleBtn">Підставити приклад</button></div>
           <div class="hint" id="lockHint"></div>
         </div>
         <div class="grid2">
@@ -1202,6 +1203,23 @@ $('gdPick').onclick=async()=>{
 $('gdDisconnect').onclick=async()=>{ if(!confirm('Відключити Google Drive?')) return; try{ await api('/integrations/gdrive/disconnect',{method:'POST'}); await loadGdrive(); }catch(e){} };
 
 // ---------- Fireflies ----------
+async function openTranscriberModal(){
+  let cfg={}; try{ cfg=await api('/integrations/transcription'); }catch(e){}
+  const PROVS=[['fireflies','Fireflies'],['grain','Grain'],['meetgeek','MeetGeek']];
+  const HINTS={fireflies:'Fireflies → Settings → Developer Settings → API Key.',grain:'Grain → Settings → API → Personal Access Token.',meetgeek:'MeetGeek → Settings → API → ключ.'};
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='76';
+  ov.innerHTML='<div class="modal-card" style="max-width:520px;padding:20px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:17px">🎙 Транскрибатор</b><button class="icon" id="trX" style="margin-left:auto">✕</button></div>'
+    +'<label class="fl">Сервіс</label><select id="trProv">'+PROVS.map(p=>'<option value="'+p[0]+'"'+((cfg.provider||'fireflies')===p[0]?' selected':'')+'>'+p[1]+'</option>').join('')+'</select>'
+    +'<div class="fld" style="margin-top:8px"><label class="fl">API-ключ</label><input class="txt" type="password" id="trKey" placeholder="'+(cfg.hasKey?'•••••••• (збережено)':'встав ключ')+'"></div>'
+    +'<div class="hint" id="trHint" style="margin-top:6px"></div>'
+    +'<div class="btnrow" style="margin-top:10px"><button class="primary" id="trSave">Підключити</button><button class="ghost" id="trImport">📥 Імпортувати зустріч</button><span id="trMsg" style="font-size:12px;color:var(--muted)"></span></div>'
+    +'<div id="trList" style="margin-top:8px"></div></div>';
+  document.body.appendChild(ov); const close=()=>ov.remove(); ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#trX').onclick=close;
+  const q=(s)=>ov.querySelector(s); const setHint=()=>{ q('#trHint').textContent=HINTS[q('#trProv').value]||''; }; setHint(); q('#trProv').onchange=setHint;
+  q('#trSave').onclick=async()=>{ const m=q('#trMsg'); m.style.color='var(--muted)'; m.textContent='…'; try{ await api('/integrations/transcription',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:q('#trProv').value,apiKey:q('#trKey').value})}); m.style.color='var(--brand)'; m.textContent='збережено ✓'; if(typeof loadTasks==='function') loadTasks(); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
+  q('#trImport').onclick=async()=>{ const el=q('#trList'); el.innerHTML='<div class="empty"><span class="spin"></span> завантаження…</div>'; try{ const l=await api('/transcription/list'); if(!l.length){ el.innerHTML='<div class="empty">Немає зустрічей.</div>'; return; } el.innerHTML=''; l.forEach(t=>{ const d=document.createElement('div'); d.className='card'; d.style.cssText='cursor:pointer;margin-bottom:6px'; d.innerHTML='<b>'+esc(t.title||'Без назви')+'</b>'; d.onclick=async()=>{ el.innerHTML='<div class="empty"><span class="spin"></span> імпорт…</div>'; try{ const r=await api('/transcription/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:t.id})}); runId=r.runId; localStorage.setItem('kg_run',runId); close(); if($('onboarding')) $('onboarding').style.display='none'; go('create'); setLayout('studio'); await refresh(); flash('Імпортовано: '+(r.title||'')); if(typeof loadTasks==='function') loadTasks(); }catch(e){ el.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; } }; el.appendChild(d); }); }catch(e){ el.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; } };
+}
+if($('ffImport')) $('ffImport').onclick=openTranscriberModal;
 async function loadFF(){ try{ const c=await api('/integrations/transcription'); if(c.hasKey) $('ffKey').placeholder='•••••••• (ключ збережено)'; if($('ffHook')) $('ffHook').value=c.webhookUrl||''; if(c.hasSecret&&$('ffSecret')) $('ffSecret').placeholder='•••••••• (секрет збережено)'; if($('ffAuto')) $('ffAuto').checked=!!c.autoRun; }catch(e){} }
 $('ffHookCopy').onclick=()=>{ const v=$('ffHook').value; if(v){ navigator.clipboard.writeText(v); flashSaved(); } };
 $('ffSave').onclick=async()=>{ try{ await api('/integrations/transcription',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({apiKey:$('ffKey').value,webhookSecret:$('ffSecret').value,autoRun:$('ffAuto').checked})}); $('ffKey').value=''; $('ffSecret').value=''; $('ffMsg').style.color='var(--brand)'; $('ffMsg').textContent='збережено ✓'; await loadFF(); }catch(e){ $('ffMsg').style.color='var(--danger)'; $('ffMsg').textContent='⚠ '+e.message; } };
@@ -1309,6 +1327,7 @@ function renderOb(){
     $('obInput').style.display=''; oc.style.display='none';
     $('obInput').placeholder=s.ph||''; $('obInput').value=s._val||'';
   }
+  const oe=$('obExtra'); if(oe){ if(s.key==='__transcript'){ oe.style.display='block'; oe.innerHTML='<button class="ghost" id="obTrBtn" style="font-size:13px">🎙 Підключити транскрибатор</button>'; const tb=$('obTrBtn'); if(tb) tb.onclick=openTranscriberModal; } else { oe.style.display='none'; oe.innerHTML=''; } }
 }
 $('obBack').onclick=()=>{ OB_STEPS[obIdx]._val=$('obInput').value; if(obIdx>0){obIdx--;renderOb();} };
 $('obSkip').onclick=async()=>{ OB_STEPS[obIdx]._val=($('obInput').style.display!=='none'?$('obInput').value:''); await finishOnboarding(); };

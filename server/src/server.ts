@@ -13,6 +13,10 @@ import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
 import * as meta from "./meta.js";
 import * as fireflies from "./fireflies.js";
+import * as grain from "./grain.js";
+import * as meetgeek from "./meetgeek.js";
+const TRANSCRIBERS: Record<string, { listTranscripts: (k: string) => Promise<any[]>; getTranscript: (k: string, id: string) => Promise<{ title: string; text: string }> }> = { fireflies, grain, meetgeek };
+const transMod = (p?: string | null) => TRANSCRIBERS[p || "fireflies"] || fireflies;
 import * as auth from "./auth.js";
 import { sendVerifyEmail, sendResetEmail, sendDeletionScheduledEmail, sendEmailChangedNotice } from "./email.js";
 import { logEvent } from "./log.js";
@@ -1385,32 +1389,34 @@ app.put("/api/integrations/transcription", async (req: any) => {
   const key = String(req.body?.apiKey ?? "").trim();
   const secret = String(req.body?.webhookSecret ?? "").trim();
   const autoRun = req.body?.autoRun === true || req.body?.autoRun === "true";
+  const provider = ["fireflies", "grain", "meetgeek"].includes(String(req.body?.provider)) ? String(req.body.provider) : "fireflies";
   await q(`insert into transcription_config(workspace_id, provider, api_key, webhook_secret, auto_run, webhook_token, updated_at)
-           values($1,'fireflies', nullif($2,''), nullif($3,''), $4, $5, now())
+           values($1,$6, nullif($2,''), nullif($3,''), $4, $5, now())
            on conflict (workspace_id) do update set
+             provider = $6,
              api_key = case when $2 <> '' then $2 else transcription_config.api_key end,
              webhook_secret = case when $3 <> '' then $3 else transcription_config.webhook_secret end,
              auto_run = $4,
              webhook_token = coalesce(transcription_config.webhook_token, $5),
              updated_at=now()`,
-    [ws, key, secret, autoRun, auth.newToken()]);
+    [ws, key, secret, autoRun, auth.newToken(), provider]);
   return { ok: true };
 });
 app.get("/api/transcription/list", async (req: any, reply) => {
   const c = await transConfig(req.user.workspace_id);
-  if (!c?.api_key) return reply.code(400).send({ error: "Спершу додайте API-ключ Fireflies у Налаштуваннях" });
-  try { return await fireflies.listTranscripts(c.api_key); }
+  if (!c?.api_key) return reply.code(400).send({ error: "Спершу додайте API-ключ транскрибатора у Налаштуваннях" });
+  try { return await transMod(c.provider).listTranscripts(c.api_key); }
   catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
 app.post("/api/transcription/import", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   const c = await transConfig(ws);
-  if (!c?.api_key) return reply.code(400).send({ error: "Спершу додайте API-ключ Fireflies" });
+  if (!c?.api_key) return reply.code(400).send({ error: "Спершу додайте API-ключ транскрибатора" });
   let t: { title: string; text: string };
-  try { t = await fireflies.getTranscript(c.api_key, String(req.body?.id ?? "")); }
+  try { t = await transMod(c.provider).getTranscript(c.api_key, String(req.body?.id ?? "")); }
   catch (e: any) { return reply.code(400).send({ error: e.message }); }
   if (!t.text) return reply.code(400).send({ error: "Порожній транскрипт" });
-  const src = await one<{ id: string }>(`insert into source(workspace_id, origin, title, transcript) values($1,'fireflies',$2,$3) returning id`, [ws, t.title, t.text]);
+  const src = await one<{ id: string }>(`insert into source(workspace_id, origin, title, transcript) values($1,$4,$2,$3) returning id`, [ws, t.title, t.text, c.provider || "fireflies"]);
   const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
   await logEvent("info", "transcription", `імпорт Fireflies: ${t.title}`, null, req.user.id);
   return { sourceId: src!.id, runId: run!.id, title: t.title };
