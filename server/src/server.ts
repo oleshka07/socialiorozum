@@ -27,7 +27,7 @@ import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
 import * as gdrive from "./gdrive.js";
 import { publishPostToChannels } from "./publisher.js";
 import { startLifecycleWorker } from "./lifecycle.js";
-import { generateImageForPost, imageProviders } from "./images.js";
+import { generateImageForPost, imageProviders, overlayForPost } from "./images.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername } from "./tgbot.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -502,7 +502,7 @@ app.get("/api/channels/status", async (req: any) => {
 
 // повний стан поста для композера (текст, канали, фото)
 app.get("/api/posts/:postId/full", async (req: any, reply) => {
-  const p = await one(`select p.id, p.content, p.review, p.channels, ma.filename as media_filename
+  const p = await one(`select p.id, p.content, p.review, p.channels, p.headline, (p.image_base is not null) as has_base, ma.filename as media_filename
      from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      left join media_asset ma on ma.id=p.media_id
      where p.id=$1 and s.workspace_id=$2`, [req.params.postId, req.user.workspace_id]);
@@ -727,8 +727,16 @@ app.post("/api/runs/:id/ideas", async (req: any, reply) => {
 app.post("/api/posts/:postId/image", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
-  try { const filename = await generateImageForPost(ws, req.params.postId); return { ok: true, filename }; }
+  try { const filename = await generateImageForPost(ws, req.params.postId, { headline: req.body?.headline }); return { ok: true, filename }; }
   catch (e: any) { await logEvent("error", "image", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
+});
+
+// перенакласти текст на вже згенероване БАЗОВЕ зображення (дешево, без нової генерації)
+app.post("/api/posts/:postId/image-text", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  try { const filename = await overlayForPost(ws, req.params.postId, String(req.body?.headline ?? ""), req.body?.overlay !== false); return { ok: true, filename }; }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
 
 // провайдер зображень: статус (які ключі є) + вибір

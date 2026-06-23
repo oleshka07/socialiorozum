@@ -3,9 +3,11 @@
 //  - fal:    FLUX.1 [schnell] через fal.ai — найдешевше (FAL_KEY)
 //  - gemini: Gemini 2.5 Flash Image «Nano Banana» (GEMINI_API_KEY)
 import sharp from "sharp";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { saveMedia } from "./media.js";
+import { saveMedia, MEDIA_DIR } from "./media.js";
 
 export type ImgProvider = "openai" | "fal" | "gemini";
 type Img = { buffer: Buffer; mime: string };
@@ -99,7 +101,7 @@ async function overlayHeadline(buf: Buffer, headline: string): Promise<{ buffer:
 }
 
 // згенерувати зображення для поста (за його image_prompt або з тексту) + опційно накласти заголовок, прикріпити (post.media_id)
-export async function generateImageForPost(ws: string, postId: string): Promise<string> {
+export async function generateImageForPost(ws: string, postId: string, opts?: { headline?: string }): Promise<string> {
   const post = await one<{ content: string; image_prompt: string | null }>(
     `select p.content, p.image_prompt from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
@@ -107,14 +109,29 @@ export async function generateImageForPost(ws: string, postId: string): Promise<
   const base = (post.image_prompt || "").trim() || `Зображення для соцмереж за темою: ${(post.content || "").split("\n")[0].slice(0, 200)}`;
   const prompt = `${base}. Стиль: чисте, сучасне, мінімалістичне, привабливе; без тексту на зображенні.`;
   const img = await generateImage(ws, prompt);
+  // зберігаємо БАЗОВЕ зображення (без тексту) окремо — щоб дешево перенакладати текст потім
+  const baseSaved = await saveMedia(ws, { buffer: img.buffer, mime: img.mime, name: `ai-base.${img.mime.includes("png") ? "png" : "jpg"}`, source: "ai-base" });
+  const ovOn = (await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='image_overlay'`, [ws]))?.content !== "0";
+  const headline = (opts?.headline ?? deriveHeadline(post.content)).trim();
   let buf = img.buffer, mime = img.mime;
-  const ov = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='image_overlay'`, [ws]);
-  if ((ov?.content ?? "1") !== "0") {
-    const hl = deriveHeadline(post.content);
-    if (hl) { try { const r = await overlayHeadline(buf, hl); buf = r.buffer; mime = r.mime; } catch { /* оверлей не критичний */ } }
-  }
-  const ext = mime.includes("png") ? "png" : "jpg";
-  const saved = await saveMedia(ws, { buffer: buf, mime, name: `ai.${ext}`, source: "ai" });
-  await q(`update post set media_id=$2 where id=$1`, [postId, saved.id]);
+  if (ovOn && headline) { try { const r = await overlayHeadline(buf, headline); buf = r.buffer; mime = r.mime; } catch { /* оверлей не критичний */ } }
+  const saved = await saveMedia(ws, { buffer: buf, mime, name: `ai.${mime.includes("png") ? "png" : "jpg"}`, source: "ai" });
+  await q(`update post set media_id=$2, image_base=$3, headline=$4 where id=$1`, [postId, saved.id, baseSaved.filename, ovOn ? (headline || null) : null]);
+  return saved.filename;
+}
+
+// перенакласти текст на ВЖЕ згенероване базове зображення (дешево, без нової генерації)
+export async function overlayForPost(ws: string, postId: string, headline: string, overlayOn: boolean): Promise<string> {
+  const post = await one<{ image_base: string | null }>(
+    `select p.image_base from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+     where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
+  if (!post?.image_base) throw new Error("Спершу згенеруй зображення");
+  const baseBuf = await readFile(join(MEDIA_DIR, post.image_base));
+  const hl = (headline || "").trim();
+  let buf: Buffer, mime = "image/jpeg";
+  if (overlayOn && hl) { const r = await overlayHeadline(baseBuf, hl); buf = r.buffer; mime = r.mime; }
+  else { buf = await sharp(baseBuf).jpeg({ quality: 88 }).toBuffer(); }
+  const saved = await saveMedia(ws, { buffer: buf, mime, name: "ai.jpg", source: "ai" });
+  await q(`update post set media_id=$2, headline=$3 where id=$1`, [postId, saved.id, overlayOn ? (hl || null) : null]);
   return saved.filename;
 }

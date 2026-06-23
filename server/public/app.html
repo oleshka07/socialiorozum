@@ -791,7 +791,7 @@ function renderStudio(){
   grid.innerHTML=show.map(p=>{ const sp=statusPill(p.review); const ap=p.review==='approved';
     return '<div class="pcard'+(ap?' appr':'')+'" data-post="'+p.id+'">'
       +'<div class="pcard-h">'+chanDots(p.channels)+'<span class="statuspill '+sp[1]+'" style="margin-left:auto">'+sp[0]+'</span></div>'
-      +(p.media_filename?'<div class="pcard-img"><img loading="lazy" src="/thumb/'+esc(p.media_filename)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(p.media_filename)+'\'"></div>':'')
+      +(p.media_filename?'<div class="pcard-img" data-a="image" style="cursor:pointer" title="Редагувати зображення"><img loading="lazy" src="/thumb/'+esc(p.media_filename)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(p.media_filename)+'\'"></div>':'')
       +'<div class="pcard-text pcontent" contenteditable="true">'+esc(p.content)+'</div>'
       +'<div class="pcard-f"><span class="chars">'+(p.content||'').replace(/\n/g,'').length+' симв.</span>'
         +'<button class="icon" data-a="regen" title="Переробити">↻</button>'
@@ -804,10 +804,33 @@ function renderStudio(){
   }).join('');
   grid.querySelectorAll('.pcard').forEach(card=>{ const id=card.dataset.post; const cont=card.querySelector('.pcontent');
     cont.addEventListener('blur',()=>saveContent(id,cont.textContent));
-    card.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(id); return; } if(a==='image'){ genImageFor(id,b); return; } postAction(card,id,a); });
+    card.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(id); return; } if(a==='image'){ openImageEditor(id); return; } postAction(card,id,a); });
   });
 }
-async function genImageFor(id,btn){ const o=btn.textContent; btn.disabled=true; btn.textContent='⏳'; try{ await api('/posts/'+id+'/image',{method:'POST'}); await refresh(); flash('🎨 Зображення додано'); }catch(e){ flash('⚠ '+e.message); } finally{ btn.disabled=false; btn.textContent=o; } }
+async function openImageEditor(postId, onDone){
+  let full; try{ full=await api('/posts/'+postId+'/full'); }catch(e){ flash('⚠ '+e.message); return; }
+  let fn=full.media_filename||null, hasBase=!!full.has_base;
+  const firstLine=(full.content||'').split('\n').map(s=>s.trim()).find(Boolean)||'';
+  const imgHtml=()=>fn?'<img src="/media/'+esc(fn)+'" style="width:100%;max-height:340px;object-fit:cover;border-radius:10px;border:1px solid var(--line)">':'<div style="height:190px;border-radius:10px;border:1px dashed var(--line2);display:grid;place-items:center;color:var(--muted);font-size:13px">Зображення ще нема — натисни «Згенерувати»</div>';
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='65';
+  ov.innerHTML='<div class="modal-card" style="max-width:520px;padding:20px">'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><b style="font-size:16px">🎨 Зображення поста</b><button class="icon" id="ieX" style="margin-left:auto">✕</button></div>'
+    +'<div id="iePrev">'+imgHtml()+'</div>'
+    +'<label class="fl" style="margin-top:12px">Текст на зображенні</label>'
+    +'<input class="txt" id="ieText" placeholder="Короткий заголовок" value="'+esc(full.headline||firstLine.slice(0,48))+'">'
+    +'<label class="rchip" style="margin-top:8px;display:inline-flex"><input type="checkbox" id="ieOv" checked> Накладати текст</label>'
+    +'<div id="ieMsg" style="font-size:12px;color:var(--muted);margin-top:6px"></div>'
+    +'<div class="btnrow" style="margin-top:14px"><button class="primary" id="ieGen">🎨 Згенерувати</button><button class="ghost" id="ieText2"'+(hasBase?'':' disabled title="Спершу згенеруй"')+'>✍ Оновити лише текст</button></div>'
+    +'<div class="hint" style="margin-top:8px">«Згенерувати» малює нову картинку (коштує). «Оновити лише текст» — дешево, на тій самій базі.</div>'
+    +'</div>';
+  document.body.appendChild(ov); const close=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
+  ov.querySelector('#ieX').onclick=close;
+  const msg=ov.querySelector('#ieMsg');
+  const done=(r)=>{ fn=r.filename; hasBase=true; ov.querySelector('#iePrev').innerHTML=imgHtml(); const t2=ov.querySelector('#ieText2'); t2.disabled=false; t2.title=''; msg.style.color='var(--brand)'; msg.textContent='готово ✓'; if(onDone)onDone(fn); try{refresh();}catch(e){} };
+  ov.querySelector('#ieGen').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='малюю зображення… (10-30с)'; try{ const r=await api('/posts/'+postId+'/image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headline:ov.querySelector('#ieOv').checked?ov.querySelector('#ieText').value:''})}); done(r); }catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; } finally{ b.disabled=false; } };
+  ov.querySelector('#ieText2').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='оновлюю текст…'; try{ const r=await api('/posts/'+postId+'/image-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headline:ov.querySelector('#ieText').value,overlay:ov.querySelector('#ieOv').checked})}); done(r); }catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; } finally{ b.disabled=false; } };
+}
 async function loadImageProvider(){ const sel=$('imgProv'); if(!sel) return; try{ const c=await api('/integrations/images'); const A=c.available||{}; const opts=[['openai','OpenAI gpt-image-1',A.openai],['fal','FLUX schnell (fal.ai)',A.fal],['gemini','Nano Banana (Gemini)',A.gemini]]; sel.innerHTML=opts.map(o=>'<option value="'+o[0]+'"'+(c.provider===o[0]?' selected':'')+(o[2]?'':' disabled')+'>'+o[1]+(o[2]?'':' — нема ключа')+'</option>').join(''); sel.onchange=async()=>{ try{ await api('/integrations/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:sel.value})}); flashSaved(); }catch(e){ flash('⚠ '+e.message); } }; const ov=$('imgOverlay'); if(ov){ ov.checked=!!c.overlay; ov.onchange=async()=>{ try{ await api('/integrations/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({overlay:ov.checked})}); flashSaved(); }catch(e){} }; } }catch(e){} }
 let InboxSel=null;
 function renderInbox(){
@@ -881,7 +904,7 @@ async function openComposer(postId, opts){
     +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px"><b style="font-size:16px">📣 Опублікувати / запланувати</b><button class="icon" id="cmpX" style="margin-left:auto">✕</button></div>'
     +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Канали</div><div id="cmpChips" style="display:flex;gap:6px;flex-wrap:wrap">'+chipsHtml()+'</div>'
     +'<div class="btnrow"><button id="cmpAdapt">✨ Підлаштувати під мережі</button><span id="cmpMsg" style="font-size:12px"></span></div>'
-    +'<div style="display:flex;gap:10px;align-items:flex-start;margin-top:6px"><div style="flex:1;min-width:0" id="cmpPrev">'+prevHtml()+'</div><div style="text-align:center"><div id="cmpMedia">'+mediaHtml()+'</div><div style="display:flex;gap:5px;justify-content:center;margin-top:6px"><button class="ghost" id="cmpPhoto" style="font-size:12px;padding:6px 9px">📎 Галерея</button><button class="ghost" id="cmpUpload" style="font-size:12px;padding:6px 9px">⬆ Завантажити</button></div><input type="file" id="cmpFile" accept="image/*" style="display:none"></div></div>'
+    +'<div style="display:flex;gap:10px;align-items:flex-start;margin-top:6px"><div style="flex:1;min-width:0" id="cmpPrev">'+prevHtml()+'</div><div style="text-align:center"><div id="cmpMedia">'+mediaHtml()+'</div><div style="display:flex;gap:5px;justify-content:center;margin-top:6px"><button class="ghost" id="cmpPhoto" style="font-size:12px;padding:6px 9px">📎 Галерея</button><button class="ghost" id="cmpUpload" style="font-size:12px;padding:6px 9px">⬆ Завантажити</button><button class="ghost" id="cmpImgGen" style="font-size:12px;padding:6px 9px">🎨 Зображення</button></div><input type="file" id="cmpFile" accept="image/*" style="display:none"></div></div>'
     +'<div class="btnrow" style="margin-top:14px;gap:12px"><label style="font-size:12px;color:var(--muted)">Дата <input type="date" id="cmpDate" class="txt" value="'+initDate+'" style="width:auto;padding:7px 9px"></label><label style="font-size:12px;color:var(--muted)">Час <input type="time" id="cmpTime" class="txt" value="'+initTime+'" style="width:auto;padding:7px 9px"></label></div>'
     +'<div class="btnrow" style="margin-top:16px"><button class="primary" id="cmpNow">📣 Опублікувати зараз</button><button class="ok" id="cmpSched">🗓 Запланувати</button></div>'
     +'</div>';
@@ -892,6 +915,7 @@ async function openComposer(postId, opts){
   ov.querySelectorAll('#cmpChips .netchip').forEach(b=>{ if(b.disabled) return; b.onclick=()=>{ const net=b.dataset.net; C[net]=C[net]||{text:''}; C[net].on=!C[net].on; b.classList.toggle('on',C[net].on); ov.querySelector('#cmpPrev').innerHTML=prevHtml(); }; });
   ov.querySelector('#cmpAdapt').onclick=async()=>{ const sel=Object.keys(C).filter(k=>C[k]&&C[k].on); if(!sel.length){ msg.style.color='var(--danger)'; msg.textContent=' оберіть мережі'; return; } msg.style.color='var(--muted)'; msg.textContent=' AI підлаштовує…'; try{ const r=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:sel})}); Object.keys(r.channels||{}).forEach(k=>C[k]=r.channels[k]); ov.querySelector('#cmpPrev').innerHTML=prevHtml(); msg.style.color='var(--brand)'; msg.textContent=' готово ✓'; }catch(e){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+e.message; } };
   ov.querySelector('#cmpPhoto').onclick=async()=>{ const sel=await chooseMedia(); if(sel===undefined) return; try{ await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:sel.id})}); mediaFilename=sel.filename; ov.querySelector('#cmpMedia').innerHTML=mediaHtml(); }catch(e){ flash(e.message); } };
+  ov.querySelector('#cmpImgGen').onclick=()=>openImageEditor(postId,(f)=>{ mediaFilename=f; ov.querySelector('#cmpMedia').innerHTML=mediaHtml(); });
   ov.querySelector('#cmpUpload').onclick=()=>ov.querySelector('#cmpFile').click();
   ov.querySelector('#cmpFile').onchange=async(e)=>{ const file=e.target.files&&e.target.files[0]; if(!file) return; msg.style.color='var(--muted)'; msg.textContent=' завантаження фото…'; try{ const fd=new FormData(); fd.append('file',file); const r=await fetch('/api/media',{method:'POST',body:fd,credentials:'same-origin'}); const j=await r.json(); if(!r.ok||j.error) throw new Error(j.error||('HTTP '+r.status)); const up=(j.saved||[])[0]; if(!up) throw new Error('файл не збережено'); await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:up.id})}); mediaFilename=up.url.replace('/media/',''); ov.querySelector('#cmpMedia').innerHTML=mediaHtml(); msg.style.color='var(--brand)'; msg.textContent=' фото додано ✓'; }catch(err){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+err.message; } };
   const saveCh=()=>api('/posts/'+postId+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:C})});
