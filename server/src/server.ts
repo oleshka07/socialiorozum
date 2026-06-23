@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost } from "./pipeline.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
 import * as meta from "./meta.js";
@@ -1000,13 +1000,22 @@ app.post("/api/integrations/meta/import-voice", async (req: any, reply) => {
   try { media = await meta.getRecentMedia(c.ig_user_id, c.page_token, 20); }
   catch (e: any) { return reply.code(400).send({ error: "Не вдалося прочитати пости IG: " + e.message }); }
   const captions = media.map((m) => (m.caption || "").trim()).filter((t) => t.length > 15);
-  if (captions.length < 2) return reply.code(400).send({ error: "Замало текстових постів в Instagram для аналізу голосу" });
+  if (captions.length < 2) return reply.code(400).send({ error: "Замало текстових постів в Instagram для аналізу" });
+  const joined = captions.slice(0, 20).join("\n\n---\n\n");
   await q(`insert into settings_block(workspace_id, key, content) values($1,'voice_examples',$2)
-           on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`,
-    [ws, captions.slice(0, 20).join("\n\n---\n\n")]);
-  const derived = await deriveVoice(ws);
-  await logEvent("info", "meta", `голос виведено з ${captions.length} IG-постів`, null, req.user.id);
-  return { ok: true, count: captions.length, derived };
+           on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`, [ws, joined]);
+  const d = await deriveBrandFromText(ws, joined);
+  // заповнюємо ПОРОЖНІ поля бренду з аналізу IG (введене вручну не перетираємо)
+  const cur = await q<{ key: string; content: string }>(`select key, content from settings_block where workspace_id=$1 and key = any($2)`, [ws, ["marketing_context", "content_strategy", "tone_of_voice"]]);
+  const has: Record<string, string> = {}; for (const r of cur) has[r.key] = (r.content || "").trim();
+  const upsert = (key: string, val: string) => q(`insert into settings_block(workspace_id,key,content) values($1,$2,$3) on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`, [ws, key, val]);
+  if (d.marketing_context && !has.marketing_context) await upsert("marketing_context", d.marketing_context);
+  if (d.content_strategy && !has.content_strategy) await upsert("content_strategy", d.content_strategy);
+  if (d.tone_of_voice && !has.tone_of_voice) await upsert("tone_of_voice", d.tone_of_voice);
+  if (d.tone_of_voice) await upsert("tone_of_voice_derived", d.tone_of_voice);
+  if (["Українська", "Російська", "English", "Polski", "Deutsch"].includes(d.language)) await upsert("output_language", d.language);
+  await logEvent("info", "meta", `бренд виведено з ${captions.length} IG-постів (мова: ${d.language || "?"})`, null, req.user.id);
+  return { ok: true, count: captions.length, derived: d.tone_of_voice, marketing_context: has.marketing_context || d.marketing_context, language: d.language };
 });
 
 

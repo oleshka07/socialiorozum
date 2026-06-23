@@ -70,6 +70,24 @@ export async function deriveVoice(workspaceId: string): Promise<string> {
 }
 
 // Згенерувати контент-стратегію (L2) із Бази бренду. Зберігає у strategy.data (draft).
+// Аналіз реальних постів автора (Instagram) -> ніша/аудиторія, голос, контент-нотатки, мова. Один виклик.
+export async function deriveBrandFromText(workspaceId: string, text: string): Promise<{ tone_of_voice: string; marketing_context: string; content_strategy: string; language: string }> {
+  const system = "Проаналізуй реальні пости автора нижче й поверни:\n" +
+    "1) marketing_context — ніша, тематика й цільова аудиторія (2-4 речення);\n" +
+    "2) tone_of_voice — стислий опис тону й стилю автора;\n" +
+    "3) content_strategy — короткі нотатки про теми/рубрики, які варто публікувати;\n" +
+    "4) language — мова, якою переважно пише автор: РІВНО одне зі значень Українська|Російська|English|Polski|Deutsch.\n" +
+    "Поверни ЛИШЕ валідний JSON: {\"marketing_context\":\"…\",\"tone_of_voice\":\"…\",\"content_strategy\":\"…\",\"language\":\"…\"}.";
+  const raw = await chat("openai/gpt-4o-mini", system, "Пости автора:\n---\n" + text.slice(0, 12000), { workspaceId, step: "derive_brand" });
+  const o = (extractJsonObject<any>(raw)) || {};
+  return {
+    tone_of_voice: String(o.tone_of_voice || "").trim(),
+    marketing_context: String(o.marketing_context || "").trim(),
+    content_strategy: String(o.content_strategy || "").trim(),
+    language: String(o.language || "").trim(),
+  };
+}
+
 export async function generateStrategy(workspaceId: string): Promise<any> {
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
