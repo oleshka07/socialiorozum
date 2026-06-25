@@ -971,7 +971,7 @@ app.get("/api/posts/:postId/threads-insights", async (req: any, reply) => {
 
 // ===================== META (Facebook + Instagram) =====================
 const META_REDIRECT = `${env.appBaseUrl}/api/integrations/meta/callback`;
-const META_SCOPES = ["public_profile", "pages_show_list", "pages_read_engagement", "pages_manage_posts", "instagram_basic", "instagram_manage_insights"];
+const META_SCOPES = ["public_profile", "pages_show_list", "pages_read_engagement", "pages_manage_posts", "instagram_basic", "instagram_content_publish", "instagram_manage_insights"];
 
 async function metaCfg(ws: string) {
   return one<{ page_id: string | null; page_name: string | null; page_token: string | null; ig_user_id: string | null; ig_username: string | null; token_expires_at: string | null }>(
