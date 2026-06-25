@@ -94,6 +94,18 @@ export async function igStats(igUserId: string, pageToken: string) {
   u.searchParams.set("access_token", pageToken);
   return fbFetch<{ username?: string; followers_count?: number; media_count?: number }>(u.toString());
 }
+// IG account insights (потребує instagram_manage_insights) — охоплення за 28 днів
+export async function igInsights(igUserId: string, pageToken: string): Promise<Record<string, number>> {
+  const u = new URL(`${GRAPH}/${igUserId}/insights`);
+  u.searchParams.set("metric", "reach");
+  u.searchParams.set("period", "days_28");
+  u.searchParams.set("metric_type", "total_value");
+  u.searchParams.set("access_token", pageToken);
+  const j = await fbFetch<{ data: Array<{ name: string; total_value?: { value: number }; values?: Array<{ value: number }> }> }>(u.toString());
+  const out: Record<string, number> = {};
+  for (const m of j.data || []) out[m.name] = m.total_value?.value ?? m.values?.[0]?.value ?? 0;
+  return out;
+}
 
 // фото-пост у FB-Сторінку (url зображення + підпис)
 export async function publishPhotoToPage(pageId: string, pageToken: string, message: string, imageUrl: string) {

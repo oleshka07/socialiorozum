@@ -680,6 +680,7 @@ async function loadAnalytics(){
   try{ slots=await api('/schedule'); }catch(e){}
   try{ bank=await api('/bank'); }catch(e){}
   try{ pub=await api('/published'); }catch(e){}
+  let mstats={}; try{ mstats=await api('/integrations/meta/stats'); }catch(e){}
   const queued=slots.filter(s=>s.status==='planned').length; const failed=slots.filter(s=>s.status==='failed').length;
   const toks=(usage.prompt_tokens||0)+(usage.completion_tokens||0);
   const stats=[['Опубліковано',pub.posts,pub.sends+' у мережах'],['У черзі',queued,'заплановано'+(failed?(' · '+failed+' ⚠'):'')],['Витрати на AI','$'+(Number(usage.cost)||0).toFixed(2),toks.toLocaleString('uk')+' токенів'],['У банку',bank.length,'затверджених']];
@@ -691,13 +692,20 @@ async function loadAnalytics(){
   const chCount={telegram:0,instagram:0,facebook:0,threads:0}; let chTot=0;
   rec.forEach(r=>{ if(chCount[r.net]!=null){ chCount[r.net]++; chTot++; } });
   const CHN={telegram:['Telegram','--tg'],instagram:['Instagram','--ig'],facebook:['Facebook','--fb'],threads:['Threads','--th']};
+  const ig=mstats.instagram, igi=mstats.instagramInsights||{}, fb=mstats.facebook;
+  const igHtml = (ig||fb)
+    ? '<div style="margin-top:14px;padding:13px;border-radius:11px;background:var(--brand-soft)">'
+      +(ig?'<div style="font-size:12.5px;font-weight:700;color:var(--brand)">📸 Instagram @'+esc(ig.username||'')+'</div><div style="font-size:12.5px;color:var(--ink2);margin-top:3px">'+(ig.followers_count||0)+' підписників · '+(ig.media_count||0)+' постів'+(igi.reach!=null?(' · охоплення 28д: <b>'+igi.reach+'</b>'):'')+'</div>':'')
+      +(fb?'<div style="font-size:12.5px;font-weight:700;color:var(--brand);margin-top:'+(ig?'8px':'0')+'">📘 Facebook '+esc(fb.name||'')+'</div><div style="font-size:12.5px;color:var(--ink2);margin-top:3px">'+(fb.followers_count||fb.fan_count||0)+' підписників</div>':'')
+      +'</div>'
+    : '<div style="margin-top:14px;padding:13px;border-radius:11px;background:var(--brand-soft);font-size:12.5px;color:var(--brand)">Підключи Instagram/Facebook у Налаштуваннях, щоб бачити охоплення й підписників.</div>';
   box.innerHTML=
     '<div class="stat-grid" style="margin-bottom:18px">'+stats.map(s=>'<div class="stat"><div class="l">'+s[0]+'</div><div class="v">'+s[1]+'</div><div class="d">'+s[2]+'</div></div>').join('')+'</div>'
     +'<div class="grid2" style="grid-template-columns:1.5fr 1fr">'
     +'<div class="panel" style="margin:0"><div style="font-weight:700;font-size:14px;margin-bottom:18px">Опубліковано за тиждень</div><div class="bars">'+wk.map((v,i)=>'<div class="bar"><div class="b" style="height:'+(v/mx*100)+'%;background:'+(i===7?'var(--brand)':'var(--brand-soft2)')+'"></div><div class="lab">Т'+(i+1)+'</div></div>').join('')+'</div></div>'
     +'<div class="panel" style="margin:0"><div style="font-weight:700;font-size:14px;margin-bottom:14px">За каналами</div>'
       +(chTot?Object.keys(CHN).map(k=>{ const pct=Math.round(chCount[k]/chTot*100); return '<div style="margin-bottom:14px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="width:11px;height:11px;border-radius:4px;background:var('+CHN[k][1]+')"></span><span style="font-size:13px;font-weight:600;flex:1">'+CHN[k][0]+'</span><span style="font-size:13px;font-weight:700">'+pct+'%</span></div><div style="height:7px;border-radius:5px;background:var(--surface2);overflow:hidden"><div style="width:'+pct+'%;height:100%;background:var('+CHN[k][1]+')"></div></div></div>'; }).join(''):'<div class="empty">Ще немає опублікованих постів.</div>')
-      +'<div style="margin-top:14px;padding:13px;border-radius:11px;background:var(--brand-soft);font-size:12.5px;color:var(--brand)">Показники охоплення й реакцій додамо згодом.</div></div>'
+      +igHtml+'</div>'
     +'</div>'
     +'<div class="panel" style="margin:18px 0 0"><div style="font-weight:700;font-size:14px;margin-bottom:6px">Останні публікації</div>'+(rec.length?rec.slice(0,12).map(r=>'<div style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--line)"><span style="font-size:15px">'+({telegram:"✈️",instagram:"📸",facebook:"📘",threads:"🧵"}[r.net]||"•")+'</span><div style="flex:1;min-width:0"><div style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc((r.content||"").replace(/\n+/g," ").slice(0,80))+'</div><div style="font-size:11px;color:var(--muted)">'+(CHN[r.net]?CHN[r.net][0]:r.net)+" · "+new Date(r.created_at).toLocaleString("uk")+'</div></div></div>').join(""):'<div class="empty">Ще нічого не опубліковано. Опублікуй пост — і він зʼявиться тут.</div>')+'</div>';
 }

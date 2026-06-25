@@ -1076,6 +1076,7 @@ app.get("/api/integrations/meta/stats", async (req: any, reply) => {
   const out: any = {};
   try { if (c.page_id) out.facebook = await meta.pageStats(c.page_id, c.page_token); } catch (e: any) { out.facebookError = e.message; }
   try { if (c.ig_user_id) out.instagram = await meta.igStats(c.ig_user_id, c.page_token); } catch (e: any) { out.instagramError = e.message; }
+  try { if (c.ig_user_id) out.instagramInsights = await meta.igInsights(c.ig_user_id, c.page_token); } catch (e: any) { out.instagramInsightsError = e.message; }
   return out;
 });
 
@@ -1508,6 +1509,7 @@ app.get("/forgot", (_req, reply) => reply.sendFile("auth.html"));
 app.get("/reset", (_req, reply) => reply.sendFile("auth.html"));
 app.get("/privacy", (_req, reply) => reply.sendFile("privacy.html"));
 app.get("/terms", (_req, reply) => reply.sendFile("terms.html"));
+app.get("/data-deletion", (_req, reply) => reply.sendFile("data-deletion.html"));
 
 app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
   app.log.info(`socialio на ${addr}`);
