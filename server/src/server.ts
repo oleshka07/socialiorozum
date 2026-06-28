@@ -1409,6 +1409,8 @@ app.get("/api/integrations/transcription", async (req: any) => {
 });
 app.put("/api/integrations/transcription", async (req: any) => {
   const ws = req.user.workspace_id;
+  // «Без підпису»: прибрати секрет → вебхук приймається лише за токеном в URL (надійніше, ніж матчити секрет із Fireflies)
+  if (req.body?.clearSecret === true) { await q(`update transcription_config set webhook_secret=null, updated_at=now() where workspace_id=$1`, [ws]); return { ok: true }; }
   const key = String(req.body?.apiKey ?? "").trim();
   const secret = String(req.body?.webhookSecret ?? "").trim();
   const autoRun = req.body?.autoRun === true || req.body?.autoRun === "true";

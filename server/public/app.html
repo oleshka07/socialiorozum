@@ -522,9 +522,9 @@
           <div class="hint">Ключ: Fireflies → Settings → Developer Settings → API Key. Імпортуй вручну («Джерела» → 📥) або налаштуй авто-імпорт (вебхук).</div>
           <div class="fld" style="margin-top:10px"><label class="fl">Fireflies API Key</label><input class="txt" type="password" id="ffKey" placeholder="вставте ключ"></div>
           <div class="fld" style="margin-top:8px"><label class="fl">🔔 Авто-імпорт: цей URL встав у Fireflies → Webhooks</label><div style="display:flex;gap:8px"><input class="txt" id="ffHook" readonly placeholder="(зʼявиться після збереження ключа)" style="font-size:12px"><button class="ghost" type="button" id="ffHookCopy">Копіювати</button></div></div>
-          <div class="fld" style="margin-top:8px"><label class="fl">Webhook Secret (16-32 символи)</label><input class="txt" type="password" id="ffSecret" placeholder="вставте секрет"></div>
+          <div class="fld" style="margin-top:8px"><label class="fl">Webhook Secret — має ТОЧНО збігатися з секретом у Fireflies (інакше 401), або тисни «Без підпису»</label><input class="txt" type="password" id="ffSecret" placeholder="вставте секрет"></div>
           <label class="rchip" style="margin:8px 0"><input type="checkbox" id="ffAuto"> Авто-прогін Автопілота для імпортованих зустрічей</label>
-          <div class="btnrow"><button class="primary" id="ffSave">Зберегти</button><button class="ghost" id="ffTest">Перевірити</button><span id="ffMsg" style="font-size:12px;color:var(--muted)"></span></div>
+          <div class="btnrow"><button class="primary" id="ffSave">Зберегти</button><button class="ghost" id="ffTest">Перевірити</button><button class="ghost" id="ffNoSig" type="button">Без підпису</button><span id="ffMsg" style="font-size:12px;color:var(--muted)"></span></div>
         </div>
         <div class="panel">
           <div class="ph">💎 Тариф</div>
@@ -1260,6 +1260,7 @@ if($('ffImport')) $('ffImport').onclick=openTranscriberModal;
 async function loadFF(){ try{ const c=await api('/integrations/transcription'); if(c.hasKey) $('ffKey').placeholder='•••••••• (ключ збережено)'; if($('ffHook')) $('ffHook').value=c.webhookUrl||''; if(c.hasSecret&&$('ffSecret')) $('ffSecret').placeholder='•••••••• (секрет збережено)'; if($('ffAuto')) $('ffAuto').checked=!!c.autoRun; }catch(e){} }
 $('ffHookCopy').onclick=()=>{ const v=$('ffHook').value; if(v){ navigator.clipboard.writeText(v); flashSaved(); } };
 $('ffSave').onclick=async()=>{ try{ await api('/integrations/transcription',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({apiKey:$('ffKey').value,webhookSecret:$('ffSecret').value,autoRun:$('ffAuto').checked})}); $('ffKey').value=''; $('ffSecret').value=''; $('ffMsg').style.color='var(--brand)'; $('ffMsg').textContent='збережено ✓'; await loadFF(); }catch(e){ $('ffMsg').style.color='var(--danger)'; $('ffMsg').textContent='⚠ '+e.message; } };
+$('ffNoSig').onclick=async()=>{ if(!confirm('Прибрати webhook-підпис? Вебхук прийматиметься лише за секретним токеном в URL — найнадійніше, якщо секрет не збігається з Fireflies.')) return; try{ await api('/integrations/transcription',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({clearSecret:true})}); $('ffMsg').style.color='var(--brand)'; $('ffMsg').textContent='підпис прибрано — вебхук тепер прийме ✓'; await loadFF(); }catch(e){ $('ffMsg').style.color='var(--danger)'; $('ffMsg').textContent='⚠ '+e.message; } };
 if($('ffAuto')) $('ffAuto').onchange=(e)=>{ if(e.target.checked && !confirm(AUTORUN_WARN)) e.target.checked=false; };
 $('ffTest').onclick=async()=>{ $('ffMsg').style.color='var(--muted)'; $('ffMsg').textContent='перевіряю…'; try{ const l=await api('/transcription/list'); $('ffMsg').style.color='var(--brand)'; $('ffMsg').textContent='ОК, зустрічей: '+l.length; }catch(e){ $('ffMsg').style.color='var(--danger)'; $('ffMsg').textContent='⚠ '+e.message; } };
 $('ffImport').onclick=async()=>{
