@@ -1475,8 +1475,8 @@ app.post("/api/webhooks/fireflies/:token", async (req: any, reply) => {
   }
   const body = req.body || {};
   if (body.eventType && body.eventType !== "Transcription completed") return { ok: true, ignored: true };
-  const meetingId = String(body.meetingId || "");
-  if (!meetingId) return reply.code(400).send({ error: "no meetingId" });
+  const meetingId = String(body.meetingId || body.meeting_id || body.id || (body.data && (body.data.meetingId || body.data.id)) || "");
+  if (!meetingId) { await logEvent("warn", "transcription", "вебхук без meetingId (тест-пінг?) payload=" + JSON.stringify(body).slice(0, 250), null); return { ok: true, note: "no meetingId" }; }
   if (!cfg.api_key) return reply.code(400).send({ error: "no api key" });
   const dup = await one(`select id from source where workspace_id=$1 and external_id=$2`, [cfg.workspace_id, meetingId]);
   if (dup) return { ok: true, duplicate: true };
