@@ -61,8 +61,21 @@ App Review → перевір, що всі 6 дозволів у запиті + 
 ## ⚡ Поки ревʼю не схвалене — розблокувати конкретних людей
 App roles → **Roles → Add People → Testers** → їхній Facebook → **вони мають ПРИЙНЯТИ** запрошення (Facebook → Settings → Business Integrations). Тоді підключаються без помилки.
 
-## Threads — ОКРЕМО
-Threads = окремий застосунок/ревʼю. Дозволи `threads_basic`, `threads_content_publish`, `threads_manage_insights`. Та сама логіка (use case + скрінкаст: підключення Threads → публікація поста). Redirect: `https://socialio.rozum.one/api/integrations/threads/callback`.
+## Threads — ОКРЕМА заявка на ОКРЕМОМУ застосунку
+socialio Threads працює через **інший застосунок** (Threads API, `graph.threads.net`):
+**App ID `1347525417441376`** (НЕ Marketing Pulse 1255…). Тому threads_* у черзі Marketing Pulse — **чужі** (Holos), а socialio Threads рецензується тут, окремо.
+
+developers.facebook.com → застосунок **1347525417441376** → App Review. Потрібні рівно **3** (socialio постить + читає інсайти постів):
+| Дозвіл | Use case |
+|---|---|
+| **threads_basic** | Authorize the user's Threads account and read their basic profile to confirm the connection. |
+| **threads_content_publish** | Publish the user's approved posts (text + optional image) to their own Threads account, now or on a schedule. |
+| **threads_manage_insights** | Show the user the performance (views/likes) of their published Threads posts inside the app's analytics. |
+
+Скрінкаст (на цьому застосунку, тестовий юзер): Налаштування → Threads → «Підключити» → авторизація → опублікувати пост у Threads → показати пост у Threads + (за наявності) інсайти.
+Redirect URI у налаштуваннях Threads-застосунку: `https://socialio.rozum.one/api/integrations/threads/callback`.
+Застосунок 1347… теж має бути **Live** + (за потреби) пройти business verification. Поки ні — додай тестера у Threads (і він приймає).
+**Решта 8 threads_*** (replies/mentions/delete/keyword_search/profile_discovery/location_tagging/share_to_instagram) — socialio НЕ використовує.
 
 ## Що вже зроблено в коді (мною)
 - `instagram_content_publish` додано до scope (IG-публікація для не-адмінів).
