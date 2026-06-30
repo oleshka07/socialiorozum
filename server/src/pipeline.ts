@@ -215,6 +215,10 @@ async function runContext(runId: string) {
     [runId]
   );
   if (!row) throw new Error("run не знайдено");
+  // Кап вхідного матеріалу: gpt-4o на Tier-1 OpenAI має ліміт 30k токенів/хв (TPM). Повний транскрипт
+  // (години розмови) не влазить у один запит → 429 "Request too large". ~32k символів (≈12-20k токенів)
+  // більш ніж достатньо, щоб згенерувати пости, і лишає запас під TPM.
+  if (row.transcript && row.transcript.length > 32000) row.transcript = row.transcript.slice(0, 32000);
   return row;
 }
 
