@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost } from "./pipeline.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
 import * as meta from "./meta.js";
@@ -1172,6 +1172,36 @@ app.put("/api/strategy", async (req: any) => {
            on conflict (workspace_id) do update set data=excluded.data, updated_at=now()`,
     [req.user.workspace_id, JSON.stringify(req.body?.data ?? {})]);
   return { ok: true };
+});
+
+// ===================== V2: КОНТЕНТ-ПЛАН ПО КАНАЛАХ (Prompt 2-7) =====================
+app.post("/api/channel-plan", async (req: any, reply) => {
+  try {
+    const ws = req.user.workspace_id;
+    const channel = String(req.body?.channel || "").trim();
+    const horizon = Math.max(7, Math.min(90, Number(req.body?.horizon) || 30));
+    const ppw = Math.max(1, Math.min(14, Number(req.body?.posts_per_week) || 4));
+    const rows = await generateChannelPlan(ws, channel, horizon, ppw);
+    return { ok: true, channel, rows };
+  } catch (e: any) { await logEvent("error", "channel_plan", e.message, null, req.user.id); return reply.code(400).send({ error: e.message }); }
+});
+app.get("/api/channel-plan/:channel", async (req: any) => {
+  const r = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key=$2`, [req.user.workspace_id, "channel_plan_" + req.params.channel]);
+  let rows: any[] = []; try { rows = r ? JSON.parse(r.content) : []; } catch { rows = []; }
+  return { channel: req.params.channel, rows };
+});
+
+// ===================== V2: АТОМІЗАЦІЯ (Prompt 10) =====================
+app.post("/api/posts/:postId/atomize", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  try {
+    const p = await one<{ content: string }>(`select content from post where id=$1`, [req.params.postId]);
+    if (!p) return reply.code(404).send({ error: "пост не знайдено" });
+    const channels = Array.isArray(req.body?.channels) ? req.body.channels : [];
+    const res = await atomizePost(ws, p.content, channels);
+    return { ok: true, ...res };
+  } catch (e: any) { await logEvent("error", "atomize", e.message, null, req.user.id); return reply.code(400).send({ error: e.message }); }
 });
 
 // ===================== РУБРИКИ (контент-мікс) =====================

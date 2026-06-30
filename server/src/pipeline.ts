@@ -90,6 +90,7 @@ export async function deriveBrandFromText(workspaceId: string, text: string): Pr
 
 export async function generateStrategy(workspaceId: string): Promise<any> {
   const s = await loadSettings(workspaceId);
+  if (s.prompt_engine === "v2") return generateStrategyV2(workspaceId, s);
   const lang = (s.output_language || "Українська").trim();
   const system =
     "Ти контент-стратег. На основі ніші, аудиторії й голосу бренду згенеруй контент-стратегію. " +
@@ -108,6 +109,76 @@ export async function generateStrategy(workspaceId: string): Promise<any> {
     [workspaceId, JSON.stringify(parsed)]
   );
   return parsed;
+}
+
+// ---- V2 (Strategy Brief): єдиний бриф-джерело правди (Prompt 1) ----
+// Надбудова над legacy: видає СУПЕРСЕТ JSON (rubrics/best_days/times/channels лишаються,
+// щоб календар і рубрики працювали) + поля брифу. Компактний бриф пишеться в settings_block.strategy_brief
+// для інʼєкції у Lite та канальні плани. Прапорець: settings_block.prompt_engine='v2'.
+async function generateStrategyV2(workspaceId: string, s: Record<string, string>): Promise<any> {
+  const lang = (s.output_language || "Українська").trim();
+  const system =
+    "Ти топовий SMM- і контент-стратег із 15+ роками побудови органічного зростання. " +
+    "На основі бізнесу, ніші, аудиторії й голосу бренду побудуй ЄДИНИЙ стратегічний бриф (Strategy Brief) — джерело правди для всього контенту. " +
+    "Застосуй перевірені фреймворки: Jobs-to-Be-Done, StoryBrand (клієнт = герой, бренд = провідник), контент-пілери, правило 80/20 (цінність/промо), Hero-Hub-Hygiene (~10/30/60). " +
+    "Будь конкретним і рішучим — займай позицію, не лий води. " +
+    'Поверни ЛИШЕ валідний JSON-обʼєкт точно такої форми: {' +
+    '"positioning":"одне речення позиціювання",' +
+    '"differentiators":["…","…","…"],' +
+    '"icp":{"audience":"хто це","jtbd":["…"],"pains":["…"],"desires":["…"],"objections":["…"]},' +
+    '"brandscript":"герой(клієнт) / його проблема / бренд як провідник / план / заклик / успіх / провал",' +
+    '"brand_voice":{"tone":"…","dos":["…"],"donts":["…"]},' +
+    '"content_pillars":[{"name":"…","why":"чому виграє","jtbd":"яку задачу закриває","funnel":"awareness|consideration|conversion","angles":["…","…"]}],' +
+    '"messaging":{"value_prop":"…","proof_points":["…"],"big_idea":"…"},' +
+    '"offers_and_ctas":{"primary_offer":"…","lead_magnet":"…","soft_cta":"…","hard_cta":"…"},' +
+    '"value_promotion_ratio":"80/20","hhh_split":"10/30/60",' +
+    '"rubrics":[{"name":"…","emoji":"…","description":"…","share":40}],' +
+    '"frequency":{"posts_per_week":4},"best_days":["mon","wed","fri"],"times":["11:00","18:00"],' +
+    '"channels":["telegram"],"schedule_rationale":"чому саме ці дні й час для цієї ніші та каналу","monthly_themes":["…","…"]' +
+    "}. " +
+    "3-5 рубрик (узгоджені з content_pillars за темами), сума share = 100. " +
+    "best_days — короткі коди (пн=mon … нд=sun); times — формат HH:MM, 1-3 значення." +
+    `\n\nМова всіх текстів брифу: ${lang}.`;
+  const user =
+    `Бізнес, ніша й аудиторія: ${s.marketing_context || ""}\n` +
+    `Голос бренду: ${s.tone_of_voice || ""}\n` +
+    `Нотатки стратегії: ${s.content_strategy || ""}\n` +
+    `Продукти/офери/ціни: ${s.offers_and_prices || ""}`;
+  const raw = await chat("openai/gpt-4o", system, user, { workspaceId, step: "strategy" });
+  const parsed: any = extractJsonObject(raw) || {};
+  await q(
+    `insert into strategy(workspace_id,data,status,updated_at) values($1,$2,'draft',now())
+     on conflict (workspace_id) do update set data=excluded.data, status='draft', updated_at=now()`,
+    [workspaceId, JSON.stringify(parsed)]
+  );
+  const briefText = renderBriefText(parsed);
+  if (briefText)
+    await q(
+      `insert into settings_block(workspace_id,key,content) values($1,'strategy_brief',$2)
+       on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`,
+      [workspaceId, briefText]
+    );
+  return parsed;
+}
+
+// Компактний текстовий рендер брифу для інʼєкції у промти (Lite/канальні плани/атомізація).
+function renderBriefText(b: any): string {
+  if (!b || typeof b !== "object") return "";
+  const arr = (x: any) => (Array.isArray(x) ? x.filter(Boolean).join("; ") : "");
+  const pillars = Array.isArray(b.content_pillars)
+    ? b.content_pillars.map((p: any) => `${p?.name || ""} (${p?.funnel || ""}: ${arr(p?.angles)})`).filter(Boolean).join(" | ")
+    : "";
+  const lines = [
+    b.positioning && `Позиціювання: ${b.positioning}`,
+    Array.isArray(b.differentiators) && b.differentiators.length && `Відмінності: ${arr(b.differentiators)}`,
+    b.icp && `Аудиторія: ${b.icp.audience || ""}; болі: ${arr(b.icp.pains)}; бажання: ${arr(b.icp.desires)}; заперечення: ${arr(b.icp.objections)}`,
+    b.brand_voice && `Голос: ${b.brand_voice.tone || ""}; робити: ${arr(b.brand_voice.dos)}; уникати: ${arr(b.brand_voice.donts)}`,
+    pillars && `Контент-пілери: ${pillars}`,
+    b.messaging && `Ключове повідомлення: ${b.messaging.value_prop || ""}; велика ідея: ${b.messaging.big_idea || ""}`,
+    b.offers_and_ctas && `Офер: ${b.offers_and_ctas.primary_offer || ""}; лід-магніт: ${b.offers_and_ctas.lead_magnet || ""}; мʼякий CTA: ${b.offers_and_ctas.soft_cta || ""}; жорсткий CTA: ${b.offers_and_ctas.hard_cta || ""}`,
+    `Цінність:промо = ${b.value_promotion_ratio || "80/20"}; Hero-Hub-Hygiene = ${b.hhh_split || "10/30/60"}`,
+  ].filter(Boolean);
+  return lines.join("\n");
 }
 
 async function loadSettings(workspaceId: string): Promise<Record<string, string>> {
@@ -312,14 +383,26 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
     ? "\n\nНапиши рівно по ОДНОМУ посту на кожну з цих тем (у тому ж порядку):\n" + ideas.map((t, i) => `${i + 1}. ${t}`).join("\n")
     : "";
   const n = ideas && ideas.length ? ideas.length : count;
+  // V2: інʼєкція стратегічного брифу + копірайтинг-фреймворки + само-критика (прапорець prompt_engine='v2').
+  const v2 = s.prompt_engine === "v2";
+  const brief = (s.strategy_brief || "").trim();
+  const briefBlock = v2 && brief ? `\n\nСТРАТЕГІЧНИЙ БРИФ (джерело правди — не суперечити):\n${brief}` : "";
+  const frameworkBlock = v2
+    ? "\n\nДобери копірайтинг-фреймворк під стадію воронки кожного поста: AIDA або PAS — для холодної/незнайомої аудиторії (awareness); BAB — для коротких залучальних постів; FAB/4P — для теплої аудиторії (consideration/conversion). Перший рядок = сильний гачок (цікавісний розрив, патерн-перебій, контр-теза, число або пряма обіцянка)."
+    : "";
+  const critiqueBlock = v2
+    ? " Перед видачею перевір кожен пост на: чіпкий гачок, голос бренду, один чіткий CTA, користь для пілера — слабке перепиши."
+    : "";
   const system =
     "Ти досвідчений SMM-копірайтер. За вхідним матеріалом нижче згенеруй готові до публікації пости. " +
     "Кожен пост ОДРАЗУ фінальний: у голосі бренду, живою людською мовою без ознак AI (без канцеляризмів, без «варто зазначити/у сучасному світі», без шаблонних списків заради списків), з чітким гачком, користю та мʼяким закликом." +
+    briefBlock +
     (s.marketing_context ? `\n\nБренд і аудиторія: ${s.marketing_context}` : "") +
     (s.tone_of_voice ? `\n\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") +
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
+    frameworkBlock +
     rubricsText + ideasText +
-    `\n\nЗгенеруй рівно ${n} різних постів. Поверни ЛИШЕ валідний JSON-масив обʼєктів: [{"text":"повний текст поста","image_prompt":"короткий опис зображення англійською для генерації — сцена/обʼєкти/настрій, без тексту на зображенні"}, …]. Мова текстів постів: ${lang}.`;
+    `\n\nЗгенеруй рівно ${n} різних постів.${critiqueBlock} Поверни ЛИШЕ валідний JSON-масив обʼєктів: [{"text":"повний текст поста","image_prompt":"короткий опис зображення англійською для генерації — сцена/обʼєкти/настрій, без тексту на зображенні"}, …]. Мова текстів постів: ${lang}.`;
   return { system, model: "openai/gpt-4o" };
 }
 
@@ -341,6 +424,67 @@ export async function generatePostsOnePass(runId: string, count: number, ideas?:
   await q(`delete from post where run_id=$1 and stage='final'`, [runId]);
   for (const p of posts) await q(`insert into post(run_id, stage, content, image_prompt) values($1,'final',$2,$3)`, [runId, p.text, p.image_prompt || null]);
   return posts.length;
+}
+
+// ---- V2 Крок 3: контент-план по каналах (Prompts 2-7, лише канали socialio) ----
+const CHANNEL_PLAYBOOK: Record<string, string> = {
+  telegram:
+    "Telegram: алгоритмічної стрічки немає — кожен пост іде всім підписникам через push. Завдання — утримання, щільність користі й воронка, не «вірусність». Архітектура: канал (broadcast) + група (спільнота) + бот (лід-магніт/автоматизація). ~80/20 користь/продаж; кілька якісних постів/тиждень > обсяг. Нативні формати: розмітка тексту, опитування, голосові, закріплене повідомлення з офером.",
+  instagram:
+    "Instagram (Mosseri, 2025): головні сигнали — час перегляду, sends-per-reach (поширення в DM), saves. Reels = охоплення/нові люди; каруселі (до 20 слайдів) = збереження й глибоке залучення; Stories = стосунки. Гачок у перші 3 сек (інакше ~50% відвалюються). Тільки ОРИГІНАЛЬНИЙ контент (без водяних знаків). Ключові слова в підписі (social SEO), 3-5 релевантних тегів.",
+  threads:
+    "Threads: до 500 символів, розмовний тон, без хештегів. Короткі думки, питання до аудиторії, треди з кількох постів. Заохочуй відповіді (репліки — головний сигнал поширення). Автентичність > полірованість.",
+  facebook:
+    "Facebook: усе відео тепер Reels (охоплення поза підписниками); зберігання/поширення > лайки; фото добре заходять у стрічці (підписи 40-80 символів). Групи дають значно більше органіки, ніж сторінки — спільнота в групі, анонси на сторінці. Оригінальність винагороджується.",
+};
+
+export async function generateChannelPlan(workspaceId: string, channel: string, horizonDays: number, postsPerWeek: number): Promise<any[]> {
+  const playbook = CHANNEL_PLAYBOOK[channel];
+  if (!playbook) throw new Error("Канал не підтримується: " + channel);
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const brief = (s.strategy_brief || "").trim();
+  const system =
+    `Ти старший контент-стратег каналу ${channel}, що знає його алгоритм 2025-2026. ` +
+    "Розширюй ЄДИНУ стратегію на цей канал, НЕ суперечачи брифу — перекладай позиціювання, пілери, голос і офери у нативний для каналу контент, а не вигадуй наново. " +
+    (brief
+      ? `\n\nСТРАТЕГІЧНИЙ БРИФ:\n${brief}`
+      : `\n\nКонтекст бренду: ${s.marketing_context || ""}\nГолос: ${s.tone_of_voice || ""}`) +
+    `\n\nПравила каналу:\n${playbook}` +
+    `\n\nПобудуй контент-план на ${horizonDays} днів за темпу ${postsPerWeek} постів/тиждень. ` +
+    "Кожен пункт прив'яжи до пілера й стадії воронки; тримай 80/20 користь/промо та розподіл Hero/Hub/Hygiene. " +
+    'Поверни ЛИШЕ валідний JSON-масив обʼєктів: [{"day":1,"pillar":"…","hhh":"hero|hub|hygiene","funnel":"awareness|consideration|conversion","format":"…","hook":"чіпкий гачок/робоча назва","message":"ключова думка","cta":"…","kpi":"головна метрика"}]. ' +
+    `Мова всіх текстів: ${lang}.`;
+  const raw = await chat("openai/gpt-4o", system, "Згенеруй контент-план.", { workspaceId, step: "channel_plan" });
+  let rows: any[] = [];
+  try { rows = extractJsonArray<any>(raw); } catch { rows = []; }
+  await q(
+    `insert into settings_block(workspace_id,key,content) values($1,$2,$3)
+     on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`,
+    [workspaceId, "channel_plan_" + channel, JSON.stringify(rows)]
+  );
+  return rows;
+}
+
+// ---- V2 Крок 4: атомізація (Prompt 10) — 1 пілерний пост → варіанти під усі канали ----
+export async function atomizePost(workspaceId: string, content: string, channels: string[]): Promise<{ atoms: string[]; matrix: any[] }> {
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const brief = (s.strategy_brief || "").trim();
+  const chans = (channels || []).filter((c) => CHANNEL_PLAYBOOK[c]);
+  const targets = chans.length ? chans.join(", ") : "telegram, instagram, threads, facebook";
+  const system =
+    "Ти стратег ре-використання контенту (create once, publish everywhere / COPE). " +
+    (brief ? `\nСТРАТЕГІЧНИЙ БРИФ (тримай бренд):\n${brief}\n` : "") +
+    "1) Витягни 12-30 «атомів» із пілерного матеріалу: статистика, цитати, кроки, історії, контр-думки, FAQ, помилки. " +
+    "2) Зістав атоми з нативними форматами для кожного каналу зі своїм свіжим гачком (НЕ копіюй однаковий текст між каналами). " +
+    `\n\nКанали: ${targets}.` +
+    ' Поверни ЛИШЕ валідний JSON-обʼєкт: {"atoms":["…"],"matrix":[{"atom":"…","channel":"…","format":"…","hook":"нативний гачок","cta":"…","best":false}]}. ' +
+    "Познач best:true для топ-варіантів на канал. " +
+    `Мова всіх текстів: ${lang}.`;
+  const raw = await chat("openai/gpt-4o", system, `Пілерний матеріал:\n---\n${(content || "").slice(0, 8000)}`, { workspaceId, step: "atomize" });
+  const o: any = extractJsonObject(raw) || {};
+  return { atoms: Array.isArray(o.atoms) ? o.atoms : [], matrix: Array.isArray(o.matrix) ? o.matrix : [] };
 }
 
 // Перегенерація одного поста зі СПІЛЬНИМ контекстом (голос + де-AI) — для кнопки «Переробити».
