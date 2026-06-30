@@ -66,3 +66,13 @@ Owner/operator: **Oleg** (o.stepeniev@swipescape.eu). Wants autonomous work: pus
 - image EDITOR shipped: prominent «🎨 Зображення» editor (studio card + composer) — generate vs cheap re-overlay-text on a saved base image; post.image_base/headline; /image-text endpoint. + `CLAUDE.md` project-memory file (d0e6411).
 - `d71554e` media thumbnails (`/thumb/:name`, sharp, disk cache) · `a7c5093` ideas selectable cards · `a21a418` re-derive brand overwrites on IG switch (+any language) · `ee37d55` multi-provider transcribers (Fireflies/Grain/MeetGeek) · `b866753` gamification phase 2 (task strip) · `5eb6ec0` tariffs page (fake billing) · `67ec64c` gamification phase 1 · `2533955` Threads posts images · `8e3a6a5` Studio ideas→posts block · `5ce64e4` Telegram photo posts + shared bot · `a63b9bc` brand-from-Instagram + drop hardcoded defaults · `496a7eb` onboarding popup lines.
 - `21f9a23` text overlay (sharp+SVG) · `ee1e8e1` AI image gen 3-provider · `f2d4dfb` Lite/PRO UI · `331111f` OAuth popup + account picker · `9982392` OpenAI-direct · `705db54` reset button · `ef450f0` Lite single-pass · `fca38db` IG-first onboarding · `9653ec5` instant first posts · `828258b` timezone · `de70c3b` dead-code cleanup · `ceb4868` publishing visibility · `cd7bbb4` account lifecycle · `4132c5e` Plyn redesign.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
