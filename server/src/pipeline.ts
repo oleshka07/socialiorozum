@@ -61,7 +61,13 @@ export async function deriveVoice(workspaceId: string): Promise<string> {
   if (!examples) throw new Error("Спершу встав 3-5 прикладів постів");
   const lang = (settings.output_language || "Українська").trim();
   const system =
-    "Проаналізуй приклади постів автора і стисло опиши його tone of voice (голос бренду): звертання (ти/ви), тон, характерну лексику й ритм, що робить голос впізнаваним і чого уникати. 4-6 речень суцільним описом, без преамбул і списків - щоб вставити як інструкцію для AI." +
+    "Проаналізуй приклади постів автора і опиши його tone of voice (голос бренду) СТРУКТУРОВАНО, як робочу інструкцію для AI-копірайтера:\n" +
+    "1) Тон і звертання (ти/ви, енергія, дистанція) - 2-3 речення.\n" +
+    "2) РОБИ: 5 характерних прийомів автора (ритм, довжина абзаців, як будує гачки, як завершує).\n" +
+    "3) НЕ РОБИ: 5 речей, які зламали б цей голос.\n" +
+    "4) Фірмова лексика: 5-10 слів/зворотів, які автор реально вживає.\n" +
+    "5) Емодзі: які, скільки, де.\n" +
+    "Стисло, без преамбул і води." +
     `\n\nМова опису: ${lang}.`;
   const derived = await chat("anthropic/claude-sonnet-4.5", system, `Приклади постів:\n---\n${examples}`, { workspaceId, step: "tone" });
   await q(
@@ -364,12 +370,20 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
   if (!want.length) return {};
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
+  const v2 = s.prompt_engine === "v2";
   const tone = s.tone_of_voice ? `\nГолос бренду (зберігай): ${s.tone_of_voice}` : "";
   const deai = s.deai_rules ? `\nПравила «без AI» (зберігай): ${s.deai_rules}` : "";
-  const system = "Адаптуй пост під кожну вказану соцмережу, зберігаючи зміст, голос бренду й живу людську мову." + tone + deai +
-    "\nПравила:\n" + want.map((c) => "- " + rules[c]).join("\n") +
+  // V2: адаптація успадковує бриф і ПОВНІ плейбуки каналів (алгоритми 2025-26), не однорядкові правила
+  const brief = v2 ? (s.strategy_brief || "").trim() : "";
+  const playbooks = v2
+    ? "\nПлейбуки каналів (перекладай пост у нативний формат, НЕ вигадуй новий зміст):\n" + want.map((c) => `[${c}] ${CHANNEL_PLAYBOOK[c] || rules[c]}\nФормат: ${rules[c]}`).join("\n")
+    : "\nПравила:\n" + want.map((c) => "- " + rules[c]).join("\n");
+  const critique = v2 ? "\nПеред видачею перевір кожну версію: гачок працює саме для цього каналу; довжина й формат нативні; голос не зламано. Слабке перепиши." : "";
+  const system = "Адаптуй пост під кожну вказану соцмережу, зберігаючи зміст, голос бренду й живу людську мову." +
+    (brief ? `\n\n<strategy_brief>\n${brief}\n</strategy_brief>` : "") +
+    tone + deai + playbooks + critique +
     NO_DASH_RULE + `\n\nПоверни ЛИШЕ валідний JSON-обʼєкт виду {${want.map((c) => `"${c}":"…"`).join(",")}}. Мова: ${lang}.`;
-  const raw = await chat("openai/gpt-4o-mini", system, `Пост:\n---\n${content}`, { workspaceId, step: "format" });
+  const raw = await chat(v2 ? "openai/gpt-4o" : "openai/gpt-4o-mini", system, `Пост:\n---\n${content}`, { workspaceId, step: "format" });
   const obj = extractJsonObject(raw) as Record<string, string>;
   const out: Record<string, string> = {};
   for (const c of want) if (obj && obj[c]) out[c] = String(obj[c]);
@@ -390,26 +404,45 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
     ? "\n\nНапиши рівно по ОДНОМУ посту на кожну з цих тем (у тому ж порядку):\n" + ideas.map((t, i) => `${i + 1}. ${t}`).join("\n")
     : "";
   const n = ideas && ideas.length ? ideas.length : count;
-  // V2: інʼєкція стратегічного брифу + копірайтинг-фреймворки + само-критика (прапорець prompt_engine='v2').
   const v2 = s.prompt_engine === "v2";
-  const brief = (s.strategy_brief || "").trim();
-  const briefBlock = v2 && brief ? `\n\nСТРАТЕГІЧНИЙ БРИФ (джерело правди - не суперечити):\n${brief}` : "";
-  const frameworkBlock = v2
-    ? "\n\nДобери копірайтинг-фреймворк під стадію воронки кожного поста: AIDA або PAS - для холодної/незнайомої аудиторії (awareness); BAB - для коротких залучальних постів; FAB/4P - для теплої аудиторії (consideration/conversion). Перший рядок = сильний гачок (цікавісний розрив, патерн-перебій, контр-теза, число або пряма обіцянка)."
-    : "";
-  const critiqueBlock = v2
-    ? " Перед видачею перевір кожен пост на: чіпкий гачок, голос бренду, один чіткий CTA, користь для пілера - слабке перепиши."
-    : "";
+  const outputFormat = `Поверни ЛИШЕ валідний JSON-масив обʼєктів: [{"text":"повний текст поста","image_prompt":"короткий опис зображення англійською для генерації - сцена/обʼєкти/настрій, без тексту на зображенні","rubric":"назва рубрики поста${rubs.length ? " (СТРОГО одна з переліку рубрик вище)" : ""}"}, …]. Мова текстів постів: ${lang}.`;
+
+  if (v2) {
+    // V2 (бібліотека промтів): XML-структура + multishot (реальні пости автора) + меню гачків +
+    // фреймворк під воронку + само-критика. Порядок секцій: роль → бриф → бренд → зразки → правила → задача → формат.
+    const brief = (s.strategy_brief || "").trim();
+    const examples = (s.voice_examples || "").trim().slice(0, 3000);
+    const system =
+      "<role>Ти елітний direct-response копірайтер і SMM-автор із 15+ роками досвіду. Пишеш нативно для соцмереж і НІКОЛИ не звучиш як AI чи «загальний» контент.</role>" +
+      (brief ? `\n\n<strategy_brief>\nДжерело правди - не суперечити:\n${brief}\n</strategy_brief>` : "") +
+      "\n\n<brand>" +
+      (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") +
+      (s.tone_of_voice ? `\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") +
+      (s.deai_rules ? `\nПравила «без AI»: ${s.deai_rules}` : "") +
+      "\n</brand>" +
+      (examples ? `\n\n<voice_examples>\nРЕАЛЬНІ пости автора - еталон голосу. Відтворюй ритм, лексику, звертання й розмір абзаців САМЕ як тут, але НЕ копіюй зміст:\n---\n${examples}\n---\n</voice_examples>` : "") +
+      "\n\n<rules>" +
+      "\n- Кожен пост ОДРАЗУ фінальний: жива людська мова, без канцеляризмів, без «варто зазначити/у сучасному світі», без шаблонних списків заради списків." +
+      "\n- Фреймворк під стадію воронки поста: AIDA або PAS - холодна аудиторія (awareness); BAB - короткі залучальні пости; FAB/4P - тепла аудиторія (consideration/conversion)." +
+      "\n- Гачок (перший рядок вирішує все): подумки склади 3 варіанти різних типів (цікавісний розрив, патерн-перебій, контр-теза, попередження про помилку, число/список, пряма обіцянка) і залиш у пості НАЙСИЛЬНІШИЙ." +
+      "\n- Один чіткий мʼякий заклик на пост, не більше." +
+      rubricsText +
+      NO_DASH_RULE.replace(/^\n+/, "\n- ") +
+      "\n</rules>" +
+      `\n\n<task>\nЗгенеруй рівно ${n} різних постів за вхідним матеріалом.${ideasText}\nПеред видачею САМО-КРИТИКА кожного поста за 5 критеріями: (а) гачок зупиняє скрол; (б) голос як у зразках; (в) один чіткий CTA; (г) нативний формат; (д) реальна користь для читача. Усе, що слабке, перепиши до видачі.\n</task>` +
+      `\n\n<output_format>\n${outputFormat}\n</output_format>`;
+    return { system, model: "openai/gpt-4o" };
+  }
+
+  // LEGACY (prompt_engine != v2) - незмінний класичний промт
   const system =
     "Ти досвідчений SMM-копірайтер. За вхідним матеріалом нижче згенеруй готові до публікації пости. " +
     "Кожен пост ОДРАЗУ фінальний: у голосі бренду, живою людською мовою без ознак AI (без канцеляризмів, без «варто зазначити/у сучасному світі», без шаблонних списків заради списків), з чітким гачком, користю та мʼяким закликом." +
-    briefBlock +
     (s.marketing_context ? `\n\nБренд і аудиторія: ${s.marketing_context}` : "") +
     (s.tone_of_voice ? `\n\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") +
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
-    frameworkBlock +
     rubricsText + ideasText +
-    NO_DASH_RULE + `\n\nЗгенеруй рівно ${n} різних постів.${critiqueBlock} Поверни ЛИШЕ валідний JSON-масив обʼєктів: [{"text":"повний текст поста","image_prompt":"короткий опис зображення англійською для генерації - сцена/обʼєкти/настрій, без тексту на зображенні","rubric":"назва рубрики поста${rubs.length ? " (СТРОГО одна з переліку рубрик вище)" : ""}"}, …]. Мова текстів постів: ${lang}.`;
+    NO_DASH_RULE + `\n\nЗгенеруй рівно ${n} різних постів. ${outputFormat}`;
   return { system, model: "openai/gpt-4o" };
 }
 
