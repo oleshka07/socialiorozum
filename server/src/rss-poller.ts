@@ -3,7 +3,7 @@
 import { q, one } from "./db.js";
 import { logEvent } from "./log.js";
 import { fetchFeed } from "./rss.js";
-import { executeStep, STEP_ORDER, StepKey } from "./pipeline.js";
+import { generatePostsOnePass } from "./pipeline.js";
 
 const POLL_MS = 15 * 60 * 1000; // кожні 15 хв
 const MAX_NEW_PER_TICK = 8;     // обмеження, щоб великий фід не залив систему
@@ -35,10 +35,11 @@ async function ingest(feed: Feed): Promise<string[]> {
   return runIds;
 }
 
+// auto_run жене ДЕФОЛТНИЙ Lite-шлях (1 виклик на прогін), а не дорогий 6-кроковий PRO-конвеєр
 async function runPipelines(runIds: string[]): Promise<void> {
   for (const rid of runIds) {
-    try { for (const s of STEP_ORDER) await executeStep(rid, s as StepKey); }
-    catch (e: any) { await logEvent("error", "rss", `автопілот ${rid}: ${e.message}`, { runId: rid }); }
+    try { await generatePostsOnePass(rid, 6); }
+    catch (e: any) { await logEvent("error", "rss", `авто-генерація ${rid}: ${e.message}`, { runId: rid }); }
   }
 }
 

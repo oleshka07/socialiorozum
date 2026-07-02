@@ -68,8 +68,9 @@ async function resolveProvider(ws: string): Promise<ImgProvider | null> {
   return null;
 }
 
-export async function generateImage(ws: string, prompt: string): Promise<Img> {
-  const p = await resolveProvider(ws);
+export async function generateImage(ws: string, prompt: string, providerOverride?: ImgProvider): Promise<Img> {
+  const avail = imageProviders();
+  const p = (providerOverride && avail[providerOverride]) ? providerOverride : await resolveProvider(ws);
   if (!p) throw new Error("Не налаштовано жодного провайдера зображень — додай ключ (OPENAI_API_KEY / FAL_KEY / GEMINI_API_KEY) у .env");
   const img = p === "openai" ? await genOpenAI(prompt) : p === "fal" ? await genFal(prompt) : await genGemini(prompt);
   try { await q(`insert into llm_usage(workspace_id, step, model, cost) values($1,'image',$2,$3)`, [ws, p, COSTS[p] || 0]); } catch { /* облік не критичний */ }
@@ -100,23 +101,28 @@ async function overlayHeadline(buf: Buffer, headline: string): Promise<{ buffer:
   return { buffer: out, mime: "image/jpeg" };
 }
 
-// згенерувати зображення для поста (за його image_prompt або з тексту) + опційно накласти заголовок, прикріпити (post.media_id)
-export async function generateImageForPost(ws: string, postId: string, opts?: { headline?: string }): Promise<string> {
+// згенерувати зображення для поста (за його image_prompt або з тексту), прикріпити (post.media_id).
+// Логіка тексту на зображенні: генерація ЗАВЖДИ чиста (без накладання) — заголовок юзер підтверджує
+// в редакторі зображення і накладає окремо (дешевий /image-text). Виняток: явний opts.headline
+// (кнопка «Згенерувати» в редакторі з заповненим полем) — тоді накладаємо одразу.
+export async function generateImageForPost(ws: string, postId: string, opts?: { headline?: string; provider?: ImgProvider }): Promise<string> {
   const post = await one<{ content: string; image_prompt: string | null }>(
     `select p.content, p.image_prompt from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
   if (!post) throw new Error("пост не знайдено");
   const base = (post.image_prompt || "").trim() || `Зображення для соцмереж за темою: ${(post.content || "").split("\n")[0].slice(0, 200)}`;
-  const prompt = `${base}. Стиль: чисте, сучасне, мінімалістичне, привабливе; без тексту на зображенні.`;
-  const img = await generateImage(ws, prompt);
+  // стиль зображень бренду (аналог tone of voice для картинок) — задається в Налаштуваннях
+  const styleRow = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='image_style'`, [ws]);
+  const style = (styleRow?.content || "").trim() || "чисте, сучасне, мінімалістичне, привабливе";
+  const prompt = `${base}. Стиль бренду: ${style}. Без жодного тексту, написів чи літер на зображенні.`;
+  const img = await generateImage(ws, prompt, opts?.provider);
   // зберігаємо БАЗОВЕ зображення (без тексту) окремо — щоб дешево перенакладати текст потім
   const baseSaved = await saveMedia(ws, { buffer: img.buffer, mime: img.mime, name: `ai-base.${img.mime.includes("png") ? "png" : "jpg"}`, source: "ai-base" });
-  const ovOn = (await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='image_overlay'`, [ws]))?.content !== "0";
-  const headline = (opts?.headline ?? deriveHeadline(post.content)).trim();
+  const headline = (opts?.headline || "").trim();
   let buf = img.buffer, mime = img.mime;
-  if (ovOn && headline) { try { const r = await overlayHeadline(buf, headline); buf = r.buffer; mime = r.mime; } catch { /* оверлей не критичний */ } }
+  if (headline) { try { const r = await overlayHeadline(buf, headline); buf = r.buffer; mime = r.mime; } catch { /* оверлей не критичний */ } }
   const saved = await saveMedia(ws, { buffer: buf, mime, name: `ai.${mime.includes("png") ? "png" : "jpg"}`, source: "ai" });
-  await q(`update post set media_id=$2, image_base=$3, headline=$4 where id=$1`, [postId, saved.id, baseSaved.filename, ovOn ? (headline || null) : null]);
+  await q(`update post set media_id=$2, image_base=$3, headline=$4 where id=$1`, [postId, saved.id, baseSaved.filename, headline || null]);
   return saved.filename;
 }
 

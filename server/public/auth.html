@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html lang="uk"><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>socialio — вхід</title>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>socialio - вхід</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -62,9 +63,9 @@ button:disabled{opacity:.5}
     <div class="pitch">
       <div class="eyebrow">Соцмережі без вигадування</div>
       <h2>Контент тече з того, що ти вже маєш</h2>
-      <p>Встав транскрипт, нотатку чи думку — socialio перетворить це на пачку готових постів у твоєму голосі. Ти лише переглядаєш і затверджуєш.</p>
+      <p>Встав транскрипт, нотатку чи думку - socialio перетворить це на пачку готових постів у твоєму голосі. Ти лише переглядаєш і затверджуєш.</p>
       <div class="bullets">
-        <div class="bullet"><span class="bdot"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg></span> Жодної «порожньої сторінки» — ідеї вже всередині</div>
+        <div class="bullet"><span class="bdot"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg></span> Жодної «порожньої сторінки» - ідеї вже всередині</div>
         <div class="bullet"><span class="bdot"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg></span> Твій тон голосу, очищений від AI-присмаку</div>
         <div class="bullet"><span class="bdot"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg></span> Затвердив → у календар → опубліковано</div>
       </div>
@@ -110,9 +111,9 @@ function show(cls,text){ const m=$('msg'); m.className='msg '+cls; m.textContent
 const CFG={
   login:   {title:'З поверненням 👋', sub:'Увійдіть у свій кабінет',                 btn:'Увійти',              email:1,pass:1,passLabel:'Пароль',
             alt:'Немає акаунта? <a href="/register">Реєстрація</a> · <a href="/forgot">Забули пароль?</a>'},
-  register:{title:'Створіть акаунт',  sub:'Кілька секунд — і починаємо',            btn:'Зареєструватись',     email:1,pass:1,passLabel:'Пароль (мін. 8 символів)',
+  register:{title:'Створіть акаунт',  sub:'Кілька секунд - і починаємо',            btn:'Зареєструватись',     email:1,pass:1,passLabel:'Пароль (мін. 8 символів)',
             alt:'Вже є акаунт? <a href="/login">Увійти</a>'},
-  forgot:  {title:'Скидання пароля', sub:'Введіть email — надішлемо посилання',    btn:'Надіслати посилання', email:1,pass:0,passLabel:'',
+  forgot:  {title:'Скидання пароля', sub:'Введіть email - надішлемо посилання',    btn:'Надіслати посилання', email:1,pass:0,passLabel:'',
             alt:'Згадали? <a href="/login">Увійти</a>'},
   reset:   {title:'Новий пароль',    sub:'Введіть новий пароль',                   btn:'Зберегти пароль',     email:0,pass:1,passLabel:'Новий пароль (мін. 8)',
             alt:'<a href="/login">До входу</a>'},

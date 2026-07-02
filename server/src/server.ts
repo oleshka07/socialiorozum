@@ -39,7 +39,7 @@ await app.register(fstatic, { root: join(__dirname, "..", "public"), prefix: "/"
 // медіа-сховище: файли на диску (Docker-volume), віддаємо публічно за /media/<uuid>.<ext>
 await app.register(multipart, { limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
 await app.register(fstatic, { root: MEDIA_DIR, prefix: "/media/", decorateReply: false });
-// мініатюри (sharp + диск-кеш) — щоб сітки не вантажили повні зображення; публічно, як і /media
+// мініатюри (sharp + диск-кеш) - щоб сітки не вантажили повні зображення; публічно, як і /media
 app.get("/thumb/:name", async (req: any, reply) => {
   const buf = await getThumb(String(req.params.name));
   if (!buf) return reply.code(404).send();
@@ -55,7 +55,7 @@ app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body,
   try { done(null, JSON.parse(body as string)); } catch (e) { done(e as Error, undefined); }
 });
 
-// HTML-сторінки не кешуємо браузером — щоб після деплою одразу бачити свіжий app.html
+// HTML-сторінки не кешуємо браузером - щоб після деплою одразу бачити свіжий app.html
 app.addHook("onSend", async (req: any, reply, payload) => {
   const u = (req.raw.url || "").split("?")[0];
   if (["/", "/app", "/B", "/b", "/login", "/register", "/forgot", "/reset"].includes(u))
@@ -173,8 +173,8 @@ app.post("/api/auth/request-reset", async (req: any, reply) => {
     try { await sendResetEmail(email, `${env.appBaseUrl}/reset?token=${token}`); }
     catch (e: any) { await logEvent("error", "email", `reset-лист НЕ надіслано (${email}): ${e.message}`, null, u.id); }
   }
-  // завжди ok — не розкриваємо, чи існує email
-  return { ok: true, message: "Якщо такий email існує — ми надіслали лист для скидання." };
+  // завжди ok - не розкриваємо, чи існує email
+  return { ok: true, message: "Якщо такий email існує - ми надіслали лист для скидання." };
 });
 
 app.post("/api/auth/reset", async (req: any, reply) => {
@@ -264,7 +264,7 @@ app.post("/api/account/reset", async (req: any, reply) => {
   await q(`delete from llm_usage where workspace_id=$1`, [ws]);
   await auth.seedWorkspaceDefaults(ws);                                // дефолтні налаштування + рубрики
   await logEvent("info", "account", `чистий старт (reset воркспейсу): ${req.user.email}`, null, req.user.id);
-  return { ok: true, message: "Готово — кабінет очищено. Зараз почнеться онбординг." };
+  return { ok: true, message: "Готово - кабінет очищено. Зараз почнеться онбординг." };
 });
 
 // ---- Google OAuth (вхід через Google; обходить email-верифікацію) ----
@@ -384,7 +384,7 @@ app.post("/api/sources", async (req: any) => {
   return { sourceId: src!.id, runId: run!.id };
 });
 
-// згенерувати джерело-бриф із Бази бренду — для «миттєвих перших постів» без транскрипту
+// згенерувати джерело-бриф із Бази бренду - для «миттєвих перших постів» без транскрипту
 app.post("/api/generate/from-brand", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   const rows = await q<{ key: string; content: string }>(`select key, content from settings_block where workspace_id=$1`, [ws]);
@@ -440,7 +440,7 @@ app.post("/api/sources/rss/:id/pull", async (req: any, reply) => {
   catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
 
-// останні підтягнуті джерела (RSS/Fireflies/ручні) — щоб їх можна було відкрити в роботі
+// останні підтягнуті джерела (RSS/Fireflies/ручні) - щоб їх можна було відкрити в роботі
 app.get("/api/sources/recent", async (req: any) =>
   q(`select s.id, s.title, s.origin, s.created_at, r.id as run_id
      from source s join pipeline_run r on r.source_id=s.id
@@ -541,6 +541,9 @@ app.post("/api/posts/:postId/publish-all", async (req: any, reply) => {
   try {
     const results = await publishPostToChannels(ws, req.params.postId);
     if (!results.length) return reply.code(400).send({ error: "Оберіть хоча б одну мережу" });
+    // гасимо ще не відпрацьовані planned-слоти цього поста - інакше autopost опублікує ВДРУГЕ
+    if (results.some((r) => r.status === "sent"))
+      await q(`update schedule_slot set status='posted', result='опубліковано вручну (слот погашено)' where post_id=$1 and status='planned'`, [req.params.postId]);
     return { ok: true, results };
   } catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
@@ -685,7 +688,7 @@ app.post("/api/runs/:id/run-from/:step", async (req: any, reply) => {
   } catch (e: any) { cancelRun.delete(id); await logEvent("error", "pipeline", `run-from ${step}: ${e.message}`, { runId: id }, req.user.id); return reply.code(500).send({ error: e.message }); }
 });
 
-// Автопілот: повний прогін кишки (чернетки лишаються на підтвердження — банк-pending)
+// Автопілот: повний прогін кишки (чернетки лишаються на підтвердження - банк-pending)
 app.post("/api/runs/:id/autopilot", async (req: any, reply) => {
   const id = req.params.id;
   if (!(await runOwned(id, req.user.workspace_id))) return reply.code(404).send({ error: "run не знайдено" });
@@ -696,7 +699,7 @@ app.post("/api/runs/:id/autopilot", async (req: any, reply) => {
   } catch (e: any) { cancelRun.delete(id); await logEvent("error", "autopilot", e.message, { runId: id }, req.user.id); return reply.code(500).send({ error: e.message }); }
 });
 
-// LITE: одна генерація N готових постів (замість 6-крокової кишки) — дешево
+// LITE: одна генерація N готових постів (замість 6-крокової кишки) - дешево
 app.post("/api/runs/:id/generate-lite", async (req: any, reply) => {
   const id = req.params.id; const ws = req.user.workspace_id;
   if (!(await runOwned(id, ws))) return reply.code(404).send({ error: "run не знайдено" });
@@ -705,7 +708,9 @@ app.post("/api/runs/:id/generate-lite", async (req: any, reply) => {
     let images = 0;
     if (req.body?.images) {
       const posts = await q<{ id: string }>(`select id from post where run_id=$1 and stage='final'`, [id]);
-      const res = await Promise.allSettled(posts.map((p) => generateImageForPost(ws, p.id)));
+      // онбординг шле provider:'gemini' (Nano Banana) для вау-ефекту перших зображень; без ключа - дефолтний провайдер
+      const provider = ["openai", "fal", "gemini"].includes(req.body?.provider) ? req.body.provider : undefined;
+      const res = await Promise.allSettled(posts.map((p) => generateImageForPost(ws, p.id, provider ? { provider } : undefined)));
       images = res.filter((r) => r.status === "fulfilled").length;
     }
     return { ok: true, count, images };
@@ -907,7 +912,7 @@ async function thValidToken(ws: string): Promise<{ token: string; userId: string
       const newExp = new Date(Date.now() + r.expires_in * 1000).toISOString();
       await q(`update threads_config set access_token=$2, token_expires_at=$3, updated_at=now() where workspace_id=$1`, [ws, r.access_token, newExp]);
       return { token: r.access_token, userId: c.threads_user_id };
-    } catch { /* рефреш не вдався — пробуємо наявним токеном */ }
+    } catch { /* рефреш не вдався - пробуємо наявним токеном */ }
   }
   return { token: c.access_token, userId: c.threads_user_id };
 }
@@ -930,7 +935,7 @@ app.get("/api/integrations/threads/callback", async (req: any, reply) => {
   const oerr = String(req.query?.error_description ?? req.query?.error ?? "");
   if (oerr) { await logEvent("error", "threads", `Threads відмовив: ${oerr}`, { error: req.query?.error }, req.user.id); return reply.redirect("/app?threads=error"); }
   if (!code) { await logEvent("error", "threads", "callback без code", { keys: Object.keys(req.query || {}) }, req.user.id); return reply.redirect("/app?threads=error"); }
-  if (!state || state !== req.cookies?.threads_state) { await logEvent("error", "threads", `state mismatch — cookie ${req.cookies?.threads_state ? "є але != state" : "ВІДСУТНІЙ"}`, null, req.user.id); return reply.redirect("/app?threads=error"); }
+  if (!state || state !== req.cookies?.threads_state) { await logEvent("error", "threads", `state mismatch - cookie ${req.cookies?.threads_state ? "є але != state" : "ВІДСУТНІЙ"}`, null, req.user.id); return reply.redirect("/app?threads=error"); }
   reply.clearCookie("threads_state", { path: "/" });
   try {
     const short = await threads.exchangeCode(env.threads.appId, env.threads.appSecret, THREADS_REDIRECT, code);
@@ -1002,7 +1007,7 @@ app.get("/api/integrations/meta/callback", async (req: any, reply) => {
   const oerr = String(req.query?.error_description ?? req.query?.error ?? "");
   if (oerr) { await logEvent("error", "meta", `Meta відмовив: ${oerr}`, { error: req.query?.error }, req.user.id); return reply.redirect("/app?meta=error"); }
   if (!code) { await logEvent("error", "meta", "callback без code", { keys: Object.keys(req.query || {}) }, req.user.id); return reply.redirect("/app?meta=error"); }
-  if (!state || state !== req.cookies?.meta_state) { await logEvent("error", "meta", `state mismatch — cookie ${req.cookies?.meta_state ? "є але != state" : "ВІДСУТНІЙ"}`, null, req.user.id); return reply.redirect("/app?meta=error"); }
+  if (!state || state !== req.cookies?.meta_state) { await logEvent("error", "meta", `state mismatch - cookie ${req.cookies?.meta_state ? "є але != state" : "ВІДСУТНІЙ"}`, null, req.user.id); return reply.redirect("/app?meta=error"); }
   reply.clearCookie("meta_state", { path: "/" });
   try {
     const short = await meta.exchangeCode(env.meta.appId, env.meta.appSecret, META_REDIRECT, code);
@@ -1131,7 +1136,7 @@ app.post("/api/posts/:postId/regenerate", async (req: any, reply) => {
   const post = await postOwned(req.params.postId, req.user.workspace_id);
   if (!post) return reply.code(404).send({ error: "пост не знайдено" });
   try {
-    const fresh = await rewritePost(req.user.workspace_id, post.content);
+    const fresh = await rewritePost(req.user.workspace_id, post.content, typeof req.body?.instruction === "string" ? req.body.instruction : undefined);
     await q(`update post set content=$2, review=null where id=$1`, [req.params.postId, fresh]);
     return { ok: true, content: fresh };
   } catch (e: any) {
@@ -1285,9 +1290,9 @@ app.get("/api/bank", async (req: any) => {
             order by p.created_at desc`, [req.user.workspace_id]);
 });
 
-// усі фінальні пости воркспейсу (Студія/Інбокс — глобальний список, НЕ привʼязаний до активного джерела)
+// усі фінальні пости воркспейсу (Студія/Інбокс - глобальний список, НЕ привʼязаний до активного джерела)
 app.get("/api/posts/studio", async (req: any) => {
-  return q(`select p.id, p.content, p.review, p.channels, ma.filename as media_filename, p.created_at, src.title as source_title
+  return q(`select p.id, p.content, p.review, p.channels, p.rubric, src.origin as source_origin, ma.filename as media_filename, p.created_at, src.title as source_title
             from post p join pipeline_run r on r.id=p.run_id join source src on src.id=r.source_id
             left join media_asset ma on ma.id=p.media_id
             where src.workspace_id=$1 and p.stage='final' and (p.review is null or p.review <> 'archived')
@@ -1303,7 +1308,7 @@ app.get("/api/schedule", async (req: any) => {
             where s.workspace_id=$1 order by ss.scheduled_at`, [req.user.workspace_id]);
 });
 
-// реально опубліковані пости (ручні + планові) з усіх мереж — для Аналітики
+// реально опубліковані пости (ручні + планові) з усіх мереж - для Аналітики
 app.get("/api/published", async (req: any) => {
   const ws = req.user.workspace_id;
   const recent = await q<{ post_id: string; net: string; created_at: string; content: string }>(
@@ -1332,11 +1337,17 @@ app.post("/api/schedule", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   const postId = String(req.body?.postId ?? "");
   if (!(await postOwned(postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
-  // якщо мережі не обрані (drag&drop) — типово Telegram, але ЯВНО (видно в календарі), не тихо
+  // якщо мережі не обрані (drag&drop) - типово Telegram, але ЯВНО (видно в календарі), не тихо
   const cur = await one<{ channels: any }>(`select channels from post where id=$1`, [postId]);
   const cch = cur?.channels || {};
   if (!Object.keys(cch).some((k) => cch[k] && cch[k].on))
     await q(`update post set channels=$2 where id=$1`, [postId, JSON.stringify({ telegram: { on: true } })]);
+  // якщо у поста ВЖЕ є незапощений слот - переносимо його, а не додаємо другий (інакше подвійна публікація)
+  const existing = await one<{ id: string }>(`select id from schedule_slot where post_id=$1 and status='planned' limit 1`, [postId]);
+  if (existing) {
+    await q(`update schedule_slot set scheduled_at=$2 where id=$1`, [existing.id, req.body?.scheduledAt ?? null]);
+    return { ok: true, id: existing.id, moved: true };
+  }
   const r = await one<{ id: string }>(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned') returning id`,
     [postId, req.body?.scheduledAt ?? null]);
   return { ok: true, id: r!.id };
@@ -1344,7 +1355,11 @@ app.post("/api/schedule", async (req: any, reply) => {
 
 app.put("/api/schedule/:id", async (req: any, reply) => {
   if (!(await slotOwned(req.params.id, req.user.workspace_id))) return reply.code(404).send({ error: "слот не знайдено" });
-  await q(`update schedule_slot set scheduled_at=$2, status='planned' where id=$1`, [req.params.id, req.body?.scheduledAt ?? null]);
+  // переносити можна лише те, що ще не пішло: posted/posting не «воскрешаємо» - це друга публікація
+  const r = await one<{ id: string }>(
+    `update schedule_slot set scheduled_at=$2, status='planned' where id=$1 and status in ('planned','failed') returning id`,
+    [req.params.id, req.body?.scheduledAt ?? null]);
+  if (!r) return reply.code(409).send({ error: "Слот уже опубліковано - перенести не можна. Заплануй пост заново зі Студії." });
   return { ok: true };
 });
 
@@ -1355,7 +1370,7 @@ app.delete("/api/schedule/:id", async (req: any, reply) => {
 });
 
 // авто-розподіл затверджених постів за розкладом зі Стратегії (дні + час).
-// Чистить незапощені planned-слоти й розкладає заново — передбачуваний календар без дублів.
+// Чистить незапощені planned-слоти й розкладає заново - передбачуваний календар без дублів.
 // конвертація «стінного» часу в поясі tz -> UTC (для автопланування за поясом воркспейсу)
 function tzOffsetMs(date: Date, tz: string): number {
   const p: any = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })
@@ -1370,7 +1385,7 @@ function zonedToUTC(y: number, mo: number, d: number, h: number, mi: number, tz:
 
 app.post("/api/schedule/auto", async (req: any) => {
   const ws = req.user.workspace_id;
-  // 1) прибрати всі незапощені (planned) слоти воркспейсу — і старі plan-based, і post-based
+  // 1) прибрати всі незапощені (planned) слоти воркспейсу - і старі plan-based, і post-based
   await q(
     `delete from schedule_slot where status='planned' and id in (
        select ss.id from schedule_slot ss
@@ -1384,7 +1399,7 @@ app.post("/api/schedule/auto", async (req: any) => {
      where s.workspace_id=$1 and p.stage='final' and p.review='approved'
        and not exists(select 1 from schedule_slot ss where ss.post_id=p.id and ss.status in ('posting','posted'))
      order by p.created_at`, [ws]);
-  // типово Telegram для постів без обраних мереж (явно — щоб autopost мав куди публікувати, не тихо)
+  // типово Telegram для постів без обраних мереж (явно - щоб autopost мав куди публікувати, не тихо)
   if (units.length) await q(`update post set channels=$2 where id = any($1) and (channels is null or channels = '{}'::jsonb)`,
     [units.map((u) => u.id), JSON.stringify({ telegram: { on: true } })]);
   // 3) розклад зі Стратегії: дні (best_days) + час (times). Фолбек: щодня, 11:00.
@@ -1395,10 +1410,10 @@ app.post("/api/schedule/auto", async (req: any) => {
   let times: string[] = Array.isArray(strat?.data?.times)
     ? strat!.data.times.map((t: any) => String(t)).filter((t: string) => /^\d{1,2}:\d{2}$/.test(t)) : [];
   if (!times.length) times = ["11:00"];
-  // часовий пояс воркспейсу — щоб час публікацій був «стінним» у поясі користувача
+  // часовий пояс воркспейсу - щоб час публікацій був «стінним» у поясі користувача
   const tzRow = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='timezone'`, [ws]);
   const tz = tzRow?.content || "Europe/Kyiv";
-  // 4) times.length постів/день у дозволені дні (за поясом); надлишок — на наступні тижні
+  // 4) times.length постів/день у дозволені дні (за поясом); надлишок - на наступні тижні
   const tzToday = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()).split("-").map(Number);
   const cursor = new Date(Date.UTC(tzToday[0], tzToday[1] - 1, tzToday[2], 12, 0, 0)); // календарний курсор (полудень UTC, без DST-стрибків)
   let count = 0, off = 1, i = 0;
@@ -1478,7 +1493,7 @@ app.post("/api/transcription/import", async (req: any, reply) => {
 });
 
 // вебхук Fireflies: «зустріч готова» -> автоімпорт джерела (+ опційно автопілот).
-// Поза auth: маршрутизація через per-workspace токен у URL, автентичність — HMAC-підпис.
+// Поза auth: маршрутизація через per-workspace токен у URL, автентичність - HMAC-підпис.
 // вебхук спільного Telegram-бота (auth-exempt; секрет у шляху + у заголовку)
 app.post("/api/webhooks/telegram/:secret", async (req: any, reply) => {
   if (req.params.secret !== env.telegram.webhookSecret) return reply.code(404).send({ error: "not found" });
@@ -1518,7 +1533,7 @@ app.post("/api/webhooks/fireflies/:token", async (req: any, reply) => {
     const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
     await logEvent("info", "transcription", `вебхук-імпорт: ${t.title}`, { runId: run!.id });
     if (cfg.auto_run) {
-      // автопілот довгий (~2-3 хв) — у фоні, щоб вебхук одразу повернув 200 і Fireflies не ретраїв
+      // автопілот довгий (~2-3 хв) - у фоні, щоб вебхук одразу повернув 200 і Fireflies не ретраїв
       (async () => {
         try { for (const s of STEP_ORDER) await executeStep(run!.id, s as StepKey); await logEvent("info", "autopilot", "вебхук-автопілот: готово", { runId: run!.id }); }
         catch (e: any) { await logEvent("error", "autopilot", `вебхук-автопілот: ${e.message}`, { runId: run!.id }); }

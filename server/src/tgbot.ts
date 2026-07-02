@@ -14,7 +14,7 @@ export const botEnabled = (): boolean => !!env.telegram.botToken;
 export const botUsername = (): string => BOT_USERNAME;
 
 export async function initTelegramBot(): Promise<void> {
-  if (!env.telegram.botToken) { console.log("[tgbot] TELEGRAM_BOT_TOKEN не заданий — спільний бот вимкнено"); return; }
+  if (!env.telegram.botToken) { console.log("[tgbot] TELEGRAM_BOT_TOKEN не заданий - спільний бот вимкнено"); return; }
   try {
     const me = await tg.getMe(env.telegram.botToken);
     BOT_ID = me.id; if (me.username) BOT_USERNAME = me.username;

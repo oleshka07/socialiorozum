@@ -2,8 +2,9 @@
 <html lang="uk">
 <head>
 <meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>socialio — кабінет</title>
+<title>socialio - кабінет</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -64,6 +65,10 @@
   .ptitle{font-family:'Bricolage Grotesque';font-weight:600;font-size:20px;line-height:1.1}
   .psub{font-size:12.5px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .content{padding:24px 30px 80px;max-width:1180px;width:100%}
+  @keyframes obPulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.25);opacity:.7}}
+  .ptag{font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--line);border-radius:6px;padding:2px 7px;white-space:nowrap}
+  .pcard.selc{outline:2px solid var(--brand);outline-offset:-1px}
+  .pcard .psel{width:15px;height:15px;accent-color:var(--brand);cursor:pointer}
   .viewsec{display:none;animation:fadeUp .3s ease}
   .viewsec.active{display:block}
   /* buttons */
@@ -276,7 +281,7 @@
         <div class="psub" id="pageSub">Переглянь і затвердь готові пости</div>
       </div>
       <div style="margin-left:auto;display:flex;align-items:center;gap:9px">
-        <button id="scorePill" title="Заповнення профілю — натисни, щоб побачити задачі">⚙ <span id="scoreVal">…</span></button>
+        <button id="scorePill" title="Заповнення профілю - натисни, щоб побачити задачі">⚙ <span id="scoreVal">…</span></button>
         <button class="primary" id="genPostsBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.8L19 9l-5.1 1.2L12 15l-1.9-4.8L5 9l5.1-1.2z"></path></svg>Згенерувати пости</button>
         <button id="proPill" title="Режим ПРО" style="background:transparent;border:1px solid var(--line2);border-radius:9px;padding:7px 11px;font:inherit;font-weight:700;font-size:13px;cursor:pointer;color:var(--muted)">⚡ PRO</button>
         <button class="icon" id="themeToggle" title="Тема" style="width:40px;height:40px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path id="themeIcon" d="M21 12.8A9 9 0 1111.2 3a7 7 0 109.8 9.8z"></path></svg></button>
@@ -292,7 +297,7 @@
           <div class="tabs" id="layoutTabs">
             <div class="tab on" data-lay="studio"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="7" height="14"></rect><rect x="13" y="5" width="7" height="6"></rect><rect x="13" y="14" width="7" height="5"></rect></svg>Студія</div>
             <div class="tab" data-lay="pipeline"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"></path></svg>Конвеєр <span id="pipePro" style="display:none;font-size:9px;font-weight:800;background:var(--brand);color:var(--brand-ink);border-radius:5px;padding:1px 5px;margin-left:3px">PRO</span></div>
-            <div class="tab" data-lay="inbox"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 11h6l2 3h2l2-3h6"></path></svg>Інбокс</div>
+<!-- Інбокс злито в Студію (фільтри + масові дії) - вкладку прибрано, код списку лишається на випадок відкату -->
           </div>
           <div class="hint" id="layoutHint" style="margin:0"></div>
         </div>
@@ -304,9 +309,9 @@
               <div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 001 1h4"></path><path d="M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z"></path></svg><span style="font-weight:700;font-size:14px">Джерело</span></div>
               <div style="padding:14px 16px" id="srcCard"><div class="empty">Немає активного джерела.</div></div>
             </div>
-            <div class="panel" style="margin:0">
-              <div style="font-weight:700;font-size:14px;margin-bottom:6px">💡 Ідеї → пости</div>
-              <div class="hint" style="margin:0 0 8px">Згенеруй ідеї, обери потрібні — і створимо пости саме з них.</div>
+            <div class="panel proonly" id="ideasPanel" style="margin:0;display:none">
+              <div style="font-weight:700;font-size:14px;margin-bottom:6px">💡 Ідеї → пости <span class="badge">PRO</span></div>
+              <div class="hint" style="margin:0 0 8px">Згенеруй ідеї, обери потрібні - і створимо пости саме з них.</div>
               <div class="btnrow"><button class="ghost" id="genIdeas">Згенерувати ідеї</button><span id="ideasMsg" style="font-size:12px;color:var(--muted)"></span></div>
               <div id="ideaList" style="margin-top:8px;display:flex;flex-direction:column;gap:5px"></div>
               <button class="primary" id="ideasToPosts" style="width:100%;margin-top:10px;display:none">✨ Створити пости з обраних</button>
@@ -327,6 +332,7 @@
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
               <div class="disp" style="font-weight:600;font-size:17px">На перегляд</div>
               <div class="ftabs" id="studioFilters"></div>
+              <div class="ftabs" id="studioTagFilters" style="flex-wrap:wrap"></div>
               <button class="ghost" id="studioMore" style="margin-left:auto"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v4h4"></path></svg>Згенерувати ще</button>
               <button class="primary" id="toCalendar" style="display:none">До календаря →</button>
               <button class="ghost" id="viewPrompt" title="Переглянути спільний промт генерації">👁 Промт</button>
@@ -340,7 +346,7 @@
           <div class="pipe" id="pipe">
             <section class="step" id="s1"><div class="stepline"><span class="stepdot">1</span><div class="stepbar"></div></div><div class="stepbody">
               <div class="shead"><span class="t">Витяг ідей</span><span class="badge" id="b1">очікує</span><div class="btnrow" style="margin:0 0 0 auto"><button class="primary" data-run="1">▷ Запустити</button><button class="ghost" data-from="1">↻ донизу</button></div></div>
-              <div class="out" id="o1"><div class="empty">Ідеї з'являться тут — кожну можна вимкнути перед чернетками.</div></div>
+              <div class="out" id="o1"><div class="empty">Ідеї з'являться тут - кожну можна вимкнути перед чернетками.</div></div>
             </div></section>
             <section class="step" id="s3"><div class="stepline"><span class="stepdot">2</span><div class="stepbar"></div></div><div class="stepbody">
               <div class="shead"><span class="t">Чорнові пости</span><span class="badge" id="b3">очікує</span><div class="btnrow" style="margin:0 0 0 auto"><button class="primary" data-run="3">▷ Запустити</button><button class="ghost" data-from="3">↻ донизу</button></div></div>
@@ -348,15 +354,15 @@
             </div></section>
             <section class="step" id="s4"><div class="stepline"><span class="stepdot">3</span><div class="stepbar"></div></div><div class="stepbody">
               <div class="shead"><span class="t">Tone of Voice</span><span class="badge" id="b4">очікує</span><div class="btnrow" style="margin:0 0 0 auto"><button class="primary" data-run="4">▷ Запустити</button><button class="ghost" data-from="4">↻ донизу</button></div></div>
-              <div class="out" id="o4"><div class="empty">—</div></div>
+              <div class="out" id="o4"><div class="empty">-</div></div>
             </div></section>
             <section class="step" id="s5"><div class="stepline"><span class="stepdot">4</span><div class="stepbar"></div></div><div class="stepbody">
               <div class="shead"><span class="t">Формат під канали</span><span class="badge" id="b5">очікує</span><div class="btnrow" style="margin:0 0 0 auto"><button class="primary" data-run="5">▷ Запустити</button><button class="ghost" data-from="5">↻ донизу</button></div></div>
-              <div class="out" id="o5"><div class="empty">—</div></div>
+              <div class="out" id="o5"><div class="empty">-</div></div>
             </div></section>
             <section class="step" id="s6"><div class="stepline"><span class="stepdot">5</span><div class="stepbar"></div></div><div class="stepbody">
               <div class="shead"><span class="t">Де-AI</span><span class="badge" id="b6">очікує</span><div class="btnrow" style="margin:0 0 0 auto"><button class="primary" data-run="6">▷ Запустити</button><button class="ghost" data-from="6">↻ донизу</button></div></div>
-              <div class="out" id="o6"><div class="empty">Готові пости — повний перегляд у «Студії».</div></div>
+              <div class="out" id="o6"><div class="empty">Готові пости - повний перегляд у «Студії».</div></div>
             </div></section>
             <section class="step" id="s7"><div class="stepline"><span class="stepdot">6</span><div class="stepbar"></div></div><div class="stepbody">
               <div class="shead"><span class="t">Контент-план</span><span class="badge" id="b7">очікує</span><div class="btnrow" style="margin:0 0 0 auto"><button class="primary" data-run="7">▷ Запустити</button><button class="ghost" data-from="7">↻ донизу</button></div></div>
@@ -400,7 +406,7 @@
       <section class="viewsec" data-view="brand">
         <div class="panel">
           <div class="ph">✨ Виведи свій голос за прикладами</div>
-          <div class="hint" style="margin-bottom:10px">Встав 3–5 своїх постів — AI опише твій тон, щоб усі тексти звучали як ти.</div>
+          <div class="hint" style="margin-bottom:10px">Встав 3–5 своїх постів - AI опише твій тон, щоб усі тексти звучали як ти.</div>
           <textarea id="voiceExamples" placeholder="Встав сюди 3–5 своїх найкращих постів…" style="min-height:96px"></textarea>
           <div class="btnrow"><button class="primary" id="deriveVoiceBtn">✨ Вивести голос</button><span id="voiceMsg" style="font-size:12px;color:var(--muted)"></span></div>
           <div id="derivedVoice"></div>
@@ -418,7 +424,7 @@
       <section class="viewsec" data-view="strategy">
         <div class="panel">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-            <div class="ph" style="margin:0">🤖 Згенерована стратегія <span class="badge" id="stratStatus">—</span></div>
+            <div class="ph" style="margin:0">🤖 Згенерована стратегія <span class="badge" id="stratStatus">-</span></div>
             <div class="btnrow" style="margin:0 0 0 auto"><button class="primary" id="genStrat">✨ Згенерувати</button><span id="stratMsg" style="font-size:12px;color:var(--muted)"></span></div>
           </div>
           <div class="hint">AI бере нішу/аудиторію/голос із Бази бренду → рубрики, частота, дні, теми. Рубрики застосовуються одразу (редагуй у списку нижче).</div>
@@ -456,7 +462,7 @@
       <section class="viewsec" data-view="sources">
         <div class="panel">
           <div class="ph">📝 Встав транскрипт або думку</div>
-          <div class="hint" style="margin-bottom:10px">Найшвидший шлях — вставити текст і натиснути «У роботу».</div>
+          <div class="hint" style="margin-bottom:10px">Найшвидший шлях - вставити текст і натиснути «У роботу».</div>
           <textarea id="transcript" placeholder="Встав транскрипт сесії, голосову нотатку чи думку…" style="min-height:130px"></textarea>
           <div class="btnrow"><button class="primary" id="toCreate">У роботу →</button><button class="ghost" id="autopilotBtn">🟢 Автопілот</button><button class="ghost" id="ffImport">🎙 Транскрибатор</button><button class="ghost" id="sampleBtn">Підставити приклад</button></div>
           <div class="hint" id="lockHint"></div>
@@ -470,7 +476,7 @@
           </div>
           <div class="panel" style="margin:0">
             <div class="ph">📁 Google Drive</div>
-            <div class="hint">Познач папку через рідний вибір Google — поллер тягне нові фото в медіа (scope drive.file, без верифікації).</div>
+            <div class="hint">Познач папку через рідний вибір Google - поллер тягне нові фото в медіа (scope drive.file, без верифікації).</div>
             <div class="btnrow"><span id="gdStatus" style="font-size:13px;color:var(--muted)">…</span></div>
             <div class="btnrow"><a id="gdConnect" class="btn primary" href="/api/integrations/gdrive/connect" onclick="return connectPopup('/api/integrations/gdrive/connect')" style="display:none">🔗 Підключити</a><button class="ghost" id="gdDisconnect" style="display:none">Відключити</button></div>
             <div id="gdFolderBox" style="display:none;margin-top:10px">
@@ -489,7 +495,7 @@
         </div>
         <div class="panel">
           <div style="display:flex;align-items:center;justify-content:space-between"><div class="ph" style="margin:0">🗂️ Останні джерела</div><button class="ghost" id="recReload">↻</button></div>
-          <div class="hint">Усе, що підтягнулося (RSS / Fireflies / вручну). «Відкрити» — щоб працювати з ним.</div>
+          <div class="hint">Усе, що підтягнулося (RSS / Fireflies / вручну). «Відкрити» - щоб працювати з ним.</div>
           <div id="recList" class="out" style="margin-top:8px"></div>
         </div>
       </section>
@@ -502,22 +508,29 @@
       <!-- ============ SETTINGS ============ -->
       <section class="viewsec" data-view="settings">
         <div class="panel"><label class="fl">🕒 Часовий пояс</label><select id="tzSel"></select><div class="hint">Час планування й календаря рахується за цим поясом (визначається автоматично, можна змінити).</div></div>
-        <div class="panel"><label class="fl">🎨 Генерація зображень</label><select id="imgProv"></select><label class="rchip" style="margin-top:10px;display:inline-flex"><input type="checkbox" id="imgOverlay"> Накладати заголовок на зображення</label><div class="hint">Провайдер AI-зображень. Недоступні — треба додати ключ у .env (FAL_KEY / GEMINI_API_KEY).</div></div>
-        <div class="panel"><label class="fl">🧠 Система промтів</label><label class="rchip" style="display:inline-flex"><input type="checkbox" id="promptEngine"> Стратегічний рушій v2 (Strategy Brief + копірайтинг-фреймворки + контент-плани по каналах + атомізація)</label><div class="hint">Експериментально. Вмикає бриф як джерело правди для генерації. Вимкни — миттєво повертаєшся до класичної генерації, нічого не втрачаючи.</div></div>
+        <div class="panel"><label class="fl">🎨 Генерація зображень</label><select id="imgProv"></select>
+          <div class="fld" style="margin-top:12px"><label class="fl">Стиль зображень бренду</label><textarea class="txt" id="imgStyle" rows="3" placeholder="Напр.: тепла пастельна палітра, мінімалізм, живі фото людей замість ілюстрацій, без стокового вигляду…"></textarea><div class="hint">Як tone of voice, тільки для картинок: AI дотримується цього стилю в кожному згенерованому зображенні.</div></div>
+          <div class="hint">Недоступні провайдери підключає адміністратор сервісу.</div></div>
+        <div class="panel"><label class="fl">🧠 Система промтів</label><label class="rchip" style="display:inline-flex"><input type="checkbox" id="promptEngine"> Стратегічний рушій v2 (Strategy Brief + копірайтинг-фреймворки + контент-плани по каналах + атомізація)</label><div class="hint">Експериментально. Вмикає бриф як джерело правди для генерації. Вимкни - миттєво повертаєшся до класичної генерації, нічого не втрачаючи.</div></div>
         <div class="panel">
           <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--tg)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M22 4L2 11l6 2 2 6 3-4 5 4 4-15z"></path></svg></span>Telegram</div>
           <div id="tgSharedBox" style="display:none;margin:8px 0 4px">
-            <div class="hint">Найпростіше — підключи свій канал до <b>нашого бота</b> (без створення власного):</div>
+            <div class="hint">Найпростіше - підключи свій канал до <b>нашого бота</b> (без створення власного):</div>
             <div class="btnrow"><button class="primary" id="tgConnectBot">🤖 Підключити наш бот</button><span id="tgConnMsg" style="font-size:12px;color:var(--muted)"></span></div>
             <div id="tgBotSteps" style="display:none;font-size:13px;color:var(--ink2);margin-top:6px;line-height:1.7"></div>
             <div style="border-top:1px solid var(--line);margin:12px 0 2px"></div>
           </div>
-          <div class="hint" style="line-height:1.7"><b>Або власний бот:</b> 1. @BotFather → <code>/newbot</code> → токен. 2. Додай бота <b>адміном</b> у канал і групу. 3. Встав токен; канал — <code>@username</code> або id; група — числовий id. 4. «Перевірити».</div>
-          <div class="fld" style="margin-top:10px"><label class="fl">Bot Token</label><input class="txt" type="password" id="tgToken" placeholder="123456:ABC-..."></div>
-          <div class="fld" style="margin-top:8px"><label class="fl">Канал (chat id або @username)</label><input class="txt" id="tgChannel" placeholder="@my_channel або -1001234567890"></div>
-          <div class="fld" style="margin-top:8px"><label class="fl">Група (chat id)</label><input class="txt" id="tgGroup" placeholder="-1001234567890"></div>
-          <div class="btnrow"><button class="primary" id="tgSave">Зберегти</button><button class="ghost" id="tgTest">Перевірити з'єднання</button></div>
-          <div id="tgResult" class="out"></div>
+          <details class="disc" style="margin-top:6px">
+            <summary>⚙️ Розширені налаштування (власний бот)</summary>
+            <div style="padding:4px 14px 14px">
+              <div class="hint" style="line-height:1.7"><b>Власний бот:</b> 1. @BotFather → <code>/newbot</code> → токен. 2. Додай бота <b>адміном</b> у канал і групу. 3. Встав токен; канал - <code>@username</code> або id; група - числовий id. 4. «Перевірити».</div>
+              <div class="fld" style="margin-top:10px"><label class="fl">Bot Token</label><input class="txt" type="password" id="tgToken" placeholder="123456:ABC-..."></div>
+              <div class="fld" style="margin-top:8px"><label class="fl">Канал (chat id або @username)</label><input class="txt" id="tgChannel" placeholder="@my_channel або -1001234567890"></div>
+              <div class="fld" style="margin-top:8px"><label class="fl">Група (chat id)</label><input class="txt" id="tgGroup" placeholder="-1001234567890"></div>
+              <div class="btnrow"><button class="primary" id="tgSave">Зберегти</button><button class="ghost" id="tgTest">Перевірити з'єднання</button></div>
+              <div id="tgResult" class="out"></div>
+            </div>
+          </details>
         </div>
         <div class="grid2">
           <div class="panel" style="margin:0">
@@ -540,7 +553,7 @@
           <div class="hint">Ключ: Fireflies → Settings → Developer Settings → API Key. Імпортуй вручну («Джерела» → 📥) або налаштуй авто-імпорт (вебхук).</div>
           <div class="fld" style="margin-top:10px"><label class="fl">Fireflies API Key</label><input class="txt" type="password" id="ffKey" placeholder="вставте ключ"></div>
           <div class="fld" style="margin-top:8px"><label class="fl">🔔 Авто-імпорт: цей URL встав у Fireflies → Webhooks</label><div style="display:flex;gap:8px"><input class="txt" id="ffHook" readonly placeholder="(зʼявиться після збереження ключа)" style="font-size:12px"><button class="ghost" type="button" id="ffHookCopy">Копіювати</button></div></div>
-          <div class="fld" style="margin-top:8px"><label class="fl">Webhook Secret — має ТОЧНО збігатися з секретом у Fireflies (інакше 401), або тисни «Без підпису»</label><input class="txt" type="password" id="ffSecret" placeholder="вставте секрет"></div>
+          <div class="fld" style="margin-top:8px"><label class="fl">Webhook Secret - має ТОЧНО збігатися з секретом у Fireflies (інакше 401), або тисни «Без підпису»</label><input class="txt" type="password" id="ffSecret" placeholder="вставте секрет"></div>
           <label class="rchip" style="margin:8px 0"><input type="checkbox" id="ffAuto"> Авто-прогін Автопілота для імпортованих зустрічей</label>
           <div class="btnrow"><button class="primary" id="ffSave">Зберегти</button><button class="ghost" id="ffTest">Перевірити</button><button class="ghost" id="ffNoSig" type="button">Без підпису</button><span id="ffMsg" style="font-size:12px;color:var(--muted)"></span></div>
         </div>
@@ -558,7 +571,7 @@
               <button class="primary" id="planProBtn" style="width:100%">Перейти на ПРО</button>
             </div>
           </div>
-          <div class="hint" style="margin-top:10px">Тестовий режим — оплата зʼявиться згодом. ПРО можна вмикати/вимикати безкоштовно.</div>
+          <div class="hint" style="margin-top:10px">Тестовий режим - оплата зʼявиться згодом. ПРО можна вмикати/вимикати безкоштовно.</div>
         </div>
         <div class="panel">
           <div class="ph">👤 Акаунт</div>
@@ -581,8 +594,8 @@
         </div>
         <div class="panel" style="border-color:var(--danger)">
           <div class="ph" style="color:var(--danger)">⚠ Небезпечна зона</div>
-          <div class="hint">Видалення акаунта: дані одразу зникнуть з кабінету, остаточно зітруться через 14 днів. Передумаєш — просто увійди протягом цього часу.</div>
-          <div class="hint" style="margin-top:10px">«Почати з чистого листа» — стерти весь контент (бренд, стратегію, пости, календар, медіа) і пройти онбординг заново. Підключені канали лишаються.</div>
+          <div class="hint">Видалення акаунта: дані одразу зникнуть з кабінету, остаточно зітруться через 14 днів. Передумаєш - просто увійди протягом цього часу.</div>
+          <div class="hint" style="margin-top:10px">«Почати з чистого листа» - стерти весь контент (бренд, стратегію, пости, календар, медіа) і пройти онбординг заново. Підключені канали лишаються.</div>
           <div class="btnrow"><button class="ghost" id="accReset">🔄 Почати з чистого листа</button><button class="danger" id="accDelete">Видалити акаунт</button></div>
         </div>
       </section>
@@ -598,9 +611,9 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const STEP  = {1:'extract_ideas',3:'drafts',4:'tone',5:'format',6:'deai',7:'strategy'};
 const ORDER = [1,3,4,5,6,7];
-const SET = {mkt:'marketing_context', tov:'tone_of_voice', deai:'deai_rules', strat:'content_strategy', voiceExamples:'voice_examples'};
-const AUTORUN_WARN='Авто-прогін запускатиме повну AI-генерацію постів на КОЖНУ нову статтю/зустріч — це витрачає кошти на AI. Увімкнути?';
-// час: усе планування рахуємо в поясі TZ (обирається в Налаштуваннях); у БД — UTC
+const SET = {mkt:'marketing_context', tov:'tone_of_voice', deai:'deai_rules', strat:'content_strategy', voiceExamples:'voice_examples', imgStyle:'image_style'};
+const AUTORUN_WARN='Авто-прогін запускатиме повну AI-генерацію постів на КОЖНУ нову статтю/зустріч - це витрачає кошти на AI. Увімкнути?';
+// час: усе планування рахуємо в поясі TZ (обирається в Налаштуваннях); у БД - UTC
 let TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Kyiv';
 const TZS=['Europe/Kyiv','Europe/Warsaw','Europe/Berlin','Europe/London','Europe/Lisbon','America/New_York','America/Chicago','America/Los_Angeles','Asia/Dubai','Asia/Jerusalem','UTC'];
 function buildTzSel(){ const sel=$('tzSel'); if(!sel) return; const list=TZS.includes(TZ)?TZS:[TZ].concat(TZS); sel.innerHTML=list.map(z=>'<option'+(z===TZ?' selected':'')+'>'+z+'</option>').join(''); }
@@ -638,7 +651,7 @@ function setTheme(t){ document.body.setAttribute('data-theme',t); localStorage.s
 $('themeToggle').onclick=()=>setTheme(document.body.getAttribute('data-theme')==='light'?'dark':'light');
 
 // ---------- навігація ----------
-const PAGES={create:['Створення','Переглянь і затвердь готові пости'],publish:['Публікація','Запланований контент і календар'],brand:['База бренду','Факти про бренд — вводяться раз, працюють всюди'],strategy:['Стратегія','Рубрики, частота й теми контенту'],sources:['Джерела','Звідки беремо матеріал для постів'],analytics:['Аналітика','Ефективність контенту і витрати'],settings:['Налаштування','Канали публікації та інтеграції']};
+const PAGES={create:['Створення','Переглянь і затвердь готові пости'],publish:['Публікація','Запланований контент і календар'],brand:['База бренду','Факти про бренд - вводяться раз, працюють всюди'],strategy:['Стратегія','Рубрики, частота й теми контенту'],sources:['Джерела','Звідки беремо матеріал для постів'],analytics:['Аналітика','Ефективність контенту і витрати'],settings:['Налаштування','Канали публікації та інтеграції']};
 function selectView(v){
   document.querySelectorAll('.navitem').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
   document.querySelectorAll('.viewsec').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
@@ -661,7 +674,7 @@ let _lastScore=-1;
 async function loadTasks(){ try{ const d=await api('/tasks'); window._tasks=d.tasks||[]; const v=$('scoreVal'); if(v)v.textContent=d.score+'%'; const sp=$('scorePill'); if(sp){ sp.style.color=d.score>=80?'var(--brand)':(d.score>=40?'var(--amber)':'var(--muted)'); sp.style.borderColor=d.score>=80?'var(--brand)':'var(--line2)'; } if(_lastScore>=0 && d.score>_lastScore) flyPoints('+'+(d.score-_lastScore)+'%'); _lastScore=d.score; const bySec={}; (d.tasks||[]).forEach(t=>{ if(!t.done) bySec[t.section]=(bySec[t.section]||0)+1; }); document.querySelectorAll('.navitem[data-view]').forEach(it=>{ const s=it.dataset.view; let b=it.querySelector('.navbadge'); const n=bySec[s]||0; if(!b){ b=document.createElement('span'); b.className='navbadge'; it.appendChild(b); } b.textContent=n||''; b.style.display=n?'inline-flex':'none'; }); renderTaskStrip(curView); }catch(e){} }
 function flyPoints(txt){ const sp=$('scorePill'); if(!sp) return; const r=sp.getBoundingClientRect(); const el=document.createElement('div'); el.textContent=txt; el.style.cssText='position:fixed;left:'+(r.left+r.width/2)+'px;top:'+r.top+'px;transform:translateX(-50%);font-weight:800;color:var(--brand);font-size:16px;z-index:90;pointer-events:none;transition:top 1.1s ease,opacity 1.1s ease'; document.body.appendChild(el); requestAnimationFrame(()=>{ el.style.top=(r.top-48)+'px'; el.style.opacity='0'; }); setTimeout(()=>el.remove(),1200); try{ sp.animate([{transform:'scale(1)'},{transform:'scale(1.18)'},{transform:'scale(1)'}],{duration:480}); }catch(e){} }
 function openTasksModal(){ const tasks=window._tasks||[]; const SECN={create:'Створення',publish:'Публікація',brand:'База бренду',strategy:'Стратегія',sources:'Джерела',settings:'Налаштування',analytics:'Аналітика'}; const order=['brand','sources','create','publish','strategy','settings']; const bySec={}; tasks.forEach(t=>{ (bySec[t.section]=bySec[t.section]||[]).push(t); }); const done=tasks.filter(t=>t.done).length;
-  let html='<div class="modal-card" style="max-width:560px;padding:22px;max-height:86vh;overflow:auto"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:18px">🚀 Налаштування профілю</b><button class="icon" id="tkX" style="margin-left:auto">✕</button></div><div class="hint" style="margin-bottom:8px">Виконано '+done+' із '+tasks.length+' — що більше, то кращі пости.</div>';
+  let html='<div class="modal-card" style="max-width:560px;padding:22px;max-height:86vh;overflow:auto"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:18px">🚀 Налаштування профілю</b><button class="icon" id="tkX" style="margin-left:auto">✕</button></div><div class="hint" style="margin-bottom:8px">Виконано '+done+' із '+tasks.length+' - що більше, то кращі пости.</div>';
   order.concat(Object.keys(bySec).filter(s=>!order.includes(s))).forEach(sec=>{ const list=bySec[sec]; if(!list) return; html+='<div style="font-weight:700;font-size:12.5px;color:var(--muted);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.03em">'+(SECN[sec]||sec)+'</div>'; list.forEach(t=>{ html+='<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)"><span style="width:22px;height:22px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:12px;'+(t.done?'background:var(--brand);color:#fff':'border:2px solid var(--line2);color:var(--faint)')+'">'+(t.done?'✓':'')+'</span><div style="flex:1;font-size:13.5px;'+(t.done?'color:var(--faint);text-decoration:line-through':'')+'">'+esc(t.label)+'</div><span style="font-size:12px;color:var(--muted)">+'+t.points+'</span>'+(t.done?'':(t.id==='plans'?'<button class="ghost tkAck" data-key="seen_plans" style="padding:5px 10px;font-size:12px">Зрозуміло</button>':'<button class="ghost tkGo" data-sec="'+t.section+'" style="padding:5px 10px;font-size:12px">Перейти</button>'))+'</div>'; }); });
   html+='</div>'; const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='75'; ov.innerHTML=html; document.body.appendChild(ov); const close=()=>ov.remove(); ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#tkX').onclick=close; ov.querySelectorAll('.tkGo').forEach(b=>b.onclick=()=>{ close(); go(b.dataset.sec); }); ov.querySelectorAll('.tkAck').forEach(b=>b.onclick=async()=>{ try{ await api('/tasks/ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:b.dataset.key})}); close(); loadTasks(); }catch(e){} }); }
 if($('scorePill')) $('scorePill').onclick=openTasksModal;
@@ -670,7 +683,7 @@ const _tdismiss=new Set(); const _tidx={};
 function highlightTarget(sel){ const el=sel&&document.querySelector(sel); if(!el||!el.offsetParent) return; el.scrollIntoView({behavior:'smooth',block:'center'}); el.classList.add('thl'); setTimeout(()=>el.classList.remove('thl'),2200); }
 function renderTaskStrip(view){ const strip=$('taskStrip'); if(!strip) return; const all=(window._tasks||[]).filter(t=>t.section===view && !t.done && !_tdismiss.has(t.id)); if(!all.length){ strip.style.display='none'; strip.innerHTML=''; return; } let i=_tidx[view]||0; if(i>=all.length) i=0; _tidx[view]=i; const t=all[i]; const tgt=TASK_TARGET[t.id]; strip.style.display='flex'; strip.className='tstrip'; strip.innerHTML='<span style="font-size:16px">💡</span><div style="flex:1;min-width:0"><b>'+esc(t.label)+'</b> <span style="color:var(--brand);font-weight:700">+'+t.points+'</span></div>'+(tgt?'<button class="ghost" id="tsShow" style="padding:5px 11px;font-size:12.5px">Показати</button>':'')+(all.length>1?'<button class="icon" id="tsPrev" title="Попередня">◀</button><span style="font-size:12px;color:var(--muted)">'+(i+1)+'/'+all.length+'</span><button class="icon" id="tsNext" title="Наступна">▶</button>':'')+'<button class="icon" id="tsX" title="Сховати">✕</button>'; const q=(s)=>strip.querySelector(s); if(q('#tsShow')) q('#tsShow').onclick=()=>highlightTarget(tgt); if(q('#tsPrev')) q('#tsPrev').onclick=()=>{ _tidx[view]=(i-1+all.length)%all.length; renderTaskStrip(view); }; if(q('#tsNext')) q('#tsNext').onclick=()=>{ _tidx[view]=(i+1)%all.length; renderTaskStrip(view); }; q('#tsX').onclick=()=>{ _tdismiss.add(t.id); renderTaskStrip(view); }; }
 function loadPlans(){ const lite=$('planLiteBtn'), pro=$('planProBtn'); if(!pro) return;
-  if(PRO){ pro.textContent='✓ Активно — вимкнути'; pro.className='ghost'; if(lite){ lite.textContent='Обрати Lite'; lite.className='ghost'; } }
+  if(PRO){ pro.textContent='✓ Активно - вимкнути'; pro.className='ghost'; if(lite){ lite.textContent='Обрати Lite'; lite.className='ghost'; } }
   else { pro.textContent='Перейти на ПРО'; pro.className='primary'; if(lite){ lite.textContent='Поточний'; lite.className='ghost'; } }
   api('/tasks/ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'seen_plans'})}).then(()=>{ if(typeof loadTasks==='function') loadTasks(); }).catch(()=>{});
 }
@@ -680,12 +693,12 @@ function setLayout(l){
   const map={studio:'layStudio',pipeline:'layPipeline',inbox:'layInbox'};
   for(const k in map){ const el=$(map[k]); if(el) el.style.display = k===l?'':'none'; }
   document.querySelectorAll('#layoutTabs .tab').forEach(t=>t.classList.toggle('on',t.dataset.lay===l));
-  const H={studio:'Картки постів — переглянь, відредагуй, затвердь',pipeline:'Покроковий конвеєр — повний контроль над кожним етапом',inbox:'Список + редактор — швидке тріаж-затвердження'};
+  const H={studio:'Картки постів - переглянь, відредагуй, затвердь',pipeline:'Покроковий конвеєр - повний контроль над кожним етапом',inbox:'Список + редактор - швидке тріаж-затвердження'};
   $('layoutHint').textContent=H[l]||'';
 }
 let PRO=false;
-function updateProUI(){ const p=$('proPill'); if(p){ p.innerHTML=PRO?'⚡ PRO ✓':'⚡ PRO'; p.style.color=PRO?'var(--brand)':'var(--muted)'; p.style.borderColor=PRO?'var(--brand)':'var(--line2)'; } if($('pipePro')) $('pipePro').style.display=PRO?'none':'inline-block'; }
-function openProModal(){ const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70'; ov.innerHTML='<div class="modal-card" style="max-width:480px;padding:24px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="font-size:18px">⚡ Конвеєр — режим ПРО</b><button class="icon" id="proX" style="margin-left:auto">✕</button></div><p style="color:var(--muted);font-size:14px;margin:0 0 12px;line-height:1.6">У <b>Lite</b> пости генеруються в один прохід — швидко й дешево. <b>ПРО</b> відкриває покроковий конвеєр: кожен етап окремо (ідеї → чернетки → тон → формат → де-AI → план), власний <b>промт і модель на кожному кроці</b> — повний контроль над якістю.</p><div style="font-size:12.5px;color:var(--faint);margin-bottom:14px">Оплата зʼявиться згодом. Зараз можна увімкнути для тесту.</div><div class="btnrow"><button class="primary" id="proEnable">Увімкнути ПРО (тест)</button></div></div>'; document.body.appendChild(ov); const close=()=>ov.remove(); ov.addEventListener("click",e=>{if(e.target===ov)close();}); ov.querySelector("#proX").onclick=close; ov.querySelector("#proEnable").onclick=async()=>{ try{ await saveSetting("pro","1"); PRO=true; updateProUI(); close(); setLayout("pipeline"); flash("ПРО увімкнено ✓"); }catch(e){ flash("⚠ "+e.message); } }; }
+function updateProUI(){ const p=$('proPill'); if(p){ p.innerHTML=PRO?'⚡ PRO ✓':'⚡ PRO'; p.style.color=PRO?'var(--brand)':'var(--muted)'; p.style.borderColor=PRO?'var(--brand)':'var(--line2)'; } if($('pipePro')) $('pipePro').style.display=PRO?'none':'inline-block'; document.querySelectorAll('.proonly').forEach(el=>el.style.display=PRO?'':'none'); }
+function openProModal(){ const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70'; ov.innerHTML='<div class="modal-card" style="max-width:480px;padding:24px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="font-size:18px">⚡ Конвеєр - режим ПРО</b><button class="icon" id="proX" style="margin-left:auto">✕</button></div><p style="color:var(--muted);font-size:14px;margin:0 0 12px;line-height:1.6">У <b>Lite</b> пости генеруються в один прохід - швидко й дешево. <b>ПРО</b> відкриває покроковий конвеєр: кожен етап окремо (ідеї → чернетки → тон → формат → де-AI → план), власний <b>промт і модель на кожному кроці</b> - повний контроль над якістю.</p><div style="font-size:12.5px;color:var(--faint);margin-bottom:14px">Оплата зʼявиться згодом. Зараз можна увімкнути для тесту.</div><div class="btnrow"><button class="primary" id="proEnable">Увімкнути ПРО (тест)</button></div></div>'; document.body.appendChild(ov); const close=()=>ov.remove(); ov.addEventListener("click",e=>{if(e.target===ov)close();}); ov.querySelector("#proX").onclick=close; ov.querySelector("#proEnable").onclick=async()=>{ try{ await saveSetting("pro","1"); PRO=true; updateProUI(); close(); setLayout("pipeline"); flash("ПРО увімкнено ✓"); }catch(e){ flash("⚠ "+e.message); } }; }
 document.querySelectorAll('#layoutTabs .tab').forEach(t=>t.onclick=()=>{ if(t.dataset.lay==='pipeline' && !PRO){ openProModal(); return; } setLayout(t.dataset.lay); });
 if($('proPill')) $('proPill').onclick=async()=>{ if(PRO){ if(confirm('Вимкнути ПРО? Повернешся до простого режиму Lite.')){ try{ await saveSetting('pro','0'); PRO=false; updateProUI(); if($('layPipeline')&&$('layPipeline').style.display!=='none') setLayout('studio'); flash('ПРО вимкнено'); }catch(e){} } } else openProModal(); };
 $('toStudio').onclick=()=>setLayout('studio');
@@ -694,12 +707,13 @@ $('toCalendar').onclick=()=>go('publish');
 // ---------- аналітика ----------
 async function loadAnalytics(){
   const box=$('analyticsBox'); if(!box) return;
+  // миттєвий скелетон + ПАРАЛЕЛЬНІ локальні запити; повільна статистика мереж підтягується окремо після рендера
+  box.innerHTML='<div class="stat-grid" style="margin-bottom:18px">'+[1,2,3,4].map(()=>'<div class="stat"><div class="l" style="opacity:.4">…</div><div class="v" style="opacity:.25">—</div></div>').join('')+'</div><div class="empty">Завантажую аналітику…</div>';
   let usage={},slots=[],bank=[],pub={posts:0,sends:0,recent:[]};
-  try{ usage=await api('/usage'); }catch(e){}
-  try{ slots=await api('/schedule'); }catch(e){}
-  try{ bank=await api('/bank'); }catch(e){}
-  try{ pub=await api('/published'); }catch(e){}
-  let mstats={}; try{ mstats=await api('/integrations/meta/stats'); }catch(e){}
+  const rs=await Promise.allSettled([api('/usage'),api('/schedule'),api('/bank'),api('/published')]);
+  if(rs[0].status==='fulfilled') usage=rs[0].value; if(rs[1].status==='fulfilled') slots=rs[1].value;
+  if(rs[2].status==='fulfilled') bank=rs[2].value;  if(rs[3].status==='fulfilled') pub=rs[3].value;
+  const mstats={}; // мережева статистика вантажиться асинхронно нижче (не блокує сторінку)
   const queued=slots.filter(s=>s.status==='planned').length; const failed=slots.filter(s=>s.status==='failed').length;
   const toks=(usage.prompt_tokens||0)+(usage.completion_tokens||0);
   const stats=[['Опубліковано',pub.posts,pub.sends+' у мережах'],['У черзі',queued,'заплановано'+(failed?(' · '+failed+' ⚠'):'')],['Витрати на AI','$'+(Number(usage.cost)||0).toFixed(2),toks.toLocaleString('uk')+' токенів'],['У банку',bank.length,'затверджених']];
@@ -711,13 +725,7 @@ async function loadAnalytics(){
   const chCount={telegram:0,instagram:0,facebook:0,threads:0}; let chTot=0;
   rec.forEach(r=>{ if(chCount[r.net]!=null){ chCount[r.net]++; chTot++; } });
   const CHN={telegram:['Telegram','--tg'],instagram:['Instagram','--ig'],facebook:['Facebook','--fb'],threads:['Threads','--th']};
-  const ig=mstats.instagram, igi=mstats.instagramInsights||{}, fb=mstats.facebook;
-  const igHtml = (ig||fb)
-    ? '<div style="margin-top:14px;padding:13px;border-radius:11px;background:var(--brand-soft)">'
-      +(ig?'<div style="font-size:12.5px;font-weight:700;color:var(--brand)">📸 Instagram @'+esc(ig.username||'')+'</div><div style="font-size:12.5px;color:var(--ink2);margin-top:3px">'+(ig.followers_count||0)+' підписників · '+(ig.media_count||0)+' постів'+(igi.reach!=null?(' · охоплення 28д: <b>'+igi.reach+'</b>'):'')+'</div>':'')
-      +(fb?'<div style="font-size:12.5px;font-weight:700;color:var(--brand);margin-top:'+(ig?'8px':'0')+'">📘 Facebook '+esc(fb.name||'')+'</div><div style="font-size:12.5px;color:var(--ink2);margin-top:3px">'+(fb.followers_count||fb.fan_count||0)+' підписників</div>':'')
-      +'</div>'
-    : '<div style="margin-top:14px;padding:13px;border-radius:11px;background:var(--brand-soft);font-size:12.5px;color:var(--brand)">Підключи Instagram/Facebook у Налаштуваннях, щоб бачити охоплення й підписників.</div>';
+  const igHtml = '<div id="igLive" style="margin-top:14px;padding:13px;border-radius:11px;background:var(--brand-soft);font-size:12.5px;color:var(--brand)"><span class="spin"></span> Завантажую статистику Instagram/Facebook…</div>';
   box.innerHTML=
     '<div class="stat-grid" style="margin-bottom:18px">'+stats.map(s=>'<div class="stat"><div class="l">'+s[0]+'</div><div class="v">'+s[1]+'</div><div class="d">'+s[2]+'</div></div>').join('')+'</div>'
     +'<div class="grid2" style="grid-template-columns:1.5fr 1fr">'
@@ -726,7 +734,16 @@ async function loadAnalytics(){
       +(chTot?Object.keys(CHN).map(k=>{ const pct=Math.round(chCount[k]/chTot*100); return '<div style="margin-bottom:14px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="width:11px;height:11px;border-radius:4px;background:var('+CHN[k][1]+')"></span><span style="font-size:13px;font-weight:600;flex:1">'+CHN[k][0]+'</span><span style="font-size:13px;font-weight:700">'+pct+'%</span></div><div style="height:7px;border-radius:5px;background:var(--surface2);overflow:hidden"><div style="width:'+pct+'%;height:100%;background:var('+CHN[k][1]+')"></div></div></div>'; }).join(''):'<div class="empty">Ще немає опублікованих постів.</div>')
       +igHtml+'</div>'
     +'</div>'
-    +'<div class="panel" style="margin:18px 0 0"><div style="font-weight:700;font-size:14px;margin-bottom:6px">Останні публікації</div>'+(rec.length?rec.slice(0,12).map(r=>'<div style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--line)"><span style="font-size:15px">'+({telegram:"✈️",instagram:"📸",facebook:"📘",threads:"🧵"}[r.net]||"•")+'</span><div style="flex:1;min-width:0"><div style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc((r.content||"").replace(/\n+/g," ").slice(0,80))+'</div><div style="font-size:11px;color:var(--muted)">'+(CHN[r.net]?CHN[r.net][0]:r.net)+" · "+new Date(r.created_at).toLocaleString("uk")+'</div></div></div>').join(""):'<div class="empty">Ще нічого не опубліковано. Опублікуй пост — і він зʼявиться тут.</div>')+'</div>';
+    +'<div class="panel" style="margin:18px 0 0"><div style="font-weight:700;font-size:14px;margin-bottom:6px">Останні публікації</div>'+(rec.length?rec.slice(0,12).map(r=>'<div style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--line)"><span style="font-size:15px">'+({telegram:"✈️",instagram:"📸",facebook:"📘",threads:"🧵"}[r.net]||"•")+'</span><div style="flex:1;min-width:0"><div style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc((r.content||"").replace(/\n+/g," ").slice(0,80))+'</div><div style="font-size:11px;color:var(--muted)">'+(CHN[r.net]?CHN[r.net][0]:r.net)+" · "+new Date(r.created_at).toLocaleString("uk")+'</div></div></div>').join(""):'<div class="empty">Ще нічого не опубліковано. Опублікуй пост - і він зʼявиться тут.</div>')+'</div>';
+  // мережева статистика довантажується ПІСЛЯ рендера сторінки (Graph API повільний - не блокуємо аналітику)
+  api('/integrations/meta/stats').then(m=>{
+    const el=$('igLive'); if(!el) return;
+    const ig=m.instagram, igi=m.instagramInsights||{}, fb=m.facebook;
+    el.innerHTML=(ig||fb)
+      ? (ig?'<div style="font-size:12.5px;font-weight:700;color:var(--brand)">📸 Instagram @'+esc(ig.username||'')+'</div><div style="font-size:12.5px;color:var(--ink2);margin-top:3px">'+(ig.followers_count||0)+' підписників · '+(ig.media_count||0)+' постів'+(igi.reach!=null?(' · охоплення 28д: <b>'+igi.reach+'</b>'):'')+'</div>':'')
+        +(fb?'<div style="font-size:12.5px;font-weight:700;color:var(--brand);margin-top:'+(ig?'8px':'0')+'">📘 Facebook '+esc(fb.name||'')+'</div><div style="font-size:12.5px;color:var(--ink2);margin-top:3px">'+(fb.followers_count||fb.fan_count||0)+' підписників</div>':'')
+      : 'Підключи Instagram/Facebook у Налаштуваннях, щоб бачити охоплення й підписників.';
+  }).catch(()=>{ const el=$('igLive'); if(el) el.textContent='Підключи Instagram/Facebook у Налаштуваннях, щоб бачити охоплення й підписників.'; });
 }
 
 // ---------- база бренду (settings) ----------
@@ -747,7 +764,7 @@ async function loadSettings(){
   }catch(e){ $('srvDot').style.background='var(--danger)'; }
 }
 function toggleV2UI(){ document.querySelectorAll('.v2only').forEach(el=>el.style.display=window._v2?'':'none'); }
-function renderBrief(text){ const o=$('briefView'); if(!o) return; o.innerHTML = text ? '<pre style="white-space:pre-wrap;font:inherit;margin:0;color:var(--ink2);line-height:1.65">'+esc(text)+'</pre>' : '<div class="empty">Натисни «Згенерувати» вгорі — бриф зʼявиться тут.</div>'; }
+function renderBrief(text){ const o=$('briefView'); if(!o) return; o.innerHTML = text ? '<pre style="white-space:pre-wrap;font:inherit;margin:0;color:var(--ink2);line-height:1.65">'+esc(text)+'</pre>' : '<div class="empty">Натисни «Згенерувати» вгорі - бриф зʼявиться тут.</div>'; }
 if($('promptEngine')) $('promptEngine').onchange=()=>{ window._v2=$('promptEngine').checked; saveSetting('prompt_engine', window._v2?'v2':'legacy'); toggleV2UI(); flash(window._v2?'Рушій v2 увімкнено':'Повернуто класичний рушій'); };
 let saveT;
 function flashSaved(){ const s=$('saved'); if(!s) return; s.style.opacity='1'; clearTimeout(flashSaved._t); flashSaved._t=setTimeout(()=>s.style.opacity='0',1500); }
@@ -796,7 +813,7 @@ function renderIdeas(ideas){
   o.querySelectorAll('input').forEach(c=>c.onchange=saveSelection);
 }
 async function saveSelection(){ if(!runId) return; const ids=[...$('o1').querySelectorAll('input:checked')].map(c=>c.dataset.id); try{ await api('/runs/'+runId+'/ideas/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({selectedIds:ids})}); flashSaved(); }catch(e){} }
-function renderPosts(oid,posts,emptyTxt){ const o=$(oid); if(!o) return; if(!posts||!posts.length){ o.innerHTML='<div class="empty">'+(emptyTxt||'—')+'</div>'; return; } o.innerHTML=posts.map(p=>'<div class="card post">'+esc(p.content)+'</div>').join(''); }
+function renderPosts(oid,posts,emptyTxt){ const o=$(oid); if(!o) return; if(!posts||!posts.length){ o.innerHTML='<div class="empty">'+(emptyTxt||'-')+'</div>'; return; } o.innerHTML=posts.map(p=>'<div class="card post">'+esc(p.content)+'</div>').join(''); }
 
 // ---------- мережі ----------
 const NETS=[['telegram','Telegram'],['instagram','Instagram'],['facebook','Facebook'],['threads','Threads']];
@@ -811,27 +828,44 @@ function statusPill(rv){ if(rv==='approved') return ['Затверджено','s
 // ---------- фінальні пости: Конвеєр (компактно) / Студія / Інбокс ----------
 function renderFinals(posts){
   const o=$('o6'); if(!o) return; const vis=(posts||[]).filter(p=>p.review!=='archived');
-  if(!vis.length){ o.innerHTML='<div class="empty">Готові пости зʼявляться тут — повний перегляд у «Студії».</div>'; return; }
-  o.innerHTML=vis.map(p=>'<div class="card post">'+esc((p.content||'').slice(0,200))+((p.content||'').length>200?'…':'')+'</div>').join('')+'<div class="hint" style="margin-top:8px">'+vis.length+' постів — відредагуй і затвердь у «Студії».</div>';
+  if(!vis.length){ o.innerHTML='<div class="empty">Готові пости зʼявляться тут - повний перегляд у «Студії».</div>'; return; }
+  o.innerHTML=vis.map(p=>'<div class="card post">'+esc((p.content||'').slice(0,200))+((p.content||'').length>200?'…':'')+'</div>').join('')+'<div class="hint" style="margin-top:8px">'+vis.length+' постів - відредагуй і затвердь у «Студії».</div>';
 }
 async function saveContent(id,v){ try{ await api('/posts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:v})}); flashSaved(); }catch(e){} }
-let StudioFilter='all';
+let StudioFilter='all', StudioRubric='', StudioOrigin='';
+const ORIGIN_LABEL={manual:'✍️ вручну',rss:'📡 RSS',fireflies:'🎙 транскрипт',grain:'🎙 транскрипт',meetgeek:'🎙 транскрипт',brand:'✨ з бренду',gdrive:'📁 Drive'};
+const SelPosts=new Set(); // масові дії
 // глобальний список усіх фінальних постів воркспейсу (НЕ привʼязаний до активного джерела/прогону)
-async function loadStudioPosts(){ try{ Finals=(await api('/posts/studio'))||[]; }catch(e){} renderStudio(); renderInbox(); }
+async function loadStudioPosts(){ try{ Finals=(await api('/posts/studio'))||[]; }catch(e){} SelPosts.clear(); renderStudio(); renderInbox(); }
 function renderStudio(){
   const grid=$('studioGrid'); if(!grid) return;
   const all=Finals; const appr=all.filter(p=>p.review==='approved').length; const rev=all.length-appr;
   const tc=$('toCalendar'); if(tc){ tc.style.display=appr>0?'':'none'; tc.textContent='До календаря ('+appr+') →'; }
   const ft=$('studioFilters'); if(ft){ ft.innerHTML=[['all','Усі',all.length],['review','На перегляд',rev],['approved','Затверджені',appr]].map(f=>'<div class="ftab'+(StudioFilter===f[0]?' on':'')+'" data-sf="'+f[0]+'">'+f[1]+' <span style="opacity:.6">'+f[2]+'</span></div>').join(''); ft.querySelectorAll('[data-sf]').forEach(t=>t.onclick=()=>{ StudioFilter=t.dataset.sf; renderStudio(); }); }
+  // теги: рубрики й джерела, що реально є в постах (композитний фільтр, як у Publer: статус × рубрика × джерело)
+  const tf=$('studioTagFilters');
+  if(tf){
+    const rubset=[...new Set(all.map(p=>p.rubric).filter(Boolean))];
+    const orgset=[...new Set(all.map(p=>p.source_origin).filter(Boolean))];
+    tf.innerHTML=(rubset.length?rubset.map(r=>'<div class="ftab'+(StudioRubric===r?' on':'')+'" data-rb="'+esc(r)+'">🏷 '+esc(r)+'</div>').join(''):'')
+      +(orgset.length>1?orgset.map(o=>'<div class="ftab'+(StudioOrigin===o?' on':'')+'" data-og="'+esc(o)+'">'+(ORIGIN_LABEL[o]||o)+'</div>').join(''):'');
+    tf.querySelectorAll('[data-rb]').forEach(t=>t.onclick=()=>{ StudioRubric=StudioRubric===t.dataset.rb?'':t.dataset.rb; renderStudio(); });
+    tf.querySelectorAll('[data-og]').forEach(t=>t.onclick=()=>{ StudioOrigin=StudioOrigin===t.dataset.og?'':t.dataset.og; renderStudio(); });
+  }
   let show=all; if(StudioFilter==='review') show=all.filter(p=>p.review!=='approved'); if(StudioFilter==='approved') show=all.filter(p=>p.review==='approved');
+  if(StudioRubric) show=show.filter(p=>p.rubric===StudioRubric);
+  if(StudioOrigin) show=show.filter(p=>p.source_origin===StudioOrigin);
+  renderBulkBar();
   if(!show.length){ grid.innerHTML='<div class="empty" style="grid-column:1/-1">Поки порожньо. Додай джерело у «Джерела» і натисни «Згенерувати пости».</div>'; return; }
-  grid.innerHTML=show.map(p=>{ const sp=statusPill(p.review); const ap=p.review==='approved';
-    return '<div class="pcard'+(ap?' appr':'')+'" data-post="'+p.id+'">'
-      +'<div class="pcard-h">'+chanDots(p.channels)+'<span class="statuspill '+sp[1]+'" style="margin-left:auto">'+sp[0]+'</span></div>'
+  grid.innerHTML=show.map(p=>{ const sp=statusPill(p.review); const ap=p.review==='approved'; const sel=SelPosts.has(p.id);
+    const tags=(p.rubric?'<span class="ptag">🏷 '+esc(p.rubric)+'</span>':'')+(p.source_origin&&p.source_origin!=='manual'?'<span class="ptag">'+(ORIGIN_LABEL[p.source_origin]||esc(p.source_origin))+'</span>':'');
+    return '<div class="pcard'+(ap?' appr':'')+(sel?' selc':'')+'" data-post="'+p.id+'">'
+      +'<div class="pcard-h"><input type="checkbox" class="psel" '+(sel?'checked':'')+' title="Обрати для масових дій">'+chanDots(p.channels)+'<span class="statuspill '+sp[1]+'" style="margin-left:auto">'+sp[0]+'</span></div>'
       +(p.media_filename?'<div class="pcard-img" data-a="image" style="cursor:pointer" title="Редагувати зображення"><img loading="lazy" src="/thumb/'+esc(p.media_filename)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(p.media_filename)+'\'"></div>':'')
       +'<div class="pcard-text pcontent" contenteditable="true">'+esc(p.content)+'</div>'
+      +(tags?'<div style="display:flex;gap:5px;flex-wrap:wrap;padding:0 14px 4px">'+tags+'</div>':'')
       +'<div class="pcard-f"><span class="chars">'+(p.content||'').replace(/\n/g,'').length+' симв.</span>'
-        +'<button class="icon" data-a="regen" title="Переробити">↻</button>'
+        +'<button class="icon" data-a="regen" title="Переробити (можна вказати, що саме змінити)">↻</button>'
         +'<button class="icon" data-a="copy" title="Копіювати">⧉</button>'
         +'<button class="icon" data-a="archive" title="В архів">🗄</button>'
         +'<button class="icon" data-a="image" title="Згенерувати зображення">🎨</button>'
@@ -842,14 +876,37 @@ function renderStudio(){
   }).join('');
   grid.querySelectorAll('.pcard').forEach(card=>{ const id=card.dataset.post; const cont=card.querySelector('.pcontent');
     cont.addEventListener('blur',()=>saveContent(id,cont.textContent));
+    const cb=card.querySelector('.psel'); if(cb) cb.onchange=()=>{ cb.checked?SelPosts.add(id):SelPosts.delete(id); card.classList.toggle('selc',cb.checked); renderBulkBar(); };
     card.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(id); return; } if(a==='image'){ openImageEditor(id); return; } if(a==='atomize'){ openAtomize(id); return; } postAction(card,id,a); });
   });
+}
+// панель масових дій (зʼявляється коли є обрані пости)
+function renderBulkBar(){
+  let bar=$('bulkBar');
+  if(!SelPosts.size){ if(bar) bar.remove(); return; }
+  if(!bar){ bar=document.createElement('div'); bar.id='bulkBar';
+    bar.style.cssText='position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:55;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.18);padding:10px 14px;display:flex;gap:10px;align-items:center';
+    document.body.appendChild(bar); }
+  bar.innerHTML='<b style="font-size:13px">Обрано: '+SelPosts.size+'</b>'
+    +'<button class="primary" id="bulkApprove" style="padding:7px 12px">✓ Затвердити всі</button>'
+    +'<button class="ghost" id="bulkArchive" style="padding:7px 12px">🗄 В архів</button>'
+    +'<button class="icon" id="bulkClear" title="Зняти вибір">✕</button>';
+  $('bulkApprove').onclick=()=>bulkReview('approved');
+  $('bulkArchive').onclick=()=>bulkReview('archived');
+  $('bulkClear').onclick=()=>{ SelPosts.clear(); renderStudio(); };
+}
+async function bulkReview(status){
+  const ids=[...SelPosts]; if(!ids.length) return;
+  flash((status==='approved'?'Затверджую':'Архівую')+' '+ids.length+'…');
+  const res=await Promise.allSettled(ids.map(id=>api('/posts/'+id+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})})));
+  const ok=res.filter(r=>r.status==='fulfilled').length;
+  SelPosts.clear(); await loadStudioPosts(); flash('Готово: '+ok+'/'+ids.length);
 }
 async function openImageEditor(postId, onDone){
   let full; try{ full=await api('/posts/'+postId+'/full'); }catch(e){ flash('⚠ '+e.message); return; }
   let fn=full.media_filename||null, hasBase=!!full.has_base;
   const firstLine=(full.content||'').split('\n').map(s=>s.trim()).find(Boolean)||'';
-  const imgHtml=()=>fn?'<img src="/media/'+esc(fn)+'" style="width:100%;max-height:340px;object-fit:cover;border-radius:10px;border:1px solid var(--line)">':'<div style="height:190px;border-radius:10px;border:1px dashed var(--line2);display:grid;place-items:center;color:var(--muted);font-size:13px">Зображення ще нема — натисни «Згенерувати»</div>';
+  const imgHtml=()=>fn?'<img src="/media/'+esc(fn)+'" style="width:100%;max-height:340px;object-fit:cover;border-radius:10px;border:1px solid var(--line)">':'<div style="height:190px;border-radius:10px;border:1px dashed var(--line2);display:grid;place-items:center;color:var(--muted);font-size:13px">Зображення ще нема - натисни «Згенерувати»</div>';
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='65';
   ov.innerHTML='<div class="modal-card" style="max-width:520px;padding:20px">'
     +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><b style="font-size:16px">🎨 Зображення поста</b><button class="icon" id="ieX" style="margin-left:auto">✕</button></div>'
@@ -859,7 +916,7 @@ async function openImageEditor(postId, onDone){
     +'<label class="rchip" style="margin-top:8px;display:inline-flex"><input type="checkbox" id="ieOv" checked> Накладати текст</label>'
     +'<div id="ieMsg" style="font-size:12px;color:var(--muted);margin-top:6px"></div>'
     +'<div class="btnrow" style="margin-top:14px"><button class="primary" id="ieGen">🎨 Згенерувати</button><button class="ghost" id="ieText2"'+(hasBase?'':' disabled title="Спершу згенеруй"')+'>✍ Оновити лише текст</button></div>'
-    +'<div class="hint" style="margin-top:8px">«Згенерувати» малює нову картинку (коштує). «Оновити лише текст» — дешево, на тій самій базі.</div>'
+    +'<div class="hint" style="margin-top:8px">«Згенерувати» малює нову картинку (коштує). «Оновити лише текст» - дешево, на тій самій базі.</div>'
     +'</div>';
   document.body.appendChild(ov); const close=()=>ov.remove();
   ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
@@ -869,7 +926,7 @@ async function openImageEditor(postId, onDone){
   ov.querySelector('#ieGen').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='малюю зображення… (10-30с)'; try{ const r=await api('/posts/'+postId+'/image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headline:ov.querySelector('#ieOv').checked?ov.querySelector('#ieText').value:''})}); done(r); }catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; } finally{ b.disabled=false; } };
   ov.querySelector('#ieText2').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='оновлюю текст…'; try{ const r=await api('/posts/'+postId+'/image-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headline:ov.querySelector('#ieText').value,overlay:ov.querySelector('#ieOv').checked})}); done(r); }catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; } finally{ b.disabled=false; } };
 }
-async function loadImageProvider(){ const sel=$('imgProv'); if(!sel) return; try{ const c=await api('/integrations/images'); const A=c.available||{}; const opts=[['openai','OpenAI gpt-image-1',A.openai],['fal','FLUX schnell (fal.ai)',A.fal],['gemini','Nano Banana (Gemini)',A.gemini]]; sel.innerHTML=opts.map(o=>'<option value="'+o[0]+'"'+(c.provider===o[0]?' selected':'')+(o[2]?'':' disabled')+'>'+o[1]+(o[2]?'':' — нема ключа')+'</option>').join(''); sel.onchange=async()=>{ try{ await api('/integrations/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:sel.value})}); flashSaved(); }catch(e){ flash('⚠ '+e.message); } }; const ov=$('imgOverlay'); if(ov){ ov.checked=!!c.overlay; ov.onchange=async()=>{ try{ await api('/integrations/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({overlay:ov.checked})}); flashSaved(); }catch(e){} }; } }catch(e){} }
+async function loadImageProvider(){ const sel=$('imgProv'); if(!sel) return; try{ const c=await api('/integrations/images'); const A=c.available||{}; const opts=[['openai','OpenAI gpt-image-1',A.openai],['fal','FLUX schnell (fal.ai)',A.fal],['gemini','Nano Banana (Gemini)',A.gemini]]; sel.innerHTML=opts.map(o=>'<option value="'+o[0]+'"'+(c.provider===o[0]?' selected':'')+(o[2]?'':' disabled')+'>'+o[1]+(o[2]?'':' - нема ключа')+'</option>').join(''); sel.onchange=async()=>{ try{ await api('/integrations/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:sel.value})}); flashSaved(); }catch(e){ flash('⚠ '+e.message); } }; }catch(e){} }
 let InboxSel=null;
 function renderInbox(){
   const list=$('inboxList'), det=$('inboxDetail'); if(!list||!det) return;
@@ -911,9 +968,27 @@ function renderCountChips(){ const o=$('countChips'); if(!o) return; const cur=+
 async function postAction(card,id,a){
   const cont=card.querySelector('.pcontent');
   if(a==='copy'){ navigator.clipboard.writeText(cont?cont.textContent:''); flash('Скопійовано'); return; }
-  if(a==='regen'){ if(cont) cont.innerHTML='<span class="spin"></span> перегенерація…'; try{ await api('/posts/'+id+'/regenerate',{method:'POST'}); await loadStudioPosts(); flashSaved(); }catch(e){ flash('⚠ '+e.message); await loadStudioPosts(); } return; }
+  if(a==='regen'){ openRegenModal(id, cont); return; }
   const map={approve:'approved',needs:'needs_work',archive:'archived'};
   if(map[a]){ try{ await api('/posts/'+id+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:map[a]})}); await loadStudioPosts(); flashSaved(); }catch(e){ flash('⚠ '+e.message); } }
+}
+// ---------- Переробити пост: з полем «що саме змінити» (правка поверх повного контексту) ----------
+function openRegenModal(postId, cont){
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
+  ov.innerHTML='<div class="modal-card" style="max-width:480px;padding:20px">'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">↻ Переробити пост</b><button class="icon" id="rgX" style="margin-left:auto">✕</button></div>'
+    +'<div class="hint">Напиши, що саме змінити (або залиш порожнім - перепишемо іншими словами). Голос бренду і стратегія зберігаються.</div>'
+    +'<textarea class="txt" id="rgInstr" rows="3" style="margin-top:8px" placeholder="Напр.: зроби коротшим і без смайлів; додай приклад із практики; зроби гачок різкішим…"></textarea>'
+    +'<div class="btnrow" style="margin-top:12px"><button class="primary" id="rgGo">↻ Переробити</button></div></div>';
+  document.body.appendChild(ov); const close=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#rgX').onclick=close;
+  const ta=ov.querySelector('#rgInstr'); ta.focus();
+  ov.querySelector('#rgGo').onclick=async()=>{
+    const instruction=ta.value.trim(); close();
+    if(cont) cont.innerHTML='<span class="spin"></span> перегенерація…';
+    try{ await api('/posts/'+postId+'/regenerate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(instruction?{instruction}:{})}); await loadStudioPosts(); flashSaved(); }
+    catch(e){ flash('⚠ '+e.message); await loadStudioPosts(); }
+  };
 }
 // ---------- Атомізація: 1 пост → варіанти під усі канали (v2) ----------
 async function openAtomize(postId){
@@ -942,7 +1017,7 @@ function chooseMedia(){ return new Promise(async resolve=>{
   let media=[]; try{ media=await api('/media'); }catch(e){ flash('Не вдалося завантажити бібліотеку'); resolve(undefined); return; }
   const imgs=media.filter(m=>m.kind==='image');
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
-  const grid=imgs.length?imgs.map(m=>'<img loading="lazy" src="/thumb/'+esc(m.filename)+'" data-id="'+m.id+'" data-fn="'+esc(m.filename)+'" onerror="this.style.opacity=.3" style="height:84px;border-radius:8px;cursor:pointer;background:var(--surface2)">').join(''):'<div class="empty">Бібліотека порожня — завантаж фото у «Джерела».</div>';
+  const grid=imgs.length?imgs.map(m=>'<img loading="lazy" src="/thumb/'+esc(m.filename)+'" data-id="'+m.id+'" data-fn="'+esc(m.filename)+'" onerror="this.style.opacity=.3" style="height:84px;border-radius:8px;cursor:pointer;background:var(--surface2)">').join(''):'<div class="empty">Бібліотека порожня - завантаж фото у «Джерела».</div>';
   ov.innerHTML='<div class="modal-card" style="max-width:620px;padding:20px"><b>Обери фото</b><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">'+grid+'</div><div class="btnrow"><button class="ghost" id="cmClose">Скасувати</button><button id="cmDetach">Без фото</button></div></div>';
   document.body.appendChild(ov); const close=()=>ov.remove();
   ov.addEventListener('click',e=>{ if(e.target===ov){ close(); resolve(undefined); } });
@@ -1026,7 +1101,7 @@ async function genPosts(){
   let rid; try{ rid=await ensureRun(); }catch(e){ try{ const r=await api('/generate/from-brand',{method:'POST'}); rid=r.runId; runId=rid; localStorage.setItem('kg_run',rid); updRunLabel(); }catch(e2){ go('brand'); flash('Спершу заповни Базу бренду (ніша й аудиторія).'); return; } }
   setBusy(true); setLayout('studio'); flash('Генерую пости…');
   const cnt=Number(($('ideaCount')||{}).value)||6;
-  try{ const r=await api('/runs/'+rid+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:cnt})}); await refresh(); flash('Готово — '+(r.count||0)+' постів на перегляд.'); loadTasks(); }
+  try{ const r=await api('/runs/'+rid+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:cnt})}); await refresh(); flash('Готово - '+(r.count||0)+' постів на перегляд.'); loadTasks(); }
   catch(e){ flash('⚠ '+e.message); try{await refresh();}catch(_){} }
   finally{ setBusy(false); }
 }
@@ -1042,7 +1117,7 @@ async function genIdeas(){
 }
 function renderIdeaList(ideas){
   const el=$('ideaList'); if(!el) return;
-  if(!ideas.length){ el.innerHTML='<div class="empty">Ідей нема — спробуй ще.</div>'; $('ideasToPosts').style.display='none'; return; }
+  if(!ideas.length){ el.innerHTML='<div class="empty">Ідей нема - спробуй ще.</div>'; $('ideasToPosts').style.display='none'; return; }
   el.innerHTML=ideas.map(it=>'<label class="rchip on ideaChip" style="display:flex;gap:8px;align-items:flex-start;text-align:left;width:100%;padding:9px 12px;font-weight:500;line-height:1.4;margin-bottom:5px"><input type="checkbox" class="ideaCb" data-idea="'+esc(it.idea)+'" checked><span class="ideaCk" style="font-weight:800">✓</span><span style="flex:1">'+esc(it.idea)+'</span></label>').join('');
   el.querySelectorAll('.ideaChip').forEach(l=>{ const cb=l.querySelector('input'); const upd=()=>{ l.classList.toggle('on',cb.checked); const ck=l.querySelector('.ideaCk'); if(ck) ck.style.visibility=cb.checked?'visible':'hidden'; }; upd(); cb.addEventListener('change',upd); });
   $('ideasToPosts').style.display='block';
@@ -1052,7 +1127,7 @@ if($('ideasToPosts')) $('ideasToPosts').onclick=async()=>{
   const picked=Array.from(document.querySelectorAll('#ideaList .ideaCb:checked')).map(c=>c.dataset.idea).filter(Boolean);
   if(!picked.length){ flash('Обери хоча б одну ідею'); return; }
   if(busy||!runId) return; setBusy(true); setLayout('studio'); flash('Створюю пости з обраних ідей…');
-  try{ const r=await api('/runs/'+runId+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ideas:picked})}); await refresh(); flash('Готово — '+(r.count||0)+' постів на перегляд.'); loadTasks(); }
+  try{ const r=await api('/runs/'+runId+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ideas:picked})}); await refresh(); flash('Готово - '+(r.count||0)+' постів на перегляд.'); loadTasks(); }
   catch(e){ flash('⚠ '+e.message); }
   finally{ setBusy(false); }
 };
@@ -1069,7 +1144,7 @@ async function loadPublish(){ try{ const [bank,slots]=await Promise.all([api('/b
 function renderBank(){
   const o=$('bank'); if(!o) return; const sch=new Set(Pub.slots.map(s=>s.post_id));
   $('bankCount').textContent=Pub.bank.length;
-  if(!Pub.bank.length){ o.innerHTML='<div class="empty">Порожньо. Затвердьте пости у «Студії» — вони зʼявляться тут.</div>'; return; }
+  if(!Pub.bank.length){ o.innerHTML='<div class="empty">Порожньо. Затвердьте пости у «Студії» - вони зʼявляться тут.</div>'; return; }
   o.innerHTML='';
   Pub.bank.forEach(p=>{ const placed=sch.has(p.id);
     const c=document.createElement('div'); c.className='chip'+(placed?' placed':''); c.draggable=true; c.dataset.post=p.id;
@@ -1078,15 +1153,19 @@ function renderBank(){
     o.appendChild(c);
   });
 }
-function calMonday(){const d=new Date();const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);d.setHours(0,0,0,0);return d;}
-function calISO(off){const d=calMonday();d.setDate(d.getDate()+off);return d.toISOString().slice(0,10);}
+function calMonday(){ // «сьогодні» за поясом воркспейсу (TZ), якір - полудень UTC, щоб DST не зсував дату
+  const [Y,M,D]=locDate(new Date()).split('-').map(Number);
+  const d=new Date(Date.UTC(Y,M-1,D,12,0,0));
+  const day=(d.getUTCDay()+6)%7; d.setUTCDate(d.getUTCDate()-day); return d;
+}
+function calISO(off){const d=new Date(calMonday());d.setUTCDate(d.getUTCDate()+off);return d.toISOString().slice(0,10);}
 function renderCal(){
   const cal=$('cal'); if(!cal) return; cal.innerHTML='';
   ['Пн','Вт','Ср','Чт','Пт','Сб','Нд'].forEach(d=>{const h=document.createElement('div');h.className='dow';h.textContent=d;cal.appendChild(h);});
   const byDay={}; Pub.slots.forEach(s=>{ if(!s.scheduled_at) return; const iso=locDate(s.scheduled_at); (byDay[iso]=byDay[iso]||[]).push(s); });
   for(let off=0;off<28;off++){
     const iso=calISO(off); const cell=document.createElement('div'); cell.className='day'; cell.dataset.iso=iso;
-    const dt=new Date(iso); cell.innerHTML='<div class="dn">'+dt.getDate()+'.'+(dt.getMonth()+1)+'</div>';
+    const [,mmI,ddI]=iso.split('-'); cell.innerHTML='<div class="dn">'+(+ddI)+'.'+(+mmI)+'</div>';
     (byDay[iso]||[]).sort((a,b)=>String(a.scheduled_at).localeCompare(String(b.scheduled_at))).forEach(s=>{
       const time=locHM(s.scheduled_at); const st=s.status;
       const icon=st==='posted'?' ✅':(st==='failed'?' ⚠️':(st==='posting'?' ⏳':''));
@@ -1106,7 +1185,7 @@ function renderCal(){
 // ---------- wiring ----------
 document.querySelectorAll('[data-run]').forEach(b=>b.onclick=()=>run(+b.dataset.run));
 document.querySelectorAll('[data-from]').forEach(b=>b.onclick=()=>runFrom(+b.dataset.from));
-$('runAll').onclick=async()=>{ await runFrom(1); setLayout('studio'); flash('Готово — переглянь і затвердь пости.'); };
+$('runAll').onclick=async()=>{ await runFrom(1); setLayout('studio'); flash('Готово - переглянь і затвердь пости.'); };
 $('stopBtn').onclick=async()=>{ if(!runId) return; $('stopBtn').textContent='⛔ зупиняю…'; try{ await api('/runs/'+runId+'/cancel',{method:'POST'}); }catch(e){} };
 $('sampleBtn').onclick=()=>{ $('transcript').value=SAMPLE; };
 $('toCreate').onclick=async()=>{
@@ -1114,7 +1193,7 @@ $('toCreate').onclick=async()=>{
   if(!transcript){ flash('Спершу вставте транскрипт або імпортуйте джерело.'); return; }
   try{ const r=await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript})}); if(r.error) throw new Error(r.error);
     runId=r.runId; localStorage.setItem('kg_run',runId);
-    ['o1','o3','o4','o5','o6','o7'].forEach(id=>{const e=$(id); if(e) e.innerHTML='<div class="empty">—</div>';});
+    ['o1','o3','o4','o5','o6','o7'].forEach(id=>{const e=$(id); if(e) e.innerHTML='<div class="empty">-</div>';});
     ORDER.forEach(n=>{badge(n,'','очікує');stepEl(n).classList.remove('done','stale');});
     $('transcript').value=''; updRunLabel(); go('create'); setLayout('pipeline'); refresh().catch(()=>{});
   }catch(e){ flash('Помилка: '+e.message); }
@@ -1137,7 +1216,7 @@ $('newRun').onclick=()=>{
   if(busy) return;
   if(runId && !confirm('Почати новий прогін? Поточні результати лишаться на сервері, але зникнуть з екрана.')) return;
   runId=null; localStorage.removeItem('kg_run'); S={plan:[],schedule:{}};
-  ['o1','o3','o4','o5','o6','o7'].forEach(id=>{const e=$(id); if(e) e.innerHTML='<div class="empty">—</div>';});
+  ['o1','o3','o4','o5','o6','o7'].forEach(id=>{const e=$(id); if(e) e.innerHTML='<div class="empty">-</div>';});
   $('transcript').value='';
   ORDER.forEach(n=>{badge(n,'','очікує');stepEl(n).classList.remove('done','stale');});
   renderStudio(); renderInbox(); renderStudioSteps({}); renderSourceCard(null);
@@ -1146,8 +1225,8 @@ $('newRun').onclick=()=>{
 $('logoutBtn').onclick=async()=>{ try{ await api('/auth/logout',{method:'POST'}); }catch(e){} location.href='/login'; };
 
 // ---------- Telegram / Threads / Meta ----------
-async function loadTelegram(){ try{ const c=await api('/integrations/telegram'); $('tgChannel').value=c.channelChatId||''; $('tgGroup').value=c.groupChatId||''; if(c.hasToken) $('tgToken').placeholder='•••••••• (токен збережено — лиши порожнім, щоб не міняти)'; if($('tgSharedBox')) $('tgSharedBox').style.display=c.sharedBot?'block':'none'; if($('tgConnMsg')&&c.channelTitle) $('tgConnMsg').innerHTML='✅ підключено: <b>'+esc(c.channelTitle)+'</b>'; }catch(e){} }
-if($('tgConnectBot')) $('tgConnectBot').onclick=async()=>{ const m=$('tgConnMsg'); m.style.color='var(--muted)'; m.textContent='…'; try{ const r=await api('/integrations/telegram/connect-link',{method:'POST'}); const steps=$('tgBotSteps'); if(steps){ steps.style.display='block'; steps.innerHTML='1) Відкрий <a href="'+r.link+'" target="_blank"><b>@'+esc(r.bot)+'</b></a> → натисни <b>Start</b>.<br>2) Додай бота <b>адміном</b> у свій канал.<br>3) Перешли боту будь-який пост із каналу.<br>Потім онови цю сторінку — канал зʼявиться тут.'; } m.textContent=''; window.open(r.link,'_blank'); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
+async function loadTelegram(){ try{ const c=await api('/integrations/telegram'); $('tgChannel').value=c.channelChatId||''; $('tgGroup').value=c.groupChatId||''; if(c.hasToken) $('tgToken').placeholder='•••••••• (токен збережено - лиши порожнім, щоб не міняти)'; if($('tgSharedBox')) $('tgSharedBox').style.display=c.sharedBot?'block':'none'; if($('tgConnMsg')&&c.channelTitle) $('tgConnMsg').innerHTML='✅ підключено: <b>'+esc(c.channelTitle)+'</b>'; }catch(e){} }
+if($('tgConnectBot')) $('tgConnectBot').onclick=async()=>{ const m=$('tgConnMsg'); m.style.color='var(--muted)'; m.textContent='…'; try{ const r=await api('/integrations/telegram/connect-link',{method:'POST'}); const steps=$('tgBotSteps'); if(steps){ steps.style.display='block'; steps.innerHTML='1) Відкрий <a href="'+r.link+'" target="_blank"><b>@'+esc(r.bot)+'</b></a> → натисни <b>Start</b>.<br>2) Додай бота <b>адміном</b> у свій канал.<br>3) Перешли боту будь-який пост із каналу.<br>Потім онови цю сторінку - канал зʼявиться тут.'; } m.textContent=''; window.open(r.link,'_blank'); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
 async function loadThreads(){
   try{ const c=await api('/integrations/threads'); const st=$('thStatus'), conn=$('thConnect'), dis=$('thDisconnect'); if(!st) return;
     if(!c.configured){ st.textContent='⚠ Threads App ID не налаштований (THREADS_APP_ID).'; if(conn)conn.style.display='none'; if(dis)dis.style.display='none'; return; }
@@ -1166,7 +1245,7 @@ async function loadMeta(){
 }
 $('mtDisconnect').onclick=async()=>{ if(!confirm('Відключити Facebook/Instagram?')) return; try{ await api('/integrations/meta/disconnect',{method:'POST'}); await loadMeta(); }catch(e){} };
 $('mtVoice').onclick=async()=>{ const b=$('mtVoice'); const o=b.textContent; b.disabled=true; b.textContent='…читаю пости'; try{ const r=await api('/integrations/meta/import-voice',{method:'POST'}); flash('✨ Голос, нішу й мову виведено з '+r.count+' постів IG'); if(r.derived&&typeof renderDerived==='function') renderDerived(r.derived); await loadSettings(); }catch(e){ flash('⚠ '+e.message); } finally{ b.disabled=false; b.textContent=o; } };
-async function loadMetaPages(){ const sel=$('mtPage'); if(!sel) return; try{ const pages=await api('/integrations/meta/pages'); if(!Array.isArray(pages)||!pages.length){ sel.innerHTML='<option>—</option>'; return; } sel.innerHTML=pages.map(p=>'<option value="'+p.id+'"'+(p.current?' selected':'')+'>'+esc(p.name)+(p.ig?(' · IG @'+esc(p.ig)):'')+'</option>').join(''); }catch(e){ sel.innerHTML='<option>—</option>'; } }
+async function loadMetaPages(){ const sel=$('mtPage'); if(!sel) return; try{ const pages=await api('/integrations/meta/pages'); if(!Array.isArray(pages)||!pages.length){ sel.innerHTML='<option>-</option>'; return; } sel.innerHTML=pages.map(p=>'<option value="'+p.id+'"'+(p.current?' selected':'')+'>'+esc(p.name)+(p.ig?(' · IG @'+esc(p.ig)):'')+'</option>').join(''); }catch(e){ sel.innerHTML='<option>-</option>'; } }
 $('mtPage').onchange=async(e)=>{ try{ await api('/integrations/meta/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pageId:e.target.value})}); await loadMeta(); flashSaved(); }catch(err){ flash('Не вдалося змінити акаунт: '+err.message); } };
 $('mtStats').onclick=async()=>{ const o=$('mtStatsOut'); o.innerHTML='<div class="empty"><span class="spin"></span> завантаження…</div>';
   try{ const s=await api('/integrations/meta/stats'); o.innerHTML=(s.facebook?('<div class="card">📘 <b>'+esc(s.facebook.name||'FB')+'</b>: '+(s.facebook.followers_count||s.facebook.fan_count||0)+' підписників</div>'):'')+(s.instagram?('<div class="card">📸 <b>@'+esc(s.instagram.username||'')+'</b>: '+(s.instagram.followers_count||0)+' підписників · '+(s.instagram.media_count||0)+' постів</div>'):'')+(!s.facebook&&!s.instagram?'<div class="empty">Немає даних.</div>':''); }catch(e){ o.innerHTML='<div class="card" style="color:var(--danger)">⚠ '+esc(e.message)+'</div>'; } };
@@ -1269,7 +1348,7 @@ async function loadGdriveFolders(){
   }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }
 let _pickerReady=false;
-function loadPickerApi(cb){ if(_pickerReady){cb();return;} if(typeof gapi==='undefined'){ flash('Google API ще вантажиться — спробуй за мить'); return; } gapi.load('picker',()=>{ _pickerReady=true; cb(); }); }
+function loadPickerApi(cb){ if(_pickerReady){cb();return;} if(typeof gapi==='undefined'){ flash('Google API ще вантажиться - спробуй за мить'); return; } gapi.load('picker',()=>{ _pickerReady=true; cb(); }); }
 $('gdPick').onclick=async()=>{
   const m=$('gdMsg'); m.style.color='var(--muted)'; m.textContent='відкриваю вибір…';
   let cfg; try{ cfg=await api('/integrations/gdrive/picker-token'); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; return; }
@@ -1279,7 +1358,7 @@ $('gdPick').onclick=async()=>{
     const picker=new google.picker.PickerBuilder().setOAuthToken(cfg.token).setDeveloperKey(cfg.apiKey).setAppId(cfg.appId).addView(view)
       .setCallback(async(d)=>{ if(d.action===google.picker.Action.PICKED){ const f=d.docs[0];
         try{ const r=await api('/sources/gdrive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folderId:f.id,name:f.name})});
-          m.style.color='var(--brand)'; m.textContent=(r.duplicate?'папка вже додана':'додано: '+(f.name||''))+' — тягну…'; await loadGdriveFolders();
+          m.style.color='var(--brand)'; m.textContent=(r.duplicate?'папка вже додана':'додано: '+(f.name||''))+' - тягну…'; await loadGdriveFolders();
           try{ await api('/sources/gdrive/'+r.id+'/pull',{method:'POST'}); await loadGdriveFolders(); await loadMedia(); m.textContent='готово ✓'; }catch(e){ m.textContent='папку додано; фото підтягнуться за розкладом'; }
         }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; }
       } }).build();
@@ -1309,7 +1388,7 @@ if($('ffImport')) $('ffImport').onclick=openTranscriberModal;
 async function loadFF(){ try{ const c=await api('/integrations/transcription'); if(c.hasKey) $('ffKey').placeholder='•••••••• (ключ збережено)'; if($('ffHook')) $('ffHook').value=c.webhookUrl||''; if(c.hasSecret&&$('ffSecret')) $('ffSecret').placeholder='•••••••• (секрет збережено)'; if($('ffAuto')) $('ffAuto').checked=!!c.autoRun; }catch(e){} }
 $('ffHookCopy').onclick=()=>{ const v=$('ffHook').value; if(v){ navigator.clipboard.writeText(v); flashSaved(); } };
 $('ffSave').onclick=async()=>{ try{ await api('/integrations/transcription',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({apiKey:$('ffKey').value,webhookSecret:$('ffSecret').value,autoRun:$('ffAuto').checked})}); $('ffKey').value=''; $('ffSecret').value=''; $('ffMsg').style.color='var(--brand)'; $('ffMsg').textContent='збережено ✓'; await loadFF(); }catch(e){ $('ffMsg').style.color='var(--danger)'; $('ffMsg').textContent='⚠ '+e.message; } };
-$('ffNoSig').onclick=async()=>{ if(!confirm('Прибрати webhook-підпис? Вебхук прийматиметься лише за секретним токеном в URL — найнадійніше, якщо секрет не збігається з Fireflies.')) return; try{ await api('/integrations/transcription',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({clearSecret:true})}); $('ffMsg').style.color='var(--brand)'; $('ffMsg').textContent='підпис прибрано — вебхук тепер прийме ✓'; await loadFF(); }catch(e){ $('ffMsg').style.color='var(--danger)'; $('ffMsg').textContent='⚠ '+e.message; } };
+$('ffNoSig').onclick=async()=>{ if(!confirm('Прибрати webhook-підпис? Вебхук прийматиметься лише за секретним токеном в URL - найнадійніше, якщо секрет не збігається з Fireflies.')) return; try{ await api('/integrations/transcription',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({clearSecret:true})}); $('ffMsg').style.color='var(--brand)'; $('ffMsg').textContent='підпис прибрано - вебхук тепер прийме ✓'; await loadFF(); }catch(e){ $('ffMsg').style.color='var(--danger)'; $('ffMsg').textContent='⚠ '+e.message; } };
 if($('ffAuto')) $('ffAuto').onchange=(e)=>{ if(e.target.checked && !confirm(AUTORUN_WARN)) e.target.checked=false; };
 $('ffTest').onclick=async()=>{ $('ffMsg').style.color='var(--muted)'; $('ffMsg').textContent='перевіряю…'; try{ const l=await api('/transcription/list'); $('ffMsg').style.color='var(--brand)'; $('ffMsg').textContent='ОК, зустрічей: '+l.length; }catch(e){ $('ffMsg').style.color='var(--danger)'; $('ffMsg').textContent='⚠ '+e.message; } };
 $('ffImport').onclick=async()=>{
@@ -1329,13 +1408,13 @@ $('ffImport').onclick=async()=>{
 async function loadAccount(){
   try{ const a=await api('/account'); const mb=(a.media.bytes/1048576).toFixed(1);
     $('accInfo').innerHTML='Email: <b>'+esc(a.email||'')+'</b>'+(a.emailVerified?' ✓':' (не підтверджено)')+' · Медіа: '+a.media.count+' файлів ('+mb+' МБ)'+(a.hasPassword?'':' · вхід лише через Google');
-  }catch(e){ $('accInfo').textContent='—'; }
+  }catch(e){ $('accInfo').textContent='-'; }
 }
 $('accPwSave').onclick=async()=>{ const m=$('accPwMsg'); m.style.color='var(--muted)'; m.textContent='…'; try{ await api('/account/password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({currentPassword:$('accCurPw').value,newPassword:$('accNewPw').value})}); $('accCurPw').value=''; $('accNewPw').value=''; m.style.color='var(--brand)'; m.textContent='пароль змінено ✓'; }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
 $('accEmailSave').onclick=async()=>{ const m=$('accEmailMsg'); m.style.color='var(--muted)'; m.textContent='…'; try{ const r=await api('/account/email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('accNewEmail').value,password:$('accEmailPw').value})}); $('accEmailPw').value=''; $('accNewEmail').value=''; m.style.color='var(--brand)'; m.textContent='email змінено ✓'; if($('userEmail'))$('userEmail').textContent=r.email; loadAccount(); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
 $('accExport').onclick=()=>{ window.location.href='/api/account/export'; };
 $('accDelete').onclick=async()=>{ const email=prompt('Видалення акаунта.\nДані одразу зникнуть з кабінету, остаточно зітруться через 14 днів (увійди, щоб скасувати).\n\nВведи свій email для підтвердження:'); if(!email) return; try{ const r=await api('/account/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmEmail:email})}); alert(r.message||'Акаунт заплановано до видалення.'); location.href='/login'; }catch(e){ alert('⚠ '+e.message); } };
-$('accReset').onclick=async()=>{ const c=prompt('Це СОТРЕ весь контент: бренд, стратегію, рубрики, джерела, пости, календар, медіа — і поверне онбординг. Канали лишаться підключені.\n\nВведи RESET для підтвердження:'); if(!c) return; try{ const r=await api('/account/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:c})}); alert(r.message||'Готово.'); location.href='/app'; }catch(e){ alert('⚠ '+e.message); } };
+$('accReset').onclick=async()=>{ const c=prompt('Це СОТРЕ весь контент: бренд, стратегію, рубрики, джерела, пости, календар, медіа - і поверне онбординг. Канали лишаться підключені.\n\nВведи RESET для підтвердження:'); if(!c) return; try{ const r=await api('/account/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:c})}); alert(r.message||'Готово.'); location.href='/app'; }catch(e){ alert('⚠ '+e.message); } };
 
 // ---------- Стратегія ----------
 let STRAT = { data:{}, status:"none" };
@@ -1349,13 +1428,13 @@ function renderStrategy(){
   const themes=(d.monthly_themes||[]).map(t=>esc(typeof t==='string'?t:((t&&t.themes)||[]).join(', '))).filter(Boolean).join(' · ');
   const sel=new Set((d.best_days||[]).map(x=>String(x).toLowerCase().slice(0,3)));
   const times=(Array.isArray(d.times)&&d.times.length?d.times:['11:00']).join(', ');
-  o.innerHTML='<div class="card"><b>Рубрики:</b> '+(rubs||'—')+'</div>'
-    +'<div class="card"><b>🗓️ Розклад постингу</b><div class="hint" style="margin:6px 0">Дні й час підібрані під нішу та канал. Скоригуй — планувальник бере саме це.</div>'
+  o.innerHTML='<div class="card"><b>Рубрики:</b> '+(rubs||'-')+'</div>'
+    +'<div class="card"><b>🗓️ Розклад постингу</b><div class="hint" style="margin:6px 0">Дні й час підібрані під нішу та канал. Скоригуй - планувальник бере саме це.</div>'
       +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">'+WEEK.map(w=>'<label class="rchip"><input type="checkbox" class="stDay" value="'+w[0]+'"'+(sel.has(w[0])?' checked':'')+'> '+w[1]+'</label>').join('')+'</div>'
       +'<label style="font-size:12px;color:var(--muted)">Час (HH:MM, через кому = кілька на день): <input id="stTimes" class="txt" value="'+esc(times)+'" style="width:170px;display:inline-block;padding:7px 9px"></label>'
       +'<div class="btnrow"><button class="primary" id="saveSched">Зберегти розклад</button><span id="schedMsg" style="font-size:12px;color:var(--muted)"></span></div>'
       +(d.schedule_rationale?'<div class="hint" style="margin-top:8px">💡 '+esc(d.schedule_rationale)+'</div>':'')+'</div>'
-    +'<div class="card"><b>Частота:</b> '+((d.frequency&&d.frequency.posts_per_week)||'?')+' пост/тиж · <b>Канали:</b> '+esc((d.channels||[]).join(', ')||'—')+'</div>'
+    +'<div class="card"><b>Частота:</b> '+((d.frequency&&d.frequency.posts_per_week)||'?')+' пост/тиж · <b>Канали:</b> '+esc((d.channels||[]).join(', ')||'-')+'</div>'
     +(themes?'<div class="card"><b>Теми:</b> '+themes+'</div>':'');
   o.querySelectorAll('.stDay').forEach(cb=>{ const l=cb.closest('.rchip'); l.classList.toggle('on',cb.checked); cb.addEventListener('change',()=>l.classList.toggle('on',cb.checked)); });
   const sb=$('saveSched'); if(sb) sb.onclick=saveSchedule;
@@ -1369,7 +1448,7 @@ async function saveSchedule(){
   catch(e){ if(m){m.style.color='var(--danger)'; m.textContent='⚠ '+e.message;} }
 }
 async function loadStrategy(){ try{ STRAT=await api('/strategy'); }catch(e){ STRAT={data:{},status:'none'}; } renderStrategy(); }
-$('genStrat').onclick=async()=>{ const m=$('stratMsg'); m.style.color='var(--muted)'; m.textContent='генерую…'; try{ const r=await api('/strategy/generate',{method:'POST'}); STRAT={data:r.data,status:r.status||'applied'}; renderStrategy(); await loadRubrics(); if(window._v2) await loadSettings(); m.style.color='var(--brand)'; m.textContent='готово — рубрики застосовано ✓'; }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
+$('genStrat').onclick=async()=>{ const m=$('stratMsg'); m.style.color='var(--muted)'; m.textContent='генерую…'; try{ const r=await api('/strategy/generate',{method:'POST'}); STRAT={data:r.data,status:r.status||'applied'}; renderStrategy(); await loadRubrics(); if(window._v2) await loadSettings(); m.style.color='var(--brand)'; m.textContent='готово - рубрики застосовано ✓'; }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
 // ---------- Контент-план по каналах (v2) ----------
 const CP_LABEL={telegram:'Telegram',instagram:'Instagram',threads:'Threads',facebook:'Facebook'};
 function renderChannelPlan(rows){ const o=$('cpView'); if(!o) return; if(!rows||!rows.length){ o.innerHTML='<div class="empty">Порожньо.</div>'; return; }
@@ -1404,10 +1483,10 @@ $('saveRubrics').onclick=async()=>{ try{ await api('/rubrics',{method:'PUT',head
 
 // ---------- онбординг ----------
 const OB_STEPS=[
-  {title:'Підключи Instagram', desc:'Ми прочитаємо твої останні пости й автоматично виведемо голос бренду — найшвидший старт. Або тисни «Далі», щоб пропустити.', key:'connect', type:'connect'},
+  {title:'Підключи Instagram', desc:'Ми прочитаємо твої останні пости й автоматично виведемо голос бренду - найшвидший старт. Або тисни «Далі», щоб пропустити.', key:'connect', type:'connect'},
   {title:'Про що ваш бренд і для кого?', desc:'Кілька речень про те, чим ти займаєшся і для кого. Ми використаємо це як контекст у кожному пості.', key:'marketing_context', ph:'Ніша + аудиторія: хто ви, для кого пишете, який результат даєте…', req:true},
-  {title:'Ваш голос — встав 3-5 своїх постів', desc:'За ними AI виведе твій тон голосу, щоб тексти звучали як ти, а не як AI.', key:'voice_examples', ph:'Приклади постів, щоб AI вивів ваш стиль…'},
-  {title:'Перше джерело (необовʼязково)', desc:'Встав транскрипт сесії або просто думку — і ми одразу покажемо готові пости.', key:'__transcript', ph:'Встав транскрипт/нотатку — зробимо перший контент…'},
+  {title:'Ваш голос - встав 3-5 своїх постів', desc:'За ними AI виведе твій тон голосу, щоб тексти звучали як ти, а не як AI.', key:'voice_examples', ph:'Приклади постів, щоб AI вивів ваш стиль…'},
+  {title:'Перше джерело (необовʼязково)', desc:'Встав транскрипт сесії або просто думку - і ми одразу покажемо готові пости.', key:'__transcript', ph:'Встав транскрипт/нотатку - зробимо перший контент…'},
 ];
 let obIdx=0;
 function showOnboarding(){ obIdx=0; $('onboarding').style.display='grid'; renderOb(); }
@@ -1415,7 +1494,7 @@ function renderOb(){
   const s=OB_STEPS[obIdx];
   $('obStep').textContent='Крок '+(obIdx+1)+' з '+OB_STEPS.length;
   $('obTitle').textContent=s.title; $('obDesc').textContent=s.desc;
-  if(s.key==='voice_examples' && obVoiceImported) $('obDesc').textContent='✅ Голос уже виведено з твого Instagram. Можеш одразу «Далі» — або додай ще приклади постів.';
+  if(s.key==='voice_examples' && obVoiceImported) $('obDesc').textContent='✅ Голос уже виведено з твого Instagram. Можеш одразу «Далі» - або додай ще приклади постів.';
   $('obBar').style.width=((obIdx+1)/OB_STEPS.length*100)+'%';
   $('obBack').style.display=obIdx>0?'inline-flex':'none';
   $('obNext').textContent=obIdx===OB_STEPS.length-1?'Завершити ✨':'Далі →';
@@ -1441,7 +1520,14 @@ $('obNext').onclick=async()=>{
 };
 // завершити онбординг тим, що ВЖЕ маємо (включно з «Пропустити»): голос/бренд → run → генерація
 async function finishOnboarding(){
-  if($('obNext')) $('obNext').disabled=true; if($('obMsg')) $('obMsg').textContent='Налаштовую кабінет…';
+  if($('obNext')) $('obNext').disabled=true;
+  // одразу видимий стан «працюємо» на всю модалку, а не сірий рядок унизу, який виглядає як зависання
+  const obCard=$('onboarding').querySelector('.modal-card');
+  if(obCard) obCard.innerHTML='<div style="padding:44px;text-align:center">'
+    +'<div style="font-size:40px;line-height:1;animation:obPulse 1.2s ease-in-out infinite">✨</div>'
+    +'<h2 style="font-size:20px;font-weight:600;margin:14px 0 8px">Налаштовую твій кабінет</h2>'
+    +'<div style="color:var(--muted);font-size:13.5px">Виводжу голос бренду і готую стратегію…</div>'
+    +'<div style="margin-top:18px"><span class="spin"></span></div></div>';
   const valByKey=(k)=>{ const x=OB_STEPS.find(o=>o.key===k); return ((x&&x._val)||'').trim(); };
   try{ if(valByKey('voice_examples')){ try{ await api('/brand/derive-voice',{method:'POST'}); }catch(e){} }
        try{ await api('/strategy/generate',{method:'POST'}); }catch(e){}
@@ -1454,7 +1540,7 @@ async function finishOnboarding(){
   if(rid){ runId=rid; localStorage.setItem('kg_run',rid); updRunLabel(); await runOnbProgress(rid); }
   $('onboarding').style.display='none';
   go('create'); setLayout('studio'); try{ await refresh(); }catch(e){}
-  flash(rid?'Готово — ось твої перші пости 🎉':'Готово! Додай джерело й натисни «Згенерувати пости».');
+  flash(rid?'Готово - ось твої перші пости 🎉':'Готово! Додай джерело й натисни «Згенерувати пости».');
 }
 async function runOnbProgress(rid){
   const cnt=Number(($('ideaCount')||{}).value)||6;
@@ -1462,13 +1548,13 @@ async function runOnbProgress(rid){
   if(card) card.innerHTML='<div style="padding:34px"><h2 style="font-size:21px;font-weight:600;margin:0 0 14px;text-align:center">Готуємо твій старт ✨</h2>'
     +'<div style="display:flex;flex-direction:column;gap:11px;font-size:14px;color:var(--ink2)">'
     +'<div>📝 Генеруємо перші <b>'+cnt+' постів</b> у твоєму голосі</div>'
-    +'<div>🎨 Малюємо до них <b>прості зображення</b> (за мінімальним промтом)</div>'
+    +'<div>🎨 Малюємо до них <b>зображення у стилі бренду</b></div>'
     +'<div>📷 Далі зможеш підключити <b>свій банк фото</b> й покращувати зображення для постів</div>'
     +'<div>🔗 У <b>Налаштуваннях</b> підключиш інші соцмережі (Telegram, Facebook, Threads)</div>'
     +'<div>📥 У <b>Джерелах</b> додаси інші джерела контенту (транскрипти, RSS, фото з Google Drive)</div>'
     +'</div><div style="text-align:center;margin-top:20px"><span class="spin"></span> <span style="color:var(--muted);font-size:13px">зачекай ~30-60 секунд…</span></div></div>';
   const minWait=new Promise(z=>setTimeout(z,3500)); // щоб встиг прочитати тези
-  try{ await Promise.all([ api('/runs/'+rid+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:cnt,images:true})}), minWait ]); }catch(e){ await minWait; }
+  try{ await Promise.all([ api('/runs/'+rid+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:cnt,images:true,provider:'gemini'})}), minWait ]); }catch(e){ await minWait; }
 }
 
 // ---------- OAuth у поп-апі (кабінет не закривається) ----------
@@ -1482,7 +1568,7 @@ window.addEventListener('message',(ev)=>{ if(ev.origin!==location.origin) return
 async function renderObConnect(oc){
   oc.innerHTML='<div style="font-size:13px;color:var(--muted)">Перевіряю підключення…</div>';
   let st={}; try{ st=await api('/channels/status'); }catch(e){}
-  if(!(st&&st.instagram)){ oc.innerHTML='<button class="btn primary" style="display:inline-flex" onclick="return connectPopup(\'/api/integrations/meta/connect\')">📸 Підключити Instagram</button><div style="font-size:12.5px;color:var(--muted);margin-top:8px">Відкриється в окремому вікні — кабінет не закриється. Після підключення автоматично виведемо твій голос. Немає бізнес-IG? Тисни «Далі».</div>'; return; }
+  if(!(st&&st.instagram)){ oc.innerHTML='<button class="btn primary" style="display:inline-flex" onclick="return connectPopup(\'/api/integrations/meta/connect\')">📸 Підключити Instagram</button><div style="font-size:12.5px;color:var(--muted);margin-top:8px">Відкриється в окремому вікні - кабінет не закриється. Після підключення автоматично виведемо твій голос. Немає бізнес-IG? Тисни «Далі».</div>'; return; }
   let pages=[]; try{ pages=await api('/integrations/meta/pages'); }catch(e){}
   let html='<div style="padding:12px;border-radius:10px;background:var(--brand-soft);color:var(--brand);font-weight:600">✅ Instagram підключено</div>';
   if(pages.length>1) html+='<label style="display:block;font-size:12.5px;color:var(--ink2);margin:10px 0 4px">Акаунт для цього бренду:</label><select id="obIgSel" style="width:100%">'+pages.map(p=>'<option value="'+p.id+'"'+(p.current?' selected':'')+'>'+esc(p.name)+(p.ig?(' · IG @'+esc(p.ig)):'')+'</option>').join('')+'</select>';

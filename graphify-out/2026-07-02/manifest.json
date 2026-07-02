@@ -1,8 +1,8 @@
 {
   "server/db/schema.sql": {
-    "mtime": 1783015643.6077077,
-    "ast_hash": "496870d2c57c43112d0e50a46d42f56e",
-    "semantic_hash": ""
+    "mtime": 1782731362.9545949,
+    "ast_hash": "08b766a3c8edf0ad50ad7302d036fd11",
+    "semantic_hash": "08b766a3c8edf0ad50ad7302d036fd11"
   },
   "server/package.json": {
     "mtime": 1782731362.9550133,
@@ -25,14 +25,14 @@
     "semantic_hash": "4f60c2f5decc6583397d8488fef96238"
   },
   "server/src/defaults.ts": {
-    "mtime": 1783015433.515072,
-    "ast_hash": "c8388fdad56f961952118cf952e65b14",
-    "semantic_hash": ""
+    "mtime": 1782731362.9623814,
+    "ast_hash": "df6c216aff128dc5043b2fc1c7384f9d",
+    "semantic_hash": "df6c216aff128dc5043b2fc1c7384f9d"
   },
   "server/src/email.ts": {
-    "mtime": 1783015433.5146437,
-    "ast_hash": "953634792457e6e6ee516394c1885bcc",
-    "semantic_hash": ""
+    "mtime": 1782731362.9623814,
+    "ast_hash": "6fc0537bea1ecbe804168f72d11aa8d2",
+    "semantic_hash": "6fc0537bea1ecbe804168f72d11aa8d2"
   },
   "server/src/env.ts": {
     "mtime": 1782731362.9623814,
@@ -65,9 +65,9 @@
     "semantic_hash": "6c2ff85822659e4bfac582a0db70ce2e"
   },
   "server/src/images.ts": {
-    "mtime": 1783015326.087689,
-    "ast_hash": "9cce476929f118917cf35dd5d4ca615e",
-    "semantic_hash": ""
+    "mtime": 1782731362.9630132,
+    "ast_hash": "850e2997ac187addc412344177877396",
+    "semantic_hash": "850e2997ac187addc412344177877396"
   },
   "server/src/lifecycle.ts": {
     "mtime": 1782731362.9630132,
@@ -105,8 +105,8 @@
     "semantic_hash": "146bd4a919c3218078bd4f79b9182554"
   },
   "server/src/pipeline.ts": {
-    "mtime": 1783015883.867722,
-    "ast_hash": "22b367812dcae2e9422fa883d6b10469",
+    "mtime": 1782845790.4372447,
+    "ast_hash": "c03e8f01d3f6b188af2f625ba9cee826",
     "semantic_hash": ""
   },
   "server/src/publisher.ts": {
@@ -115,9 +115,9 @@
     "semantic_hash": "faff3a9d3355e82f3ff73dd1935970fa"
   },
   "server/src/rss-poller.ts": {
-    "mtime": 1783015725.2957127,
-    "ast_hash": "2354368d2780b93302edaad53397671f",
-    "semantic_hash": ""
+    "mtime": 1782731362.9630132,
+    "ast_hash": "8a6711af33f2b7ea3e67914869a39137",
+    "semantic_hash": "8a6711af33f2b7ea3e67914869a39137"
   },
   "server/src/rss.ts": {
     "mtime": 1782731362.9630132,
@@ -125,19 +125,19 @@
     "semantic_hash": "3e929595c91643444c4c4d540a929c55"
   },
   "server/src/server.ts": {
-    "mtime": 1783015898.5637228,
-    "ast_hash": "5f6c977f4781ae675f8b31dce2fe0849",
+    "mtime": 1782845833.245246,
+    "ast_hash": "c43250493e1430c92dd7165af4158a97",
     "semantic_hash": ""
   },
   "server/src/telegram.ts": {
-    "mtime": 1783015221.9676828,
-    "ast_hash": "7b1c1db72516d92c511bc3eab57d4efe",
-    "semantic_hash": ""
+    "mtime": 1782731362.9670131,
+    "ast_hash": "513d4a63568ee5bac4fde94224adaa57",
+    "semantic_hash": "513d4a63568ee5bac4fde94224adaa57"
   },
   "server/src/tgbot.ts": {
-    "mtime": 1783015433.51489,
-    "ast_hash": "ade105dac11112588dd96ca950f3abf8",
-    "semantic_hash": ""
+    "mtime": 1782731362.9670131,
+    "ast_hash": "fcbbf9be01c98e766be208efc7136c95",
+    "semantic_hash": "fcbbf9be01c98e766be208efc7136c95"
   },
   "server/src/threads.ts": {
     "mtime": 1782731362.9670131,
@@ -155,9 +155,9 @@
     "semantic_hash": "352df4b84f4af2922ccd9adaf8e4608f"
   },
   "CLAUDE.md": {
-    "mtime": 1782851154.9039767,
-    "ast_hash": "876509505ccc0afe196d739c85529eb3",
-    "semantic_hash": ""
+    "mtime": 1782833467.436259,
+    "ast_hash": "1740824a6e4cddb8184df6b83ac4f97a",
+    "semantic_hash": "1740824a6e4cddb8184df6b83ac4f97a"
   },
   "DEPLOY.md": {
     "mtime": 1782731362.9470243,
@@ -225,39 +225,39 @@
     "semantic_hash": "199a92f19b822e467cdaf95780db5fee"
   },
   "server/public/app.html": {
-    "mtime": 1783016020.79573,
-    "ast_hash": "a8bcbe660d47e9cc2ad9a314c45799f0",
+    "mtime": 1782846002.2852516,
+    "ast_hash": "42e1826fdd5ae4222e2bfefd8a83c331",
     "semantic_hash": ""
   },
   "server/public/auth.html": {
-    "mtime": 1783015433.51118,
-    "ast_hash": "cd4d25dc1b285ea65d25957344970124",
-    "semantic_hash": ""
+    "mtime": 1782731362.9598758,
+    "ast_hash": "16c146d8456ed07ba124ff525fc78904",
+    "semantic_hash": "16c146d8456ed07ba124ff525fc78904"
   },
   "server/public/b.html": {
-    "mtime": 1783015433.5118253,
-    "ast_hash": "e3b09207c8129081e2b3ac783a0e1f90",
-    "semantic_hash": ""
+    "mtime": 1782731362.9598758,
+    "ast_hash": "1b288da0957e4d347ec23cdd45aadbf4",
+    "semantic_hash": "1b288da0957e4d347ec23cdd45aadbf4"
   },
   "server/public/data-deletion.html": {
-    "mtime": 1783015433.5129824,
-    "ast_hash": "92e97e9d4966b78c5059439425fbf28c",
-    "semantic_hash": ""
+    "mtime": 1782731362.9598758,
+    "ast_hash": "b0147b1e41acb1a39dd30a6293cce683",
+    "semantic_hash": "b0147b1e41acb1a39dd30a6293cce683"
   },
   "server/public/index.html": {
-    "mtime": 1783015433.5113788,
-    "ast_hash": "fa9b3de991a6d6b9a342e2dcb64b4fab",
-    "semantic_hash": ""
+    "mtime": 1782731362.9598758,
+    "ast_hash": "72bc6bb774cad1bc7456a1b4f61427d2",
+    "semantic_hash": "72bc6bb774cad1bc7456a1b4f61427d2"
   },
   "server/public/privacy.html": {
-    "mtime": 1783015433.512481,
-    "ast_hash": "a4678e46343df90fcba2cc05c285e8be",
-    "semantic_hash": ""
+    "mtime": 1782731362.9598758,
+    "ast_hash": "90b1403beb169198fad1d5b870388091",
+    "semantic_hash": "90b1403beb169198fad1d5b870388091"
   },
   "server/public/terms.html": {
-    "mtime": 1783015433.5126503,
-    "ast_hash": "ea9bb79ab241624cdafdc5f118e03471",
-    "semantic_hash": ""
+    "mtime": 1782731362.9598758,
+    "ast_hash": "c8670e44fd882e5ee7a2a649e33cd2a6",
+    "semantic_hash": "c8670e44fd882e5ee7a2a649e33cd2a6"
   },
   "meta-review/app-icon-1024.png": {
     "mtime": 1782731362.9510133,
@@ -268,10 +268,5 @@
     "mtime": 1782731362.9510133,
     "ast_hash": "fc21c2f9a9d0b11b51ad9c144f7967dd",
     "semantic_hash": "fc21c2f9a9d0b11b51ad9c144f7967dd"
-  },
-  "server/public/favicon.svg": {
-    "mtime": 1783015351.857909,
-    "ast_hash": "fc21c2f9a9d0b11b51ad9c144f7967dd",
-    "semantic_hash": ""
   }
 }

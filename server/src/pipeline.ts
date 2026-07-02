@@ -6,7 +6,7 @@ import { chat, extractJsonArray, extractJsonObject } from "./openrouter.js";
 export const STEP_ORDER = ["extract_ideas", "drafts", "tone", "format", "deai", "strategy"] as const;
 export type StepKey = (typeof STEP_ORDER)[number];
 
-// РЕДАГОВАНІ промпти — ЛИШЕ обробка/стилістика. Технічну частину (формат JSON, контекст бренду)
+// РЕДАГОВАНІ промпти - ЛИШЕ обробка/стилістика. Технічну частину (формат JSON, контекст бренду)
 // додає код нижче (STEP_CONTEXT/STEP_FORMAT), щоб правки промпта не ламали парсинг.
 export const DEFAULT_PROMPTS: Record<StepKey, { model: string; content: string }> = {
   extract_ideas: {
@@ -16,7 +16,7 @@ export const DEFAULT_PROMPTS: Record<StepKey, { model: string; content: string }
   drafts: {
     model: "anthropic/claude-sonnet-4.5",
     content:
-      "Зроби пост СУВОРО на основі змісту сесії (першоджерело нижче) — використовуй конкретні приклади, думки й формулювання саме з неї, не вигадуй загальних порад «з повітря». " +
+      "Зроби пост СУВОРО на основі змісту сесії (першоджерело нижче) - використовуй конкретні приклади, думки й формулювання саме з неї, не вигадуй загальних порад «з повітря». " +
       "Структура: гачок, 2-4 абзаци користі, м'який заклик. Поверни лише текст поста.",
   },
   tone: {
@@ -36,6 +36,9 @@ export const DEFAULT_PROMPTS: Record<StepKey, { model: string; content: string }
     content: "Признач кожному готовому посту (по порядку) тип і рекомендований зсув у днях від старту, спираючись на контент-стратегію.",
   },
 };
+
+// Наскрізне правило стилю для ВСІЄЇ генерації тексту: широке тире («—») - типовий AI-маркер.
+const NO_DASH_RULE = "\n\nПунктуація: НІКОЛИ не використовуй широке тире («—») чи середнє тире («–») у тексті. Замінюй їх комою, двокрапкою, дефісом або розбивай на окремі речення.";
 
 // ХАРДКОД (не редагується юзером): контекст бренду + контракт формату відповіді.
 const STEP_CONTEXT: Record<StepKey, (s: Record<string, string>) => string> = {
@@ -58,7 +61,7 @@ export async function deriveVoice(workspaceId: string): Promise<string> {
   if (!examples) throw new Error("Спершу встав 3-5 прикладів постів");
   const lang = (settings.output_language || "Українська").trim();
   const system =
-    "Проаналізуй приклади постів автора і стисло опиши його tone of voice (голос бренду): звертання (ти/ви), тон, характерну лексику й ритм, що робить голос впізнаваним і чого уникати. 4-6 речень суцільним описом, без преамбул і списків — щоб вставити як інструкцію для AI." +
+    "Проаналізуй приклади постів автора і стисло опиши його tone of voice (голос бренду): звертання (ти/ви), тон, характерну лексику й ритм, що робить голос впізнаваним і чого уникати. 4-6 речень суцільним описом, без преамбул і списків - щоб вставити як інструкцію для AI." +
     `\n\nМова опису: ${lang}.`;
   const derived = await chat("anthropic/claude-sonnet-4.5", system, `Приклади постів:\n---\n${examples}`, { workspaceId, step: "tone" });
   await q(
@@ -73,10 +76,10 @@ export async function deriveVoice(workspaceId: string): Promise<string> {
 // Аналіз реальних постів автора (Instagram) -> ніша/аудиторія, голос, контент-нотатки, мова. Один виклик.
 export async function deriveBrandFromText(workspaceId: string, text: string): Promise<{ tone_of_voice: string; marketing_context: string; content_strategy: string; language: string }> {
   const system = "Проаналізуй реальні пости автора нижче й поверни:\n" +
-    "1) marketing_context — ніша, тематика й цільова аудиторія (2-4 речення);\n" +
-    "2) tone_of_voice — стислий опис тону й стилю автора;\n" +
-    "3) content_strategy — короткі нотатки про теми/рубрики, які варто публікувати;\n" +
-    "4) language — мова, якою переважно пише автор (назва УКРАЇНСЬКОЮ, напр.: Українська, Англійська, Чеська, Польська, Німецька, Іспанська, Французька, Італійська).\n" +
+    "1) marketing_context - ніша, тематика й цільова аудиторія (2-4 речення);\n" +
+    "2) tone_of_voice - стислий опис тону й стилю автора;\n" +
+    "3) content_strategy - короткі нотатки про теми/рубрики, які варто публікувати;\n" +
+    "4) language - мова, якою переважно пише автор (назва УКРАЇНСЬКОЮ, напр.: Українська, Англійська, Чеська, Польська, Німецька, Іспанська, Французька, Італійська).\n" +
     "Поверни ЛИШЕ валідний JSON: {\"marketing_context\":\"…\",\"tone_of_voice\":\"…\",\"content_strategy\":\"…\",\"language\":\"…\"}.";
   const raw = await chat("openai/gpt-4o-mini", system, "Пости автора:\n---\n" + text.slice(0, 12000), { workspaceId, step: "derive_brand" });
   const o = (extractJsonObject<any>(raw)) || {};
@@ -98,7 +101,7 @@ export async function generateStrategy(workspaceId: string): Promise<any> {
     '"frequency":{"posts_per_week":4},"best_days":["mon","wed","fri"],"times":["11:00","18:00"],' +
     '"channels":["telegram"],"schedule_rationale":"чому саме ці дні й час для цієї ніші та каналу","monthly_themes":["...","..."]}. ' +
     "4-6 рубрик, сума share = 100. Дні й час публікацій підбери за найкращими практиками саме для цієї ніші та каналу: " +
-    "best_days — короткі коди (пн=mon … нд=sun); times — формат HH:MM, 1-3 значення (скільки значень — стільки постів на день)." +
+    "best_days - короткі коди (пн=mon … нд=sun); times - формат HH:MM, 1-3 значення (скільки значень - стільки постів на день)." +
     `\n\nМова текстів (rubrics, schedule_rationale, monthly_themes): ${lang}.`;
   const user = `Ніша й аудиторія: ${s.marketing_context || ""}\nГолос бренду: ${s.tone_of_voice || ""}\nНотатки стратегії: ${s.content_strategy || ""}`;
   const raw = await chat("openai/gpt-4o-mini", system, user, { workspaceId, step: "strategy" });
@@ -119,9 +122,9 @@ async function generateStrategyV2(workspaceId: string, s: Record<string, string>
   const lang = (s.output_language || "Українська").trim();
   const system =
     "Ти топовий SMM- і контент-стратег із 15+ роками побудови органічного зростання. " +
-    "На основі бізнесу, ніші, аудиторії й голосу бренду побудуй ЄДИНИЙ стратегічний бриф (Strategy Brief) — джерело правди для всього контенту. " +
+    "На основі бізнесу, ніші, аудиторії й голосу бренду побудуй ЄДИНИЙ стратегічний бриф (Strategy Brief) - джерело правди для всього контенту. " +
     "Застосуй перевірені фреймворки: Jobs-to-Be-Done, StoryBrand (клієнт = герой, бренд = провідник), контент-пілери, правило 80/20 (цінність/промо), Hero-Hub-Hygiene (~10/30/60). " +
-    "Будь конкретним і рішучим — займай позицію, не лий води. " +
+    "Будь конкретним і рішучим - займай позицію, не лий води. " +
     'Поверни ЛИШЕ валідний JSON-обʼєкт точно такої форми: {' +
     '"positioning":"одне речення позиціювання",' +
     '"differentiators":["…","…","…"],' +
@@ -137,7 +140,7 @@ async function generateStrategyV2(workspaceId: string, s: Record<string, string>
     '"channels":["telegram"],"schedule_rationale":"чому саме ці дні й час для цієї ніші та каналу","monthly_themes":["…","…"]' +
     "}. " +
     "3-5 рубрик (узгоджені з content_pillars за темами), сума share = 100. " +
-    "best_days — короткі коди (пн=mon … нд=sun); times — формат HH:MM, 1-3 значення." +
+    "best_days - короткі коди (пн=mon … нд=sun); times - формат HH:MM, 1-3 значення." +
     `\n\nМова всіх текстів брифу: ${lang}.`;
   const user =
     `Бізнес, ніша й аудиторія: ${s.marketing_context || ""}\n` +
@@ -272,7 +275,7 @@ export async function executeStep(runId: string, step: StepKey, opts?: { count?:
   }
   if (step === "extract_ideas") countText = `\n\nЗнайди до ${Math.max(1, Math.min(12, Number(opts?.count) || 6))} контент-ідей.`;
   const system = fillPrompt(tpl.content, settings) + STEP_CONTEXT[step](settings) + (STEP_FORMAT[step] || "")
-    + countText + `\n\nМова всього тексту у відповіді: ${lang}.` + rubricsText;
+    + countText + NO_DASH_RULE + `\n\nМова всього тексту у відповіді: ${lang}.` + rubricsText;
   const ctx = { workspaceId: workspace_id, step };
   await upsertStepRun(runId, step, { status: "running", model: tpl.model, prompt_version: tpl.version });
 
@@ -316,7 +319,7 @@ export async function executeStep(runId: string, step: StepKey, opts?: { count?:
     } else if (step === "strategy") {
       const finals = await getPosts(runId, "final");
       if (!finals.length) throw new Error("немає фінальних постів");
-      // AI радить лише тип і день для КОЖНОГО готового поста (по порядку) — самі пости не змінюємо
+      // AI радить лише тип і день для КОЖНОГО готового поста (по порядку) - самі пости не змінюємо
       const out = await chat(tpl.model, system,
         "Готові пости (по порядку):\n" + finals.map((p, i) => `[${i}] ${p.content}`).join("\n\n"), ctx);
       let advice: { type?: string; dayOffset?: number }[] = [];
@@ -345,7 +348,7 @@ export async function rewriteWithStep(workspaceId: string, step: StepKey, text: 
   const settings = await loadSettings(workspaceId);
   const tpl = await resolvePrompt(workspaceId, step);
   const lang = (settings.output_language || "Українська").trim();
-  const system = fillPrompt(tpl.content, settings) + STEP_CONTEXT[step](settings) + `\n\nМова всього тексту у відповіді: ${lang}.`;
+  const system = fillPrompt(tpl.content, settings) + STEP_CONTEXT[step](settings) + NO_DASH_RULE + `\n\nМова всього тексту у відповіді: ${lang}.`;
   return chat(tpl.model, system, `---\n${text}`, { workspaceId, step });
 }
 
@@ -365,7 +368,7 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
   const deai = s.deai_rules ? `\nПравила «без AI» (зберігай): ${s.deai_rules}` : "";
   const system = "Адаптуй пост під кожну вказану соцмережу, зберігаючи зміст, голос бренду й живу людську мову." + tone + deai +
     "\nПравила:\n" + want.map((c) => "- " + rules[c]).join("\n") +
-    `\n\nПоверни ЛИШЕ валідний JSON-обʼєкт виду {${want.map((c) => `"${c}":"…"`).join(",")}}. Мова: ${lang}.`;
+    NO_DASH_RULE + `\n\nПоверни ЛИШЕ валідний JSON-обʼєкт виду {${want.map((c) => `"${c}":"…"`).join(",")}}. Мова: ${lang}.`;
   const raw = await chat("openai/gpt-4o-mini", system, `Пост:\n---\n${content}`, { workspaceId, step: "format" });
   const obj = extractJsonObject(raw) as Record<string, string>;
   const out: Record<string, string> = {};
@@ -390,12 +393,12 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
   // V2: інʼєкція стратегічного брифу + копірайтинг-фреймворки + само-критика (прапорець prompt_engine='v2').
   const v2 = s.prompt_engine === "v2";
   const brief = (s.strategy_brief || "").trim();
-  const briefBlock = v2 && brief ? `\n\nСТРАТЕГІЧНИЙ БРИФ (джерело правди — не суперечити):\n${brief}` : "";
+  const briefBlock = v2 && brief ? `\n\nСТРАТЕГІЧНИЙ БРИФ (джерело правди - не суперечити):\n${brief}` : "";
   const frameworkBlock = v2
-    ? "\n\nДобери копірайтинг-фреймворк під стадію воронки кожного поста: AIDA або PAS — для холодної/незнайомої аудиторії (awareness); BAB — для коротких залучальних постів; FAB/4P — для теплої аудиторії (consideration/conversion). Перший рядок = сильний гачок (цікавісний розрив, патерн-перебій, контр-теза, число або пряма обіцянка)."
+    ? "\n\nДобери копірайтинг-фреймворк під стадію воронки кожного поста: AIDA або PAS - для холодної/незнайомої аудиторії (awareness); BAB - для коротких залучальних постів; FAB/4P - для теплої аудиторії (consideration/conversion). Перший рядок = сильний гачок (цікавісний розрив, патерн-перебій, контр-теза, число або пряма обіцянка)."
     : "";
   const critiqueBlock = v2
-    ? " Перед видачею перевір кожен пост на: чіпкий гачок, голос бренду, один чіткий CTA, користь для пілера — слабке перепиши."
+    ? " Перед видачею перевір кожен пост на: чіпкий гачок, голос бренду, один чіткий CTA, користь для пілера - слабке перепиши."
     : "";
   const system =
     "Ти досвідчений SMM-копірайтер. За вхідним матеріалом нижче згенеруй готові до публікації пости. " +
@@ -406,7 +409,7 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
     frameworkBlock +
     rubricsText + ideasText +
-    `\n\nЗгенеруй рівно ${n} різних постів.${critiqueBlock} Поверни ЛИШЕ валідний JSON-масив обʼєктів: [{"text":"повний текст поста","image_prompt":"короткий опис зображення англійською для генерації — сцена/обʼєкти/настрій, без тексту на зображенні"}, …]. Мова текстів постів: ${lang}.`;
+    NO_DASH_RULE + `\n\nЗгенеруй рівно ${n} різних постів.${critiqueBlock} Поверни ЛИШЕ валідний JSON-масив обʼєктів: [{"text":"повний текст поста","image_prompt":"короткий опис зображення англійською для генерації - сцена/обʼєкти/настрій, без тексту на зображенні","rubric":"назва рубрики поста${rubs.length ? " (СТРОГО одна з переліку рубрик вище)" : ""}"}, …]. Мова текстів постів: ${lang}.`;
   return { system, model: "openai/gpt-4o" };
 }
 
@@ -417,29 +420,29 @@ export async function generatePostsOnePass(runId: string, count: number, ideas?:
   const n = Math.max(1, Math.min(12, sel.length ? sel.length : (Number(count) || 6)));
   const { system, model } = await buildLitePrompt(workspace_id, n, sel.length ? sel : undefined);
   const out = await chat(model, system, `Вхідний матеріал:\n---\n${transcript}`, { workspaceId: workspace_id, step: "lite" });
-  let posts: { text: string; image_prompt: string }[] = [];
+  let posts: { text: string; image_prompt: string; rubric: string }[] = [];
   try {
     posts = extractJsonArray<any>(out).map((x) => typeof x === "string"
-      ? { text: x, image_prompt: "" }
-      : { text: String(x?.text || x?.content || x?.post || ""), image_prompt: String(x?.image_prompt || x?.image || "") })
-      .map((p) => ({ text: p.text.trim(), image_prompt: p.image_prompt.trim() })).filter((p) => p.text);
+      ? { text: x, image_prompt: "", rubric: "" }
+      : { text: String(x?.text || x?.content || x?.post || ""), image_prompt: String(x?.image_prompt || x?.image || ""), rubric: String(x?.rubric || "") })
+      .map((p) => ({ text: p.text.trim(), image_prompt: p.image_prompt.trim(), rubric: p.rubric.trim().slice(0, 60) })).filter((p) => p.text);
   } catch { posts = []; }
   if (!posts.length) throw new Error("Не вдалося згенерувати пости (порожня відповідь моделі)");
   await q(`delete from post where run_id=$1 and stage='final'`, [runId]);
-  for (const p of posts) await q(`insert into post(run_id, stage, content, image_prompt) values($1,'final',$2,$3)`, [runId, p.text, p.image_prompt || null]);
+  for (const p of posts) await q(`insert into post(run_id, stage, content, image_prompt, rubric) values($1,'final',$2,$3,$4)`, [runId, p.text, p.image_prompt || null, p.rubric || null]);
   return posts.length;
 }
 
 // ---- V2 Крок 3: контент-план по каналах (Prompts 2-7, лише канали socialio) ----
 const CHANNEL_PLAYBOOK: Record<string, string> = {
   telegram:
-    "Telegram: алгоритмічної стрічки немає — кожен пост іде всім підписникам через push. Завдання — утримання, щільність користі й воронка, не «вірусність». Архітектура: канал (broadcast) + група (спільнота) + бот (лід-магніт/автоматизація). ~80/20 користь/продаж; кілька якісних постів/тиждень > обсяг. Нативні формати: розмітка тексту, опитування, голосові, закріплене повідомлення з офером.",
+    "Telegram: алгоритмічної стрічки немає - кожен пост іде всім підписникам через push. Завдання - утримання, щільність користі й воронка, не «вірусність». Архітектура: канал (broadcast) + група (спільнота) + бот (лід-магніт/автоматизація). ~80/20 користь/продаж; кілька якісних постів/тиждень > обсяг. Нативні формати: розмітка тексту, опитування, голосові, закріплене повідомлення з офером.",
   instagram:
-    "Instagram (Mosseri, 2025): головні сигнали — час перегляду, sends-per-reach (поширення в DM), saves. Reels = охоплення/нові люди; каруселі (до 20 слайдів) = збереження й глибоке залучення; Stories = стосунки. Гачок у перші 3 сек (інакше ~50% відвалюються). Тільки ОРИГІНАЛЬНИЙ контент (без водяних знаків). Ключові слова в підписі (social SEO), 3-5 релевантних тегів.",
+    "Instagram (Mosseri, 2025): головні сигнали - час перегляду, sends-per-reach (поширення в DM), saves. Reels = охоплення/нові люди; каруселі (до 20 слайдів) = збереження й глибоке залучення; Stories = стосунки. Гачок у перші 3 сек (інакше ~50% відвалюються). Тільки ОРИГІНАЛЬНИЙ контент (без водяних знаків). Ключові слова в підписі (social SEO), 3-5 релевантних тегів.",
   threads:
-    "Threads: до 500 символів, розмовний тон, без хештегів. Короткі думки, питання до аудиторії, треди з кількох постів. Заохочуй відповіді (репліки — головний сигнал поширення). Автентичність > полірованість.",
+    "Threads: до 500 символів, розмовний тон, без хештегів. Короткі думки, питання до аудиторії, треди з кількох постів. Заохочуй відповіді (репліки - головний сигнал поширення). Автентичність > полірованість.",
   facebook:
-    "Facebook: усе відео тепер Reels (охоплення поза підписниками); зберігання/поширення > лайки; фото добре заходять у стрічці (підписи 40-80 символів). Групи дають значно більше органіки, ніж сторінки — спільнота в групі, анонси на сторінці. Оригінальність винагороджується.",
+    "Facebook: усе відео тепер Reels (охоплення поза підписниками); зберігання/поширення > лайки; фото добре заходять у стрічці (підписи 40-80 символів). Групи дають значно більше органіки, ніж сторінки - спільнота в групі, анонси на сторінці. Оригінальність винагороджується.",
 };
 
 export async function generateChannelPlan(workspaceId: string, channel: string, horizonDays: number, postsPerWeek: number): Promise<any[]> {
@@ -450,7 +453,7 @@ export async function generateChannelPlan(workspaceId: string, channel: string, 
   const brief = (s.strategy_brief || "").trim();
   const system =
     `Ти старший контент-стратег каналу ${channel}, що знає його алгоритм 2025-2026. ` +
-    "Розширюй ЄДИНУ стратегію на цей канал, НЕ суперечачи брифу — перекладай позиціювання, пілери, голос і офери у нативний для каналу контент, а не вигадуй наново. " +
+    "Розширюй ЄДИНУ стратегію на цей канал, НЕ суперечачи брифу - перекладай позиціювання, пілери, голос і офери у нативний для каналу контент, а не вигадуй наново. " +
     (brief
       ? `\n\nСТРАТЕГІЧНИЙ БРИФ:\n${brief}`
       : `\n\nКонтекст бренду: ${s.marketing_context || ""}\nГолос: ${s.tone_of_voice || ""}`) +
@@ -470,7 +473,7 @@ export async function generateChannelPlan(workspaceId: string, channel: string, 
   return rows;
 }
 
-// ---- V2 Крок 4: атомізація (Prompt 10) — 1 пілерний пост → варіанти під усі канали ----
+// ---- V2 Крок 4: атомізація (Prompt 10) - 1 пілерний пост → варіанти під усі канали ----
 export async function atomizePost(workspaceId: string, content: string, channels: string[]): Promise<{ atoms: string[]; matrix: any[] }> {
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
@@ -491,13 +494,21 @@ export async function atomizePost(workspaceId: string, content: string, channels
   return { atoms: Array.isArray(o.atoms) ? o.atoms : [], matrix: Array.isArray(o.matrix) ? o.matrix : [] };
 }
 
-// Перегенерація одного поста зі СПІЛЬНИМ контекстом (голос + де-AI) — для кнопки «Переробити».
-export async function rewritePost(workspaceId: string, text: string): Promise<string> {
+// Перегенерація одного поста зі СПІЛЬНИМ контекстом (голос + де-AI + бриф) - для кнопки «Переробити».
+// instruction - конкретна правка від користувача («зроби коротшим», «прибери смайли», «додай приклад»):
+// виконується ПОВЕРХ повного контексту, тож правка не губить голос/стратегію.
+export async function rewritePost(workspaceId: string, text: string, instruction?: string): Promise<string> {
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
-  const system = "Перепиши цей пост іншими словами, зберігаючи зміст і структуру, у голосі бренду й живою людською мовою (без ознак AI)." +
+  const instr = (instruction || "").trim();
+  const brief = s.prompt_engine === "v2" ? (s.strategy_brief || "").trim() : "";
+  const task = instr
+    ? `Внеси в цей пост конкретну правку, яку просить користувач, зберігаючи решту тексту, зміст, голос бренду й живу людську мову (без ознак AI).\n\nПРАВКА ВІД КОРИСТУВАЧА: ${instr.slice(0, 600)}`
+    : "Перепиши цей пост іншими словами, зберігаючи зміст і структуру, у голосі бренду й живою людською мовою (без ознак AI).";
+  const system = task +
+    (brief ? `\n\nСТРАТЕГІЧНИЙ БРИФ (тримай бренд): ${brief}` : "") +
     (s.tone_of_voice ? `\n\nГолос бренду: ${s.tone_of_voice}` : "") +
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
-    `\n\nПоверни лише текст поста. Мова: ${lang}.`;
+    NO_DASH_RULE + `\n\nПоверни лише текст поста. Мова: ${lang}.`;
   return chat("openai/gpt-4o", system, `---\n${text}`, { workspaceId, step: "regenerate" });
 }

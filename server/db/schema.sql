@@ -314,6 +314,7 @@ create table if not exists media_asset (
 create index if not exists idx_media_ws on media_asset(workspace_id, created_at desc);
 alter table post add column if not exists media_id uuid references media_asset(id) on delete set null;
 alter table post add column if not exists channels jsonb;   -- {telegram:{on,text}, instagram:{...}, ...} для композера
+alter table post add column if not exists rubric text;      -- тег-рубрика (штампується при генерації; фільтри Студії/календаря)
 
 -- Google Drive: OAuth-підключення (drive.readonly) на workspace
 create table if not exists gdrive_config (
