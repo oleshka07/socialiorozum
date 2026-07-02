@@ -66,6 +66,10 @@
   .psub{font-size:12.5px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .content{padding:24px 30px 80px;max-width:1180px;width:100%}
   @keyframes obPulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.25);opacity:.7}}
+  /* глобальний банер «AI працює» - помітний стан для будь-якої довгої дії */
+  #aiBusy{position:fixed;top:14px;left:50%;transform:translateX(-50%) translateY(-70px);z-index:90;display:flex;align-items:center;gap:9px;background:var(--brand);color:var(--brand-ink);font-size:13.5px;font-weight:600;padding:10px 18px;border-radius:999px;box-shadow:0 8px 28px rgba(0,0,0,.28);transition:transform .28s ease,opacity .28s;opacity:0;pointer-events:none;max-width:88vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #aiBusy.show{transform:translateX(-50%) translateY(0);opacity:1}
+  #aiBusy .orb{width:9px;height:9px;border-radius:50%;background:currentColor;flex:0 0 auto;animation:obPulse 1s ease-in-out infinite}
   .ptag{font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--line);border-radius:6px;padding:2px 7px;white-space:nowrap}
   .pcard.selc{outline:2px solid var(--brand);outline-offset:-1px}
   .pcard .psel{width:15px;height:15px;accent-color:var(--brand);cursor:pointer}
@@ -643,6 +647,11 @@ async function api(path, opts){
   return ct.includes('json') ? r.json() : r.text();
 }
 let _toastT; function flash(m){ const t=$('toast'); if(!t) return; t.textContent=m; t.classList.add('show'); clearTimeout(_toastT); _toastT=setTimeout(()=>t.classList.remove('show'),2300); }
+// глобальний індикатор довгої AI-дії: aiBusy('що робимо…') на старті, aiDone() у finally.
+// Лічильник дозволяє паралельні дії - банер зникає, коли завершилась остання.
+let _aiN=0;
+function aiBusy(label){ _aiN++; let b=$('aiBusy'); if(!b){ b=document.createElement('div'); b.id='aiBusy'; b.innerHTML='<span class="orb"></span><span id="aiBusyTxt"></span>'; document.body.appendChild(b); } const t=$('aiBusyTxt'); if(t) t.textContent=label||'AI працює…'; requestAnimationFrame(()=>b.classList.add('show')); }
+function aiDone(){ _aiN=Math.max(0,_aiN-1); if(_aiN<1){ const b=$('aiBusy'); if(b) b.classList.remove('show'); } }
 
 // ---------- тема ----------
 const MOON='M21 12.8A9 9 0 1111.2 3a7 7 0 109.8 9.8z';
@@ -778,7 +787,7 @@ function renderDerived(text){
   o.innerHTML='<div class="card" style="margin-top:10px"><div style="font-size:12px;color:var(--muted);margin-bottom:6px">Запропонований голос (ще не застосовано):</div><div class="post">'+esc(text)+'</div><div class="btnrow"><button class="primary" id="acceptVoice">Прийняти → у Tone of Voice</button></div></div>';
   $('acceptVoice').onclick=()=>{ $('tov').value=text; saveSetting('tone_of_voice',$('tov').value); $('derivedVoice').querySelector('.btnrow').innerHTML='<span style="color:var(--brand);font-size:12px">✓ застосовано до Tone of Voice</span>'; };
 }
-$('deriveVoiceBtn').onclick=async()=>{ const m=$('voiceMsg'); m.style.color='var(--muted)'; m.textContent='аналізую приклади…'; try{ const r=await api('/brand/derive-voice',{method:'POST'}); m.textContent=''; renderDerived(r.derived); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
+$('deriveVoiceBtn').onclick=async()=>{ const m=$('voiceMsg'); m.style.color='var(--muted)'; m.textContent='аналізую приклади…'; aiBusy('🧠 Аналізую твої пости і виводжу голос бренду…'); try{ const r=await api('/brand/derive-voice',{method:'POST'}); m.textContent=''; renderDerived(r.derived); flash('Голос виведено ✓'); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; }finally{ aiDone(); } };
 // ---------- стан прогону ----------
 const badge=(n,cls,txt)=>{const b=$('b'+n); if(b){ b.className='badge '+(cls||''); b.innerHTML=txt; }};
 const stepEl=n=>$('s'+n);
@@ -897,10 +906,12 @@ function renderBulkBar(){
 }
 async function bulkReview(status){
   const ids=[...SelPosts]; if(!ids.length) return;
-  flash((status==='approved'?'Затверджую':'Архівую')+' '+ids.length+'…');
-  const res=await Promise.allSettled(ids.map(id=>api('/posts/'+id+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})})));
-  const ok=res.filter(r=>r.status==='fulfilled').length;
-  SelPosts.clear(); await loadStudioPosts(); flash('Готово: '+ok+'/'+ids.length);
+  aiBusy((status==='approved'?'✓ Затверджую':'🗄 Архівую')+' '+ids.length+' постів…');
+  try{
+    const res=await Promise.allSettled(ids.map(id=>api('/posts/'+id+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})})));
+    const ok=res.filter(r=>r.status==='fulfilled').length;
+    SelPosts.clear(); await loadStudioPosts(); flash('Готово: '+ok+'/'+ids.length);
+  }finally{ aiDone(); }
 }
 async function openImageEditor(postId, onDone){
   let full; try{ full=await api('/posts/'+postId+'/full'); }catch(e){ flash('⚠ '+e.message); return; }
@@ -923,8 +934,8 @@ async function openImageEditor(postId, onDone){
   ov.querySelector('#ieX').onclick=close;
   const msg=ov.querySelector('#ieMsg');
   const done=(r)=>{ fn=r.filename; hasBase=true; ov.querySelector('#iePrev').innerHTML=imgHtml(); const t2=ov.querySelector('#ieText2'); t2.disabled=false; t2.title=''; msg.style.color='var(--brand)'; msg.textContent='готово ✓'; if(onDone)onDone(fn); try{loadStudioPosts();}catch(e){} };
-  ov.querySelector('#ieGen').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='малюю зображення… (10-30с)'; try{ const r=await api('/posts/'+postId+'/image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headline:ov.querySelector('#ieOv').checked?ov.querySelector('#ieText').value:''})}); done(r); }catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; } finally{ b.disabled=false; } };
-  ov.querySelector('#ieText2').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='оновлюю текст…'; try{ const r=await api('/posts/'+postId+'/image-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headline:ov.querySelector('#ieText').value,overlay:ov.querySelector('#ieOv').checked})}); done(r); }catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; } finally{ b.disabled=false; } };
+  ov.querySelector('#ieGen').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='малюю зображення… (10-30с)'; aiBusy('🎨 Малюю зображення… (10-30 секунд)'); try{ const r=await api('/posts/'+postId+'/image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headline:ov.querySelector('#ieOv').checked?ov.querySelector('#ieText').value:''})}); done(r); }catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; } finally{ b.disabled=false; aiDone(); } };
+  ov.querySelector('#ieText2').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='оновлюю текст…'; aiBusy('✍ Оновлюю текст на зображенні…'); try{ const r=await api('/posts/'+postId+'/image-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headline:ov.querySelector('#ieText').value,overlay:ov.querySelector('#ieOv').checked})}); done(r); }catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; } finally{ b.disabled=false; aiDone(); } };
 }
 async function loadImageProvider(){ const sel=$('imgProv'); if(!sel) return; try{ const c=await api('/integrations/images'); const A=c.available||{}; const opts=[['openai','OpenAI gpt-image-1',A.openai],['fal','FLUX schnell (fal.ai)',A.fal],['gemini','Nano Banana (Gemini)',A.gemini]]; sel.innerHTML=opts.map(o=>'<option value="'+o[0]+'"'+(c.provider===o[0]?' selected':'')+(o[2]?'':' disabled')+'>'+o[1]+(o[2]?'':' - нема ключа')+'</option>').join(''); sel.onchange=async()=>{ try{ await api('/integrations/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:sel.value})}); flashSaved(); }catch(e){ flash('⚠ '+e.message); } }; }catch(e){} }
 let InboxSel=null;
@@ -986,8 +997,10 @@ function openRegenModal(postId, cont){
   ov.querySelector('#rgGo').onclick=async()=>{
     const instruction=ta.value.trim(); close();
     if(cont) cont.innerHTML='<span class="spin"></span> перегенерація…';
+    aiBusy('↻ Переробляю пост'+(instruction?' за твоєю правкою':'')+'…');
     try{ await api('/posts/'+postId+'/regenerate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(instruction?{instruction}:{})}); await loadStudioPosts(); flashSaved(); }
     catch(e){ flash('⚠ '+e.message); await loadStudioPosts(); }
+    finally{ aiDone(); }
   };
 }
 // ---------- Атомізація: 1 пост → варіанти під усі канали (v2) ----------
@@ -1002,7 +1015,7 @@ async function openAtomize(postId){
     +'</div>';
   document.body.appendChild(ov);
   const close=()=>ov.remove(); ov.querySelector('#atX').onclick=close; ov.onclick=e=>{ if(e.target===ov) close(); };
-  ov.querySelector('#atGen').onclick=async()=>{ const m=ov.querySelector('#atMsg'); const chans=[...ov.querySelectorAll('.atCh:checked')].map(c=>c.value); m.style.color='var(--muted)'; m.textContent='атомізую…';
+  ov.querySelector('#atGen').onclick=async()=>{ const m=ov.querySelector('#atMsg'); const chans=[...ov.querySelectorAll('.atCh:checked')].map(c=>c.value); m.style.color='var(--muted)'; m.textContent='атомізую…'; aiBusy('♻️ Розтиражовую пост під канали…');
     try{ const r=await api('/posts/'+postId+'/atomize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:chans})});
       const mat=(r.matrix||[]); const v=ov.querySelector('#atView');
       v.innerHTML=(r.atoms&&r.atoms.length?'<div class="card" style="margin-bottom:10px"><b>Атоми ('+r.atoms.length+'):</b><div style="color:var(--muted);font-size:13px;margin-top:4px">'+r.atoms.map(esc).join(' · ')+'</div></div>':'')
@@ -1010,7 +1023,7 @@ async function openAtomize(postId){
           +mat.map(x=>'<tr style="border-top:1px solid var(--line)'+(x.best?';background:var(--surface2)':'')+'"><td style="padding:6px 8px">'+(x.best?'⭐ ':'')+esc(CP_LABEL[x.channel]||x.channel||'')+'</td><td>'+esc(x.format||'')+'</td><td><b>'+esc(x.hook||'')+'</b><div style="color:var(--muted)">'+esc(x.atom||'')+'</div></td><td>'+esc(x.cta||'')+'</td></tr>').join('')
           +'</tbody></table></div>':'<div class="empty">Порожньо.</div>');
       m.style.color='var(--brand)'; m.textContent='готово ✓'; }
-    catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
+    catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; }finally{ aiDone(); } };
 }
 // ---------- вибір фото ----------
 function chooseMedia(){ return new Promise(async resolve=>{
@@ -1048,13 +1061,13 @@ async function openComposer(postId, opts){
   const msg=ov.querySelector('#cmpMsg');
   ov.querySelector('#cmpX').onclick=close;
   ov.querySelectorAll('#cmpChips .netchip').forEach(b=>{ if(b.disabled) return; b.onclick=()=>{ const net=b.dataset.net; C[net]=C[net]||{text:''}; C[net].on=!C[net].on; b.classList.toggle('on',C[net].on); ov.querySelector('#cmpPrev').innerHTML=prevHtml(); }; });
-  ov.querySelector('#cmpAdapt').onclick=async()=>{ const sel=Object.keys(C).filter(k=>C[k]&&C[k].on); if(!sel.length){ msg.style.color='var(--danger)'; msg.textContent=' оберіть мережі'; return; } msg.style.color='var(--muted)'; msg.textContent=' AI підлаштовує…'; try{ const r=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:sel})}); Object.keys(r.channels||{}).forEach(k=>C[k]=r.channels[k]); ov.querySelector('#cmpPrev').innerHTML=prevHtml(); msg.style.color='var(--brand)'; msg.textContent=' готово ✓'; }catch(e){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+e.message; } };
+  ov.querySelector('#cmpAdapt').onclick=async()=>{ const sel=Object.keys(C).filter(k=>C[k]&&C[k].on); if(!sel.length){ msg.style.color='var(--danger)'; msg.textContent=' оберіть мережі'; return; } msg.style.color='var(--muted)'; msg.textContent=' AI підлаштовує…'; aiBusy('✨ Підлаштовую пост під обрані мережі…'); try{ const r=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:sel})}); Object.keys(r.channels||{}).forEach(k=>C[k]=r.channels[k]); ov.querySelector('#cmpPrev').innerHTML=prevHtml(); msg.style.color='var(--brand)'; msg.textContent=' готово ✓'; }catch(e){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+e.message; }finally{ aiDone(); } };
   ov.querySelector('#cmpPhoto').onclick=async()=>{ const sel=await chooseMedia(); if(sel===undefined) return; try{ await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:sel.id})}); mediaFilename=sel.filename; ov.querySelector('#cmpMedia').innerHTML=mediaHtml(); }catch(e){ flash(e.message); } };
   ov.querySelector('#cmpImgGen').onclick=()=>openImageEditor(postId,(f)=>{ mediaFilename=f; ov.querySelector('#cmpMedia').innerHTML=mediaHtml(); });
   ov.querySelector('#cmpUpload').onclick=()=>ov.querySelector('#cmpFile').click();
   ov.querySelector('#cmpFile').onchange=async(e)=>{ const file=e.target.files&&e.target.files[0]; if(!file) return; msg.style.color='var(--muted)'; msg.textContent=' завантаження фото…'; try{ const fd=new FormData(); fd.append('file',file); const r=await fetch('/api/media',{method:'POST',body:fd,credentials:'same-origin'}); const j=await r.json(); if(!r.ok||j.error) throw new Error(j.error||('HTTP '+r.status)); const up=(j.saved||[])[0]; if(!up) throw new Error('файл не збережено'); await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:up.id})}); mediaFilename=up.url.replace('/media/',''); ov.querySelector('#cmpMedia').innerHTML=mediaHtml(); msg.style.color='var(--brand)'; msg.textContent=' фото додано ✓'; }catch(err){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+err.message; } };
   const saveCh=()=>api('/posts/'+postId+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:C})});
-  ov.querySelector('#cmpNow').onclick=async(e)=>{ const b=e.target.closest('button'); b.disabled=true; msg.style.color='var(--muted)'; msg.textContent=' публікую…'; try{ await saveCh(); const r=await api('/posts/'+postId+'/publish-all',{method:'POST'}); const res=r.results||[]; const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); msg.style.color=err.length?'var(--danger)':'var(--brand)'; msg.textContent=' '+(ok.length?('✓ '+ok.join(', ')):'')+(err.length?(' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; ')):''); if(!err.length){ try{await refresh();}catch(_){} setTimeout(close,1300);} }catch(e2){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+e2.message; } finally{ b.disabled=false; } };
+  ov.querySelector('#cmpNow').onclick=async(e)=>{ const b=e.target.closest('button'); b.disabled=true; msg.style.color='var(--muted)'; msg.textContent=' публікую…'; aiBusy('📣 Публікую в обрані мережі…'); try{ await saveCh(); const r=await api('/posts/'+postId+'/publish-all',{method:'POST'}); const res=r.results||[]; const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); msg.style.color=err.length?'var(--danger)':'var(--brand)'; msg.textContent=' '+(ok.length?('✓ '+ok.join(', ')):'')+(err.length?(' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; ')):''); if(!err.length){ try{await refresh();}catch(_){} setTimeout(close,1300);} }catch(e2){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+e2.message; } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ msg.style.color='var(--danger)'; msg.textContent=' вкажи дату й час'; return; } const sel=Object.keys(C).filter(k=>C[k]&&C[k].on); if(!sel.length){ msg.style.color='var(--danger)'; msg.textContent=' оберіть мережі'; return; } const b=e.target.closest('button'); b.disabled=true; msg.style.color='var(--muted)'; msg.textContent=' зберігаю…'; const at=zonedToUTCISO(d,t); try{ await saveCh(); if(opts.slotId){ await api('/schedule/'+opts.slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:at})}); } else { await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:at})}); } msg.style.color='var(--brand)'; msg.textContent=' заплановано ✓'; try{await loadPublish();}catch(_){} setTimeout(close,900); }catch(e2){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+e2.message; b.disabled=false; } };
 }
 function openDayScheduler(iso){
@@ -1081,39 +1094,40 @@ function setBusy(b){ busy=b; document.querySelectorAll('#pipe button, #runAll, #
 function ideaOpts(){ return { count: Math.max(1,Math.min(12,(+($('ideaCount')&&$('ideaCount').value))||6)), rubrics: [...document.querySelectorAll('.ideaRub:checked')].map(c=>c.value) }; }
 function renderIdeaRubrics(){ const o=$('ideaRubrics'); if(!o) return; o.innerHTML = Rubrics.length ? Rubrics.map(r=>'<label class="rchip"><input type="checkbox" class="ideaRub" value="'+esc(r.name)+'" checked> '+(r.emoji||'')+' '+esc(r.name)+'</label>').join('') : '<div class="empty">нема рубрик</div>'; o.querySelectorAll('.rchip').forEach(l=>{ const cb=l.querySelector('input'); const upd=()=>l.classList.toggle('on',cb.checked); upd(); cb.addEventListener('change',upd); }); }
 async function run(n){
-  if(busy) return; setBusy(true);
+  if(busy) return; setBusy(true); aiBusy('⚙️ Виконую крок конвеєра…');
   try{ await ensureRun(); badge(n,'run','<span class="spin"></span> генерую'); stepEl(n).classList.remove('stale');
     const body=n===1?JSON.stringify(ideaOpts()):null;
     await api('/runs/'+runId+'/steps/'+STEP[n]+'/run', body?{method:'POST',headers:{'Content-Type':'application/json'},body}:{method:'POST'}); await refresh();
   }catch(e){ badge(n,'stale','помилка'); const o=$('o'+n); if(o) o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
-  finally{ setBusy(false); }
+  finally{ setBusy(false); aiDone(); }
 }
 async function runFrom(startN){
-  if(busy) return; setBusy(true);
+  if(busy) return; setBusy(true); aiBusy('⚙️ Проганяю конвеєр (кілька кроків, зачекай)…');
   try{ await ensureRun(); for(const k of ORDER.slice(ORDER.indexOf(startN))) badge(k,'run','<span class="spin"></span> у черзі');
     const body=startN===1?JSON.stringify(ideaOpts()):null;
     await api('/runs/'+runId+'/run-from/'+STEP[startN], body?{method:'POST',headers:{'Content-Type':'application/json'},body}:{method:'POST'});
   }catch(e){ flash('⚠ '+e.message); }
-  finally{ try{ await refresh(); }catch(_){} setBusy(false); }
+  finally{ try{ await refresh(); }catch(_){} setBusy(false); aiDone(); }
 }
 async function genPosts(){
   if(busy) return;
   let rid; try{ rid=await ensureRun(); }catch(e){ try{ const r=await api('/generate/from-brand',{method:'POST'}); rid=r.runId; runId=rid; localStorage.setItem('kg_run',rid); updRunLabel(); }catch(e2){ go('brand'); flash('Спершу заповни Базу бренду (ніша й аудиторія).'); return; } }
-  setBusy(true); setLayout('studio'); flash('Генерую пости…');
+  setBusy(true); setLayout('studio');
   const cnt=Number(($('ideaCount')||{}).value)||6;
+  aiBusy('✨ Генерую '+cnt+' постів у твоєму голосі…');
   try{ const r=await api('/runs/'+rid+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:cnt})}); await refresh(); flash('Готово - '+(r.count||0)+' постів на перегляд.'); loadTasks(); }
   catch(e){ flash('⚠ '+e.message); try{await refresh();}catch(_){} }
-  finally{ setBusy(false); }
+  finally{ setBusy(false); aiDone(); }
 }
 $('genPostsBtn').onclick=genPosts; $('studioMore').onclick=genPosts;
 async function genIdeas(){
   if(busy) return;
   let rid; try{ rid=await ensureRun(); }catch(e){ try{ const r=await api('/generate/from-brand',{method:'POST'}); rid=r.runId; runId=rid; localStorage.setItem('kg_run',rid); updRunLabel(); }catch(e2){ go('brand'); flash('Спершу заповни Базу бренду (ніша й аудиторія).'); return; } }
-  const m=$('ideasMsg'); if(m){ m.style.color='var(--muted)'; m.innerHTML='<span class="spin"></span> думаю…'; } setBusy(true);
+  const m=$('ideasMsg'); if(m){ m.style.color='var(--muted)'; m.innerHTML='<span class="spin"></span> думаю…'; } setBusy(true); aiBusy('💡 Шукаю контент-ідеї…');
   const cnt=Number(($('ideaCount')||{}).value)||6;
   try{ const r=await api('/runs/'+rid+'/ideas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:cnt})}); renderIdeaList(r.ideas||[]); if(m)m.textContent=''; }
   catch(e){ if(m){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } }
-  finally{ setBusy(false); }
+  finally{ setBusy(false); aiDone(); }
 }
 function renderIdeaList(ideas){
   const el=$('ideaList'); if(!el) return;
@@ -1126,10 +1140,10 @@ if($('genIdeas')) $('genIdeas').onclick=genIdeas;
 if($('ideasToPosts')) $('ideasToPosts').onclick=async()=>{
   const picked=Array.from(document.querySelectorAll('#ideaList .ideaCb:checked')).map(c=>c.dataset.idea).filter(Boolean);
   if(!picked.length){ flash('Обери хоча б одну ідею'); return; }
-  if(busy||!runId) return; setBusy(true); setLayout('studio'); flash('Створюю пости з обраних ідей…');
+  if(busy||!runId) return; setBusy(true); setLayout('studio'); aiBusy('✨ Створюю пости з обраних ідей…');
   try{ const r=await api('/runs/'+runId+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ideas:picked})}); await refresh(); flash('Готово - '+(r.count||0)+' постів на перегляд.'); loadTasks(); }
   catch(e){ flash('⚠ '+e.message); }
-  finally{ setBusy(false); }
+  finally{ setBusy(false); aiDone(); }
 };
 if($('viewPrompt')) $('viewPrompt').onclick=async()=>{ try{ const cnt=Number(($('ideaCount')||{}).value)||6; const r=await api('/generate/prompt-preview?count='+cnt); const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70'; ov.innerHTML='<div class="modal-card" style="max-width:680px;padding:20px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b>Спільний промт генерації · '+esc(r.model||'')+'</b><button class="icon" id="vpX" style="margin-left:auto">✕</button></div><pre style="white-space:pre-wrap;font-size:12.5px;line-height:1.5;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;max-height:60vh;overflow:auto;margin:0">'+esc(r.system||'')+'</pre></div>'; document.body.appendChild(ov); const close=()=>ov.remove(); ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#vpX').onclick=close; }catch(e){ flash('⚠ '+e.message); } };
 function renderPlan(){
@@ -1210,7 +1224,7 @@ $('autopilotBtn').onclick=async()=>{
   }catch(e){ flash('Помилка: '+e.message); try{ await refresh(); }catch(_){} }
   finally{ btn.disabled=false; btn.textContent=old; }
 };
-$('aiDistribute').onclick=async()=>{ if(!confirm('Перерозподілити всі незапощені пости за розкладом зі Стратегії? Раніше заплановані (але не опубліковані) слоти буде перекладено.')) return; const m=$('pubMsg'); m.style.color='var(--muted)'; m.textContent='розподіляю…'; try{ const r=await api('/schedule/auto',{method:'POST'}); m.style.color='var(--brand)'; m.textContent='розподілено: '+r.count; await loadPublish(); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
+$('aiDistribute').onclick=async()=>{ if(!confirm('Перерозподілити всі незапощені пости за розкладом зі Стратегії? Раніше заплановані (але не опубліковані) слоти буде перекладено.')) return; const m=$('pubMsg'); m.style.color='var(--muted)'; m.textContent='розподіляю…'; aiBusy('🗓 Розподіляю пости по календарю за стратегією…'); try{ const r=await api('/schedule/auto',{method:'POST'}); m.style.color='var(--brand)'; m.textContent='розподілено: '+r.count; await loadPublish(); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; }finally{ aiDone(); } };
 $('reloadPub').onclick=()=>loadPublish();
 $('newRun').onclick=()=>{
   if(busy) return;
@@ -1244,7 +1258,7 @@ async function loadMeta(){
   }catch(e){}
 }
 $('mtDisconnect').onclick=async()=>{ if(!confirm('Відключити Facebook/Instagram?')) return; try{ await api('/integrations/meta/disconnect',{method:'POST'}); await loadMeta(); }catch(e){} };
-$('mtVoice').onclick=async()=>{ const b=$('mtVoice'); const o=b.textContent; b.disabled=true; b.textContent='…читаю пости'; try{ const r=await api('/integrations/meta/import-voice',{method:'POST'}); flash('✨ Голос, нішу й мову виведено з '+r.count+' постів IG'); if(r.derived&&typeof renderDerived==='function') renderDerived(r.derived); await loadSettings(); }catch(e){ flash('⚠ '+e.message); } finally{ b.disabled=false; b.textContent=o; } };
+$('mtVoice').onclick=async()=>{ const b=$('mtVoice'); const o=b.textContent; b.disabled=true; b.textContent='…читаю пости'; aiBusy('📸 Читаю пости Instagram і виводжу голос бренду…'); try{ const r=await api('/integrations/meta/import-voice',{method:'POST'}); flash('✨ Голос, нішу й мову виведено з '+r.count+' постів IG'); if(r.derived&&typeof renderDerived==='function') renderDerived(r.derived); await loadSettings(); }catch(e){ flash('⚠ '+e.message); } finally{ b.disabled=false; b.textContent=o; aiDone(); } };
 async function loadMetaPages(){ const sel=$('mtPage'); if(!sel) return; try{ const pages=await api('/integrations/meta/pages'); if(!Array.isArray(pages)||!pages.length){ sel.innerHTML='<option>-</option>'; return; } sel.innerHTML=pages.map(p=>'<option value="'+p.id+'"'+(p.current?' selected':'')+'>'+esc(p.name)+(p.ig?(' · IG @'+esc(p.ig)):'')+'</option>').join(''); }catch(e){ sel.innerHTML='<option>-</option>'; } }
 $('mtPage').onchange=async(e)=>{ try{ await api('/integrations/meta/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pageId:e.target.value})}); await loadMeta(); flashSaved(); }catch(err){ flash('Не вдалося змінити акаунт: '+err.message); } };
 $('mtStats').onclick=async()=>{ const o=$('mtStatsOut'); o.innerHTML='<div class="empty"><span class="spin"></span> завантаження…</div>';
@@ -1448,7 +1462,7 @@ async function saveSchedule(){
   catch(e){ if(m){m.style.color='var(--danger)'; m.textContent='⚠ '+e.message;} }
 }
 async function loadStrategy(){ try{ STRAT=await api('/strategy'); }catch(e){ STRAT={data:{},status:'none'}; } renderStrategy(); }
-$('genStrat').onclick=async()=>{ const m=$('stratMsg'); m.style.color='var(--muted)'; m.textContent='генерую…'; try{ const r=await api('/strategy/generate',{method:'POST'}); STRAT={data:r.data,status:r.status||'applied'}; renderStrategy(); await loadRubrics(); if(window._v2) await loadSettings(); m.style.color='var(--brand)'; m.textContent='готово - рубрики застосовано ✓'; }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
+$('genStrat').onclick=async()=>{ const m=$('stratMsg'); m.style.color='var(--muted)'; m.textContent='генерую…'; aiBusy('🧠 Генерую стратегію бренду…'); try{ const r=await api('/strategy/generate',{method:'POST'}); STRAT={data:r.data,status:r.status||'applied'}; renderStrategy(); await loadRubrics(); if(window._v2) await loadSettings(); m.style.color='var(--brand)'; m.textContent='готово - рубрики застосовано ✓'; }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; }finally{ aiDone(); } };
 // ---------- Контент-план по каналах (v2) ----------
 const CP_LABEL={telegram:'Telegram',instagram:'Instagram',threads:'Threads',facebook:'Facebook'};
 function renderChannelPlan(rows){ const o=$('cpView'); if(!o) return; if(!rows||!rows.length){ o.innerHTML='<div class="empty">Порожньо.</div>'; return; }
@@ -1459,9 +1473,9 @@ function renderChannelPlan(rows){ const o=$('cpView'); if(!o) return; if(!rows||
 }
 async function loadChannelPlan(){ const ch=($('cpChannel')||{}).value||'telegram'; try{ const r=await api('/channel-plan/'+ch); renderChannelPlan(r.rows); }catch(e){ renderChannelPlan([]); } }
 if($('cpChannel')) $('cpChannel').onchange=loadChannelPlan;
-if($('cpGen')) $('cpGen').onclick=async()=>{ const m=$('cpMsg'); const ch=$('cpChannel').value; m.style.color='var(--muted)'; m.textContent='будую план для '+(CP_LABEL[ch]||ch)+'…';
+if($('cpGen')) $('cpGen').onclick=async()=>{ const m=$('cpMsg'); const ch=$('cpChannel').value; m.style.color='var(--muted)'; m.textContent='будую план для '+(CP_LABEL[ch]||ch)+'…'; aiBusy('📅 Будую контент-план для '+(CP_LABEL[ch]||ch)+'…');
   try{ const r=await api('/channel-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channel:ch,horizon:+$('cpHorizon').value||30,posts_per_week:+$('cpPpw').value||4})}); renderChannelPlan(r.rows); m.style.color='var(--brand)'; m.textContent='готово ✓ ('+(r.rows||[]).length+' пунктів)'; }
-  catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
+  catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; }finally{ aiDone(); } };
 
 // ---------- Рубрики ----------
 let Rubrics = [];
