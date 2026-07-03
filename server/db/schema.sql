@@ -315,6 +315,26 @@ create index if not exists idx_media_ws on media_asset(workspace_id, created_at 
 alter table post add column if not exists media_id uuid references media_asset(id) on delete set null;
 alter table post add column if not exists channels jsonb;   -- {telegram:{on,text}, instagram:{...}, ...} для композера
 alter table post add column if not exists rubric text;      -- тег-рубрика (штампується при генерації; фільтри Студії/календаря)
+alter table source add column if not exists archived boolean not null default false;  -- «Прибрати» зі стрічки матеріалів
+
+-- Скелет контент-плану (workspace-scoped, НЕ на прогін): слоти-очікування, що відстежують заповнення.
+-- Статуси: empty → matched (є матеріал) → drafted (пост створено) → approved → scheduled → published
+create table if not exists plan_slot (
+  id               uuid primary key default gen_random_uuid(),
+  workspace_id     uuid not null references workspace(id) on delete cascade,
+  slot_date        date not null,
+  channel          text not null default 'telegram',
+  rubric           text,
+  theme            text not null,
+  hook             text,
+  cta              text,
+  status           text not null default 'empty',
+  match_source_id  uuid references source(id) on delete set null,
+  match_note       text,
+  post_id          uuid references post(id) on delete set null,
+  created_at       timestamptz not null default now()
+);
+create index if not exists idx_plan_slot_ws on plan_slot(workspace_id, slot_date);
 
 -- Google Drive: OAuth-підключення (drive.readonly) на workspace
 create table if not exists gdrive_config (

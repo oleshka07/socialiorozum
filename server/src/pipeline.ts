@@ -99,7 +99,7 @@ export async function deriveBrandFromText(workspaceId: string, text: string): Pr
 
 export async function generateStrategy(workspaceId: string): Promise<any> {
   const s = await loadSettings(workspaceId);
-  if (s.prompt_engine === "v2") return generateStrategyV2(workspaceId, s);
+  if (s.prompt_engine !== "legacy") return generateStrategyV2(workspaceId, s);
   const lang = (s.output_language || "Українська").trim();
   const system =
     "Ти контент-стратег. На основі ніші, аудиторії й голосу бренду згенеруй контент-стратегію. " +
@@ -370,7 +370,7 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
   if (!want.length) return {};
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
-  const v2 = s.prompt_engine === "v2";
+  const v2 = s.prompt_engine !== "legacy";
   const tone = s.tone_of_voice ? `\nГолос бренду (зберігай): ${s.tone_of_voice}` : "";
   const deai = s.deai_rules ? `\nПравила «без AI» (зберігай): ${s.deai_rules}` : "";
   // V2: адаптація успадковує бриф і ПОВНІ плейбуки каналів (алгоритми 2025-26), не однорядкові правила
@@ -404,7 +404,7 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
     ? "\n\nНапиши рівно по ОДНОМУ посту на кожну з цих тем (у тому ж порядку):\n" + ideas.map((t, i) => `${i + 1}. ${t}`).join("\n")
     : "";
   const n = ideas && ideas.length ? ideas.length : count;
-  const v2 = s.prompt_engine === "v2";
+  const v2 = s.prompt_engine !== "legacy";
   const outputFormat = `Поверни ЛИШЕ валідний JSON-масив обʼєктів: [{"text":"повний текст поста","image_prompt":"короткий опис зображення англійською для генерації - сцена/обʼєкти/настрій, без тексту на зображенні","rubric":"назва рубрики поста${rubs.length ? " (СТРОГО одна з переліку рубрик вище)" : ""}"}, …]. Мова текстів постів: ${lang}.`;
 
   if (v2) {
@@ -527,6 +527,53 @@ export async function atomizePost(workspaceId: string, content: string, channels
   return { atoms: Array.isArray(o.atoms) ? o.atoms : [], matrix: Array.isArray(o.matrix) ? o.matrix : [] };
 }
 
+// ---- Стрічка матеріалів: витягнути ідеї з одного матеріалу (модалка «Ідеї з матеріалу») ----
+export async function extractIdeasFromText(workspaceId: string, text: string, count = 6): Promise<{ idea: string; rubric: string }[]> {
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const rubs = await q<{ name: string }>(`select name from rubric where workspace_id=$1 order by idx`, [workspaceId]);
+  const rubList = rubs.map((r) => r.name).join(", ");
+  const system =
+    "Ти контент-стратег. Знайди в матеріалі окремі контент-ідеї для соцмереж, кожна зі своїм кутом подачі. " +
+    (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") +
+    (rubList ? `\nРубрики бренду: ${rubList}. Кожній ідеї признач НАЙБЛИЖЧУ рубрику з цього переліку.` : "") +
+    `\n\nЗнайди до ${Math.max(1, Math.min(10, count))} ідей. Поверни ЛИШЕ валідний JSON-масив: [{"idea":"суть ідеї одним реченням","rubric":"назва рубрики"}]. Мова: ${lang}.`;
+  const raw = await chat("openai/gpt-4o-mini", system, `Матеріал:\n---\n${(text || "").slice(0, 20000)}`, { workspaceId, step: "ideas" });
+  let out: { idea: string; rubric: string }[] = [];
+  try {
+    out = extractJsonArray<any>(raw).map((x) => ({ idea: String(x?.idea || x || "").trim(), rubric: String(x?.rubric || "").trim() })).filter((x) => x.idea);
+  } catch { out = []; }
+  return out;
+}
+
+// ---- Метчинг: які матеріали підходять під порожні слоти плану (дешевий один виклик) ----
+export async function matchPlanSlots(workspaceId: string): Promise<number> {
+  const slots = await q<{ id: string; theme: string; rubric: string }>(
+    `select id, theme, coalesce(rubric,'') as rubric from plan_slot where workspace_id=$1 and status='empty' order by slot_date limit 20`, [workspaceId]);
+  const mats = await q<{ id: string; title: string; transcript: string }>(
+    `select id, coalesce(title,'') as title, left(transcript, 300) as transcript from source
+     where workspace_id=$1 and archived=false and coalesce(transcript,'') <> '' order by created_at desc limit 30`, [workspaceId]);
+  if (!slots.length || !mats.length) return 0;
+  const system =
+    "Зістав теми контент-плану з наявними матеріалами. Метч признач ЛИШЕ якщо матеріал реально розкриває тему слота (не за поверхневою схожістю слів). Один матеріал може підійти кільком слотам, слот отримує максимум один матеріал." +
+    '\n\nПоверни ЛИШЕ валідний JSON-масив (порожній, якщо метчів нема): [{"slotId":"…","sourceId":"…"}].';
+  const user =
+    "СЛОТИ ПЛАНУ:\n" + slots.map((s) => `${s.id} | [${s.rubric}] ${s.theme}`).join("\n") +
+    "\n\nМАТЕРІАЛИ:\n" + mats.map((m) => `${m.id} | ${m.title}: ${m.transcript.replace(/\n+/g, " ")}`).join("\n");
+  const raw = await chat("openai/gpt-4o-mini", system, user, { workspaceId, step: "plan_match" });
+  let pairs: { slotId: string; sourceId: string }[] = [];
+  try { pairs = extractJsonArray<any>(raw).map((x) => ({ slotId: String(x?.slotId || ""), sourceId: String(x?.sourceId || "") })); } catch { pairs = []; }
+  const slotIds = new Set(slots.map((s) => s.id)); const matIds = new Map(mats.map((m) => [m.id, m.title]));
+  let n = 0;
+  for (const p of pairs) {
+    if (!slotIds.has(p.slotId) || !matIds.has(p.sourceId)) continue;
+    await q(`update plan_slot set status='matched', match_source_id=$2, match_note=$3 where id=$1 and status='empty'`,
+      [p.slotId, p.sourceId, `метч: «${String(matIds.get(p.sourceId)).slice(0, 80)}»`]);
+    n++;
+  }
+  return n;
+}
+
 // Перегенерація одного поста зі СПІЛЬНИМ контекстом (голос + де-AI + бриф) - для кнопки «Переробити».
 // instruction - конкретна правка від користувача («зроби коротшим», «прибери смайли», «додай приклад»):
 // виконується ПОВЕРХ повного контексту, тож правка не губить голос/стратегію.
@@ -534,7 +581,7 @@ export async function rewritePost(workspaceId: string, text: string, instruction
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
   const instr = (instruction || "").trim();
-  const brief = s.prompt_engine === "v2" ? (s.strategy_brief || "").trim() : "";
+  const brief = s.prompt_engine !== "legacy" ? (s.strategy_brief || "").trim() : "";
   const task = instr
     ? `Внеси в цей пост конкретну правку, яку просить користувач, зберігаючи решту тексту, зміст, голос бренду й живу людську мову (без ознак AI).\n\nПРАВКА ВІД КОРИСТУВАЧА: ${instr.slice(0, 600)}`
     : "Перепиши цей пост іншими словами, зберігаючи зміст і структуру, у голосі бренду й живою людською мовою (без ознак AI).";

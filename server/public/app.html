@@ -70,6 +70,22 @@
   #aiBusy{position:fixed;top:14px;left:50%;transform:translateX(-50%) translateY(-70px);z-index:90;display:flex;align-items:center;gap:9px;background:var(--brand);color:var(--brand-ink);font-size:13.5px;font-weight:600;padding:10px 18px;border-radius:999px;box-shadow:0 8px 28px rgba(0,0,0,.28);transition:transform .28s ease,opacity .28s;opacity:0;pointer-events:none;max-width:88vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #aiBusy.show{transform:translateX(-50%) translateY(0);opacity:1}
   #aiBusy .orb{width:9px;height:9px;border-radius:50%;background:currentColor;flex:0 0 auto;animation:obPulse 1s ease-in-out infinite}
+  /* v3: верхня навігація замість сайдбара */
+  .layout{display:block !important}
+  .topnav{position:sticky;top:0;z-index:30;background:color-mix(in srgb, var(--bg) 90%, transparent);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;padding:9px 22px}
+  .topnav .wordmark{font-size:18px}
+  .topnav-tabs{display:flex;align-items:center;gap:3px;min-width:0;overflow-x:auto;scrollbar-width:none}
+  .topnav-tabs::-webkit-scrollbar{display:none}
+  .topnav .navitem{padding:8px 12px;font-size:13.5px;white-space:nowrap;gap:7px}
+  .topnav-right{margin-left:auto;display:flex;align-items:center;gap:8px;flex:none}
+  .modeseg{display:inline-flex;background:var(--surface2);border:1px solid var(--line);border-radius:11px;padding:3px;gap:2px}
+  .modeseg span{padding:6px 12px;border-radius:9px;cursor:pointer;font-size:12.5px;font-weight:700;color:var(--muted);transition:.12s}
+  .modeseg span.on{color:var(--ink);background:var(--surface);box-shadow:var(--shadow)}
+  .modeseg span.pro.on{color:var(--brand)}
+  .main{margin-left:0 !important;width:100%}
+  .content{max-width:1460px;margin:0 auto}
+  .pagehead{margin-bottom:14px}
+  @media(max-width:1000px){ .topnav{flex-wrap:wrap} .topnav-right{margin-left:0} }
   .ptag{font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--line);border-radius:6px;padding:2px 7px;white-space:nowrap}
   .pcard.selc{outline:2px solid var(--brand);outline-offset:-1px}
   .pcard .psel{width:15px;height:15px;accent-color:var(--brand);cursor:pointer}
@@ -247,72 +263,83 @@
 </div>
 
 <div class="layout">
-  <aside class="sidebar">
-    <div class="brandrow">
+  <header class="topnav">
+    <div style="display:flex;align-items:center;gap:9px;flex:none">
       <div class="logo"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14c4-7 12-7 16 0"></path><path d="M4 19c4-7 12-7 16 0"></path><path d="M9 6.5l3-3 3 3"></path></svg></div>
       <div class="wordmark">socialio</div>
-      <div class="pro">Pro</div>
     </div>
-
-    <div class="navgroup">Щодня</div>
-    <div class="navitem active" data-view="create"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L18 10a2.8 2.8 0 00-4-4L4 16v4z"></path><path d="M13 7l4 4"></path></svg><span class="lbl">Створення</span></div>
-    <div class="navitem" data-view="publish"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M4 9h16M8 3v3M16 3v3"></path></svg><span class="lbl">Публікація</span></div>
-
-    <div class="navgroup">Основа</div>
-    <div class="navitem" data-view="brand"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a4 4 0 014 4 3.5 3.5 0 01.5 6.9A4 4 0 0112 21a4 4 0 01-4.5-7.1A3.5 3.5 0 018 7a4 4 0 014-4z"></path><path d="M12 3v18"></path></svg><span class="lbl">База бренду</span></div>
-    <div class="navitem" data-view="strategy"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3"></circle></svg><span class="lbl">Стратегія</span></div>
-    <div class="navitem" data-view="sources"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v4a2 2 0 002 2h12a2 2 0 002-2v-4M12 3v11M8 10l4 4 4-4"></path></svg><span class="lbl">Джерела</span></div>
-
-    <div style="margin-top:auto"></div>
-    <div class="navitem" data-view="analytics"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V11M12 20V4M19 20v-6M3 20h18"></path></svg><span class="lbl">Аналітика</span></div>
-    <div class="navitem" data-view="settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 5v4M8 15v4"></path></svg><span class="lbl">Налаштування</span></div>
-
-    <div class="usercard">
-      <div class="avatar" id="avatar">О</div>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Акаунт</div>
-        <div id="userEmail" style="font-size:11.5px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
-      </div>
+    <nav class="topnav-tabs">
+      <div class="navitem active" data-view="create"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L18 10a2.8 2.8 0 00-4-4L4 16v4z"></path><path d="M13 7l4 4"></path></svg><span class="lbl">Створення</span></div>
+      <div class="navitem" data-view="publish"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M4 9h16M8 3v3M16 3v3"></path></svg><span class="lbl">Публікація</span></div>
+      <div class="navitem" data-view="brand"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a4 4 0 014 4 3.5 3.5 0 01.5 6.9A4 4 0 0112 21a4 4 0 01-4.5-7.1A3.5 3.5 0 018 7a4 4 0 014-4z"></path><path d="M12 3v18"></path></svg><span class="lbl">Бренд</span></div>
+      <div class="navitem" data-view="strategy"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3"></circle></svg><span class="lbl">Стратегія</span></div>
+      <div class="navitem" data-view="sources"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v4a2 2 0 002 2h12a2 2 0 002-2v-4M12 3v11M8 10l4 4 4-4"></path></svg><span class="lbl">Джерела</span></div>
+      <div class="navitem" data-view="analytics"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V11M12 20V4M19 20v-6M3 20h18"></path></svg><span class="lbl">Аналітика</span></div>
+      <div class="navitem" data-view="settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 5v4M8 15v4"></path></svg><span class="lbl">Налаштування</span></div>
+    </nav>
+    <div class="topnav-right">
+      <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--faint)"><span class="cdot" id="srvDot" style="width:8px;height:8px;background:var(--danger)"></span><span id="saved" style="opacity:0;transition:.3s;color:var(--brand)">✓</span></span>
+      <button id="scorePill" title="Заповнення профілю - натисни, щоб побачити задачі">⚙ <span id="scoreVal">…</span></button>
+      <div class="modeseg" id="modeSeg" title="Lite - просто і швидко. PRO - повний контроль."><span id="segLite" class="on">Lite</span><span id="segPro" class="pro">⚡ PRO</span></div>
+      <button class="primary" id="genPostsBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.8L19 9l-5.1 1.2L12 15l-1.9-4.8L5 9l5.1-1.2z"></path></svg>Згенерувати</button>
+      <button class="icon" id="themeToggle" title="Тема" style="width:37px;height:37px"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path id="themeIcon" d="M21 12.8A9 9 0 1111.2 3a7 7 0 109.8 9.8z"></path></svg></button>
+      <div class="avatar" id="avatar" title="Акаунт">О</div>
       <div id="logoutBtn" title="Вийти" style="cursor:pointer;color:var(--faint);padding:4px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"></path></svg></div>
+      <span id="userEmail" style="display:none"></span>
     </div>
-    <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--faint);padding:4px 8px"><span class="cdot" id="srvDot" style="width:8px;height:8px;background:var(--danger)"></span><span id="saved" style="opacity:0;transition:.3s;color:var(--brand)">збережено ✓</span></div>
-  </aside>
+  </header>
 
   <main class="main">
-    <div class="topbar">
-      <div style="min-width:0">
-        <div class="ptitle" id="pageTitle">Створення</div>
-        <div class="psub" id="pageSub">Переглянь і затвердь готові пости</div>
-      </div>
-      <div style="margin-left:auto;display:flex;align-items:center;gap:9px">
-        <button id="scorePill" title="Заповнення профілю - натисни, щоб побачити задачі">⚙ <span id="scoreVal">…</span></button>
-        <button class="primary" id="genPostsBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.8L19 9l-5.1 1.2L12 15l-1.9-4.8L5 9l5.1-1.2z"></path></svg>Згенерувати пости</button>
-        <button id="proPill" title="Режим ПРО" style="background:transparent;border:1px solid var(--line2);border-radius:9px;padding:7px 11px;font:inherit;font-weight:700;font-size:13px;cursor:pointer;color:var(--muted)">⚡ PRO</button>
-        <button class="icon" id="themeToggle" title="Тема" style="width:40px;height:40px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path id="themeIcon" d="M21 12.8A9 9 0 1111.2 3a7 7 0 109.8 9.8z"></path></svg></button>
-      </div>
-    </div>
-
     <div class="content">
+      <div class="pagehead"><div class="ptitle" id="pageTitle">Створення</div><div class="psub" id="pageSub">Переглянь і затвердь готові пости</div></div>
       <div id="taskStrip" style="display:none"></div>
 
-      <!-- ============ CREATE ============ -->
+      <!-- ============ CREATE: конвеєр Матеріали → План → Пости ============ -->
       <section class="viewsec active" data-view="create">
         <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;flex-wrap:wrap">
-          <div class="tabs" id="layoutTabs">
-            <div class="tab on" data-lay="studio"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="7" height="14"></rect><rect x="13" y="5" width="7" height="6"></rect><rect x="13" y="14" width="7" height="5"></rect></svg>Студія</div>
-            <div class="tab" data-lay="pipeline"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"></path></svg>Конвеєр <span id="pipePro" style="display:none;font-size:9px;font-weight:800;background:var(--brand);color:var(--brand-ink);border-radius:5px;padding:1px 5px;margin-left:3px">PRO</span></div>
-<!-- Інбокс злито в Студію (фільтри + масові дії) - вкладку прибрано, код списку лишається на випадок відкату -->
+          <div class="tabs" id="cTabs">
+            <div class="tab" data-ctab="materials">📥 Матеріали <span class="badge" id="matCount" style="margin-left:5px"></span></div>
+            <div class="tab" data-ctab="plan">📅 План <span class="badge" id="planCount" style="margin-left:5px"></span></div>
+            <div class="tab on" data-ctab="posts">📝 Пости <span class="badge" id="postCount" style="margin-left:5px"></span></div>
+          </div>
+          <div class="tabs proonly" id="layoutTabs" style="display:none">
+            <div class="tab on" data-lay="studio">Студія</div>
+            <div class="tab" data-lay="pipeline">Конвеєр <span id="pipePro" style="display:none;font-size:9px;font-weight:800;background:var(--brand);color:var(--brand-ink);border-radius:5px;padding:1px 5px;margin-left:3px">PRO</span></div>
           </div>
           <div class="hint" id="layoutHint" style="margin:0"></div>
+        </div>
+
+        <!-- MATERIALS: стрічка сировини -->
+        <div id="layMaterials" style="display:none">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+            <div class="ftabs" id="matFilters"></div>
+            <button class="primary" id="addMaterialBtn" style="margin-left:auto">＋ Додати матеріал</button>
+          </div>
+          <div class="panel" style="padding:0;overflow:hidden"><div id="matFeed"><div class="empty" style="padding:20px">Завантажую матеріали…</div></div></div>
+        </div>
+
+        <!-- PLAN: скелет -->
+        <div id="layPlan" style="display:none">
+          <div class="panel" style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+            <div style="flex:1;min-width:230px">
+              <div style="font-weight:700;font-size:14.5px;margin-bottom:7px" id="planProgressLabel">Скелет плану</div>
+              <div style="height:9px;border-radius:6px;background:var(--surface2);overflow:hidden"><div id="planProgressBar" style="height:100%;background:var(--brand);width:0%;border-radius:6px;transition:width .3s"></div></div>
+            </div>
+            <div style="font-size:11.5px;color:var(--faint);line-height:1.7">⬜ порожньо → 📎 є матеріал → ✍️ пост → ✅ затверджено → 🗓 календар → ✈️ вийшло</div>
+            <div class="btnrow" style="margin:0;align-items:center;flex-wrap:wrap">
+              <select id="planChannel"><option value="telegram">Telegram</option><option value="instagram">Instagram</option><option value="threads">Threads</option><option value="facebook">Facebook</option></select>
+              <label style="font-size:12px;color:var(--muted)">днів <input id="planHorizon" class="txt" type="number" value="14" min="7" max="90" style="width:60px;display:inline-block;padding:7px 9px"></label>
+              <label style="font-size:12px;color:var(--muted)">п/тиж <input id="planPpw" class="txt" type="number" value="4" min="1" max="14" style="width:54px;display:inline-block;padding:7px 9px"></label>
+              <button class="primary" id="planGenBtn">↻ Згенерувати скелет</button>
+              <span id="planMsg" style="font-size:12px;color:var(--muted)"></span>
+            </div>
+          </div>
+          <div class="panel" style="padding:0;overflow:hidden"><div id="planList"><div class="empty" style="padding:20px">Скелета ще нема - натисни «Згенерувати скелет» (потрібна стратегія з розділу Стратегія).</div></div></div>
         </div>
 
         <!-- STUDIO -->
         <div id="layStudio" class="crow">
           <div class="rail">
-            <div class="panel" style="margin:0;padding:0;overflow:hidden">
-              <div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 001 1h4"></path><path d="M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z"></path></svg><span style="font-weight:700;font-size:14px">Джерело</span></div>
-              <div style="padding:14px 16px" id="srcCard"><div class="empty">Немає активного джерела.</div></div>
-            </div>
             <div class="panel proonly" id="ideasPanel" style="margin:0;display:none">
               <div style="font-weight:700;font-size:14px;margin-bottom:6px">💡 Ідеї → пости <span class="badge">PRO</span></div>
               <div class="hint" style="margin:0 0 8px">Згенеруй ідеї, обери потрібні - і створимо пости саме з них.</div>
@@ -443,12 +470,12 @@
           <div id="rubBar" style="display:flex;height:12px;border-radius:7px;overflow:hidden;margin:12px 0;background:var(--surface2)"></div>
           <div id="rubList" class="out"></div>
         </div>
-        <div class="panel v2only" id="briefPanel" style="display:none">
+        <div class="panel proonly" id="briefPanel" style="display:none">
           <div class="ph">🧠 Стратегічний бриф</div>
           <div class="hint">Джерело правди для всієї генерації. Оновлюється кнопкою «Згенерувати» вгорі.</div>
           <div id="briefView" class="out"></div>
         </div>
-        <div class="panel v2only" id="chanPlanPanel" style="display:none">
+        <div class="panel proonly" id="chanPlanPanel" style="display:none">
           <div class="ph">📅 Контент-план по каналах</div>
           <div class="hint">Бере стратегічний бриф і будує нативний план під обраний канал (алгоритми 2025-2026).</div>
           <div class="btnrow" style="margin-top:8px;align-items:center;flex-wrap:wrap">
@@ -515,7 +542,6 @@
         <div class="panel"><label class="fl">🎨 Генерація зображень</label><select id="imgProv"></select>
           <div class="fld" style="margin-top:12px"><label class="fl">Стиль зображень бренду</label><textarea class="txt" id="imgStyle" rows="3" placeholder="Напр.: тепла пастельна палітра, мінімалізм, живі фото людей замість ілюстрацій, без стокового вигляду…"></textarea><div class="hint">Як tone of voice, тільки для картинок: AI дотримується цього стилю в кожному згенерованому зображенні.</div></div>
           <div class="hint">Недоступні провайдери підключає адміністратор сервісу.</div></div>
-        <div class="panel"><label class="fl">🧠 Система промтів</label><label class="rchip" style="display:inline-flex"><input type="checkbox" id="promptEngine"> Стратегічний рушій v2 (Strategy Brief + копірайтинг-фреймворки + контент-плани по каналах + атомізація)</label><div class="hint">Експериментально. Вмикає бриф як джерело правди для генерації. Вимкни - миттєво повертаєшся до класичної генерації, нічого не втрачаючи.</div></div>
         <div class="panel">
           <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--tg)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M22 4L2 11l6 2 2 6 3-4 5 4 4-15z"></path></svg></span>Telegram</div>
           <div id="tgSharedBox" style="display:none;margin:8px 0 4px">
@@ -668,7 +694,7 @@ function selectView(v){
   $('genPostsBtn').style.display=v==='create'?'inline-flex':'none';
   if(v==='analytics') loadAnalytics();
   if(v==='publish') loadPublish();
-  if(v==='strategy' && window._v2) loadChannelPlan();
+  if(v==='strategy' && PRO) loadChannelPlan();
   if(v==='create') loadStudioPosts();
   if(v==='settings'){ loadAccount(); loadPlans(); }
   if(typeof loadTasks==='function') loadTasks();
@@ -698,19 +724,174 @@ function loadPlans(){ const lite=$('planLiteBtn'), pro=$('planProBtn'); if(!pro)
 }
 if($('planProBtn')) $('planProBtn').onclick=async()=>{ try{ const next=PRO?'0':'1'; await saveSetting('pro',next); PRO=(next==='1'); if(typeof updateProUI==='function') updateProUI(); loadPlans(); if(typeof loadTasks==='function') loadTasks(); flash(PRO?'ПРО увімкнено ✓':'ПРО вимкнено'); if(!PRO&&$('layPipeline')&&$('layPipeline').style.display!=='none') setLayout('studio'); }catch(e){ flash('⚠ '+e.message); } };
 if($('planLiteBtn')) $('planLiteBtn').onclick=async()=>{ if(!PRO) return; try{ await saveSetting('pro','0'); PRO=false; if(typeof updateProUI==='function') updateProUI(); loadPlans(); if(typeof loadTasks==='function') loadTasks(); flash('Lite активний'); if($('layPipeline')&&$('layPipeline').style.display!=='none') setLayout('studio'); }catch(e){} };
+// ---------- конвеєр Створення: Матеріали → План → Пости ----------
+let cTab='posts';
+function setCTab(t){
+  cTab=t;
+  document.querySelectorAll('#cTabs .tab').forEach(x=>x.classList.toggle('on',x.dataset.ctab===t));
+  const show=(id,on)=>{ const el=$(id); if(el) el.style.display=on?'':'none'; };
+  show('layMaterials',t==='materials'); show('layPlan',t==='plan');
+  const posts=t==='posts';
+  show('layStudio',posts&&curLayout==='studio'); show('layPipeline',posts&&curLayout==='pipeline');
+  const lt=$('layoutTabs'); if(lt) lt.style.display=(posts&&PRO)?'':'none';
+  const H={materials:'Стрічка сировини - все, з чого можна зробити пост',plan:'Скелет: що і коли має вийти - і чим воно заповнюється',posts:'Переглянь, відредагуй, затвердь'};
+  $('layoutHint').textContent=H[t]||''; if($('pageSub')) $('pageSub').textContent=H[t]||'';
+  if(t==='materials') loadMaterials();
+  if(t==='plan') loadPlan();
+}
+document.querySelectorAll('#cTabs .tab').forEach(x=>x.onclick=()=>setCTab(x.dataset.ctab));
+let curLayout='studio';
 function setLayout(l){
+  curLayout=l;
+  if(cTab!=='posts') setCTab('posts');
   const map={studio:'layStudio',pipeline:'layPipeline',inbox:'layInbox'};
-  for(const k in map){ const el=$(map[k]); if(el) el.style.display = k===l?'':'none'; }
+  for(const k in map){ const el=$(map[k]); if(el) el.style.display = (k===l&&cTab==='posts')?'':'none'; }
   document.querySelectorAll('#layoutTabs .tab').forEach(t=>t.classList.toggle('on',t.dataset.lay===l));
-  const H={studio:'Картки постів - переглянь, відредагуй, затвердь',pipeline:'Покроковий конвеєр - повний контроль над кожним етапом',inbox:'Список + редактор - швидке тріаж-затвердження'};
-  $('layoutHint').textContent=H[l]||'';
 }
 let PRO=false;
-function updateProUI(){ const p=$('proPill'); if(p){ p.innerHTML=PRO?'⚡ PRO ✓':'⚡ PRO'; p.style.color=PRO?'var(--brand)':'var(--muted)'; p.style.borderColor=PRO?'var(--brand)':'var(--line2)'; } if($('pipePro')) $('pipePro').style.display=PRO?'none':'inline-block'; document.querySelectorAll('.proonly').forEach(el=>el.style.display=PRO?'':'none'); }
-function openProModal(){ const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70'; ov.innerHTML='<div class="modal-card" style="max-width:480px;padding:24px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="font-size:18px">⚡ Конвеєр - режим ПРО</b><button class="icon" id="proX" style="margin-left:auto">✕</button></div><p style="color:var(--muted);font-size:14px;margin:0 0 12px;line-height:1.6">У <b>Lite</b> пости генеруються в один прохід - швидко й дешево. <b>ПРО</b> відкриває покроковий конвеєр: кожен етап окремо (ідеї → чернетки → тон → формат → де-AI → план), власний <b>промт і модель на кожному кроці</b> - повний контроль над якістю.</p><div style="font-size:12.5px;color:var(--faint);margin-bottom:14px">Оплата зʼявиться згодом. Зараз можна увімкнути для тесту.</div><div class="btnrow"><button class="primary" id="proEnable">Увімкнути ПРО (тест)</button></div></div>'; document.body.appendChild(ov); const close=()=>ov.remove(); ov.addEventListener("click",e=>{if(e.target===ov)close();}); ov.querySelector("#proX").onclick=close; ov.querySelector("#proEnable").onclick=async()=>{ try{ await saveSetting("pro","1"); PRO=true; updateProUI(); close(); setLayout("pipeline"); flash("ПРО увімкнено ✓"); }catch(e){ flash("⚠ "+e.message); } }; }
-document.querySelectorAll('#layoutTabs .tab').forEach(t=>t.onclick=()=>{ if(t.dataset.lay==='pipeline' && !PRO){ openProModal(); return; } setLayout(t.dataset.lay); });
-if($('proPill')) $('proPill').onclick=async()=>{ if(PRO){ if(confirm('Вимкнути ПРО? Повернешся до простого режиму Lite.')){ try{ await saveSetting('pro','0'); PRO=false; updateProUI(); if($('layPipeline')&&$('layPipeline').style.display!=='none') setLayout('studio'); flash('ПРО вимкнено'); }catch(e){} } } else openProModal(); };
+function updateProUI(){
+  const sl=$('segLite'), sp=$('segPro');
+  if(sl&&sp){ sl.classList.toggle('on',!PRO); sp.classList.toggle('on',PRO); }
+  document.querySelectorAll('.proonly').forEach(el=>el.style.display=PRO?'':'none');
+  const lt=$('layoutTabs'); if(lt) lt.style.display=(cTab==='posts'&&PRO)?'':'none';
+  if(!PRO && curLayout==='pipeline') setLayout('studio');
+}
+// просте перемикання Lite/PRO (тарифи будуть поповненням токенів окремо)
+async function setMode(pro){ try{ await saveSetting('pro',pro?'1':'0'); PRO=pro; updateProUI(); flash(pro?'Режим PRO - усі інструменти відкрито ⚡':'Режим Lite - тільки головне'); }catch(e){ flash('⚠ '+e.message); } }
+if($('segLite')) $('segLite').onclick=()=>{ if(PRO) setMode(false); };
+if($('segPro')) $('segPro').onclick=()=>{ if(!PRO) setMode(true); };
+document.querySelectorAll('#layoutTabs .tab').forEach(t=>t.onclick=()=>setLayout(t.dataset.lay));
 $('toStudio').onclick=()=>setLayout('studio');
+
+// ---------- МАТЕРІАЛИ: стрічка сировини ----------
+let Mats=[], MatFilter='Усі', MatOpen=null;
+const MAT_TYPE={manual:'✍️ Нотатка',rss:'📡 RSS',fireflies:'🎙 Транскрипт',grain:'🎙 Транскрипт',meetgeek:'🎙 Транскрипт',gdrive:'📁 Drive',brand:'✨ Бренд',plan:'📅 План'};
+async function loadMaterials(){ try{ const r=await api('/materials'); Mats=r.materials||[]; }catch(e){ Mats=[]; } renderMaterials(); updateCounts(); }
+function matType(m){ return MAT_TYPE[m.origin]||m.origin; }
+function renderMaterials(){
+  const feed=$('matFeed'); if(!feed) return;
+  const types=['Усі',...new Set(Mats.map(matType))];
+  const ft=$('matFilters'); if(ft){ ft.innerHTML=types.map(t=>{ const n=t==='Усі'?Mats.length:Mats.filter(m=>matType(m)===t).length; return '<div class="ftab'+(MatFilter===t?' on':'')+'" data-mf="'+esc(t)+'">'+esc(t)+' <span style="opacity:.6">'+n+'</span></div>'; }).join(''); ft.querySelectorAll('[data-mf]').forEach(x=>x.onclick=()=>{ MatFilter=x.dataset.mf; renderMaterials(); }); }
+  const show=MatFilter==='Усі'?Mats:Mats.filter(m=>matType(m)===MatFilter);
+  if(!show.length){ feed.innerHTML='<div class="empty" style="padding:20px">Порожньо. Додай матеріал кнопкою вище - або підключи RSS/транскрибатор у «Джерелах», нове зʼявиться тут само.</div>'; return; }
+  feed.innerHTML=show.map(m=>{
+    const open=MatOpen===m.id;
+    const match=m.slot_id?'<span class="ptag" style="color:var(--amber);border-color:var(--amber)">🏷 підходить: '+esc(m.slot_rubric||'')+' · '+esc(String(m.slot_date||'').slice(5,10))+'</span>':'';
+    return '<div data-mat="'+m.id+'" style="padding:13px 18px;border-bottom:1px solid var(--line);background:'+(open?'var(--surface2)':'transparent')+'">'
+      +'<div class="matHead" style="cursor:pointer">'
+        +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="ptag">'+esc(matType(m))+'</span><b style="font-size:14px;flex:1;min-width:180px">'+esc(m.title||'Без назви')+'</b>'+match+'<span style="font-size:11.5px;color:var(--faint)">'+new Date(m.created_at).toLocaleDateString('uk')+' · '+(m.chars||0)+' симв.</span></div>'
+        +'<div style="font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+esc(m.preview||'')+'</div>'
+      +'</div>'
+      +(open?'<div id="matFull" style="margin-top:10px;background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:12px 14px;font-size:13px;line-height:1.6;color:var(--ink2);white-space:pre-wrap;max-height:300px;overflow:auto"><span class="spin"></span></div>'
+        +'<div class="btnrow" style="margin-top:10px;flex-wrap:wrap"><button class="primary" data-ma="post">✨ Створити пост</button><button class="ghost" data-ma="ideas">💡 Витягнути ідеї</button><button class="ghost" data-ma="del" style="margin-left:auto;color:var(--danger)">🗑 Прибрати</button></div>':'')
+      +'</div>';
+  }).join('');
+  feed.querySelectorAll('[data-mat]').forEach(row=>{
+    const id=row.dataset.mat;
+    row.querySelector('.matHead').onclick=async()=>{ MatOpen=MatOpen===id?null:id; renderMaterials(); if(MatOpen===id){ try{ const f=await api('/materials/'+id); const el=$('matFull'); if(el) el.textContent=f.transcript||''; }catch(e){} } };
+    row.querySelectorAll('[data-ma]').forEach(b=>b.onclick=async(ev)=>{ ev.stopPropagation(); const a=b.dataset.ma;
+      if(a==='del'){ if(!confirm('Прибрати матеріал зі стрічки?')) return; try{ await api('/materials/'+id+'/archive',{method:'POST'}); await loadMaterials(); }catch(e){ flash('⚠ '+e.message); } return; }
+      if(a==='post'){ aiBusy('✨ Створюю пост з матеріалу…'); setCTab('posts'); setLayout('studio');
+        try{ await api('/materials/'+id+'/posts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}); await loadStudioPosts(); flash('Готово - пост у стрічці ✓'); }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } return; }
+      if(a==='ideas'){ openMaterialIdeas(id); }
+    });
+  });
+}
+if($('addMaterialBtn')) $('addMaterialBtn').onclick=()=>{
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
+  ov.innerHTML='<div class="modal-card" style="max-width:560px;padding:20px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">＋ Додати матеріал</b><button class="icon" id="amX" style="margin-left:auto">✕</button></div>'
+    +'<input class="txt" id="amTitle" placeholder="Назва (необовʼязково)" style="margin-bottom:8px">'
+    +'<textarea class="txt" id="amText" rows="7" placeholder="Встав транскрипт, статтю, нотатку чи просто думку…"></textarea>'
+    +'<div class="btnrow" style="margin-top:12px"><button class="primary" id="amSave">Додати у стрічку</button></div></div>';
+  document.body.appendChild(ov); const close=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#amX').onclick=close;
+  ov.querySelector('#amSave').onclick=async()=>{ const text=ov.querySelector('#amText').value.trim(); if(!text){ flash('Встав текст'); return; }
+    const title=ov.querySelector('#amTitle').value.trim();
+    try{ await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript:text,title:title||undefined})}); close(); await loadMaterials(); try{ await api('/plan/match',{method:'POST'}); await loadMaterials(); }catch(_){} flash('Матеріал додано ✓'); }
+    catch(e){ flash('⚠ '+e.message); } };
+};
+// модалка «Ідеї з матеріалу»: обери ідеї -> чернетки постів
+async function openMaterialIdeas(matId){
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
+  ov.innerHTML='<div class="modal-card" style="max-width:560px;padding:20px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">💡 Ідеї з матеріалу</b><button class="icon" id="miX" style="margin-left:auto">✕</button></div>'
+    +'<div id="miList"><div class="empty"><span class="spin"></span> AI шукає ідеї…</div></div>'
+    +'<div class="btnrow" style="margin-top:12px"><button class="primary" id="miGo" disabled>✨ Створити пости з обраних</button></div></div>';
+  document.body.appendChild(ov); const close=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#miX').onclick=close;
+  aiBusy('💡 Витягую ідеї з матеріалу…');
+  let ideas=[];
+  try{ const r=await api('/materials/'+matId+'/ideas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:6})}); ideas=r.ideas||[]; }
+  catch(e){ const l=ov.querySelector('#miList'); if(l) l.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
+  finally{ aiDone(); }
+  const list=ov.querySelector('#miList'); if(!list) return;
+  if(ideas.length){
+    list.innerHTML=ideas.map((it,i)=>'<label class="rchip on" style="display:flex;gap:8px;align-items:flex-start;width:100%;padding:9px 12px;margin-bottom:5px;text-align:left;font-weight:500;line-height:1.4"><input type="checkbox" class="miCb" data-i="'+i+'" checked><span style="flex:1">'+esc(it.idea)+'</span>'+(it.rubric?'<span class="ptag">🏷 '+esc(it.rubric)+'</span>':'')+'</label>').join('');
+    list.querySelectorAll('.rchip').forEach(l=>{ const cb=l.querySelector('input'); cb.addEventListener('change',()=>l.classList.toggle('on',cb.checked)); });
+    const go=ov.querySelector('#miGo'); go.disabled=false;
+    go.onclick=async()=>{ const picked=[...list.querySelectorAll('.miCb:checked')].map(c=>ideas[+c.dataset.i].idea); if(!picked.length){ flash('Обери хоча б одну ідею'); return; }
+      close(); aiBusy('✨ Створюю '+picked.length+' постів з ідей…'); setCTab('posts'); setLayout('studio');
+      try{ const r=await api('/materials/'+matId+'/posts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ideas:picked})}); await loadStudioPosts(); flash('Готово - '+(r.count||0)+' постів ✓'); }
+      catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } };
+  } else if(!list.textContent.includes('⚠')) list.innerHTML='<div class="empty">Ідей не знайшлось - спробуй «Створити пост» напряму.</div>';
+}
+
+// ---------- ПЛАН: скелет ----------
+let PlanSlots=[];
+const SLOT_ST={empty:['⬜ порожньо','var(--faint)','var(--surface2)'],matched:['📎 є матеріал','var(--amber)','var(--amber-soft, #f7ecd8)'],drafted:['✍️ пост','var(--tg)','var(--surface2)'],approved:['✅ затверджено','var(--brand)','var(--brand-soft)'],scheduled:['🗓 у календарі','var(--brand)','var(--brand-soft)'],published:['✈️ вийшло','var(--muted)','var(--surface2)']};
+async function loadPlan(){ try{ const r=await api('/plan'); PlanSlots=r.slots||[]; }catch(e){ PlanSlots=[]; } renderPlan(); updateCounts(); }
+function renderPlan(){
+  const list=$('planList'); if(!list) return;
+  const filled=PlanSlots.filter(s=>s.status!=='empty').length;
+  if($('planProgressLabel')) $('planProgressLabel').textContent=PlanSlots.length?('Скелет · заповнено '+filled+' з '+PlanSlots.length):'Скелет плану';
+  if($('planProgressBar')) $('planProgressBar').style.width=PlanSlots.length?Math.round(filled/PlanSlots.length*100)+'%':'0%';
+  if(!PlanSlots.length){ list.innerHTML='<div class="empty" style="padding:20px">Скелета ще нема. Обери канал вище і натисни «Згенерувати скелет» (спершу потрібна стратегія - розділ Стратегія → Згенерувати).</div>'; return; }
+  const DOW=['Нд','Пн','Вт','Ср','Чт','Пт','Сб'];
+  list.innerHTML=PlanSlots.map(s=>{
+    const st=SLOT_ST[s.status]||SLOT_ST.empty;
+    const d=new Date(String(s.slot_date).slice(0,10)+'T12:00:00Z');
+    const day=DOW[d.getUTCDay()]+' '+String(d.getUTCDate()).padStart(2,'0')+'.'+String(d.getUTCMonth()+1).padStart(2,'0');
+    let act='';
+    if(s.status==='empty') act='<button class="ghost" data-pa="theme">Згенерувати з теми</button>';
+    if(s.status==='matched') act='<button class="primary" data-pa="material">✨ З матеріалу</button><button class="ghost" data-pa="theme">З теми</button>';
+    if(s.status==='drafted') act='<button class="ghost" data-pa="topost">→ до поста</button>';
+    if(s.status==='approved'||s.status==='scheduled') act='<button class="ghost" data-pa="tocal">→ календар</button>';
+    return '<div data-slot="'+s.id+'" style="display:flex;align-items:center;gap:11px;padding:12px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap">'
+      +'<span style="font-size:12px;font-weight:700;color:var(--ink2);background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:5px 10px;min-width:82px;text-align:center;flex:none">'+day+'</span>'
+      +(s.rubric?'<span class="ptag" style="color:var(--brand);border-color:var(--brand)">🏷 '+esc(s.rubric)+'</span>':'')
+      +'<div style="flex:1;min-width:200px"><div style="font-size:13.5px;font-weight:600;line-height:1.35">'+esc(s.theme)+'</div>'
+        +(s.match_note?'<div style="font-size:11.5px;color:var(--amber);margin-top:2px">📎 '+esc(s.match_note)+'</div>':'')+'</div>'
+      +'<span style="flex:none;font-size:11.5px;font-weight:700;color:'+st[1]+';background:'+st[2]+';padding:5px 11px;border-radius:20px">'+st[0]+'</span>'
+      +(act?'<span class="btnrow" style="margin:0;flex:none">'+act+'</span>':'')
+      +'</div>';
+  }).join('');
+  list.querySelectorAll('[data-slot]').forEach(row=>{
+    const id=row.dataset.slot; const slot=PlanSlots.find(x=>x.id===id);
+    row.querySelectorAll('[data-pa]').forEach(b=>b.onclick=async()=>{ const a=b.dataset.pa;
+      if(a==='topost'){ setCTab('posts'); setLayout('studio'); return; }
+      if(a==='tocal'){ go('publish'); return; }
+      const from=a==='material'?'material':'theme';
+      aiBusy('✨ Генерую пост: «'+(slot?slot.theme.slice(0,60):'')+'»…');
+      try{ await api('/plan/slots/'+id+'/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from})}); await loadPlan(); setCTab('posts'); setLayout('studio'); await loadStudioPosts(); flash('Пост створено і привʼязано до слота ✓'); }
+      catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); }
+    });
+  });
+}
+if($('planGenBtn')) $('planGenBtn').onclick=async()=>{
+  const m=$('planMsg'); const ch=$('planChannel').value;
+  if(PlanSlots.some(s=>s.status==='empty'||s.status==='matched') && !confirm('Незаповнені слоти поточного скелета буде замінено новими. Продовжити?')) return;
+  m.style.color='var(--muted)'; m.textContent='будую скелет…'; aiBusy('📅 Будую скелет плану для '+ch+'…');
+  try{ const r=await api('/plan/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channel:ch,horizon:+$('planHorizon').value||14,posts_per_week:+$('planPpw').value||4})});
+    m.style.color='var(--brand)'; m.textContent='готово ✓ '+r.slots+' слотів'+(r.matched?(' · '+r.matched+' метчів'):''); await loadPlan(); }
+  catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } finally{ aiDone(); }
+};
+// лічильники на вкладках конвеєра
+function updateCounts(){
+  if($('matCount')) $('matCount').textContent=Mats.length||'';
+  const todo=PlanSlots.filter(s=>s.status==='empty'||s.status==='matched').length;
+  if($('planCount')) $('planCount').textContent=todo||'';
+  const rev=(Finals||[]).filter(p=>p.review!=='approved').length;
+  if($('postCount')) $('postCount').textContent=rev||'';
+}
 $('toCalendar').onclick=()=>go('publish');
 
 // ---------- аналітика ----------
@@ -765,16 +946,12 @@ async function loadSettings(){
     TZ = map.timezone || TZ; buildTzSel();
     PRO = (map.pro==='1'); updateProUI();
     if(map.tone_of_voice_derived) renderDerived(map.tone_of_voice_derived);
-    window._v2 = (map.prompt_engine==='v2');
-    if($('promptEngine')) $('promptEngine').checked = window._v2;
+    window._v2 = (map.prompt_engine!=='legacy'); // v2 - дефолтний рушій
     if($('briefView')) renderBrief(map.strategy_brief||'');
-    toggleV2UI();
     $('srvDot').style.background='var(--brand)';
   }catch(e){ $('srvDot').style.background='var(--danger)'; }
 }
-function toggleV2UI(){ document.querySelectorAll('.v2only').forEach(el=>el.style.display=window._v2?'':'none'); }
 function renderBrief(text){ const o=$('briefView'); if(!o) return; o.innerHTML = text ? '<pre style="white-space:pre-wrap;font:inherit;margin:0;color:var(--ink2);line-height:1.65">'+esc(text)+'</pre>' : '<div class="empty">Натисни «Згенерувати» вгорі - бриф зʼявиться тут.</div>'; }
-if($('promptEngine')) $('promptEngine').onchange=()=>{ window._v2=$('promptEngine').checked; saveSetting('prompt_engine', window._v2?'v2':'legacy'); toggleV2UI(); flash(window._v2?'Рушій v2 увімкнено':'Повернуто класичний рушій'); };
 let saveT;
 function flashSaved(){ const s=$('saved'); if(!s) return; s.style.opacity='1'; clearTimeout(flashSaved._t); flashSaved._t=setTimeout(()=>s.style.opacity='0',1500); }
 async function saveSetting(key,val){ try{ await api('/settings/'+key,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:val})}); flashSaved(); }catch(e){} }
@@ -842,10 +1019,10 @@ function renderFinals(posts){
 }
 async function saveContent(id,v){ try{ await api('/posts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:v})}); flashSaved(); }catch(e){} }
 let StudioFilter='all', StudioRubric='', StudioOrigin='';
-const ORIGIN_LABEL={manual:'✍️ вручну',rss:'📡 RSS',fireflies:'🎙 транскрипт',grain:'🎙 транскрипт',meetgeek:'🎙 транскрипт',brand:'✨ з бренду',gdrive:'📁 Drive'};
+const ORIGIN_LABEL={manual:'✍️ вручну',rss:'📡 RSS',fireflies:'🎙 транскрипт',grain:'🎙 транскрипт',meetgeek:'🎙 транскрипт',brand:'✨ з бренду',gdrive:'📁 Drive',plan:'📅 з плану'};
 const SelPosts=new Set(); // масові дії
 // глобальний список усіх фінальних постів воркспейсу (НЕ привʼязаний до активного джерела/прогону)
-async function loadStudioPosts(){ try{ Finals=(await api('/posts/studio'))||[]; }catch(e){} SelPosts.clear(); renderStudio(); renderInbox(); }
+async function loadStudioPosts(){ try{ Finals=(await api('/posts/studio'))||[]; }catch(e){} SelPosts.clear(); renderStudio(); renderInbox(); if(typeof updateCounts==='function') updateCounts(); }
 function renderStudio(){
   const grid=$('studioGrid'); if(!grid) return;
   const all=Finals; const appr=all.filter(p=>p.review==='approved').length; const rev=all.length-appr;
@@ -878,7 +1055,7 @@ function renderStudio(){
         +'<button class="icon" data-a="copy" title="Копіювати">⧉</button>'
         +'<button class="icon" data-a="archive" title="В архів">🗄</button>'
         +'<button class="icon" data-a="image" title="Згенерувати зображення">🎨</button>'
-        +(window._v2?'<button class="icon" data-a="atomize" title="Розтиражувати під усі канали">♻️</button>':'')
+        +(PRO?'<button class="icon" data-a="atomize" title="Розтиражувати під усі канали">♻️</button>':'')
         +'<button class="icon" data-a="composer" title="Опублікувати / запланувати">📣</button>'
         +'<button class="approve'+(ap?' on':'')+'" data-a="approve"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg>'+(ap?'Затверджено':'Затвердити')+'</button>'
       +'</div></div>';
@@ -1462,7 +1639,7 @@ async function saveSchedule(){
   catch(e){ if(m){m.style.color='var(--danger)'; m.textContent='⚠ '+e.message;} }
 }
 async function loadStrategy(){ try{ STRAT=await api('/strategy'); }catch(e){ STRAT={data:{},status:'none'}; } renderStrategy(); }
-$('genStrat').onclick=async()=>{ const m=$('stratMsg'); m.style.color='var(--muted)'; m.textContent='генерую…'; aiBusy('🧠 Генерую стратегію бренду…'); try{ const r=await api('/strategy/generate',{method:'POST'}); STRAT={data:r.data,status:r.status||'applied'}; renderStrategy(); await loadRubrics(); if(window._v2) await loadSettings(); m.style.color='var(--brand)'; m.textContent='готово - рубрики застосовано ✓'; }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; }finally{ aiDone(); } };
+$('genStrat').onclick=async()=>{ const m=$('stratMsg'); m.style.color='var(--muted)'; m.textContent='генерую…'; aiBusy('🧠 Генерую стратегію бренду…'); try{ const r=await api('/strategy/generate',{method:'POST'}); STRAT={data:r.data,status:r.status||'applied'}; renderStrategy(); await loadRubrics(); await loadSettings(); m.style.color='var(--brand)'; m.textContent='готово - рубрики застосовано ✓'; }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; }finally{ aiDone(); } };
 // ---------- Контент-план по каналах (v2) ----------
 const CP_LABEL={telegram:'Telegram',instagram:'Instagram',threads:'Threads',facebook:'Facebook'};
 function renderChannelPlan(rows){ const o=$('cpView'); if(!o) return; if(!rows||!rows.length){ o.innerHTML='<div class="empty">Порожньо.</div>'; return; }
@@ -1610,6 +1787,8 @@ async function renderObConnect(oc){
   if(_gdq){ go('sources'); alert(_gdq==='ok'?'Google Drive підключено ✓':'Не вдалося підключити Google Drive.'); }
   await loadPrompts();
   loadRubrics(); loadStrategy(); loadFF(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadTasks(); loadStudioPosts();
+  loadMaterials(); // стрічка + лічильник
+  loadPlan().then(()=>{ if(PlanSlots.length) setCTab('plan'); }); // план є -> відкриваємо скелет
   await loadChanStatus();
   try{ const st=await api('/settings'); if(!st.some(r=>r.key==='onboarded')) showOnboarding(); }catch(e){}
   updRunLabel();

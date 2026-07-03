@@ -28,6 +28,7 @@ async function tick(): Promise<void> {
       const err = results.filter((r) => r.status === "error").map((r) => `${r.channel}: ${r.error}`).join("; ");
       const summary = [ok ? `✓ ${ok}` : "", err ? `⚠ ${err}` : ""].filter(Boolean).join(" · ") || "немає обраних каналів";
       await q(`update schedule_slot set status=$2, result=$3 where id=$1`, [slot.id, anyOk ? "posted" : "failed", summary]);
+      if (anyOk) await q(`update plan_slot set status='published' where post_id=$1 and status in ('drafted','approved','scheduled')`, [slot.post_id]);
       if (anyOk) await logEvent("info", "autopost", `slot ${slot.id} → ${ok}${err ? ` (помилки: ${err})` : ""}`);
       else await logEvent("warn", "autopost", `slot ${slot.id} не опубліковано: ${err || "немає каналів"}`);
     } catch (e: any) {

@@ -3,7 +3,7 @@
 import { q, one } from "./db.js";
 import { logEvent } from "./log.js";
 import { fetchFeed } from "./rss.js";
-import { generatePostsOnePass } from "./pipeline.js";
+import { generatePostsOnePass, matchPlanSlots } from "./pipeline.js";
 
 const POLL_MS = 15 * 60 * 1000; // кожні 15 хв
 const MAX_NEW_PER_TICK = 8;     // обмеження, щоб великий фід не залив систему
@@ -31,7 +31,10 @@ async function ingest(feed: Feed): Promise<string[]> {
     runIds.push(run!.id);
   }
   await q(`update content_source set last_error=null, last_pulled_at=now() where id=$1`, [feed.id]);
-  if (runIds.length) await logEvent("info", "rss", `${feed.url}: +${runIds.length} нових`);
+  if (runIds.length) {
+    await logEvent("info", "rss", `${feed.url}: +${runIds.length} нових`);
+    try { await matchPlanSlots(feed.workspace_id); } catch { /* метчинг не критичний */ }
+  }
   return runIds;
 }
 

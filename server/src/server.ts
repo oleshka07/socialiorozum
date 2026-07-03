@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots } from "./pipeline.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
 import * as meta from "./meta.js";
@@ -542,8 +542,10 @@ app.post("/api/posts/:postId/publish-all", async (req: any, reply) => {
     const results = await publishPostToChannels(ws, req.params.postId);
     if (!results.length) return reply.code(400).send({ error: "Оберіть хоча б одну мережу" });
     // гасимо ще не відпрацьовані planned-слоти цього поста - інакше autopost опублікує ВДРУГЕ
-    if (results.some((r) => r.status === "sent"))
+    if (results.some((r) => r.status === "sent")) {
       await q(`update schedule_slot set status='posted', result='опубліковано вручну (слот погашено)' where post_id=$1 and status='planned'`, [req.params.postId]);
+      await q(`update plan_slot set status='published' where post_id=$1 and status in ('drafted','approved','scheduled')`, [req.params.postId]);
+    }
     return { ok: true, results };
   } catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
@@ -1129,6 +1131,12 @@ app.post("/api/posts/:postId/review", async (req: any, reply) => {
   const status = String(req.body?.status ?? "");
   if (!["approved", "needs_work", "archived", ""].includes(status)) return reply.code(400).send({ error: "невідомий статус" });
   await q(`update post set review=nullif($2,'') where id=$1`, [req.params.postId, status]);
+  // синхронізація скелета плану: затвердив -> слот approved; заархівував -> слот звільняється
+  if (status === "approved")
+    await q(`update plan_slot set status='approved' where post_id=$1 and status='drafted'`, [req.params.postId]);
+  else if (status === "archived")
+    await q(`update plan_slot set status = case when match_source_id is null then 'empty' else 'matched' end, post_id=null
+             where post_id=$1 and status in ('drafted','approved')`, [req.params.postId]);
   return { ok: true };
 });
 
@@ -1194,6 +1202,130 @@ app.get("/api/channel-plan/:channel", async (req: any) => {
   const r = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key=$2`, [req.user.workspace_id, "channel_plan_" + req.params.channel]);
   let rows: any[] = []; try { rows = r ? JSON.parse(r.content) : []; } catch { rows = []; }
   return { channel: req.params.channel, rows };
+});
+
+// ===================== ПЛАН-СКЕЛЕТ (workspace-scoped слоти: що і коли має вийти) =====================
+// Згенерувати скелет: v2 канальний план -> слоти з датами (з завтра, по днях плану) + авто-метчинг матеріалів
+app.post("/api/plan/generate", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  try {
+    const channel = String(req.body?.channel || "telegram").trim();
+    const horizon = Math.max(7, Math.min(90, Number(req.body?.horizon) || 14));
+    const ppw = Math.max(1, Math.min(14, Number(req.body?.posts_per_week) || 4));
+    const rows = await generateChannelPlan(ws, channel, horizon, ppw);
+    if (!rows.length) return reply.code(400).send({ error: "План порожній - спершу згенеруй стратегію (розділ Стратегія)" });
+    // старі незаповнені слоти цього каналу прибираємо (заповнені лишаються - вони вже мають пости)
+    await q(`delete from plan_slot where workspace_id=$1 and channel=$2 and status in ('empty','matched')`, [ws, channel]);
+    const anchor = new Date(); anchor.setUTCHours(12, 0, 0, 0);
+    let n = 0;
+    for (const r of rows) {
+      const day = Math.max(1, Number(r?.day) || (n + 1));
+      const d = new Date(anchor); d.setUTCDate(d.getUTCDate() + day);
+      await q(
+        `insert into plan_slot(workspace_id, slot_date, channel, rubric, theme, hook, cta) values($1,$2,$3,$4,$5,$6,$7)`,
+        [ws, d.toISOString().slice(0, 10), channel, String(r?.pillar || "").slice(0, 60) || null,
+         String(r?.message || r?.hook || "Тема").slice(0, 300), String(r?.hook || "").slice(0, 300) || null, String(r?.cta || "").slice(0, 200) || null]);
+      n++;
+    }
+    let matched = 0; try { matched = await matchPlanSlots(ws); } catch { /* метчинг не критичний */ }
+    return { ok: true, slots: n, matched };
+  } catch (e: any) { await logEvent("error", "plan", e.message, null, req.user.id); return reply.code(400).send({ error: e.message }); }
+});
+
+app.get("/api/plan", async (req: any) => {
+  const slots = await q(
+    `select ps.id, ps.slot_date, ps.channel, ps.rubric, ps.theme, ps.hook, ps.status, ps.match_note, ps.post_id, s.title as match_title
+     from plan_slot ps left join source s on s.id = ps.match_source_id
+     where ps.workspace_id=$1 order by ps.slot_date`, [req.user.workspace_id]);
+  return { slots };
+});
+
+app.post("/api/plan/match", async (req: any, reply) => {
+  try { const n = await matchPlanSlots(req.user.workspace_id); return { ok: true, matched: n }; }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+
+// Згенерувати пост для слота: from='material' (зі зметченого матеріалу) або 'theme' (чиста генерація з теми)
+app.post("/api/plan/slots/:id/generate", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const slot = await one<{ id: string; theme: string; hook: string | null; cta: string | null; rubric: string | null; channel: string; match_source_id: string | null; status: string }>(
+    `select id, theme, hook, cta, rubric, channel, match_source_id, status from plan_slot where id=$1 and workspace_id=$2`, [req.params.id, ws]);
+  if (!slot) return reply.code(404).send({ error: "слот не знайдено" });
+  try {
+    const useMaterial = req.body?.from === "material" && slot.match_source_id;
+    let sourceId = slot.match_source_id;
+    if (!useMaterial) {
+      // генерація «з теми»: джерело-план (origin='plan') з самою темою як матеріалом
+      const src = await one<{ id: string }>(
+        `insert into source(workspace_id, origin, title, transcript) values($1,'plan',$2,$3) returning id`,
+        [ws, slot.theme.slice(0, 200), `Тема поста: ${slot.theme}${slot.hook ? `\nГачок: ${slot.hook}` : ""}${slot.cta ? `\nЗаклик: ${slot.cta}` : ""}`]);
+      sourceId = src!.id;
+    }
+    const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [sourceId]);
+    const idea = `${slot.theme}${slot.hook ? `. Гачок: ${slot.hook}` : ""}${slot.cta ? `. Заклик: ${slot.cta}` : ""}`;
+    await generatePostsOnePass(run!.id, 1, [idea]);
+    const post = await one<{ id: string }>(`select id from post where run_id=$1 and stage='final' limit 1`, [run!.id]);
+    if (!post) throw new Error("пост не згенерувався");
+    // привʼязка пост<->слот + рубрика слота + канал слота увімкнений
+    await q(`update post set rubric=coalesce($2, rubric), channels=coalesce(channels,'{}'::jsonb) || $3::jsonb where id=$1`,
+      [post.id, slot.rubric, JSON.stringify({ [slot.channel]: { on: true } })]);
+    await q(`update plan_slot set status='drafted', post_id=$2 where id=$1`, [slot.id, post.id]);
+    return { ok: true, postId: post.id };
+  } catch (e: any) { await logEvent("error", "plan_slot", e.message, { slotId: slot.id }, req.user.id); return reply.code(500).send({ error: e.message }); }
+});
+
+// ===================== МАТЕРІАЛИ (стрічка сировини) =====================
+app.get("/api/materials", async (req: any) => {
+  const rows = await q(
+    `select s.id, s.origin, coalesce(s.title,'') as title, left(s.transcript, 260) as preview,
+            length(s.transcript) as chars, s.created_at,
+            ps.id as slot_id, ps.theme as slot_theme, ps.rubric as slot_rubric, ps.slot_date
+     from source s
+     left join plan_slot ps on ps.match_source_id = s.id and ps.status='matched'
+     where s.workspace_id=$1 and s.archived=false and coalesce(s.transcript,'') <> ''
+     order by s.created_at desc limit 60`, [req.user.workspace_id]);
+  return { materials: rows };
+});
+app.get("/api/materials/:id", async (req: any, reply) => {
+  const m = await one(`select id, origin, title, transcript, created_at from source where id=$1 and workspace_id=$2`, [req.params.id, req.user.workspace_id]);
+  if (!m) return reply.code(404).send({ error: "матеріал не знайдено" });
+  return m;
+});
+app.post("/api/materials/:id/archive", async (req: any, reply) => {
+  const r = await one(`update source set archived=true where id=$1 and workspace_id=$2 returning id`, [req.params.id, req.user.workspace_id]);
+  if (!r) return reply.code(404).send({ error: "матеріал не знайдено" });
+  await q(`update plan_slot set status='empty', match_source_id=null, match_note=null where workspace_id=$1 and match_source_id=$2 and status='matched'`, [req.user.workspace_id, req.params.id]);
+  return { ok: true };
+});
+// Ідеї з матеріалу (для модалки вибору перед генерацією)
+app.post("/api/materials/:id/ideas", async (req: any, reply) => {
+  const m = await one<{ transcript: string }>(`select transcript from source where id=$1 and workspace_id=$2`, [req.params.id, req.user.workspace_id]);
+  if (!m) return reply.code(404).send({ error: "матеріал не знайдено" });
+  try { const ideas = await extractIdeasFromText(req.user.workspace_id, m.transcript, Number(req.body?.count) || 6); return { ok: true, ideas }; }
+  catch (e: any) { return reply.code(500).send({ error: e.message }); }
+});
+// Створити пости з матеріалу (всі обрані ідеї, або 1 пост без ідей)
+app.post("/api/materials/:id/posts", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const m = await one<{ id: string }>(`select id from source where id=$1 and workspace_id=$2`, [req.params.id, ws]);
+  if (!m) return reply.code(404).send({ error: "матеріал не знайдено" });
+  try {
+    const ideas = Array.isArray(req.body?.ideas) ? req.body.ideas.map((x: any) => String(x).trim()).filter(Boolean) : [];
+    const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [m.id]);
+    const count = await generatePostsOnePass(run!.id, ideas.length || 1, ideas.length ? ideas : undefined);
+    // якщо матеріал зметчений зі слотом - привʼяжемо перший пост до слота
+    const slot = await one<{ id: string; rubric: string | null; channel: string }>(
+      `select id, rubric, channel from plan_slot where workspace_id=$1 and match_source_id=$2 and status='matched' limit 1`, [ws, m.id]);
+    if (slot) {
+      const post = await one<{ id: string }>(`select id from post where run_id=$1 and stage='final' order by created_at limit 1`, [run!.id]);
+      if (post) {
+        await q(`update post set rubric=coalesce($2, rubric), channels=coalesce(channels,'{}'::jsonb) || $3::jsonb where id=$1`,
+          [post.id, slot.rubric, JSON.stringify({ [slot.channel]: { on: true } })]);
+        await q(`update plan_slot set status='drafted', post_id=$2 where id=$1`, [slot.id, post.id]);
+      }
+    }
+    return { ok: true, count };
+  } catch (e: any) { await logEvent("error", "material_posts", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
 });
 
 // ===================== V2: АТОМІЗАЦІЯ (Prompt 10) =====================
@@ -1346,10 +1478,12 @@ app.post("/api/schedule", async (req: any, reply) => {
   const existing = await one<{ id: string }>(`select id from schedule_slot where post_id=$1 and status='planned' limit 1`, [postId]);
   if (existing) {
     await q(`update schedule_slot set scheduled_at=$2 where id=$1`, [existing.id, req.body?.scheduledAt ?? null]);
+    await q(`update plan_slot set status='scheduled' where post_id=$1 and status in ('drafted','approved')`, [postId]);
     return { ok: true, id: existing.id, moved: true };
   }
   const r = await one<{ id: string }>(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned') returning id`,
     [postId, req.body?.scheduledAt ?? null]);
+  await q(`update plan_slot set status='scheduled' where post_id=$1 and status in ('drafted','approved')`, [postId]);
   return { ok: true, id: r!.id };
 });
 
@@ -1413,18 +1547,38 @@ app.post("/api/schedule/auto", async (req: any) => {
   // часовий пояс воркспейсу - щоб час публікацій був «стінним» у поясі користувача
   const tzRow = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='timezone'`, [ws]);
   const tz = tzRow?.content || "Europe/Kyiv";
+  // 3.5) пости, привʼязані до слотів ПЛАНУ, стають САМЕ на дату свого слота (перший час зі стратегії)
+  let count = 0;
+  let rest = units;
+  if (units.length) {
+    const withSlot = await q<{ post_id: string; slot_date: string }>(
+      `select post_id, slot_date::text as slot_date from plan_slot
+       where workspace_id=$1 and post_id = any($2) and status in ('drafted','approved','scheduled')`,
+      [ws, units.map((u) => u.id)]);
+    const slotByPost = new Map(withSlot.map((r) => [r.post_id, r.slot_date]));
+    const [h0, m0] = times[0].split(":").map(Number);
+    for (const u of units.filter((x) => slotByPost.has(x.id))) {
+      const [Y, Mo, D] = String(slotByPost.get(u.id)).slice(0, 10).split("-").map(Number);
+      const dd = zonedToUTC(Y, Mo, D, h0, m0, tz);
+      const when = dd.getTime() > Date.now() ? dd : new Date(Date.now() + 10 * 60 * 1000); // дата слота в минулому -> через 10 хв
+      await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [u.id, when.toISOString()]);
+      await q(`update plan_slot set status='scheduled' where post_id=$1 and status in ('drafted','approved')`, [u.id]);
+      count++;
+    }
+    rest = units.filter((x) => !slotByPost.has(x.id));
+  }
   // 4) times.length постів/день у дозволені дні (за поясом); надлишок - на наступні тижні
   const tzToday = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()).split("-").map(Number);
   const cursor = new Date(Date.UTC(tzToday[0], tzToday[1] - 1, tzToday[2], 12, 0, 0)); // календарний курсор (полудень UTC, без DST-стрибків)
-  let count = 0, off = 1, i = 0;
-  while (i < units.length && off <= 120) {
+  let off = 1, i = 0;
+  while (i < rest.length && off <= 120) {
     const c = new Date(cursor); c.setUTCDate(c.getUTCDate() + off);
     const Y = c.getUTCFullYear(), Mo = c.getUTCMonth() + 1, D = c.getUTCDate();
     if (bestDays.length && !bestDays.includes(c.getUTCDay())) { off++; continue; }
-    for (let k = 0; k < times.length && i < units.length; k++, i++) {
+    for (let k = 0; k < times.length && i < rest.length; k++, i++) {
       const [h, m] = times[k].split(":").map(Number);
       const dd = zonedToUTC(Y, Mo, D, h, m, tz);
-      await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [units[i].id, dd.toISOString()]);
+      await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [rest[i].id, dd.toISOString()]);
       count++;
     }
     off++;
