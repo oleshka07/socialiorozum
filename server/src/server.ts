@@ -1257,7 +1257,8 @@ app.post("/api/plan/generate", async (req: any, reply) => {
       }
     } else {
       const slots = await buildLiteSkeleton(ws, horizon); // кидає чітку помилку, якщо нема стратегії
-      await q(`delete from plan_slot where workspace_id=$1 and channel='all' and status in ('empty','matched')`, [ws]);
+      // Lite = ОДИН спільний скелет: прибираємо незаповнені слоти БУДЬ-ЯКОГО каналу (включно з легасі-скелетами до переходу на channel='all')
+      await q(`delete from plan_slot where workspace_id=$1 and status in ('empty','matched')`, [ws]);
       for (const sl of slots) {
         const d = new Date(anchor); d.setUTCDate(d.getUTCDate() + sl.day);
         await q(`insert into plan_slot(workspace_id, slot_date, channel, rubric, theme, hook) values($1,$2,'all',$3,$4,$5)`,

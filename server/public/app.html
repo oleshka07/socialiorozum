@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>socialio - кабінет</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -230,15 +230,47 @@
   #toast.show{opacity:1}
   .modal{position:fixed;inset:0;z-index:60;background:rgba(20,28,23,.55);backdrop-filter:blur(6px);display:grid;place-items:center;padding:20px;overflow:auto}
   .modal-card{width:100%;max-width:560px;background:var(--surface);border:1px solid var(--line);border-radius:22px;box-shadow:var(--shadow-lg);overflow:hidden;animation:pop .35s ease}
+  /* ---- мобільна версія (mobile-first: нижня навігація, safe-area, без горизонтального скролу) ---- */
+  .bottomnav{display:none}
   @media(max-width:860px){
-    .layout{flex-direction:column}
-    .sidebar{width:auto;height:auto;position:static;flex-direction:row;flex-wrap:nowrap;align-items:center;overflow-x:auto;overflow-y:hidden;border-right:none;border-bottom:1px solid var(--line);padding:9px 12px;gap:6px}
-    .sidebar .navgroup,.usercard{display:none}
-    .navitem .lbl{white-space:nowrap}
-    .content{padding:18px 16px 70px}
+    html,body{overflow-x:hidden}
+    .content{padding:14px 14px calc(92px + env(safe-area-inset-bottom));max-width:100%}
+    .content img{max-width:100%;height:auto}
     .crow,.grid2,.inbox{grid-template-columns:1fr !important}
     .rail{position:static}
     .stat-grid{grid-template-columns:repeat(2,1fr)}
+    .studio-grid{grid-template-columns:1fr}
+    /* топбар: один компактний рядок, таби ховаємо (їх замінює нижня навігація) */
+    .topnav{flex-wrap:nowrap;padding:8px 12px;padding-left:calc(12px + env(safe-area-inset-left));padding-right:calc(12px + env(safe-area-inset-right));gap:8px}
+    .topnav-tabs{display:none}
+    .topnav-right{margin-left:auto;gap:6px}
+    .topnav .wordmark{font-size:16px}
+    #scorePill{padding:7px 9px;font-size:12px}
+    #genPostsBtn{padding:9px 12px;font-size:13px}
+    /* нижня навігація */
+    .bottomnav{position:fixed;left:0;right:0;bottom:0;z-index:45;display:flex;background:color-mix(in srgb, var(--surface) 94%, transparent);backdrop-filter:blur(14px);border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+    .bottomnav .navitem{flex:1;flex-direction:column;gap:3px;padding:6px 2px;font-size:10.5px;font-weight:600;border-radius:10px;justify-content:center;text-align:center}
+    .bottomnav .navitem svg{width:20px;height:20px}
+    .bottomnav .navitem.active{background:transparent;color:var(--brand);font-weight:800}
+    .bottomnav .navitem .lbl{flex:none}
+    /* вкладки/фільтри скролються, не ламають ширину */
+    .tabs{max-width:100%;overflow-x:auto;scrollbar-width:none}
+    .tabs::-webkit-scrollbar{display:none}
+    .tab{white-space:nowrap}
+    .ftabs{flex-wrap:wrap}
+    /* модалки в межах екрана */
+    .modal{padding:10px}
+    .modal-card{max-height:calc(100dvh - 20px);overflow:auto}
+    /* календар: 7 днів скролються горизонтально всередині панелі */
+    .cal{grid-template-columns:repeat(7,minmax(86px,1fr));overflow-x:auto;padding-bottom:6px}
+    /* композер: панелі в стовпчик, кнопки внизу з safe-area */
+    .cmp-left{padding:14px}
+    .cmp-right{padding:14px}
+    .cmp-foot{padding:10px 12px calc(10px + env(safe-area-inset-bottom));gap:8px}
+    .cmp-foot button{flex:1 1 auto;justify-content:center}
+    .phone{max-width:100%}
+    /* плаваюча панель масових дій - над нижньою навігацією */
+    #bulkBar{bottom:calc(76px + env(safe-area-inset-bottom)) !important;max-width:calc(100vw - 20px);flex-wrap:wrap;justify-content:center}
   }
   /* ---- повноекранний композер (2 панелі з незалежним скролом) ---- */
   .cmp-ov{position:fixed;inset:0;z-index:80;background:var(--bg);display:flex;flex-direction:column;animation:pop .25s ease}
@@ -317,6 +349,15 @@
       </div>
     </div>
   </header>
+
+  <!-- нижня навігація (мобільна): ті самі data-view, підсвітку/кліки веде selectView -->
+  <nav class="bottomnav">
+    <div class="navitem active" data-view="create"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L18 10a2.8 2.8 0 00-4-4L4 16v4z"></path><path d="M13 7l4 4"></path></svg><span class="lbl">Створення</span></div>
+    <div class="navitem" data-view="publish"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M4 9h16M8 3v3M16 3v3"></path></svg><span class="lbl">Публікація</span></div>
+    <div class="navitem" data-view="brand"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a4 4 0 014 4 3.5 3.5 0 01.5 6.9A4 4 0 0112 21a4 4 0 01-4.5-7.1A3.5 3.5 0 018 7a4 4 0 014-4z"></path><path d="M12 3v18"></path></svg><span class="lbl">Бренд</span></div>
+    <div class="navitem" data-view="strategy"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3"></circle></svg><span class="lbl">Стратегія</span></div>
+    <div class="navitem" data-view="analytics"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V11M12 20V4M19 20v-6M3 20h18"></path></svg><span class="lbl">Аналітика</span></div>
+  </nav>
 
   <main class="main">
     <div class="content">
@@ -931,26 +972,36 @@ async function openMaterialIdeas(matId){
 }
 
 // ---------- ПЛАН: скелет ----------
-let PlanSlots=[], PlanChan='all';
+let PlanSlots=[], PlanAll=[], PlanChan='all', PlanChans=[];
 const CP_LBL={telegram:'Telegram',instagram:'Instagram',threads:'Threads',facebook:'Facebook',all:'Спільний'};
 const SLOT_ST={empty:['⬜ порожньо','var(--faint)','var(--surface2)'],matched:['📎 є матеріал','var(--amber)','var(--amber-soft, #f7ecd8)'],drafted:['✍️ пост','var(--tg)','var(--surface2)'],approved:['✅ затверджено','var(--brand)','var(--brand-soft)'],scheduled:['🗓 у календарі','var(--brand)','var(--brand-soft)'],published:['✈️ вийшло','var(--muted)','var(--surface2)']};
 function planSyncMode(){
-  // Lite: спільний скелет (channel=all), без вибору каналу. PRO: вкладки 4 каналів.
+  // Lite: ОДИН спільний список (усі слоти незалежно від каналу - включно зі старими). PRO: вкладки Спільний(якщо є)+4 канали.
   const tabs=$('planChanTabs');
   if(!PRO){ PlanChan='all'; if(tabs) tabs.style.display='none'; }
   else {
-    if(PlanChan==='all') PlanChan='telegram';
-    if(tabs){ tabs.style.display=''; tabs.innerHTML=['telegram','instagram','threads','facebook'].map(c=>'<div class="tab'+(PlanChan===c?' on':'')+'" data-pc="'+c+'">'+CP_LBL[c]+'</div>').join(''); tabs.querySelectorAll('[data-pc]').forEach(t=>t.onclick=()=>{ PlanChan=t.dataset.pc; if($('planChannel')) $('planChannel').value=PlanChan; loadPlan(); }); }
-    if($('planChannel')) $('planChannel').value=PlanChan;
+    const opts=(PlanChans.includes('all')?['all']:[]).concat(['telegram','instagram','threads','facebook']);
+    if(!opts.includes(PlanChan)) PlanChan=opts[0];
+    if(tabs){ tabs.style.display=''; tabs.innerHTML=opts.map(c=>'<div class="tab'+(PlanChan===c?' on':'')+'" data-pc="'+c+'">'+CP_LBL[c]+'</div>').join(''); tabs.querySelectorAll('[data-pc]').forEach(t=>t.onclick=()=>{ PlanChan=t.dataset.pc; applyPlanFilter(); }); }
+    if($('planChannel')&&PlanChan!=='all') $('planChannel').value=PlanChan;
   }
 }
-async function loadPlan(){ planSyncMode(); try{ const r=await api('/plan?channel='+encodeURIComponent(PlanChan)); PlanSlots=r.slots||[]; }catch(e){ PlanSlots=[]; } renderPlan(); updateCounts(); }
+function applyPlanFilter(){
+  planSyncMode();
+  PlanSlots = PRO ? PlanAll.filter(s=>s.channel===PlanChan) : PlanAll; // Lite бачить УСЕ (і легасі-слоти конкретних каналів)
+  renderPlan(); updateCounts();
+}
+async function loadPlan(){
+  try{ const r=await api('/plan'); PlanAll=r.slots||[]; PlanChans=[...new Set(PlanAll.map(s=>s.channel).filter(Boolean))]; }
+  catch(e){ PlanAll=[]; PlanChans=[]; }
+  applyPlanFilter();
+}
 function renderPlan(){
   const list=$('planList'); if(!list) return;
   const filled=PlanSlots.filter(s=>s.status!=='empty').length;
   if($('planProgressLabel')) $('planProgressLabel').textContent=PlanSlots.length?('Скелет · заповнено '+filled+' з '+PlanSlots.length):'Скелет плану';
   if($('planProgressBar')) $('planProgressBar').style.width=PlanSlots.length?Math.round(filled/PlanSlots.length*100)+'%':'0%';
-  if(!PlanSlots.length){ list.innerHTML='<div class="empty" style="padding:20px">Скелета ще нема. Обери канал вище і натисни «Згенерувати скелет» (спершу потрібна стратегія - розділ Стратегія → Згенерувати).</div>'; return; }
+  if(!PlanSlots.length){ list.innerHTML='<div class="empty" style="padding:20px">Скелета ще нема - натисни «Згенерувати скелет» (спершу потрібна стратегія: розділ Стратегія → Згенерувати).</div>'; return; }
   const DOW=['Нд','Пн','Вт','Ср','Чт','Пт','Сб'];
   list.innerHTML=PlanSlots.map(s=>{
     const st=SLOT_ST[s.status]||SLOT_ST.empty;
@@ -964,7 +1015,8 @@ function renderPlan(){
     return '<div data-slot="'+s.id+'" style="display:flex;align-items:center;gap:11px;padding:12px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap">'
       +'<span style="font-size:12px;font-weight:700;color:var(--ink2);background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:5px 10px;min-width:82px;text-align:center;flex:none">'+day+'</span>'
       +(s.rubric?'<span class="ptag" style="color:var(--brand);border-color:var(--brand)">🏷 '+esc(s.rubric)+'</span>':'')
-      +'<div style="flex:1;min-width:200px"><div style="font-size:13.5px;font-weight:600;line-height:1.35">'+esc(s.theme)+'</div>'
+      +((!PRO&&s.channel&&s.channel!=='all')?'<span class="ptag">'+esc(CP_LBL[s.channel]||s.channel)+'</span>':'')
+      +'<div style="flex:1;min-width:200px"><div style="font-size:13.5px;font-weight:600;line-height:1.35">'+esc(s.theme||'')+'</div>'
         +(s.match_note?'<div style="font-size:11.5px;color:var(--amber);margin-top:2px">📎 '+esc(s.match_note)+'</div>':'')+'</div>'
       +'<span style="flex:none;font-size:11.5px;font-weight:700;color:'+st[1]+';background:'+st[2]+';padding:5px 11px;border-radius:20px">'+st[0]+'</span>'
       +(act?'<span class="btnrow" style="margin:0;flex:none">'+act+'</span>':'')
@@ -976,7 +1028,7 @@ function renderPlan(){
       if(a==='topost'){ setCTab('posts'); setLayout('studio'); return; }
       if(a==='tocal'){ go('publish'); return; }
       const from=a==='material'?'material':'theme';
-      aiBusy('✨ Генерую пост: «'+(slot?slot.theme.slice(0,60):'')+'»…');
+      aiBusy('✨ Генерую пост: «'+((slot&&slot.theme)?slot.theme.slice(0,60):'')+'»…');
       try{ await api('/plan/slots/'+id+'/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from})}); await loadPlan(); setCTab('posts'); setLayout('studio'); await loadStudioPosts(); flash('Пост створено і привʼязано до слота ✓'); }
       catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); }
     });

@@ -125,8 +125,8 @@
     "semantic_hash": "3e929595c91643444c4c4d540a929c55"
   },
   "server/src/server.ts": {
-    "mtime": 1783097946.8443072,
-    "ast_hash": "775252e7697e0ec591be506c3cdfba76",
+    "mtime": 1783099523.972262,
+    "ast_hash": "5b83ddbb30f9e02b5fe228e8b7d6ca9e",
     "semantic_hash": ""
   },
   "server/src/telegram.ts": {
@@ -155,8 +155,8 @@
     "semantic_hash": "352df4b84f4af2922ccd9adaf8e4608f"
   },
   "CLAUDE.md": {
-    "mtime": 1783096974.9483352,
-    "ast_hash": "4515d266b5e8b49b5b77cbd4873028ae",
+    "mtime": 1783098131.7043018,
+    "ast_hash": "ef505c23e9e7d4de79bdda85ae8ee3d3",
     "semantic_hash": ""
   },
   "DEPLOY.md": {
@@ -225,8 +225,8 @@
     "semantic_hash": "199a92f19b822e467cdaf95780db5fee"
   },
   "server/public/app.html": {
-    "mtime": 1783098007.5843055,
-    "ast_hash": "40d60dd4ccf30c5ad9d11ac536101977",
+    "mtime": 1783099578.8442602,
+    "ast_hash": "58c0ecc92b8754abec7930a44cea7d0d",
     "semantic_hash": ""
   },
   "server/public/auth.html": {
