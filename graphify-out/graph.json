@@ -3150,7 +3150,7 @@
       "label": "graphify",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L74",
+      "source_location": "L75",
       "_origin": "ast",
       "id": "claude_graphify",
       "community": 33,
@@ -12944,7 +12944,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CLAUDE.md",
-      "source_location": "L74",
+      "source_location": "L75",
       "weight": 1.0,
       "source": "claude_socialio_\u043a\u043e\u043d\u0442\u0435\u043d\u0442\u0433\u0440\u043e\u0432_project_memory_single_source_of_truth",
       "target": "claude_graphify",
@@ -15003,5 +15003,5 @@
       "source_file": "server/public/app.html"
     }
   ],
-  "built_at_commit": "0249e8c7ea8aa5e1f934741f6d16bfea8ea598b0"
+  "built_at_commit": "0c243d42fe59170cd5c40c57c39bd83fa4bf139f"
 }

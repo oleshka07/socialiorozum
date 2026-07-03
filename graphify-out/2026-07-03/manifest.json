@@ -1,7 +1,7 @@
 {
   "server/db/schema.sql": {
-    "mtime": 1783015643.6077077,
-    "ast_hash": "496870d2c57c43112d0e50a46d42f56e",
+    "mtime": 1783088341.836584,
+    "ast_hash": "e5972418b077d6c036517369f7abcaa8",
     "semantic_hash": ""
   },
   "server/package.json": {
@@ -15,9 +15,9 @@
     "semantic_hash": "0a46780760c16475d3cdf6c024879292"
   },
   "server/src/autopost.ts": {
-    "mtime": 1782731362.9623814,
-    "ast_hash": "69bfddef5f5a34b1cbbeedd48408eb91",
-    "semantic_hash": "69bfddef5f5a34b1cbbeedd48408eb91"
+    "mtime": 1783088508.7525792,
+    "ast_hash": "9f8f61c248ad8908692c016bde6b1149",
+    "semantic_hash": ""
   },
   "server/src/db.ts": {
     "mtime": 1782731362.9623814,
@@ -105,8 +105,8 @@
     "semantic_hash": "146bd4a919c3218078bd4f79b9182554"
   },
   "server/src/pipeline.ts": {
-    "mtime": 1783019287.099464,
-    "ast_hash": "1da6db81555151ca879bf95b11713f40",
+    "mtime": 1783088397.1565826,
+    "ast_hash": "5e641a91aad15fca19af6ffdb79f05f8",
     "semantic_hash": ""
   },
   "server/src/publisher.ts": {
@@ -115,8 +115,8 @@
     "semantic_hash": "faff3a9d3355e82f3ff73dd1935970fa"
   },
   "server/src/rss-poller.ts": {
-    "mtime": 1783015725.2957127,
-    "ast_hash": "2354368d2780b93302edaad53397671f",
+    "mtime": 1783088581.8525772,
+    "ast_hash": "a53d8722fb8a15602e9b2ef0c71a2e06",
     "semantic_hash": ""
   },
   "server/src/rss.ts": {
@@ -125,8 +125,8 @@
     "semantic_hash": "3e929595c91643444c4c4d540a929c55"
   },
   "server/src/server.ts": {
-    "mtime": 1783015898.5637228,
-    "ast_hash": "5f6c977f4781ae675f8b31dce2fe0849",
+    "mtime": 1783088564.0725777,
+    "ast_hash": "61bd1a1d9069f8b2bc9096b16f951971",
     "semantic_hash": ""
   },
   "server/src/telegram.ts": {
@@ -155,8 +155,8 @@
     "semantic_hash": "352df4b84f4af2922ccd9adaf8e4608f"
   },
   "CLAUDE.md": {
-    "mtime": 1783016110.1917355,
-    "ast_hash": "523cd319e5ffb1f7b383ed1abc8402bc",
+    "mtime": 1783019383.6274617,
+    "ast_hash": "52135d67777db8650fd97953381d478b",
     "semantic_hash": ""
   },
   "DEPLOY.md": {
@@ -225,8 +225,8 @@
     "semantic_hash": "199a92f19b822e467cdaf95780db5fee"
   },
   "server/public/app.html": {
-    "mtime": 1783016020.79573,
-    "ast_hash": "a8bcbe660d47e9cc2ad9a314c45799f0",
+    "mtime": 1783089034.228534,
+    "ast_hash": "7122dbc5568cc379a080476b64affa0b",
     "semantic_hash": ""
   },
   "server/public/auth.html": {

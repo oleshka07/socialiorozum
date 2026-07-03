@@ -85,6 +85,9 @@
   .main{margin-left:0 !important;width:100%}
   .content{max-width:1460px;margin:0 auto}
   .pagehead{margin-bottom:14px}
+  .usermenu{position:absolute;right:0;top:calc(100% + 8px);z-index:80;min-width:250px;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow-lg, 0 12px 40px rgba(0,0,0,.18));animation:pop .18s ease;overflow:hidden}
+  .umitem{padding:10px 14px;font-size:13.5px;font-weight:600;cursor:pointer;color:var(--ink2)}
+  .umitem:hover{background:var(--surface2)}
   @media(max-width:1000px){ .topnav{flex-wrap:wrap} .topnav-right{margin-left:0} }
   .ptag{font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--line);border-radius:6px;padding:2px 7px;white-space:nowrap}
   .pcard.selc{outline:2px solid var(--brand);outline-offset:-1px}
@@ -273,19 +276,27 @@
       <div class="navitem" data-view="publish"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M4 9h16M8 3v3M16 3v3"></path></svg><span class="lbl">Публікація</span></div>
       <div class="navitem" data-view="brand"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a4 4 0 014 4 3.5 3.5 0 01.5 6.9A4 4 0 0112 21a4 4 0 01-4.5-7.1A3.5 3.5 0 018 7a4 4 0 014-4z"></path><path d="M12 3v18"></path></svg><span class="lbl">Бренд</span></div>
       <div class="navitem" data-view="strategy"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3"></circle></svg><span class="lbl">Стратегія</span></div>
-      <div class="navitem" data-view="sources"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v4a2 2 0 002 2h12a2 2 0 002-2v-4M12 3v11M8 10l4 4 4-4"></path></svg><span class="lbl">Джерела</span></div>
       <div class="navitem" data-view="analytics"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V11M12 20V4M19 20v-6M3 20h18"></path></svg><span class="lbl">Аналітика</span></div>
-      <div class="navitem" data-view="settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 5v4M8 15v4"></path></svg><span class="lbl">Налаштування</span></div>
     </nav>
     <div class="topnav-right">
       <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--faint)"><span class="cdot" id="srvDot" style="width:8px;height:8px;background:var(--danger)"></span><span id="saved" style="opacity:0;transition:.3s;color:var(--brand)">✓</span></span>
       <button id="scorePill" title="Заповнення профілю - натисни, щоб побачити задачі">⚙ <span id="scoreVal">…</span></button>
-      <div class="modeseg" id="modeSeg" title="Lite - просто і швидко. PRO - повний контроль."><span id="segLite" class="on">Lite</span><span id="segPro" class="pro">⚡ PRO</span></div>
       <button class="primary" id="genPostsBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.8L19 9l-5.1 1.2L12 15l-1.9-4.8L5 9l5.1-1.2z"></path></svg>Згенерувати</button>
-      <button class="icon" id="themeToggle" title="Тема" style="width:37px;height:37px"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path id="themeIcon" d="M21 12.8A9 9 0 1111.2 3a7 7 0 109.8 9.8z"></path></svg></button>
-      <div class="avatar" id="avatar" title="Акаунт">О</div>
-      <div id="logoutBtn" title="Вийти" style="cursor:pointer;color:var(--faint);padding:4px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"></path></svg></div>
-      <span id="userEmail" style="display:none"></span>
+      <div style="position:relative">
+        <div class="avatar" id="avatar" title="Акаунт і налаштування" style="cursor:pointer">О<span id="avProBadge" style="display:none;position:absolute;top:-4px;right:-5px;font-size:10px">⚡</span></div>
+        <div id="userMenu" class="usermenu" style="display:none">
+          <div style="padding:11px 14px;border-bottom:1px solid var(--line)"><div style="font-weight:700;font-size:13.5px" id="umName">Акаунт <span id="umPro" style="display:none;color:var(--brand)">⚡ PRO</span></div><div id="userEmail" style="font-size:11.5px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:210px"></div></div>
+          <div style="padding:10px 14px;display:flex;align-items:center;gap:10px"><span style="flex:1;font-size:13px;font-weight:600">Режим</span><div class="modeseg"><span id="segLite" class="on">Lite</span><span id="segPro" class="pro">⚡ PRO</span></div></div>
+          <div style="padding:4px 14px 10px;display:flex;align-items:center;gap:10px"><span style="flex:1;font-size:13px;font-weight:600">Тема</span><button class="icon" id="themeToggle" title="Тема" style="width:33px;height:33px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path id="themeIcon" d="M21 12.8A9 9 0 1111.2 3a7 7 0 109.8 9.8z"></path></svg></button></div>
+          <div style="padding:0 14px 10px;display:flex;align-items:center;gap:10px"><span style="flex:1;font-size:13px;font-weight:600">Мова застосунку</span><select id="appLang" style="width:auto;font-size:12.5px;padding:6px 9px" disabled title="Мультимовність скоро"><option>Українська</option></select></div>
+          <div style="height:1px;background:var(--line)"></div>
+          <div class="umitem" data-um="profile">👤 Профіль</div>
+          <div class="umitem" data-um="channels">🔗 Канали</div>
+          <div class="umitem" data-um="sources">📥 Джерела</div>
+          <div style="height:1px;background:var(--line)"></div>
+          <div class="umitem" id="logoutBtn" style="color:var(--danger)">Вийти</div>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -433,21 +444,31 @@
         </div>
       </section>
 
-      <!-- ============ BRAND ============ -->
+      <!-- ============ BRAND: Голос / Візуал ============ -->
       <section class="viewsec" data-view="brand">
-        <div class="panel">
-          <div class="ph">✨ Виведи свій голос за прикладами</div>
-          <div class="hint" style="margin-bottom:10px">Встав 3–5 своїх постів - AI опише твій тон, щоб усі тексти звучали як ти.</div>
-          <textarea id="voiceExamples" placeholder="Встав сюди 3–5 своїх найкращих постів…" style="min-height:96px"></textarea>
-          <div class="btnrow"><button class="primary" id="deriveVoiceBtn">✨ Вивести голос</button><span id="voiceMsg" style="font-size:12px;color:var(--muted)"></span></div>
-          <div id="derivedVoice"></div>
+        <div class="tabs" id="bTabs" style="margin-bottom:16px">
+          <div class="tab on" data-btab="voice">✍️ Голос</div>
+          <div class="tab" data-btab="visual">🎨 Візуал</div>
         </div>
-        <div class="grid2">
-          <div class="panel" style="margin:0"><label class="fl">🗣️ Голос бренду (Tone of Voice)</label><textarea id="tov"></textarea></div>
-          <div class="panel" style="margin:0"><label class="fl">👥 Аудиторія / Marketing Context</label><textarea id="mkt"></textarea></div>
-          <div class="panel" style="margin:0"><label class="fl">🛡️ Правила «Де-AI»</label><textarea id="deai"></textarea></div>
-          <div class="panel" style="margin:0"><label class="fl">📋 Загальна контент-стратегія (нотатки)</label><textarea id="strat"></textarea></div>
-          <div class="panel" style="margin:0;grid-column:1/-1"><label class="fl">🌐 Мова виводу (застосовується до всіх кроків)</label><select id="langSel"><option>Українська</option><option>Російська</option><option>English</option><option>Polski</option><option>Deutsch</option><option>Чеська</option><option>Іспанська</option><option>Французька</option><option>Італійська</option></select><div class="hint">Збереження автоматичне.</div></div>
+        <div id="brandVoice">
+          <div class="panel">
+            <div class="ph">✨ Виведи свій голос за прикладами</div>
+            <div class="hint" style="margin-bottom:10px">Встав 3–5 своїх постів - AI опише твій тон, щоб усі тексти звучали як ти. Ці приклади також напряму живлять кожну генерацію.</div>
+            <textarea id="voiceExamples" placeholder="Встав сюди 3–5 своїх найкращих постів…" style="min-height:96px"></textarea>
+            <div class="btnrow"><button class="primary" id="deriveVoiceBtn">✨ Вивести голос</button><span id="voiceMsg" style="font-size:12px;color:var(--muted)"></span></div>
+            <div id="derivedVoice"></div>
+          </div>
+          <div class="grid2">
+            <div class="panel" style="margin:0"><label class="fl">🗣️ Голос бренду (Tone of Voice)</label><textarea id="tov"></textarea></div>
+            <div class="panel" style="margin:0"><label class="fl">👥 Аудиторія / Marketing Context</label><textarea id="mkt"></textarea></div>
+            <div class="panel" style="margin:0"><label class="fl">🛡️ Правила «Де-AI»</label><textarea id="deai"></textarea></div>
+            <div class="panel" style="margin:0"><label class="fl">🌐 Мова виводу (нею пишуться пости)</label><select id="langSel"><option>Українська</option><option>Російська</option><option>English</option><option>Polski</option><option>Deutsch</option><option>Чеська</option><option>Іспанська</option><option>Французька</option><option>Італійська</option></select><div class="hint">Збереження автоматичне.</div></div>
+          </div>
+        </div>
+        <div id="brandVisual" style="display:none">
+          <div class="panel"><label class="fl">🎨 Провайдер генерації зображень</label><select id="imgProv"></select>
+            <div class="fld" style="margin-top:12px"><label class="fl">Стиль зображень бренду</label><textarea class="txt" id="imgStyle" rows="3" placeholder="Напр.: тепла пастельна палітра, мінімалізм, живі фото людей замість ілюстрацій, без стокового вигляду…"></textarea><div class="hint">Як tone of voice, тільки для картинок: AI дотримується цього стилю в кожному згенерованому зображенні.</div></div>
+            <div class="hint">Недоступні провайдери підключає адміністратор сервісу.</div></div>
         </div>
       </section>
 
@@ -461,6 +482,7 @@
           <div class="hint">AI бере нішу/аудиторію/голос із Бази бренду → рубрики, частота, дні, теми. Рубрики застосовуються одразу (редагуй у списку нижче).</div>
           <div id="stratView" class="out"></div>
         </div>
+        <div class="panel"><label class="fl">📋 Загальні нотатки стратегії</label><textarea id="strat" placeholder="Власні тези: що просуваємо, які теми обовʼязкові, чого уникати…"></textarea><div class="hint">AI враховує ці нотатки при генерації стратегії і постів. Збереження автоматичне.</div></div>
         <div class="panel">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             <div class="ph" style="margin:0">🗂️ Контент-мікс (рубрики)</div>
@@ -489,47 +511,6 @@
         </div>
       </section>
 
-      <!-- ============ SOURCES ============ -->
-      <section class="viewsec" data-view="sources">
-        <div class="panel">
-          <div class="ph">📝 Встав транскрипт або думку</div>
-          <div class="hint" style="margin-bottom:10px">Найшвидший шлях - вставити текст і натиснути «У роботу».</div>
-          <textarea id="transcript" placeholder="Встав транскрипт сесії, голосову нотатку чи думку…" style="min-height:130px"></textarea>
-          <div class="btnrow"><button class="primary" id="toCreate">У роботу →</button><button class="ghost" id="autopilotBtn">🟢 Автопілот</button><button class="ghost" id="ffImport">🎙 Транскрибатор</button><button class="ghost" id="sampleBtn">Підставити приклад</button></div>
-          <div class="hint" id="lockHint"></div>
-        </div>
-        <div class="grid2">
-          <div class="panel" style="margin:0">
-            <div class="ph">🖼️ Медіа-бібліотека</div>
-            <div class="hint">Фото для постів (потрібні для Instagram).</div>
-            <div class="btnrow"><input type="file" id="mediaFile" accept="image/*" multiple style="font-size:13px"><button class="primary" id="mediaUpload">Завантажити</button><span id="mediaMsg" style="font-size:12px;color:var(--muted)"></span></div>
-            <div id="mediaGrid" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"></div>
-          </div>
-          <div class="panel" style="margin:0">
-            <div class="ph">📁 Google Drive</div>
-            <div class="hint">Познач папку через рідний вибір Google - поллер тягне нові фото в медіа (scope drive.file, без верифікації).</div>
-            <div class="btnrow"><span id="gdStatus" style="font-size:13px;color:var(--muted)">…</span></div>
-            <div class="btnrow"><a id="gdConnect" class="btn primary" href="/api/integrations/gdrive/connect" onclick="return connectPopup('/api/integrations/gdrive/connect')" style="display:none">🔗 Підключити</a><button class="ghost" id="gdDisconnect" style="display:none">Відключити</button></div>
-            <div id="gdFolderBox" style="display:none;margin-top:10px">
-              <div class="btnrow"><button class="primary" id="gdPick">📂 Обрати папку</button></div>
-              <div id="gdMsg" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
-              <div id="gdList" class="out" style="margin-top:8px"></div>
-            </div>
-          </div>
-        </div>
-        <div class="panel">
-          <div class="ph">📡 RSS-стрічки (авто-інжест)</div>
-          <div class="hint">Поллер кожні ~15 хв тягне нові статті у «Джерела». «Авто» = одразу проганяти кишку (обережно з вартістю AI).</div>
-          <div class="btnrow"><input class="txt" id="rssUrl" placeholder="https://example.com/feed.xml" style="flex:1;min-width:220px"><label class="rchip"><input type="checkbox" id="rssAuto"> авто-пілот</label><button class="primary" id="rssAdd">Додати</button></div>
-          <div id="rssMsg" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
-          <div id="rssList" class="out" style="margin-top:10px"></div>
-        </div>
-        <div class="panel">
-          <div style="display:flex;align-items:center;justify-content:space-between"><div class="ph" style="margin:0">🗂️ Останні джерела</div><button class="ghost" id="recReload">↻</button></div>
-          <div class="hint">Усе, що підтягнулося (RSS / Fireflies / вручну). «Відкрити» - щоб працювати з ним.</div>
-          <div id="recList" class="out" style="margin-top:8px"></div>
-        </div>
-      </section>
 
       <!-- ============ ANALYTICS ============ -->
       <section class="viewsec" data-view="analytics">
@@ -538,55 +519,13 @@
 
       <!-- ============ SETTINGS ============ -->
       <section class="viewsec" data-view="settings">
+        <div class="tabs" id="sTabs" style="margin-bottom:16px">
+          <div class="tab on" data-stab="profile">👤 Профіль</div>
+          <div class="tab" data-stab="channels">🔗 Канали</div>
+          <div class="tab" data-stab="sources">📥 Джерела</div>
+        </div>
+        <div id="setProfile">
         <div class="panel"><label class="fl">🕒 Часовий пояс</label><select id="tzSel"></select><div class="hint">Час планування й календаря рахується за цим поясом (визначається автоматично, можна змінити).</div></div>
-        <div class="panel"><label class="fl">🎨 Генерація зображень</label><select id="imgProv"></select>
-          <div class="fld" style="margin-top:12px"><label class="fl">Стиль зображень бренду</label><textarea class="txt" id="imgStyle" rows="3" placeholder="Напр.: тепла пастельна палітра, мінімалізм, живі фото людей замість ілюстрацій, без стокового вигляду…"></textarea><div class="hint">Як tone of voice, тільки для картинок: AI дотримується цього стилю в кожному згенерованому зображенні.</div></div>
-          <div class="hint">Недоступні провайдери підключає адміністратор сервісу.</div></div>
-        <div class="panel">
-          <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--tg)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M22 4L2 11l6 2 2 6 3-4 5 4 4-15z"></path></svg></span>Telegram</div>
-          <div id="tgSharedBox" style="display:none;margin:8px 0 4px">
-            <div class="hint">Найпростіше - підключи свій канал до <b>нашого бота</b> (без створення власного):</div>
-            <div class="btnrow"><button class="primary" id="tgConnectBot">🤖 Підключити наш бот</button><span id="tgConnMsg" style="font-size:12px;color:var(--muted)"></span></div>
-            <div id="tgBotSteps" style="display:none;font-size:13px;color:var(--ink2);margin-top:6px;line-height:1.7"></div>
-            <div style="border-top:1px solid var(--line);margin:12px 0 2px"></div>
-          </div>
-          <details class="disc" style="margin-top:6px">
-            <summary>⚙️ Розширені налаштування (власний бот)</summary>
-            <div style="padding:4px 14px 14px">
-              <div class="hint" style="line-height:1.7"><b>Власний бот:</b> 1. @BotFather → <code>/newbot</code> → токен. 2. Додай бота <b>адміном</b> у канал і групу. 3. Встав токен; канал - <code>@username</code> або id; група - числовий id. 4. «Перевірити».</div>
-              <div class="fld" style="margin-top:10px"><label class="fl">Bot Token</label><input class="txt" type="password" id="tgToken" placeholder="123456:ABC-..."></div>
-              <div class="fld" style="margin-top:8px"><label class="fl">Канал (chat id або @username)</label><input class="txt" id="tgChannel" placeholder="@my_channel або -1001234567890"></div>
-              <div class="fld" style="margin-top:8px"><label class="fl">Група (chat id)</label><input class="txt" id="tgGroup" placeholder="-1001234567890"></div>
-              <div class="btnrow"><button class="primary" id="tgSave">Зберегти</button><button class="ghost" id="tgTest">Перевірити з'єднання</button></div>
-              <div id="tgResult" class="out"></div>
-            </div>
-          </details>
-        </div>
-        <div class="grid2">
-          <div class="panel" style="margin:0">
-            <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--th)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M12 3c5 0 8 3 8 9s-3 9-8 9-8-3-8-9c0-2 .5-3.5 1.5-4.5"></path></svg></span>Threads</div>
-            <div class="hint">Окремий OAuth (вхід через Threads). Потрібні <code>threads_content_publish</code> + <code>threads_manage_insights</code>, акаунт у Threads Testers.</div>
-            <div class="btnrow"><span id="thStatus" style="font-size:13px;color:var(--muted)">…</span></div>
-            <div class="btnrow"><a id="thConnect" class="btn primary" href="/api/integrations/threads/connect" onclick="return connectPopup('/api/integrations/threads/connect')" style="display:none">🔗 Підключити Threads</a><button class="ghost" id="thDisconnect" style="display:none">Відключити</button></div>
-          </div>
-          <div class="panel" style="margin:0">
-            <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--ig)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M7 3h10a4 4 0 014 4v10a4 4 0 01-4 4H7a4 4 0 01-4-4V7a4 4 0 014-4zm5 5a4 4 0 100 8 4 4 0 000-8z"></path></svg></span>Facebook + Instagram</div>
-            <div class="hint">Постинг у FB-Сторінку + аналітика FB/IG. IG-публікація потребує фото.</div>
-            <div class="btnrow"><span id="mtStatus" style="font-size:13px;color:var(--muted)">…</span></div>
-            <div class="btnrow" id="mtPageRow" style="display:none"><label style="font-size:12px;color:var(--muted)">Акаунт:</label><select id="mtPage" style="width:auto;min-width:200px;font-size:12px;padding:6px 8px"></select></div>
-            <div class="btnrow"><a id="mtConnect" class="btn primary" href="/api/integrations/meta/connect" onclick="return connectPopup('/api/integrations/meta/connect')" style="display:none">🔗 Підключити</a><button class="ghost" id="mtStats" style="display:none">📊 Статистика</button><button class="ghost" id="mtVoice" style="display:none">✨ Голос з Instagram</button><button class="ghost" id="mtDisconnect" style="display:none">Відключити</button></div>
-            <div id="mtStatsOut" class="out"></div>
-          </div>
-        </div>
-        <div class="panel">
-          <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--brand)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M8.5 12.5l2.5 2.5 4.5-5"></path></svg></span>Транскрибація (Fireflies)</div>
-          <div class="hint">Ключ: Fireflies → Settings → Developer Settings → API Key. Імпортуй вручну («Джерела» → 📥) або налаштуй авто-імпорт (вебхук).</div>
-          <div class="fld" style="margin-top:10px"><label class="fl">Fireflies API Key</label><input class="txt" type="password" id="ffKey" placeholder="вставте ключ"></div>
-          <div class="fld" style="margin-top:8px"><label class="fl">🔔 Авто-імпорт: цей URL встав у Fireflies → Webhooks</label><div style="display:flex;gap:8px"><input class="txt" id="ffHook" readonly placeholder="(зʼявиться після збереження ключа)" style="font-size:12px"><button class="ghost" type="button" id="ffHookCopy">Копіювати</button></div></div>
-          <div class="fld" style="margin-top:8px"><label class="fl">Webhook Secret - має ТОЧНО збігатися з секретом у Fireflies (інакше 401), або тисни «Без підпису»</label><input class="txt" type="password" id="ffSecret" placeholder="вставте секрет"></div>
-          <label class="rchip" style="margin:8px 0"><input type="checkbox" id="ffAuto"> Авто-прогін Автопілота для імпортованих зустрічей</label>
-          <div class="btnrow"><button class="primary" id="ffSave">Зберегти</button><button class="ghost" id="ffTest">Перевірити</button><button class="ghost" id="ffNoSig" type="button">Без підпису</button><span id="ffMsg" style="font-size:12px;color:var(--muted)"></span></div>
-        </div>
         <div class="panel">
           <div class="ph">💎 Тариф</div>
           <div class="grid2" style="margin-top:6px">
@@ -627,6 +566,95 @@
           <div class="hint">Видалення акаунта: дані одразу зникнуть з кабінету, остаточно зітруться через 14 днів. Передумаєш - просто увійди протягом цього часу.</div>
           <div class="hint" style="margin-top:10px">«Почати з чистого листа» - стерти весь контент (бренд, стратегію, пости, календар, медіа) і пройти онбординг заново. Підключені канали лишаються.</div>
           <div class="btnrow"><button class="ghost" id="accReset">🔄 Почати з чистого листа</button><button class="danger" id="accDelete">Видалити акаунт</button></div>
+        </div>
+        </div>
+        <div id="setChannels" style="display:none">
+        <div class="panel">
+          <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--tg)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M22 4L2 11l6 2 2 6 3-4 5 4 4-15z"></path></svg></span>Telegram</div>
+          <div id="tgSharedBox" style="display:none;margin:8px 0 4px">
+            <div class="hint">Найпростіше - підключи свій канал до <b>нашого бота</b> (без створення власного):</div>
+            <div class="btnrow"><button class="primary" id="tgConnectBot">🤖 Підключити наш бот</button><span id="tgConnMsg" style="font-size:12px;color:var(--muted)"></span></div>
+            <div id="tgBotSteps" style="display:none;font-size:13px;color:var(--ink2);margin-top:6px;line-height:1.7"></div>
+            <div style="border-top:1px solid var(--line);margin:12px 0 2px"></div>
+          </div>
+          <details class="disc" style="margin-top:6px">
+            <summary>⚙️ Розширені налаштування (власний бот)</summary>
+            <div style="padding:4px 14px 14px">
+              <div class="hint" style="line-height:1.7"><b>Власний бот:</b> 1. @BotFather → <code>/newbot</code> → токен. 2. Додай бота <b>адміном</b> у канал і групу. 3. Встав токен; канал - <code>@username</code> або id; група - числовий id. 4. «Перевірити».</div>
+              <div class="fld" style="margin-top:10px"><label class="fl">Bot Token</label><input class="txt" type="password" id="tgToken" placeholder="123456:ABC-..."></div>
+              <div class="fld" style="margin-top:8px"><label class="fl">Канал (chat id або @username)</label><input class="txt" id="tgChannel" placeholder="@my_channel або -1001234567890"></div>
+              <div class="fld" style="margin-top:8px"><label class="fl">Група (chat id)</label><input class="txt" id="tgGroup" placeholder="-1001234567890"></div>
+              <div class="btnrow"><button class="primary" id="tgSave">Зберегти</button><button class="ghost" id="tgTest">Перевірити з'єднання</button></div>
+              <div id="tgResult" class="out"></div>
+            </div>
+          </details>
+        </div>
+        <div class="grid2">
+          <div class="panel" style="margin:0">
+            <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--th)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M12 3c5 0 8 3 8 9s-3 9-8 9-8-3-8-9c0-2 .5-3.5 1.5-4.5"></path></svg></span>Threads</div>
+            <div class="hint">Окремий OAuth (вхід через Threads). Потрібні <code>threads_content_publish</code> + <code>threads_manage_insights</code>, акаунт у Threads Testers.</div>
+            <div class="btnrow"><span id="thStatus" style="font-size:13px;color:var(--muted)">…</span></div>
+            <div class="btnrow"><a id="thConnect" class="btn primary" href="/api/integrations/threads/connect" onclick="return connectPopup('/api/integrations/threads/connect')" style="display:none">🔗 Підключити Threads</a><button class="ghost" id="thDisconnect" style="display:none">Відключити</button></div>
+          </div>
+          <div class="panel" style="margin:0">
+            <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--ig)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M7 3h10a4 4 0 014 4v10a4 4 0 01-4 4H7a4 4 0 01-4-4V7a4 4 0 014-4zm5 5a4 4 0 100 8 4 4 0 000-8z"></path></svg></span>Facebook + Instagram</div>
+            <div class="hint">Постинг у FB-Сторінку + аналітика FB/IG. IG-публікація потребує фото.</div>
+            <div class="btnrow"><span id="mtStatus" style="font-size:13px;color:var(--muted)">…</span></div>
+            <div class="btnrow" id="mtPageRow" style="display:none"><label style="font-size:12px;color:var(--muted)">Акаунт:</label><select id="mtPage" style="width:auto;min-width:200px;font-size:12px;padding:6px 8px"></select></div>
+            <div class="btnrow"><a id="mtConnect" class="btn primary" href="/api/integrations/meta/connect" onclick="return connectPopup('/api/integrations/meta/connect')" style="display:none">🔗 Підключити</a><button class="ghost" id="mtStats" style="display:none">📊 Статистика</button><button class="ghost" id="mtVoice" style="display:none">✨ Голос з Instagram</button><button class="ghost" id="mtDisconnect" style="display:none">Відключити</button></div>
+            <div id="mtStatsOut" class="out"></div>
+          </div>
+        </div>
+        </div>
+        <div id="setSources" style="display:none">
+
+        <div class="panel">
+          <div class="ph">📝 Встав транскрипт або думку</div>
+          <div class="hint" style="margin-bottom:10px">Найшвидший шлях - вставити текст і натиснути «У роботу».</div>
+          <textarea id="transcript" placeholder="Встав транскрипт сесії, голосову нотатку чи думку…" style="min-height:130px"></textarea>
+          <div class="btnrow"><button class="primary" id="toCreate">У роботу →</button><button class="ghost" id="autopilotBtn">🟢 Автопілот</button><button class="ghost" id="ffImport">🎙 Транскрибатор</button><button class="ghost" id="sampleBtn">Підставити приклад</button></div>
+          <div class="hint" id="lockHint"></div>
+        </div>
+        <div class="grid2">
+          <div class="panel" style="margin:0">
+            <div class="ph">🖼️ Медіа-бібліотека</div>
+            <div class="hint">Фото для постів (потрібні для Instagram).</div>
+            <div class="btnrow"><input type="file" id="mediaFile" accept="image/*" multiple style="font-size:13px"><button class="primary" id="mediaUpload">Завантажити</button><span id="mediaMsg" style="font-size:12px;color:var(--muted)"></span></div>
+            <div id="mediaGrid" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"></div>
+          </div>
+          <div class="panel" style="margin:0">
+            <div class="ph">📁 Google Drive</div>
+            <div class="hint">Познач папку через рідний вибір Google - поллер тягне нові фото в медіа (scope drive.file, без верифікації).</div>
+            <div class="btnrow"><span id="gdStatus" style="font-size:13px;color:var(--muted)">…</span></div>
+            <div class="btnrow"><a id="gdConnect" class="btn primary" href="/api/integrations/gdrive/connect" onclick="return connectPopup('/api/integrations/gdrive/connect')" style="display:none">🔗 Підключити</a><button class="ghost" id="gdDisconnect" style="display:none">Відключити</button></div>
+            <div id="gdFolderBox" style="display:none;margin-top:10px">
+              <div class="btnrow"><button class="primary" id="gdPick">📂 Обрати папку</button></div>
+              <div id="gdMsg" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
+              <div id="gdList" class="out" style="margin-top:8px"></div>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="ph">📡 RSS-стрічки (авто-інжест)</div>
+          <div class="hint">Поллер кожні ~15 хв тягне нові статті у «Джерела». «Авто» = одразу проганяти кишку (обережно з вартістю AI).</div>
+          <div class="btnrow"><input class="txt" id="rssUrl" placeholder="https://example.com/feed.xml" style="flex:1;min-width:220px"><label class="rchip"><input type="checkbox" id="rssAuto"> авто-пілот</label><button class="primary" id="rssAdd">Додати</button></div>
+          <div id="rssMsg" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
+          <div id="rssList" class="out" style="margin-top:10px"></div>
+        </div>
+        <div class="panel">
+          <div style="display:flex;align-items:center;justify-content:space-between"><div class="ph" style="margin:0">🗂️ Останні джерела</div><button class="ghost" id="recReload">↻</button></div>
+          <div class="hint">Усе, що підтягнулося (RSS / Fireflies / вручну). «Відкрити» - щоб працювати з ним.</div>
+          <div id="recList" class="out" style="margin-top:8px"></div>
+        </div>
+        <div class="panel">
+          <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--brand)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M8.5 12.5l2.5 2.5 4.5-5"></path></svg></span>Транскрибація (Fireflies)</div>
+          <div class="hint">Ключ: Fireflies → Settings → Developer Settings → API Key. Імпортуй вручну («Джерела» → 📥) або налаштуй авто-імпорт (вебхук).</div>
+          <div class="fld" style="margin-top:10px"><label class="fl">Fireflies API Key</label><input class="txt" type="password" id="ffKey" placeholder="вставте ключ"></div>
+          <div class="fld" style="margin-top:8px"><label class="fl">🔔 Авто-імпорт: цей URL встав у Fireflies → Webhooks</label><div style="display:flex;gap:8px"><input class="txt" id="ffHook" readonly placeholder="(зʼявиться після збереження ключа)" style="font-size:12px"><button class="ghost" type="button" id="ffHookCopy">Копіювати</button></div></div>
+          <div class="fld" style="margin-top:8px"><label class="fl">Webhook Secret - має ТОЧНО збігатися з секретом у Fireflies (інакше 401), або тисни «Без підпису»</label><input class="txt" type="password" id="ffSecret" placeholder="вставте секрет"></div>
+          <label class="rchip" style="margin:8px 0"><input type="checkbox" id="ffAuto"> Авто-прогін Автопілота для імпортованих зустрічей</label>
+          <div class="btnrow"><button class="primary" id="ffSave">Зберегти</button><button class="ghost" id="ffTest">Перевірити</button><button class="ghost" id="ffNoSig" type="button">Без підпису</button><span id="ffMsg" style="font-size:12px;color:var(--muted)"></span></div>
+        </div>
         </div>
       </section>
 
@@ -686,8 +714,9 @@ function setTheme(t){ document.body.setAttribute('data-theme',t); localStorage.s
 $('themeToggle').onclick=()=>setTheme(document.body.getAttribute('data-theme')==='light'?'dark':'light');
 
 // ---------- навігація ----------
-const PAGES={create:['Створення','Переглянь і затвердь готові пости'],publish:['Публікація','Запланований контент і календар'],brand:['База бренду','Факти про бренд - вводяться раз, працюють всюди'],strategy:['Стратегія','Рубрики, частота й теми контенту'],sources:['Джерела','Звідки беремо матеріал для постів'],analytics:['Аналітика','Ефективність контенту і витрати'],settings:['Налаштування','Канали публікації та інтеграції']};
+const PAGES={create:['Створення','Переглянь і затвердь готові пости'],publish:['Публікація','Запланований контент і календар'],brand:['Бренд','Голос і візуальний стиль - вводяться раз, працюють всюди'],strategy:['Стратегія','Рубрики, частота й теми контенту'],analytics:['Аналітика','Ефективність контенту і витрати'],settings:['Налаштування','Профіль, канали публікації та джерела']};
 function selectView(v){
+  if(v==='sources'){ v='settings'; setTimeout(()=>setSTab('sources'),0); } // джерела живуть у Налаштуваннях
   document.querySelectorAll('.navitem').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
   document.querySelectorAll('.viewsec').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
   const p=PAGES[v]||['','']; $('pageTitle').textContent=p[0]; $('pageSub').textContent=p[1];
@@ -702,6 +731,29 @@ function selectView(v){
 }
 function go(v){ selectView(v); }
 document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>selectView(n.dataset.view));
+
+// ---------- вкладки Бренду (Голос/Візуал) і Налаштувань (Профіль/Канали/Джерела) ----------
+function setBTab(b){
+  document.querySelectorAll('#bTabs .tab').forEach(x=>x.classList.toggle('on',x.dataset.btab===b));
+  if($('brandVoice')) $('brandVoice').style.display=b==='voice'?'':'none';
+  if($('brandVisual')) $('brandVisual').style.display=b==='visual'?'':'none';
+}
+document.querySelectorAll('#bTabs .tab').forEach(x=>x.onclick=()=>setBTab(x.dataset.btab));
+function setSTab(s){
+  document.querySelectorAll('#sTabs .tab').forEach(x=>x.classList.toggle('on',x.dataset.stab===s));
+  const M={profile:'setProfile',channels:'setChannels',sources:'setSources'};
+  for(const k in M){ const el=$(M[k]); if(el) el.style.display=k===s?'':'none'; }
+}
+document.querySelectorAll('#sTabs .tab').forEach(x=>x.onclick=()=>setSTab(x.dataset.stab));
+
+// ---------- меню під аватаром ----------
+(function(){
+  const av=$('avatar'), um=$('userMenu'); if(!av||!um) return;
+  const close=()=>{ um.style.display='none'; };
+  av.onclick=(e)=>{ e.stopPropagation(); um.style.display=um.style.display==='none'?'':'none'; };
+  document.addEventListener('click',(e)=>{ if(um.style.display!=='none' && !um.contains(e.target) && e.target!==av) close(); });
+  um.querySelectorAll('.umitem[data-um]').forEach(it=>it.onclick=()=>{ close(); selectView('settings'); setSTab({profile:'profile',channels:'channels',sources:'sources'}[it.dataset.um]); });
+})();
 
 // ---------- layout switcher (Студія/Конвеєр/Інбокс) ----------
 // ---------- задачі / бал заповнення (гейміфікація) ----------
@@ -752,6 +804,8 @@ let PRO=false;
 function updateProUI(){
   const sl=$('segLite'), sp=$('segPro');
   if(sl&&sp){ sl.classList.toggle('on',!PRO); sp.classList.toggle('on',PRO); }
+  if($('avProBadge')) $('avProBadge').style.display=PRO?'':'none';
+  if($('umPro')) $('umPro').style.display=PRO?'':'none';
   document.querySelectorAll('.proonly').forEach(el=>el.style.display=PRO?'':'none');
   const lt=$('layoutTabs'); if(lt) lt.style.display=(cTab==='posts'&&PRO)?'':'none';
   if(!PRO && curLayout==='pipeline') setLayout('studio');

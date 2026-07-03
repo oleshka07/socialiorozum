@@ -1,16 +1,16 @@
-# Graph Report - socialiorozum  (2026-07-02)
+# Graph Report - socialiorozum  (2026-07-03)
 
 ## Corpus Check
-- 41 files · ~60,711 words
+- 41 files · ~63,662 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 565 nodes · 831 edges · 95 communities (35 shown, 60 thin omitted)
+- 568 nodes · 847 edges · 95 communities (35 shown, 60 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 9 edges (avg confidence: 0.91)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `663c8b4a`
+- Built from commit: `0249e8c7`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -108,13 +108,13 @@
 - [[_COMMUNITY_Community 95|Community 95]]
 
 ## God Nodes (most connected - your core abstractions)
-1. `q()` - 55 edges
+1. `q()` - 56 edges
 2. `one()` - 23 edges
-3. `workspace` - 17 edges
+3. `workspace` - 18 edges
 4. `logEvent()` - 17 edges
-5. `Деплой: GitHub → Hetzner → домен (повний ранбук)` - 15 edges
-6. `Eng review — КонтентГров backend (v1+v2 skeleton)` - 15 edges
-7. `chat()` - 14 edges
+5. `chat()` - 16 edges
+6. `Деплой: GitHub → Hetzner → домен (повний ранбук)` - 15 edges
+7. `Eng review — КонтентГров backend (v1+v2 skeleton)` - 15 edges
 8. `Design doc — Content Engine для soft-ніші (коучі / психологи)` - 14 edges
 9. `app.html — Main SPA (КонтентГров Cabinet)` - 13 edges
 10. `executeStep()` - 12 edges
@@ -154,27 +154,27 @@ Nodes (38): AI-розподіл (AI auto-distribute posts to calendar), Анал
 
 ### Community 3 - "Database Schema"
 Cohesion: 0.13
-Nodes (30): app_log, app_user, content_plan, content_source, email_token, gdrive_config, gdrive_folder, idea (+22 more)
+Nodes (31): app_log, app_user, content_plan, content_source, email_token, gdrive_config, gdrive_folder, idea (+23 more)
 
 ### Community 4 - "Google Drive Integration"
-Cohesion: 0.22
-Nodes (13): COSTS, generateImage(), generateImageForPost(), genFal(), genGemini(), genOpenAI(), imageProviders(), Img (+5 more)
+Cohesion: 0.12
+Nodes (24): COSTS, generateImage(), generateImageForPost(), genFal(), genGemini(), genOpenAI(), imageProviders(), Img (+16 more)
 
 ### Community 5 - "LLM Routing & AI"
-Cohesion: 0.13
-Nodes (31): chat(), ChatCtx, extractJsonArray(), extractJsonObject(), OPENAI_PRICES, adaptForChannels(), atomizePost(), buildLitePrompt() (+23 more)
+Cohesion: 0.14
+Nodes (31): chat(), extractJsonArray(), extractJsonObject(), adaptForChannels(), atomizePost(), buildLitePrompt(), CHANNEL_PLAYBOOK, DEFAULT_PROMPTS (+23 more)
 
 ### Community 6 - "Authentication & Users"
-Cohesion: 0.11
-Nodes (27): createEmailToken(), createSession(), createUser(), createWorkspaceWithDefaults(), deleteSession(), findOrCreateGoogleUser(), hashPassword(), markVerified() (+19 more)
+Cohesion: 0.10
+Nodes (29): createEmailToken(), createSession(), createUser(), createWorkspaceWithDefaults(), deleteSession(), findOrCreateGoogleUser(), hashPassword(), markVerified() (+21 more)
 
 ### Community 7 - "Node Dependencies"
 Cohesion: 0.08
 Nodes (25): dependencies, fastify, @fastify/cookie, @fastify/cors, @fastify/multipart, @fastify/static, heic-convert, pg (+17 more)
 
 ### Community 8 - "Email & Notifications"
-Cohesion: 0.19
-Nodes (19): button(), send(), sendDeletionScheduledEmail(), sendEmailChangedNotice(), sendInactivityWarningEmail(), sendResetEmail(), sendVerifyEmail(), wrap() (+11 more)
+Cohesion: 0.61
+Nodes (8): button(), send(), sendDeletionScheduledEmail(), sendEmailChangedNotice(), sendInactivityWarningEmail(), sendResetEmail(), sendVerifyEmail(), wrap()
 
 ### Community 9 - "Meta (Facebook/Instagram)"
 Cohesion: 0.19
@@ -201,8 +201,8 @@ Cohesion: 0.67
 Nodes (3): appleboy/ssh-action (CI/CD SSH step), GitHub Actions Deploy Workflow, Hetzner Production Server (178.105.185.67)
 
 ### Community 15 - "RSS Feed Ingestion"
-Cohesion: 0.43
-Nodes (7): generatePostsOnePass(), Feed, ingest(), pullFeed(), runPipelines(), startRssPoller(), tick()
+Cohesion: 0.35
+Nodes (9): logEvent(), LogLevel, matchPlanSlots(), Feed, ingest(), pullFeed(), runPipelines(), startRssPoller() (+1 more)
 
 ### Community 16 - "Public Pages & Landing"
 Cohesion: 0.50
@@ -265,8 +265,8 @@ Cohesion: 0.25
 Nodes (7): 03 — Конкурентний аналіз: Echo by ROZUM, Головний висновок, Застереження щодо точності, Категорія 1 — All-in-one AI-контент + планувальники, Категорія 2 — Репурпос / на основі запису (наш вузький сусід), Категорія 3 — Локальні / україномовні + статус-кво, Прогалини й можливості для Echo by ROZUM
 
 ### Community 40 - "Community 40"
-Cohesion: 0.29
-Nodes (8): logEvent(), LogLevel, attachChannel(), botEnabled(), botUsername(), createConnectLink(), handleUpdate(), initTelegramBot()
+Cohesion: 0.33
+Nodes (6): attachChannel(), botEnabled(), botUsername(), createConnectLink(), handleUpdate(), initTelegramBot()
 
 ## Knowledge Gaps
 - **255 isolated node(s):** `app_log`, `name`, `version`, `private`, `type` (+250 more)
@@ -276,7 +276,7 @@ Nodes (8): logEvent(), LogLevel, attachChannel(), botEnabled(), botUsername(), c
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `q()` connect `Authentication & Users` to `Auth, Session & Workers`, `Community 36`, `LLM Routing & AI`, `Google Drive Integration`, `Email & Notifications`, `Community 40`, `RSS Feed Ingestion`?**
+- **Why does `q()` connect `Authentication & Users` to `Auth, Session & Workers`, `Community 36`, `LLM Routing & AI`, `Google Drive Integration`, `Community 40`, `RSS Feed Ingestion`?**
   _High betweenness centrality (0.027) - this node is a cross-community bridge._
 - **Why does `one()` connect `Auth, Session & Workers` to `Community 36`, `LLM Routing & AI`, `Google Drive Integration`, `Authentication & Users`, `Community 40`, `RSS Feed Ingestion`?**
   _High betweenness centrality (0.005) - this node is a cross-community bridge._
@@ -288,5 +288,5 @@ _Questions this graph is uniquely positioned to answer:_
   _Cohesion score 0.06543385490753911 - nodes in this community are weakly interconnected._
 - **Should `Database Schema` be split into smaller, more focused modules?**
   _Cohesion score 0.12903225806451613 - nodes in this community are weakly interconnected._
-- **Should `LLM Routing & AI` be split into smaller, more focused modules?**
-  _Cohesion score 0.12834224598930483 - nodes in this community are weakly interconnected._
+- **Should `Google Drive Integration` be split into smaller, more focused modules?**
+  _Cohesion score 0.1206896551724138 - nodes in this community are weakly interconnected._
