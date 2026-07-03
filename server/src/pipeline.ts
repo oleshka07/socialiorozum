@@ -506,6 +506,46 @@ export async function generateChannelPlan(workspaceId: string, channel: string, 
   return rows;
 }
 
+// ---- Lite-скелет плану: ДЕТЕРМІНОВАНО зі стратегії (рубрики × best_days × теми) ----
+// Канало-незалежний, не залежить від крихкого LLM-плану → порожнім не буде, якщо є стратегія.
+export async function buildLiteSkeleton(workspaceId: string, horizonDays: number): Promise<{ day: number; rubric: string; theme: string; hook: string }[]> {
+  const strat = await one<{ data: any }>(`select data from strategy where workspace_id=$1`, [workspaceId]);
+  const data: any = strat?.data || {};
+  const rubrics: { name: string; share?: number }[] = Array.isArray(data.rubrics) ? data.rubrics.filter((r: any) => r?.name) : [];
+  if (!rubrics.length) throw new Error("Спершу згенеруй стратегію (розділ Стратегія) - зі стратегії будується скелет плану.");
+  const DMAP: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+  let bestDays: number[] = Array.isArray(data.best_days) ? data.best_days.map((d: string) => DMAP[String(d).toLowerCase().slice(0, 3)]).filter((x: any) => x != null) : [];
+  if (!bestDays.length) bestDays = [1, 3, 5];
+  const perDay = Array.isArray(data.times) && data.times.length ? Math.min(3, data.times.length) : 1;
+  // зважений «мішок» рубрик за share
+  const bag: string[] = [];
+  for (const r of rubrics) { const w = Math.max(1, Math.round((Number(r.share) || 25) / 10)); for (let k = 0; k < w; k++) bag.push(r.name); }
+  const slots: { day: number; rubric: string; theme: string; hook: string }[] = [];
+  let bi = 0;
+  for (let day = 1; day <= horizonDays && slots.length < 40; day++) {
+    const dow = new Date(Date.now() + day * 864e5).getUTCDay();
+    if (!bestDays.includes(dow)) continue;
+    for (let p = 0; p < perDay && slots.length < 40; p++) slots.push({ day, rubric: bag[bi++ % bag.length], theme: "", hook: "" });
+  }
+  // теми: ОДИН дешевий виклик; фолбек - рубрика (щоб ніколи не порожньо)
+  if (slots.length) {
+    try {
+      const s = await loadSettings(workspaceId);
+      const lang = (s.output_language || "Українська").trim();
+      const themes = Array.isArray(data.monthly_themes) ? data.monthly_themes.filter(Boolean).map(String) : [];
+      const system = "Ти контент-стратег. Для кожного слота (рубрика задана) придумай коротку конкретну тему поста (до 12 слів) у ніші бренду." +
+        (s.strategy_brief ? `\nБриф: ${s.strategy_brief.slice(0, 1500)}` : (s.marketing_context ? `\nНіша: ${s.marketing_context}` : "")) +
+        (themes.length ? `\nОрієнтир тем: ${themes.slice(0, 10).join("; ")}` : "") +
+        `\n\nПоверни ЛИШЕ валідний JSON-масив рівно з ${slots.length} рядків-тем, у тому ж порядку, що рубрики нижче. Мова: ${lang}.`;
+      const user = slots.map((x, i) => `${i + 1}. [${x.rubric}]`).join("\n");
+      const raw = await chat("openai/gpt-4o-mini", system, user, { workspaceId, step: "plan_themes" });
+      const arr = extractJsonArray<any>(raw).map((x: any) => String(x?.theme || x || "").trim());
+      slots.forEach((x, i) => { x.theme = (arr[i] || "").slice(0, 300) || `${x.rubric}: ідея дня`; });
+    } catch { slots.forEach((x) => { x.theme = x.theme || `${x.rubric}: ідея дня`; }); }
+  }
+  return slots;
+}
+
 // ---- V2 Крок 4: атомізація (Prompt 10) - 1 пілерний пост → варіанти під усі канали ----
 export async function atomizePost(workspaceId: string, content: string, channels: string[]): Promise<{ atoms: string[]; matrix: any[] }> {
   const s = await loadSettings(workspaceId);
@@ -528,11 +568,12 @@ export async function atomizePost(workspaceId: string, content: string, channels
 }
 
 // ---- Стрічка матеріалів: витягнути ідеї з одного матеріалу (модалка «Ідеї з матеріалу») ----
-export async function extractIdeasFromText(workspaceId: string, text: string, count = 6): Promise<{ idea: string; rubric: string }[]> {
+export async function extractIdeasFromText(workspaceId: string, text: string, count = 6, rubricsFilter?: string[]): Promise<{ idea: string; rubric: string }[]> {
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
   const rubs = await q<{ name: string }>(`select name from rubric where workspace_id=$1 order by idx`, [workspaceId]);
-  const rubList = rubs.map((r) => r.name).join(", ");
+  const picked = (rubricsFilter || []).map((r) => String(r).trim()).filter(Boolean);
+  const rubList = (picked.length ? rubs.filter((r) => picked.includes(r.name)) : rubs).map((r) => r.name).join(", ");
   const system =
     "Ти контент-стратег. Знайди в матеріалі окремі контент-ідеї для соцмереж, кожна зі своїм кутом подачі. " +
     (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") +

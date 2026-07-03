@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton } from "./pipeline.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
 import * as meta from "./meta.js";
@@ -1205,27 +1205,38 @@ app.get("/api/channel-plan/:channel", async (req: any) => {
 });
 
 // ===================== ПЛАН-СКЕЛЕТ (workspace-scoped слоти: що і коли має вийти) =====================
-// Згенерувати скелет: v2 канальний план -> слоти з датами (з завтра, по днях плану) + авто-метчинг матеріалів
+// Lite (mode='lite', default): ОДИН канало-незалежний скелет (channel='all') детерміновано зі стратегії.
+// PRO (mode='pro', channel=X): багатший план під конкретний канал (LLM, нативні алгоритми) - окрема вкладка.
 app.post("/api/plan/generate", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   try {
-    const channel = String(req.body?.channel || "telegram").trim();
+    const mode = req.body?.mode === "pro" ? "pro" : "lite";
     const horizon = Math.max(7, Math.min(90, Number(req.body?.horizon) || 14));
-    const ppw = Math.max(1, Math.min(14, Number(req.body?.posts_per_week) || 4));
-    const rows = await generateChannelPlan(ws, channel, horizon, ppw);
-    if (!rows.length) return reply.code(400).send({ error: "План порожній - спершу згенеруй стратегію (розділ Стратегія)" });
-    // старі незаповнені слоти цього каналу прибираємо (заповнені лишаються - вони вже мають пости)
-    await q(`delete from plan_slot where workspace_id=$1 and channel=$2 and status in ('empty','matched')`, [ws, channel]);
     const anchor = new Date(); anchor.setUTCHours(12, 0, 0, 0);
     let n = 0;
-    for (const r of rows) {
-      const day = Math.max(1, Number(r?.day) || (n + 1));
-      const d = new Date(anchor); d.setUTCDate(d.getUTCDate() + day);
-      await q(
-        `insert into plan_slot(workspace_id, slot_date, channel, rubric, theme, hook, cta) values($1,$2,$3,$4,$5,$6,$7)`,
-        [ws, d.toISOString().slice(0, 10), channel, String(r?.pillar || "").slice(0, 60) || null,
-         String(r?.message || r?.hook || "Тема").slice(0, 300), String(r?.hook || "").slice(0, 300) || null, String(r?.cta || "").slice(0, 200) || null]);
-      n++;
+    if (mode === "pro") {
+      const channel = String(req.body?.channel || "telegram").trim();
+      const ppw = Math.max(1, Math.min(14, Number(req.body?.posts_per_week) || 4));
+      const rows = await generateChannelPlan(ws, channel, horizon, ppw);
+      if (!rows.length) return reply.code(400).send({ error: "План порожній - спершу згенеруй стратегію (розділ Стратегія)" });
+      await q(`delete from plan_slot where workspace_id=$1 and channel=$2 and status in ('empty','matched')`, [ws, channel]);
+      for (const r of rows) {
+        const day = Math.max(1, Number(r?.day) || (n + 1));
+        const d = new Date(anchor); d.setUTCDate(d.getUTCDate() + day);
+        await q(`insert into plan_slot(workspace_id, slot_date, channel, rubric, theme, hook, cta) values($1,$2,$3,$4,$5,$6,$7)`,
+          [ws, d.toISOString().slice(0, 10), channel, String(r?.pillar || "").slice(0, 60) || null,
+           String(r?.message || r?.hook || "Тема").slice(0, 300), String(r?.hook || "").slice(0, 300) || null, String(r?.cta || "").slice(0, 200) || null]);
+        n++;
+      }
+    } else {
+      const slots = await buildLiteSkeleton(ws, horizon); // кидає чітку помилку, якщо нема стратегії
+      await q(`delete from plan_slot where workspace_id=$1 and channel='all' and status in ('empty','matched')`, [ws]);
+      for (const sl of slots) {
+        const d = new Date(anchor); d.setUTCDate(d.getUTCDate() + sl.day);
+        await q(`insert into plan_slot(workspace_id, slot_date, channel, rubric, theme, hook) values($1,$2,'all',$3,$4,$5)`,
+          [ws, d.toISOString().slice(0, 10), sl.rubric || null, sl.theme.slice(0, 300), sl.hook.slice(0, 300) || null]);
+        n++;
+      }
     }
     let matched = 0; try { matched = await matchPlanSlots(ws); } catch { /* метчинг не критичний */ }
     return { ok: true, slots: n, matched };
@@ -1233,11 +1244,14 @@ app.post("/api/plan/generate", async (req: any, reply) => {
 });
 
 app.get("/api/plan", async (req: any) => {
+  const channel = req.query?.channel ? String(req.query.channel) : null;
   const slots = await q(
     `select ps.id, ps.slot_date, ps.channel, ps.rubric, ps.theme, ps.hook, ps.status, ps.match_note, ps.post_id, s.title as match_title
      from plan_slot ps left join source s on s.id = ps.match_source_id
-     where ps.workspace_id=$1 order by ps.slot_date`, [req.user.workspace_id]);
-  return { slots };
+     where ps.workspace_id=$1 ${channel ? "and ps.channel=$2" : ""} order by ps.slot_date`,
+    channel ? [req.user.workspace_id, channel] : [req.user.workspace_id]);
+  const channels = await q<{ channel: string }>(`select distinct channel from plan_slot where workspace_id=$1`, [req.user.workspace_id]);
+  return { slots, channels: channels.map((c) => c.channel) };
 });
 
 app.post("/api/plan/match", async (req: any, reply) => {
@@ -1301,7 +1315,7 @@ app.post("/api/materials/:id/archive", async (req: any, reply) => {
 app.post("/api/materials/:id/ideas", async (req: any, reply) => {
   const m = await one<{ transcript: string }>(`select transcript from source where id=$1 and workspace_id=$2`, [req.params.id, req.user.workspace_id]);
   if (!m) return reply.code(404).send({ error: "матеріал не знайдено" });
-  try { const ideas = await extractIdeasFromText(req.user.workspace_id, m.transcript, Number(req.body?.count) || 6); return { ok: true, ideas }; }
+  try { const ideas = await extractIdeasFromText(req.user.workspace_id, m.transcript, Number(req.body?.count) || 6, Array.isArray(req.body?.rubrics) ? req.body.rubrics : undefined); return { ok: true, ideas }; }
   catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
 // Створити пости з матеріалу (всі обрані ідеї, або 1 пост без ідей)

@@ -338,13 +338,14 @@
             </div>
             <div style="font-size:11.5px;color:var(--faint);line-height:1.7">⬜ порожньо → 📎 є матеріал → ✍️ пост → ✅ затверджено → 🗓 календар → ✈️ вийшло</div>
             <div class="btnrow" style="margin:0;align-items:center;flex-wrap:wrap">
-              <select id="planChannel"><option value="telegram">Telegram</option><option value="instagram">Instagram</option><option value="threads">Threads</option><option value="facebook">Facebook</option></select>
+              <label class="proonly" id="planChannelWrap" style="display:none;font-size:12px;color:var(--muted)">канал <select id="planChannel"><option value="telegram">Telegram</option><option value="instagram">Instagram</option><option value="threads">Threads</option><option value="facebook">Facebook</option></select></label>
               <label style="font-size:12px;color:var(--muted)">днів <input id="planHorizon" class="txt" type="number" value="14" min="7" max="90" style="width:60px;display:inline-block;padding:7px 9px"></label>
-              <label style="font-size:12px;color:var(--muted)">п/тиж <input id="planPpw" class="txt" type="number" value="4" min="1" max="14" style="width:54px;display:inline-block;padding:7px 9px"></label>
+              <label class="proonly" id="planPpwWrap" style="display:none;font-size:12px;color:var(--muted)">п/тиж <input id="planPpw" class="txt" type="number" value="4" min="1" max="14" style="width:54px;display:inline-block;padding:7px 9px"></label>
               <button class="primary" id="planGenBtn">↻ Згенерувати скелет</button>
               <span id="planMsg" style="font-size:12px;color:var(--muted)"></span>
             </div>
           </div>
+          <div class="tabs proonly" id="planChanTabs" style="display:none;margin-bottom:12px"></div>
           <div class="panel" style="padding:0;overflow:hidden"><div id="planList"><div class="empty" style="padding:20px">Скелета ще нема - натисни «Згенерувати скелет» (потрібна стратегія з розділу Стратегія).</div></div></div>
         </div>
 
@@ -358,14 +359,15 @@
               <div id="ideaList" style="margin-top:8px;display:flex;flex-direction:column;gap:5px"></div>
               <button class="primary" id="ideasToPosts" style="width:100%;margin-top:10px;display:none">✨ Створити пости з обраних</button>
             </div>
-            <details class="disc">
+            <input type="hidden" id="ideaCount" value="6">
+            <details class="disc proonly">
               <summary><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 5v4M8 15v4"></path></svg>Налаштування генерації<svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--faint)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-left:auto"><path d="M6 9l6 6 6-6"></path></svg></summary>
               <div style="padding:2px 16px 16px;display:flex;flex-direction:column;gap:14px">
-                <div><div style="font-size:12.5px;font-weight:600;color:var(--ink2);margin-bottom:8px">Скільки постів</div><div style="display:flex;gap:6px" id="countChips"></div><input type="hidden" id="ideaCount" value="6"></div>
+                <div><div style="font-size:12.5px;font-weight:600;color:var(--ink2);margin-bottom:8px">Скільки постів</div><div style="display:flex;gap:6px" id="countChips"></div></div>
                 <div><div style="font-size:12.5px;font-weight:600;color:var(--ink2);margin-bottom:8px">Рубрики в міксі</div><div style="display:flex;flex-wrap:wrap;gap:6px" id="ideaRubrics"></div></div>
               </div>
             </details>
-            <details class="disc">
+            <details class="disc proonly">
               <summary><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M3 12h3M18 12h3M12 3v3M12 18v3"></path></svg>Як це зроблено<span class="badge" style="margin-left:auto">6 кроків</span></summary>
               <div style="padding:4px 16px 16px" id="studioSteps"></div>
             </details>
@@ -809,6 +811,7 @@ function updateProUI(){
   document.querySelectorAll('.proonly').forEach(el=>el.style.display=PRO?'':'none');
   const lt=$('layoutTabs'); if(lt) lt.style.display=(cTab==='posts'&&PRO)?'':'none';
   if(!PRO && curLayout==='pipeline') setLayout('studio');
+  if(cTab==='plan' && typeof loadPlan==='function') loadPlan(); // Lite↔PRO змінює канал скелета (all↔telegram) - перезавантажуємо
 }
 // просте перемикання Lite/PRO (тарифи будуть поповненням токенів окремо)
 async function setMode(pro){ try{ await saveSetting('pro',pro?'1':'0'); PRO=pro; updateProUI(); flash(pro?'Режим PRO - усі інструменти відкрито ⚡':'Режим Lite - тільки головне'); }catch(e){ flash('⚠ '+e.message); } }
@@ -864,35 +867,66 @@ if($('addMaterialBtn')) $('addMaterialBtn').onclick=()=>{
     try{ await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript:text,title:title||undefined})}); close(); await loadMaterials(); try{ await api('/plan/match',{method:'POST'}); await loadMaterials(); }catch(_){} flash('Матеріал додано ✓'); }
     catch(e){ flash('⚠ '+e.message); } };
 };
-// модалка «Ідеї з матеріалу»: обери ідеї -> чернетки постів
+// модалка «Ідеї з матеріалу»: КРОК 1 налаштування генерації -> КРОК 2 обери ідеї -> чернетки постів
 async function openMaterialIdeas(matId){
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
-  ov.innerHTML='<div class="modal-card" style="max-width:560px;padding:20px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">💡 Ідеї з матеріалу</b><button class="icon" id="miX" style="margin-left:auto">✕</button></div>'
+  const card=document.createElement('div'); card.className='modal-card'; card.style.cssText='max-width:560px;padding:20px';
+  ov.appendChild(card); document.body.appendChild(ov); const close=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
+  // ---- КРОК 1: Налаштування генерації (кількість + рубрики) ----
+  let miCount=6; const miRubs=new Set((Rubrics||[]).map(r=>r.name));
+  function renderSettings(){
+    card.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px"><b style="font-size:16px">⚙️ Налаштування генерації</b><button class="icon" id="miX" style="margin-left:auto">✕</button></div>'
+      +'<div style="font-size:12.5px;font-weight:600;color:var(--ink2);margin-bottom:8px">Скільки ідей</div>'
+      +'<div style="display:flex;gap:6px" id="miCountChips">'+[3,6,9,12].map(n=>'<div class="cchip'+(n===miCount?' on':'')+'" data-n="'+n+'">'+n+'</div>').join('')+'</div>'
+      +((Rubrics&&Rubrics.length)?('<div style="font-size:12.5px;font-weight:600;color:var(--ink2);margin:16px 0 8px">Рубрики в міксі</div>'
+        +'<div style="display:flex;flex-wrap:wrap;gap:6px" id="miRubChips">'+Rubrics.map(r=>'<label class="rchip on"><input type="checkbox" class="miRub" value="'+esc(r.name)+'" checked> '+(r.emoji||'')+' '+esc(r.name)+'</label>').join('')+'</div>'):'')
+      +'<div class="btnrow" style="margin-top:18px"><button class="primary" id="miNext" style="width:100%">💡 Витягнути ідеї →</button></div>';
+    card.querySelector('#miX').onclick=close;
+    card.querySelectorAll('#miCountChips [data-n]').forEach(c=>c.onclick=()=>{ miCount=+c.dataset.n; renderSettings(); });
+    card.querySelectorAll('.miRub').forEach(cb=>cb.addEventListener('change',()=>{ cb.checked?miRubs.add(cb.value):miRubs.delete(cb.value); cb.closest('.rchip').classList.toggle('on',cb.checked); }));
+    card.querySelector('#miNext').onclick=()=>loadIdeas();
+  }
+  renderSettings();
+  // ---- КРОК 2: список ідей ----
+  async function loadIdeas(){
+  card.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">💡 Ідеї з матеріалу</b><button class="icon" id="miX" style="margin-left:auto">✕</button></div>'
     +'<div id="miList"><div class="empty"><span class="spin"></span> AI шукає ідеї…</div></div>'
-    +'<div class="btnrow" style="margin-top:12px"><button class="primary" id="miGo" disabled>✨ Створити пости з обраних</button></div></div>';
-  document.body.appendChild(ov); const close=()=>ov.remove();
-  ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#miX').onclick=close;
+    +'<div class="btnrow" style="margin-top:12px"><button class="ghost" id="miBack">← Налаштування</button><button class="primary" id="miGo" disabled>✨ Створити пости з обраних</button></div>';
+  card.querySelector('#miX').onclick=close; card.querySelector('#miBack').onclick=renderSettings;
   aiBusy('💡 Витягую ідеї з матеріалу…');
   let ideas=[];
-  try{ const r=await api('/materials/'+matId+'/ideas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:6})}); ideas=r.ideas||[]; }
-  catch(e){ const l=ov.querySelector('#miList'); if(l) l.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
+  try{ const r=await api('/materials/'+matId+'/ideas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:miCount,rubrics:[...miRubs]})}); ideas=r.ideas||[]; }
+  catch(e){ const l=card.querySelector('#miList'); if(l) l.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
   finally{ aiDone(); }
-  const list=ov.querySelector('#miList'); if(!list) return;
+  const list=card.querySelector('#miList'); if(!list) return;
   if(ideas.length){
     list.innerHTML=ideas.map((it,i)=>'<label class="rchip on" style="display:flex;gap:8px;align-items:flex-start;width:100%;padding:9px 12px;margin-bottom:5px;text-align:left;font-weight:500;line-height:1.4"><input type="checkbox" class="miCb" data-i="'+i+'" checked><span style="flex:1">'+esc(it.idea)+'</span>'+(it.rubric?'<span class="ptag">🏷 '+esc(it.rubric)+'</span>':'')+'</label>').join('');
     list.querySelectorAll('.rchip').forEach(l=>{ const cb=l.querySelector('input'); cb.addEventListener('change',()=>l.classList.toggle('on',cb.checked)); });
-    const go=ov.querySelector('#miGo'); go.disabled=false;
+    const go=card.querySelector('#miGo'); go.disabled=false;
     go.onclick=async()=>{ const picked=[...list.querySelectorAll('.miCb:checked')].map(c=>ideas[+c.dataset.i].idea); if(!picked.length){ flash('Обери хоча б одну ідею'); return; }
       close(); aiBusy('✨ Створюю '+picked.length+' постів з ідей…'); setCTab('posts'); setLayout('studio');
       try{ const r=await api('/materials/'+matId+'/posts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ideas:picked})}); await loadStudioPosts(); flash('Готово - '+(r.count||0)+' постів ✓'); }
       catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } };
   } else if(!list.textContent.includes('⚠')) list.innerHTML='<div class="empty">Ідей не знайшлось - спробуй «Створити пост» напряму.</div>';
+  }
 }
 
 // ---------- ПЛАН: скелет ----------
-let PlanSlots=[];
+let PlanSlots=[], PlanChan='all';
+const CP_LBL={telegram:'Telegram',instagram:'Instagram',threads:'Threads',facebook:'Facebook',all:'Спільний'};
 const SLOT_ST={empty:['⬜ порожньо','var(--faint)','var(--surface2)'],matched:['📎 є матеріал','var(--amber)','var(--amber-soft, #f7ecd8)'],drafted:['✍️ пост','var(--tg)','var(--surface2)'],approved:['✅ затверджено','var(--brand)','var(--brand-soft)'],scheduled:['🗓 у календарі','var(--brand)','var(--brand-soft)'],published:['✈️ вийшло','var(--muted)','var(--surface2)']};
-async function loadPlan(){ try{ const r=await api('/plan'); PlanSlots=r.slots||[]; }catch(e){ PlanSlots=[]; } renderPlan(); updateCounts(); }
+function planSyncMode(){
+  // Lite: спільний скелет (channel=all), без вибору каналу. PRO: вкладки 4 каналів.
+  const tabs=$('planChanTabs');
+  if(!PRO){ PlanChan='all'; if(tabs) tabs.style.display='none'; }
+  else {
+    if(PlanChan==='all') PlanChan='telegram';
+    if(tabs){ tabs.style.display=''; tabs.innerHTML=['telegram','instagram','threads','facebook'].map(c=>'<div class="tab'+(PlanChan===c?' on':'')+'" data-pc="'+c+'">'+CP_LBL[c]+'</div>').join(''); tabs.querySelectorAll('[data-pc]').forEach(t=>t.onclick=()=>{ PlanChan=t.dataset.pc; if($('planChannel')) $('planChannel').value=PlanChan; loadPlan(); }); }
+    if($('planChannel')) $('planChannel').value=PlanChan;
+  }
+}
+async function loadPlan(){ planSyncMode(); try{ const r=await api('/plan?channel='+encodeURIComponent(PlanChan)); PlanSlots=r.slots||[]; }catch(e){ PlanSlots=[]; } renderPlan(); updateCounts(); }
 function renderPlan(){
   const list=$('planList'); if(!list) return;
   const filled=PlanSlots.filter(s=>s.status!=='empty').length;
@@ -931,10 +965,12 @@ function renderPlan(){
   });
 }
 if($('planGenBtn')) $('planGenBtn').onclick=async()=>{
-  const m=$('planMsg'); const ch=$('planChannel').value;
+  const m=$('planMsg'); const mode=PRO?'pro':'lite';
   if(PlanSlots.some(s=>s.status==='empty'||s.status==='matched') && !confirm('Незаповнені слоти поточного скелета буде замінено новими. Продовжити?')) return;
-  m.style.color='var(--muted)'; m.textContent='будую скелет…'; aiBusy('📅 Будую скелет плану для '+ch+'…');
-  try{ const r=await api('/plan/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channel:ch,horizon:+$('planHorizon').value||14,posts_per_week:+$('planPpw').value||4})});
+  m.style.color='var(--muted)'; m.textContent='будую скелет…'; aiBusy(mode==='pro'?('📅 Будую план для '+CP_LBL[PlanChan]+'…'):'📅 Будую спільний скелет плану…');
+  const body={mode,horizon:+$('planHorizon').value||14,posts_per_week:+$('planPpw').value||4};
+  if(mode==='pro') body.channel=PlanChan;
+  try{ const r=await api('/plan/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     m.style.color='var(--brand)'; m.textContent='готово ✓ '+r.slots+' слотів'+(r.matched?(' · '+r.matched+' метчів'):''); await loadPlan(); }
   catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } finally{ aiDone(); }
 };
