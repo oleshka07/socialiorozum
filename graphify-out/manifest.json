@@ -155,8 +155,8 @@
     "semantic_hash": "352df4b84f4af2922ccd9adaf8e4608f"
   },
   "CLAUDE.md": {
-    "mtime": 1783098131.7043018,
-    "ast_hash": "ef505c23e9e7d4de79bdda85ae8ee3d3",
+    "mtime": 1783099647.9562583,
+    "ast_hash": "a814a4d0adbcbc7d136317a8f28537de",
     "semantic_hash": ""
   },
   "DEPLOY.md": {
@@ -225,8 +225,8 @@
     "semantic_hash": "199a92f19b822e467cdaf95780db5fee"
   },
   "server/public/app.html": {
-    "mtime": 1783099578.8442602,
-    "ast_hash": "58c0ecc92b8754abec7930a44cea7d0d",
+    "mtime": 1783106447.8520622,
+    "ast_hash": "58cd6bd23692b2c23b24db7b321eb67f",
     "semantic_hash": ""
   },
   "server/public/auth.html": {

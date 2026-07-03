@@ -1145,7 +1145,7 @@ function applyState(d){
   loadStudioPosts();
   renderStudioSteps(byKey);
   S.plan=(d.plan||[]).map(p=>({id:p.id,title:p.title,content:p.post_content||p.title,type:p.type,dayOffset:p.day_offset||0}));
-  renderPlan();
+  renderLegacyPlan();
   renderSourceCard(d.source);
   const si=$('srcInfo'); if(si) si.innerHTML = d.source ? ('📄 <b>'+esc(d.source.title||'(вставлений текст)')+'</b> · '+(d.source.len||0)+' симв.') : 'Немає активного джерела.';
 }
@@ -1547,7 +1547,7 @@ if($('ideasToPosts')) $('ideasToPosts').onclick=async()=>{
   finally{ setBusy(false); aiDone(); }
 };
 if($('viewPrompt')) $('viewPrompt').onclick=async()=>{ try{ const cnt=Number(($('ideaCount')||{}).value)||6; const r=await api('/generate/prompt-preview?count='+cnt); const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70'; ov.innerHTML='<div class="modal-card" style="max-width:680px;padding:20px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b>Спільний промт генерації · '+esc(r.model||'')+'</b><button class="icon" id="vpX" style="margin-left:auto">✕</button></div><pre style="white-space:pre-wrap;font-size:12.5px;line-height:1.5;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;max-height:60vh;overflow:auto;margin:0">'+esc(r.system||'')+'</pre></div>'; document.body.appendChild(ov); const close=()=>ov.remove(); ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#vpX').onclick=close; }catch(e){ flash('⚠ '+e.message); } };
-function renderPlan(){
+function renderLegacyPlan(){ // СТАРИЙ конвеєрний план (#o7/S.plan) - не плутати з renderPlan() скелета вкладки «План»
   const o=$('o7'); if(!o) return;
   if(!S.plan.length){ o.innerHTML='<div class="empty">План з\'явиться тут. Затверджені пости підуть у Банк (вкладка Публікація).</div>'; return; }
   o.innerHTML=S.plan.map(p=>{ const prev=((p.content||p.title||'')).replace(/\n+/g,' ').slice(0,140); return '<div class="card"><div>'+esc(prev)+'…</div><small style="color:var(--muted)">'+esc(p.type||'пост')+'</small></div>'; }).join('');
