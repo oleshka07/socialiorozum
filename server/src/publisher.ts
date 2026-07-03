@@ -21,9 +21,25 @@ async function thValidToken(ws: string): Promise<{ token: string; userId: string
   return { token: c.access_token, userId: c.threads_user_id };
 }
 
-export type PubResult = { channel: string; status: "sent" | "error"; error?: string };
+export type PubResult = { channel: string; status: "sent" | "error" | "skipped"; error?: string };
+
+// Мережі, куди пост УЖЕ відправлено (status='sent') — щоб не публікувати вдруге (публікація один раз на мережу).
+export async function alreadySentNetworks(postId: string): Promise<string[]> {
+  const [tgSent, thSent, metaSent] = await Promise.all([
+    one<{ n: number }>(`select count(*)::int as n from telegram_publish where post_id=$1 and status='sent'`, [postId]),
+    one<{ n: number }>(`select count(*)::int as n from threads_publish where post_id=$1 and status='sent'`, [postId]),
+    q<{ channel: string }>(`select distinct channel from meta_publish where post_id=$1 and status='sent'`, [postId]),
+  ]);
+  const sent: string[] = [];
+  if ((tgSent?.n || 0) > 0) sent.push("telegram");
+  if ((thSent?.n || 0) > 0) sent.push("threads");
+  for (const r of metaSent) if (r.channel) sent.push(r.channel); // facebook / instagram
+  return sent;
+}
 
 // Публікує пост у кожну ввімкнену в post.channels мережу (своїм текстом + медіа).
+// Мережі, куди вже публікували (status='sent'), ПРОПУСКАЮТЬСЯ (публікація один раз на мережу) —
+// це стосується і ручної публікації, і планового автопостера (schedule на ІНШІ мережі).
 // Якщо жодної мережі не обрано — нічого не публікує (порожній результат), без тихого fallback.
 export async function publishPostToChannels(ws: string, postId: string): Promise<PubResult[]> {
   const post = await one<{ content: string; channels: any; filename: string | null }>(
@@ -34,6 +50,7 @@ export async function publishPostToChannels(ws: string, postId: string): Promise
   if (!post) throw new Error("пост не знайдено");
   const ch = post.channels || {};
   const enabled = Object.keys(ch).filter((k) => ch[k] && ch[k].on);
+  const sentSet = new Set(await alreadySentNetworks(postId));
   const textOf = (k: string) => (ch[k] && ch[k].text) || post.content;
   const imageUrl = post.filename ? `${env.appBaseUrl}/media/${post.filename}` : null;
   const results: PubResult[] = [];
@@ -43,6 +60,7 @@ export async function publishPostToChannels(ws: string, postId: string): Promise
     one<{ page_id: string | null; page_token: string | null; ig_user_id: string | null }>(`select page_id, page_token, ig_user_id from meta_config where workspace_id=$1`, [ws]),
   ]);
   for (const k of enabled) {
+    if (sentSet.has(k)) { results.push({ channel: k, status: "skipped" }); continue; } // уже опубліковано в цю мережу
     try {
       if (k === "telegram") {
         if (!tgc?.bot_token) throw new Error("Telegram не підключено");

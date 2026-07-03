@@ -10,18 +10,27 @@ import { q, one } from "./db.js";
 import { saveMedia, MEDIA_DIR } from "./media.js";
 
 export type ImgProvider = "openai" | "fal" | "gemini";
+export type Aspect = "1:1" | "4:5" | "16:9";
 type Img = { buffer: Buffer; mime: string };
 const COSTS: Record<ImgProvider, number> = { openai: 0.011, fal: 0.003, gemini: 0.039 };
+
+function normAspect(a?: string): Aspect { return a === "4:5" || a === "16:9" ? a : "1:1"; }
+// цільові пропорції картинки для sharp-оверлея (ширина×висота у пікселях базового полотна)
+const ASPECT_DIM: Record<Aspect, { w: number; h: number }> = { "1:1": { w: 1024, h: 1024 }, "4:5": { w: 1024, h: 1280 }, "16:9": { w: 1280, h: 720 } };
+// gpt-image-1 підтримує лише 1024x1024 / 1024x1536 / 1536x1024
+const OPENAI_SIZE: Record<Aspect, string> = { "1:1": "1024x1024", "4:5": "1024x1536", "16:9": "1536x1024" };
+// fal FLUX schnell — іменовані формати
+const FAL_SIZE: Record<Aspect, string> = { "1:1": "square_hd", "4:5": "portrait_4_3", "16:9": "landscape_16_9" };
 
 export function imageProviders(): Record<ImgProvider, boolean> {
   return { openai: !!env.openai.apiKey, fal: !!env.fal.apiKey, gemini: !!env.gemini.apiKey };
 }
 
-async function genOpenAI(prompt: string): Promise<Img> {
+async function genOpenAI(prompt: string, aspect: Aspect): Promise<Img> {
   const r = await fetch("https://api.openai.com/v1/images/generations", {
     method: "POST",
     headers: { Authorization: `Bearer ${env.openai.apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "gpt-image-1", prompt, size: "1024x1024", quality: "low", n: 1 }),
+    body: JSON.stringify({ model: "gpt-image-1", prompt, size: OPENAI_SIZE[aspect], quality: "low", n: 1 }),
   });
   if (!r.ok) throw new Error(`OpenAI image ${r.status}: ${(await r.text()).slice(0, 200)}`);
   const j: any = await r.json();
@@ -30,11 +39,11 @@ async function genOpenAI(prompt: string): Promise<Img> {
   return { buffer: Buffer.from(b64, "base64"), mime: "image/png" };
 }
 
-async function genFal(prompt: string): Promise<Img> {
+async function genFal(prompt: string, aspect: Aspect): Promise<Img> {
   const r = await fetch("https://fal.run/fal-ai/flux/schnell", {
     method: "POST",
     headers: { Authorization: `Key ${env.fal.apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, image_size: "square_hd", num_images: 1 }),
+    body: JSON.stringify({ prompt, image_size: FAL_SIZE[aspect], num_images: 1 }),
   });
   if (!r.ok) throw new Error(`fal ${r.status}: ${(await r.text()).slice(0, 200)}`);
   const j: any = await r.json();
@@ -68,11 +77,14 @@ async function resolveProvider(ws: string): Promise<ImgProvider | null> {
   return null;
 }
 
-export async function generateImage(ws: string, prompt: string, providerOverride?: ImgProvider): Promise<Img> {
+export async function generateImage(ws: string, prompt: string, providerOverride?: ImgProvider, aspect?: Aspect): Promise<Img> {
   const avail = imageProviders();
   const p = (providerOverride && avail[providerOverride]) ? providerOverride : await resolveProvider(ws);
   if (!p) throw new Error("Не налаштовано жодного провайдера зображень — додай ключ (OPENAI_API_KEY / FAL_KEY / GEMINI_API_KEY) у .env");
-  const img = p === "openai" ? await genOpenAI(prompt) : p === "fal" ? await genFal(prompt) : await genGemini(prompt);
+  const a = normAspect(aspect);
+  // gemini не має параметра розміру — підказуємо пропорції в промті
+  const gemPrompt = a === "1:1" ? prompt : `${prompt} Формат зображення: ${a === "4:5" ? "вертикальний 4:5" : "горизонтальний 16:9"}.`;
+  const img = p === "openai" ? await genOpenAI(prompt, a) : p === "fal" ? await genFal(prompt, a) : await genGemini(gemPrompt);
   try { await q(`insert into llm_usage(workspace_id, step, model, cost) values($1,'image',$2,$3)`, [ws, p, COSTS[p] || 0]); } catch { /* облік не критичний */ }
   return img;
 }
@@ -90,12 +102,16 @@ function deriveHeadline(content: string): string {
   return h;
 }
 async function overlayHeadline(buf: Buffer, headline: string): Promise<{ buffer: Buffer; mime: string }> {
-  const W = 1024, H = 1024;
-  const base = sharp(buf).resize(W, H, { fit: "cover" });
+  // беремо реальні розміри зображення (щоб не кропити 4:5 / 16:9 до квадрата)
+  let W = 1024, H = 1024;
+  try { const meta = await sharp(buf).metadata(); if (meta.width && meta.height) { W = meta.width; H = meta.height; } } catch { /* дефолт 1024² */ }
+  const base = sharp(buf);
+  const scale = W / 1024; // масштабуємо типографіку відносно ширини
   const words = headline.split(/\s+/); const lines: string[] = []; let cur = "";
-  for (const w of words) { if ((cur + " " + w).trim().length > 16) { if (cur) lines.push(cur.trim()); cur = w; } else cur = (cur + " " + w).trim(); }
+  const maxChars = Math.max(10, Math.round(16 * (W / 1024)));
+  for (const w of words) { if ((cur + " " + w).trim().length > maxChars) { if (cur) lines.push(cur.trim()); cur = w; } else cur = (cur + " " + w).trim(); }
   if (cur) lines.push(cur);
-  const fs = 66, lh = 80, pad = 56; const blockH = lines.length * lh + pad;
+  const fs = Math.round(66 * scale), lh = Math.round(80 * scale), pad = Math.round(56 * scale); const blockH = lines.length * lh + pad;
   const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.78"/></linearGradient></defs><rect x="0" y="${H - blockH - 40}" width="${W}" height="${blockH + 40}" fill="url(#g)"/>${lines.map((ln, i) => `<text x="${pad}" y="${H - pad - (lines.length - 1 - i) * lh}" font-family="'Segoe UI',Arial,sans-serif" font-size="${fs}" font-weight="800" fill="#fff">${escXml(ln)}</text>`).join("")}</svg>`;
   const out = await base.composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).jpeg({ quality: 88 }).toBuffer();
   return { buffer: out, mime: "image/jpeg" };
@@ -105,17 +121,17 @@ async function overlayHeadline(buf: Buffer, headline: string): Promise<{ buffer:
 // Логіка тексту на зображенні: генерація ЗАВЖДИ чиста (без накладання) — заголовок юзер підтверджує
 // в редакторі зображення і накладає окремо (дешевий /image-text). Виняток: явний opts.headline
 // (кнопка «Згенерувати» в редакторі з заповненим полем) — тоді накладаємо одразу.
-export async function generateImageForPost(ws: string, postId: string, opts?: { headline?: string; provider?: ImgProvider }): Promise<string> {
+export async function generateImageForPost(ws: string, postId: string, opts?: { headline?: string; provider?: ImgProvider; aspect?: Aspect | string; prompt?: string }): Promise<string> {
   const post = await one<{ content: string; image_prompt: string | null }>(
     `select p.content, p.image_prompt from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
   if (!post) throw new Error("пост не знайдено");
-  const base = (post.image_prompt || "").trim() || `Зображення для соцмереж за темою: ${(post.content || "").split("\n")[0].slice(0, 200)}`;
+  const base = (opts?.prompt || "").trim() || (post.image_prompt || "").trim() || `Зображення для соцмереж за темою: ${(post.content || "").split("\n")[0].slice(0, 200)}`;
   // стиль зображень бренду (аналог tone of voice для картинок) — задається в Налаштуваннях
   const styleRow = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='image_style'`, [ws]);
   const style = (styleRow?.content || "").trim() || "чисте, сучасне, мінімалістичне, привабливе";
   const prompt = `${base}. Стиль бренду: ${style}. Без жодного тексту, написів чи літер на зображенні.`;
-  const img = await generateImage(ws, prompt, opts?.provider);
+  const img = await generateImage(ws, prompt, opts?.provider, normAspect(opts?.aspect));
   // зберігаємо БАЗОВЕ зображення (без тексту) окремо — щоб дешево перенакладати текст потім
   const baseSaved = await saveMedia(ws, { buffer: img.buffer, mime: img.mime, name: `ai-base.${img.mime.includes("png") ? "png" : "jpg"}`, source: "ai-base" });
   const headline = (opts?.headline || "").trim();

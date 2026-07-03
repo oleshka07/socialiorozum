@@ -25,11 +25,15 @@ async function tick(): Promise<void> {
       const results = await publishPostToChannels(slot.workspace_id, slot.post_id);
       const anyOk = results.some((r) => r.status === "sent");
       const ok = results.filter((r) => r.status === "sent").map((r) => r.channel).join(", ");
+      const skip = results.filter((r) => r.status === "skipped").map((r) => r.channel).join(", ");
       const err = results.filter((r) => r.status === "error").map((r) => `${r.channel}: ${r.error}`).join("; ");
-      const summary = [ok ? `✓ ${ok}` : "", err ? `⚠ ${err}` : ""].filter(Boolean).join(" · ") || "немає обраних каналів";
-      await q(`update schedule_slot set status=$2, result=$3 where id=$1`, [slot.id, anyOk ? "posted" : "failed", summary]);
+      // «пропущено» (мережа вже опублікована) — це НЕ помилка: слот вважається виконаним, якщо є хоч один sent або лише skipped без помилок
+      const benign = !err && (anyOk || !!skip);
+      const summary = [ok ? `✓ ${ok}` : "", skip ? `↩ вже: ${skip}` : "", err ? `⚠ ${err}` : ""].filter(Boolean).join(" · ") || "немає обраних каналів";
+      await q(`update schedule_slot set status=$2, result=$3 where id=$1`, [slot.id, benign ? "posted" : "failed", summary]);
       if (anyOk) await q(`update plan_slot set status='published' where post_id=$1 and status in ('drafted','approved','scheduled')`, [slot.post_id]);
       if (anyOk) await logEvent("info", "autopost", `slot ${slot.id} → ${ok}${err ? ` (помилки: ${err})` : ""}`);
+      else if (benign) await logEvent("info", "autopost", `slot ${slot.id}: усі мережі вже опубліковано (${skip})`);
       else await logEvent("warn", "autopost", `slot ${slot.id} не опубліковано: ${err || "немає каналів"}`);
     } catch (e: any) {
       await q(`update schedule_slot set status='failed', result=$2 where id=$1`, [slot.id, e.message]);

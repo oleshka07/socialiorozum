@@ -240,6 +240,24 @@
     .rail{position:static}
     .stat-grid{grid-template-columns:repeat(2,1fr)}
   }
+  /* ---- повноекранний композер (2 панелі з незалежним скролом) ---- */
+  .cmp-ov{position:fixed;inset:0;z-index:80;background:var(--bg);display:flex;flex-direction:column;animation:pop .25s ease}
+  .cmp-top{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--line);flex:none}
+  .cmp-body{flex:1;display:flex;min-height:0}
+  .cmp-left{flex:1;min-width:0;overflow:auto;padding:20px 24px}
+  .cmp-right{width:390px;flex:none;overflow:auto;padding:22px 20px;background:var(--surface2);border-left:1px solid var(--line)}
+  .cmp-foot{display:flex;gap:10px;align-items:center;padding:12px 20px;border-top:1px solid var(--line);flex:none;flex-wrap:wrap}
+  .dashbtn{border:1.5px dashed var(--line2);background:transparent;border-radius:10px;padding:8px 13px;font-size:13px;font-weight:600;color:var(--ink2);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+  .dashbtn:hover{border-color:var(--brand);color:var(--brand)}
+  .dashbtn:disabled{opacity:.45;cursor:not-allowed}
+  .aspchip{font-size:12px;font-weight:700;padding:5px 11px;border-radius:8px;border:1px solid var(--line2);background:transparent;color:var(--muted);cursor:pointer}
+  .aspchip.on{background:var(--brand-soft);border-color:var(--brand);color:var(--brand)}
+  .phone{max-width:330px;margin:0 auto 18px;background:var(--surface);border:1px solid var(--line);border-radius:20px;box-shadow:0 6px 24px rgba(0,0,0,.10);overflow:hidden}
+  .phone-h{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line);font-size:12.5px;font-weight:700}
+  .phone-b{padding:11px 13px}
+  .phone-txt{font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+  .cmp-cnt{font-size:11.5px;font-weight:700}
+  @media(max-width:820px){ .cmp-body{flex-direction:column} .cmp-right{width:auto;border-left:none;border-top:1px solid var(--line)} }
 </style>
 <script src="https://apis.google.com/js/api.js"></script>
 </head>
@@ -305,13 +323,13 @@
       <div class="pagehead"><div class="ptitle" id="pageTitle">Створення</div><div class="psub" id="pageSub">Переглянь і затвердь готові пости</div></div>
       <div id="taskStrip" style="display:none"></div>
 
-      <!-- ============ CREATE: конвеєр Матеріали → План → Пости ============ -->
+      <!-- ============ CREATE: конвеєр Матеріали → План → Чорновики ============ -->
       <section class="viewsec active" data-view="create">
         <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;flex-wrap:wrap">
           <div class="tabs" id="cTabs">
             <div class="tab" data-ctab="materials">📥 Матеріали <span class="badge" id="matCount" style="margin-left:5px"></span></div>
             <div class="tab" data-ctab="plan">📅 План <span class="badge" id="planCount" style="margin-left:5px"></span></div>
-            <div class="tab on" data-ctab="posts">📝 Пости <span class="badge" id="postCount" style="margin-left:5px"></span></div>
+            <div class="tab on" data-ctab="posts">📝 Чорновики <span class="badge" id="postCount" style="margin-left:5px"></span></div>
           </div>
           <div class="tabs proonly" id="layoutTabs" style="display:none">
             <div class="tab on" data-lay="studio">Студія</div>
@@ -374,7 +392,7 @@
           </div>
           <div>
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
-              <div class="disp" style="font-weight:600;font-size:17px">На перегляд</div>
+              <div class="disp" style="font-weight:600;font-size:17px">Чорновики</div>
               <div class="ftabs" id="studioFilters"></div>
               <div class="ftabs" id="studioTagFilters" style="flex-wrap:wrap"></div>
               <button class="ghost" id="studioMore" style="margin-left:auto"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v4h4"></path></svg>Згенерувати ще</button>
@@ -778,7 +796,7 @@ function loadPlans(){ const lite=$('planLiteBtn'), pro=$('planProBtn'); if(!pro)
 }
 if($('planProBtn')) $('planProBtn').onclick=async()=>{ try{ const next=PRO?'0':'1'; await saveSetting('pro',next); PRO=(next==='1'); if(typeof updateProUI==='function') updateProUI(); loadPlans(); if(typeof loadTasks==='function') loadTasks(); flash(PRO?'ПРО увімкнено ✓':'ПРО вимкнено'); if(!PRO&&$('layPipeline')&&$('layPipeline').style.display!=='none') setLayout('studio'); }catch(e){ flash('⚠ '+e.message); } };
 if($('planLiteBtn')) $('planLiteBtn').onclick=async()=>{ if(!PRO) return; try{ await saveSetting('pro','0'); PRO=false; if(typeof updateProUI==='function') updateProUI(); loadPlans(); if(typeof loadTasks==='function') loadTasks(); flash('Lite активний'); if($('layPipeline')&&$('layPipeline').style.display!=='none') setLayout('studio'); }catch(e){} };
-// ---------- конвеєр Створення: Матеріали → План → Пости ----------
+// ---------- конвеєр Створення: Матеріали → План → Чорновики ----------
 let cTab='posts';
 function setCTab(t){
   cTab=t;
@@ -941,7 +959,7 @@ function renderPlan(){
     let act='';
     if(s.status==='empty') act='<button class="ghost" data-pa="theme">Згенерувати з теми</button>';
     if(s.status==='matched') act='<button class="primary" data-pa="material">✨ З матеріалу</button><button class="ghost" data-pa="theme">З теми</button>';
-    if(s.status==='drafted') act='<button class="ghost" data-pa="topost">→ до поста</button>';
+    if(s.status==='drafted') act='<button class="ghost" data-pa="topost">→ до чорновика</button>';
     if(s.status==='approved'||s.status==='scheduled') act='<button class="ghost" data-pa="tocal">→ календар</button>';
     return '<div data-slot="'+s.id+'" style="display:flex;align-items:center;gap:11px;padding:12px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap">'
       +'<span style="font-size:12px;font-weight:700;color:var(--ink2);background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:5px 10px;min-width:82px;text-align:center;flex:none">'+day+'</span>'
@@ -1132,7 +1150,7 @@ function renderStudio(){
   if(StudioRubric) show=show.filter(p=>p.rubric===StudioRubric);
   if(StudioOrigin) show=show.filter(p=>p.source_origin===StudioOrigin);
   renderBulkBar();
-  if(!show.length){ grid.innerHTML='<div class="empty" style="grid-column:1/-1">Поки порожньо. Додай джерело у «Джерела» і натисни «Згенерувати пости».</div>'; return; }
+  if(!show.length){ grid.innerHTML='<div class="empty" style="grid-column:1/-1">Поки порожньо. Додай джерело у «Джерела» і натисни «Згенерувати».</div>'; return; }
   grid.innerHTML=show.map(p=>{ const sp=statusPill(p.review); const ap=p.review==='approved'; const sel=SelPosts.has(p.id);
     const tags=(p.rubric?'<span class="ptag">🏷 '+esc(p.rubric)+'</span>':'')+(p.source_origin&&p.source_origin!=='manual'?'<span class="ptag">'+(ORIGIN_LABEL[p.source_origin]||esc(p.source_origin))+'</span>':'');
     return '<div class="pcard'+(ap?' appr':'')+(sel?' selc':'')+'" data-post="'+p.id+'">'
@@ -1306,36 +1324,100 @@ function chooseMedia(){ return new Promise(async resolve=>{
   ov.querySelectorAll('img[data-id]').forEach(im=>im.onclick=()=>{ close(); resolve({id:im.dataset.id, filename:im.dataset.fn}); });
 }); }
 // ---------- композер: опублікувати / запланувати ----------
+// ---------- КОМПОЗЕР: повноекранна панель (ліворуч редактор, праворуч мобільне прев'ю) ----------
+const NETLIM={telegram:1024,threads:500,instagram:2200,facebook:2000};
 async function openComposer(postId, opts){
   opts=opts||{};
   let full; try{ full=await api('/posts/'+postId+'/full'); }catch(e){ flash('Не вдалося відкрити: '+e.message); return; }
-  const C=full.channels||{}; let mediaFilename=full.media_filename||null;
+  let ps={sent:[]}; try{ ps=await api('/posts/'+postId+'/publish-state'); }catch(e){}
+  const sentSet=new Set(ps.sent||[]);
+  const C=JSON.parse(JSON.stringify(full.channels||{}));
+  // якщо жодна мережа не обрана - вмикаємо всі підключені й ще не надіслані
+  if(!Object.keys(C).some(k=>C[k]&&C[k].on)) NETS.forEach(n=>{ if(ChanStatus[n[0]]&&!sentSet.has(n[0])){ C[n[0]]=C[n[0]]||{text:''}; C[n[0]].on=true; } });
+  // надіслані мережі завжди позначені як обрані (щоб було видно в прев'ю)
+  sentSet.forEach(k=>{ C[k]=C[k]||{text:''}; C[k].on=true; });
+  let master=full.content||''; let mediaFilename=full.media_filename||null; let rubric=full.rubric||'';
   const initDate=opts.scheduledAt?locDate(opts.scheduledAt):''; const initTime=opts.scheduledAt?locHM(opts.scheduledAt):'11:00';
-  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='60';
-  const chipsHtml=()=>NETS.map(n=>{ const on=C[n[0]]&&C[n[0]].on; const conn=ChanStatus[n[0]]; return '<button class="netchip'+(on?' on':'')+'" data-net="'+n[0]+'"'+(conn?'':' disabled title="не підключено"')+'>'+n[1]+'</button>'; }).join('');
-  const prevHtml=()=>{ const sel=NETS.filter(n=>C[n[0]]&&C[n[0]].on); if(!sel.length) return '<div style="font-size:12px;color:var(--muted)">Обери мережі вище.</div>'; return sel.map(n=>{ const t=(C[n[0]].text||full.content||''); return '<div style="font-size:12px;border:1px solid var(--line);border-radius:8px;padding:6px 9px;margin-top:6px"><b>'+n[1]+'</b> <span style="color:var(--muted)">'+t.length+' симв.</span><div style="color:var(--muted);margin-top:2px;white-space:pre-wrap">'+esc(t.slice(0,200))+(t.length>200?'…':'')+'</div></div>'; }).join(''); };
-  const mediaHtml=()=>mediaFilename?'<img src="/media/'+esc(mediaFilename)+'" style="height:74px;border-radius:8px">':'<div style="width:74px;height:74px;border-radius:8px;background:var(--surface2);display:grid;place-items:center;color:var(--muted);font-size:11px">нема фото</div>';
-  ov.innerHTML='<div class="modal-card" style="max-width:600px;padding:20px">'
-    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px"><b style="font-size:16px">📣 Опублікувати / запланувати</b><button class="icon" id="cmpX" style="margin-left:auto">✕</button></div>'
-    +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Канали</div><div id="cmpChips" style="display:flex;gap:6px;flex-wrap:wrap">'+chipsHtml()+'</div>'
-    +'<div class="btnrow"><button id="cmpAdapt">✨ Підлаштувати під мережі</button><span id="cmpMsg" style="font-size:12px"></span></div>'
-    +'<div style="display:flex;gap:10px;align-items:flex-start;margin-top:6px"><div style="flex:1;min-width:0" id="cmpPrev">'+prevHtml()+'</div><div style="text-align:center"><div id="cmpMedia">'+mediaHtml()+'</div><div style="display:flex;gap:5px;justify-content:center;margin-top:6px"><button class="ghost" id="cmpPhoto" style="font-size:12px;padding:6px 9px">📎 Галерея</button><button class="ghost" id="cmpUpload" style="font-size:12px;padding:6px 9px">⬆ Завантажити</button><button class="ghost" id="cmpImgGen" style="font-size:12px;padding:6px 9px">🎨 Зображення</button></div><input type="file" id="cmpFile" accept="image/*" style="display:none"></div></div>'
-    +'<div class="btnrow" style="margin-top:14px;gap:12px"><label style="font-size:12px;color:var(--muted)">Дата <input type="date" id="cmpDate" class="txt" value="'+initDate+'" style="width:auto;padding:7px 9px"></label><label style="font-size:12px;color:var(--muted)">Час <input type="time" id="cmpTime" class="txt" value="'+initTime+'" style="width:auto;padding:7px 9px"></label></div>'
-    +'<div class="btnrow" style="margin-top:16px"><button class="primary" id="cmpNow">📣 Опублікувати зараз</button><button class="ok" id="cmpSched">🗓 Запланувати</button></div>'
-    +'</div>';
-  document.body.appendChild(ov); const close=()=>ov.remove();
-  ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
-  const msg=ov.querySelector('#cmpMsg');
+  const textOf=(k)=> (C[k]&&typeof C[k].text==='string'&&C[k].text) ? C[k].text : master;
+  const ov=document.createElement('div'); ov.className='cmp-ov';
+  const rubOpts='<option value="">без рубрики</option>'+(Rubrics||[]).map(r=>'<option value="'+esc(r.name)+'"'+(r.name===rubric?' selected':'')+'>'+(r.emoji||'')+' '+esc(r.name)+'</option>').join('');
+  ov.innerHTML=
+    '<div class="cmp-top"><b style="font-size:16px">✍ Композер</b><span id="cmpSub" style="font-size:12px;color:var(--muted)"></span><span style="flex:1"></span><button class="icon" id="cmpX" title="Закрити">✕</button></div>'
+    +'<div class="cmp-body">'
+      +'<div class="cmp-left">'
+        +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Канали</div><div id="cmpChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px"></div>'
+        +'<label style="font-size:12px;color:var(--muted);display:inline-block;margin-bottom:12px">Рубрика <select id="cmpRubric" class="txt" style="width:auto;padding:6px 9px;display:inline-block;margin-left:4px">'+rubOpts+'</select></label>'
+        +'<textarea id="cmpText" class="txt" style="min-height:240px;font-size:14px;line-height:1.55;resize:vertical"></textarea>'
+        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="dashbtn" id="cmpHash"># Хештеги</button><button class="dashbtn" id="cmpPhoto">⚡ AI фото</button><button class="dashbtn" id="cmpRewrite">✍ Переписати</button></div>'
+        +'<div id="cmpMediaWrap" style="margin-top:14px"></div>'
+        +'<div id="cmpMsg" style="font-size:12.5px;margin-top:10px;min-height:18px"></div>'
+      +'</div>'
+      +'<div class="cmp-right"><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:14px;text-align:center">Прев\'ю · мобільний</div><div id="cmpPrev"></div></div>'
+    +'</div>'
+    +'<div class="cmp-foot"><button class="ghost" id="cmpSave">💾 Зберегти чернетку</button><button id="cmpAdapt">✨ Підлаштувати під канали</button><span style="flex:1"></span>'
+      +'<label style="font-size:12px;color:var(--muted)">Дата <input type="date" id="cmpDate" class="txt" value="'+initDate+'" style="width:auto;padding:6px 8px;display:inline-block"></label>'
+      +'<label style="font-size:12px;color:var(--muted)">Час <input type="time" id="cmpTime" class="txt" value="'+initTime+'" style="width:auto;padding:6px 8px;display:inline-block"></label>'
+      +'<button class="ok" id="cmpSched">🗓 Запланувати</button><button class="primary" id="cmpNow">📣 Опублікувати зараз</button></div>';
+  document.body.appendChild(ov);
+  const escH=(e)=>{ if(e.key==='Escape') close(); };
+  const close=()=>{ ov.remove(); document.removeEventListener('keydown',escH); };
+  document.addEventListener('keydown',escH);
+  const msg=ov.querySelector('#cmpMsg'); const txt=ov.querySelector('#cmpText'); txt.value=master;
+  const setMsg=(t,c)=>{ msg.textContent=t; msg.style.color=c||'var(--muted)'; };
   ov.querySelector('#cmpX').onclick=close;
-  ov.querySelectorAll('#cmpChips .netchip').forEach(b=>{ if(b.disabled) return; b.onclick=()=>{ const net=b.dataset.net; C[net]=C[net]||{text:''}; C[net].on=!C[net].on; b.classList.toggle('on',C[net].on); ov.querySelector('#cmpPrev').innerHTML=prevHtml(); }; });
-  ov.querySelector('#cmpAdapt').onclick=async()=>{ const sel=Object.keys(C).filter(k=>C[k]&&C[k].on); if(!sel.length){ msg.style.color='var(--danger)'; msg.textContent=' оберіть мережі'; return; } msg.style.color='var(--muted)'; msg.textContent=' AI підлаштовує…'; aiBusy('✨ Підлаштовую пост під обрані мережі…'); try{ const r=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:sel})}); Object.keys(r.channels||{}).forEach(k=>C[k]=r.channels[k]); ov.querySelector('#cmpPrev').innerHTML=prevHtml(); msg.style.color='var(--brand)'; msg.textContent=' готово ✓'; }catch(e){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+e.message; }finally{ aiDone(); } };
-  ov.querySelector('#cmpPhoto').onclick=async()=>{ const sel=await chooseMedia(); if(sel===undefined) return; try{ await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:sel.id})}); mediaFilename=sel.filename; ov.querySelector('#cmpMedia').innerHTML=mediaHtml(); }catch(e){ flash(e.message); } };
-  ov.querySelector('#cmpImgGen').onclick=()=>openImageEditor(postId,(f)=>{ mediaFilename=f; ov.querySelector('#cmpMedia').innerHTML=mediaHtml(); });
-  ov.querySelector('#cmpUpload').onclick=()=>ov.querySelector('#cmpFile').click();
-  ov.querySelector('#cmpFile').onchange=async(e)=>{ const file=e.target.files&&e.target.files[0]; if(!file) return; msg.style.color='var(--muted)'; msg.textContent=' завантаження фото…'; try{ const fd=new FormData(); fd.append('file',file); const r=await fetch('/api/media',{method:'POST',body:fd,credentials:'same-origin'}); const j=await r.json(); if(!r.ok||j.error) throw new Error(j.error||('HTTP '+r.status)); const up=(j.saved||[])[0]; if(!up) throw new Error('файл не збережено'); await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:up.id})}); mediaFilename=up.url.replace('/media/',''); ov.querySelector('#cmpMedia').innerHTML=mediaHtml(); msg.style.color='var(--brand)'; msg.textContent=' фото додано ✓'; }catch(err){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+err.message; } };
-  const saveCh=()=>api('/posts/'+postId+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:C})});
-  ov.querySelector('#cmpNow').onclick=async(e)=>{ const b=e.target.closest('button'); b.disabled=true; msg.style.color='var(--muted)'; msg.textContent=' публікую…'; aiBusy('📣 Публікую в обрані мережі…'); try{ await saveCh(); const r=await api('/posts/'+postId+'/publish-all',{method:'POST'}); const res=r.results||[]; const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); msg.style.color=err.length?'var(--danger)':'var(--brand)'; msg.textContent=' '+(ok.length?('✓ '+ok.join(', ')):'')+(err.length?(' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; ')):''); if(!err.length){ try{await refresh();}catch(_){} setTimeout(close,1300);} }catch(e2){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+e2.message; } finally{ b.disabled=false; aiDone(); } };
-  ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ msg.style.color='var(--danger)'; msg.textContent=' вкажи дату й час'; return; } const sel=Object.keys(C).filter(k=>C[k]&&C[k].on); if(!sel.length){ msg.style.color='var(--danger)'; msg.textContent=' оберіть мережі'; return; } const b=e.target.closest('button'); b.disabled=true; msg.style.color='var(--muted)'; msg.textContent=' зберігаю…'; const at=zonedToUTCISO(d,t); try{ await saveCh(); if(opts.slotId){ await api('/schedule/'+opts.slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:at})}); } else { await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:at})}); } msg.style.color='var(--brand)'; msg.textContent=' заплановано ✓'; try{await loadPublish();}catch(_){} setTimeout(close,900); }catch(e2){ msg.style.color='var(--danger)'; msg.textContent=' ⚠ '+e2.message; b.disabled=false; } };
+  // ----- канали (надіслані = заблоковані з ✓) -----
+  function renderChips(){ const box=ov.querySelector('#cmpChips'); box.innerHTML=NETS.map(n=>{ const k=n[0]; const on=C[k]&&C[k].on; const conn=ChanStatus[k]; const sent=sentSet.has(k);
+      return '<button class="netchip'+(on?' on':'')+'" data-net="'+k+'"'+((!conn||sent)?' disabled':'')+' title="'+(sent?'вже опубліковано':(conn?'':'не підключено'))+'">'+(sent?'✓ ':'')+n[1]+'</button>'; }).join('');
+    box.querySelectorAll('.netchip').forEach(b=>{ if(b.disabled) return; b.onclick=()=>{ const k=b.dataset.net; C[k]=C[k]||{text:''}; C[k].on=!C[k].on; renderChips(); renderPrev(); }; }); }
+  // ----- медіа (ліва панель) -----
+  function renderMedia(){ ov.querySelector('#cmpMediaWrap').innerHTML=(mediaFilename
+      ?'<img src="/media/'+esc(mediaFilename)+'" style="max-height:120px;border-radius:10px;border:1px solid var(--line)">'
+      :'<div style="font-size:12px;color:var(--muted)">Фото ще нема - додай через «⚡ AI фото».</div>'); }
+  // ----- прев'ю мобільне по кожній обраній мережі -----
+  function renderPrev(){ const box=ov.querySelector('#cmpPrev'); const sel=NETS.filter(n=>C[n[0]]&&C[n[0]].on);
+    if(!sel.length){ box.innerHTML='<div style="font-size:12px;color:var(--muted);text-align:center">Обери канал ліворуч.</div>'; return; }
+    box.innerHTML=sel.map(n=>{ const k=n[0]; const t=textOf(k); const lim=NETLIM[k]||2200; const over=t.length>lim; const sent=sentSet.has(k);
+      return '<div class="phone"><div class="phone-h"><span class="cdot" style="background:var('+NETVAR[k]+')"><svg width="11" height="11" viewBox="0 0 24 24" fill="#fff"><path d="'+NETICON[k]+'"></path></svg></span>'+n[1]
+        +(sent?'<span style="margin-left:auto;font-size:11px;font-weight:700;color:var(--brand)">✓ Опубліковано</span>':'<span class="cmp-cnt" style="margin-left:auto;color:'+(over?'var(--danger)':'var(--muted)')+'">'+t.length+'/'+lim+'</span>')+'</div>'
+        +(mediaFilename?'<img src="/media/'+esc(mediaFilename)+'" style="width:100%;display:block">':'')
+        +'<div class="phone-b"><div class="phone-txt">'+(t?esc(t):'<span style="color:var(--muted)">порожньо</span>')+'</div></div></div>'; }).join(''); }
+  txt.addEventListener('input',()=>{ master=txt.value; renderPrev(); });
+  ov.querySelector('#cmpRubric').onchange=(e)=>{ rubric=e.target.value; };
+  renderChips(); renderMedia(); renderPrev();
+  // ----- дії: хештеги / фото / переписати -----
+  ov.querySelector('#cmpHash').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('# добираю хештеги…'); aiBusy('# Добираю хештеги…'); try{ const r=await api('/posts/'+postId+'/hashtags',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:master})}); const tags=(r.hashtags||[]).join(' '); if(tags){ master=(master.trimEnd()+'\n\n'+tags); txt.value=master; renderPrev(); setMsg('готово ✓','var(--brand)'); } else setMsg('не знайшлося тегів'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
+  ov.querySelector('#cmpRewrite').onclick=async(e)=>{ const instruction=prompt('Що змінити? (порожньо = переписати іншими словами, голос збережеться)'); if(instruction===null) return; const b=e.target; b.disabled=true; setMsg('✍ переписую…'); aiBusy('✍ Переписую пост…'); try{ await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master})}); const r=await api('/posts/'+postId+'/regenerate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instruction})}); master=r.content||master; txt.value=master; renderPrev(); setMsg('готово ✓','var(--brand)'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
+  ov.querySelector('#cmpPhoto').onclick=()=>openPhotoTool(postId, full.image_prompt||'', (f)=>{ mediaFilename=f; renderMedia(); renderPrev(); });
+  // ----- зберегти / адаптувати / публікувати / планувати -----
+  const saveDraft=async()=>{ await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master,rubric})}); await api('/posts/'+postId+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:C})}); };
+  ov.querySelector('#cmpSave').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('💾 зберігаю…'); try{ await saveDraft(); setMsg('чернетку збережено ✓','var(--brand)'); try{await loadStudioPosts();}catch(_){} }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; } };
+  ov.querySelector('#cmpAdapt').onclick=async(e)=>{ const sel=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!sel.length){ setMsg('немає каналів для адаптації','var(--danger)'); return; } const b=e.target; b.disabled=true; setMsg('✨ AI підлаштовує під канали…'); aiBusy('✨ Підлаштовую під канали (з чернетки)…'); try{ await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master})}); const r=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:sel})}); Object.keys(r.channels||{}).forEach(k=>{ if(!sentSet.has(k)) C[k]=r.channels[k]; }); renderPrev(); setMsg('готово ✓ кожна мережа у своєму форматі','var(--brand)'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
+  ov.querySelector('#cmpNow').onclick=async(e)=>{ const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('усі обрані канали вже опубліковано','var(--danger)'); return; } const b=e.target; b.disabled=true; setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const r=await api('/posts/'+postId+'/publish-all',{method:'POST'}); const res=r.results||[]; const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); ok.forEach(k=>sentSet.add(k)); renderChips(); renderPrev(); setMsg((ok.length?'✓ '+ok.join(', '):'')+(err.length?' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; '):''), err.length?'var(--danger)':'var(--brand)'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
+  ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ setMsg('вкажи дату й час','var(--danger)'); return; } const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('немає каналів для планування (усі вже опубліковано)','var(--danger)'); return; } const b=e.target; b.disabled=true; setMsg('🗓 зберігаю…'); const at=zonedToUTCISO(d,t); try{ await saveDraft(); if(opts.slotId){ await api('/schedule/'+opts.slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:at})}); } else { await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:at})}); } setMsg('заплановано ✓ ('+todo.join(', ')+')','var(--brand)'); try{await loadPublish();}catch(_){} try{await loadStudioPosts();}catch(_){} setTimeout(close,1000); }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); b.disabled=false; } };
+}
+// підбір/генерація фото для композера: галерея · завантаження · AI (промт + пропорції 1:1/4:5/16:9)
+function openPhotoTool(postId, initPrompt, onDone){
+  let aspect='1:1'; let overlayOn=false;
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='90';
+  ov.innerHTML='<div class="modal-card" style="max-width:520px;padding:20px">'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><b style="font-size:16px">⚡ AI фото</b><button class="icon" id="ptX" style="margin-left:auto">✕</button></div>'
+    +'<div class="btnrow" style="margin-bottom:12px"><button class="ghost" id="ptGallery">📎 З галереї</button><button class="ghost" id="ptUpload">⬆ Завантажити</button><input type="file" id="ptFile" accept="image/*" style="display:none"></div>'
+    +'<label class="fl">Опис зображення (промт)</label><textarea id="ptPrompt" class="txt" rows="3" placeholder="Що на зображенні…">'+esc(initPrompt||'')+'</textarea>'
+    +'<div style="font-size:12px;color:var(--muted);margin:12px 0 6px">Пропорції</div><div style="display:flex;gap:6px" id="ptAsp">'+[['1:1','1:1 квадрат'],['4:5','4:5 вертикаль'],['16:9','16:9 горизонталь']].map(a=>'<button class="aspchip'+(a[0]==='1:1'?' on':'')+'" data-a="'+a[0]+'">'+a[1]+'</button>').join('')+'</div>'
+    +'<label class="rchip" style="margin-top:12px;display:inline-flex"><input type="checkbox" id="ptOv"> Заголовок на фото</label>'
+    +'<input class="txt" id="ptHead" placeholder="Короткий заголовок" style="margin-top:8px;display:none">'
+    +'<div id="ptMsg" style="font-size:12px;color:var(--muted);margin-top:8px"></div>'
+    +'<div class="btnrow" style="margin-top:14px"><button class="primary" id="ptGen">🎨 Згенерувати (коштує)</button></div>'
+    +'<div class="hint" style="margin-top:8px">Генерація малює нову картинку. «З галереї» / «Завантажити» - без витрат.</div></div>';
+  document.body.appendChild(ov); const close=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#ptX').onclick=close;
+  const msg=ov.querySelector('#ptMsg');
+  ov.querySelectorAll('#ptAsp .aspchip').forEach(c=>c.onclick=()=>{ aspect=c.dataset.a; ov.querySelectorAll('#ptAsp .aspchip').forEach(x=>x.classList.toggle('on',x===c)); });
+  ov.querySelector('#ptOv').onchange=(e)=>{ overlayOn=e.target.checked; ov.querySelector('#ptHead').style.display=overlayOn?'block':'none'; };
+  ov.querySelector('#ptGallery').onclick=async()=>{ const sel=await chooseMedia(); if(sel===undefined) return; try{ await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:sel.id})}); if(onDone)onDone(sel.filename); close(); }catch(e){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+e.message; } };
+  ov.querySelector('#ptUpload').onclick=()=>ov.querySelector('#ptFile').click();
+  ov.querySelector('#ptFile').onchange=async(e)=>{ const file=e.target.files&&e.target.files[0]; if(!file) return; msg.style.color='var(--muted)'; msg.textContent='завантаження…'; try{ const fd=new FormData(); fd.append('file',file); const r=await fetch('/api/media',{method:'POST',body:fd,credentials:'same-origin'}); const j=await r.json(); if(!r.ok||j.error) throw new Error(j.error||('HTTP '+r.status)); const up=(j.saved||[])[0]; if(!up) throw new Error('файл не збережено'); await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:up.id})}); if(onDone)onDone(up.url.replace('/media/','')); close(); }catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; } };
+  ov.querySelector('#ptGen').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='малюю зображення… (10-30с)'; aiBusy('🎨 Малюю зображення… (10-30с)'); try{ const body={prompt:ov.querySelector('#ptPrompt').value,aspect}; if(overlayOn) body.headline=ov.querySelector('#ptHead').value; const r=await api('/posts/'+postId+'/image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(onDone)onDone(r.filename); close(); }catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; b.disabled=false; }finally{ aiDone(); } };
 }
 function openDayScheduler(iso){
   const posts=(Pub&&Pub.bank)?Pub.bank:[];
@@ -1381,8 +1463,8 @@ async function genPosts(){
   let rid; try{ rid=await ensureRun(); }catch(e){ try{ const r=await api('/generate/from-brand',{method:'POST'}); rid=r.runId; runId=rid; localStorage.setItem('kg_run',rid); updRunLabel(); }catch(e2){ go('brand'); flash('Спершу заповни Базу бренду (ніша й аудиторія).'); return; } }
   setBusy(true); setLayout('studio');
   const cnt=Number(($('ideaCount')||{}).value)||6;
-  aiBusy('✨ Генерую '+cnt+' постів у твоєму голосі…');
-  try{ const r=await api('/runs/'+rid+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:cnt})}); await refresh(); flash('Готово - '+(r.count||0)+' постів на перегляд.'); loadTasks(); }
+  aiBusy('✨ Генерую '+cnt+' чорновиків у твоєму голосі…');
+  try{ const r=await api('/runs/'+rid+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:cnt})}); await refresh(); flash('Готово - '+(r.count||0)+' чорновиків на перегляд. Відкрий чорновик, підлаштуй під канали й заплануй.'); loadTasks(); }
   catch(e){ flash('⚠ '+e.message); try{await refresh();}catch(_){} }
   finally{ setBusy(false); aiDone(); }
 }

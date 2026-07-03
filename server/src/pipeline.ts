@@ -587,6 +587,23 @@ export async function extractIdeasFromText(workspaceId: string, text: string, co
   return out;
 }
 
+// ---- Хештеги для поста (кнопка «# Хештеги» у композері): 5-8 релевантних, у ніші бренду ----
+export async function suggestHashtags(workspaceId: string, text: string): Promise<string[]> {
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const system =
+    "Ти SMM-фахівець. Підбери 5-8 релевантних хештегів для цього поста: суміш нішевих і ширших, без пробілів усередині тега, без дублів, реально вживаних. " +
+    (s.marketing_context ? `\nНіша бренду: ${s.marketing_context}` : "") +
+    `\n\nПоверни ЛИШЕ валідний JSON-масив рядків, кожен починається з #. Мова тегів: ${lang}.`;
+  const raw = await chat("openai/gpt-4o-mini", system, `Пост:\n---\n${(text || "").slice(0, 4000)}`, { workspaceId, step: "hashtags" });
+  let tags: string[] = [];
+  try {
+    tags = extractJsonArray<any>(raw).map((x) => String(x || "").trim())
+      .map((t) => (t.startsWith("#") ? t : "#" + t)).map((t) => t.replace(/\s+/g, "")).filter((t) => t.length > 1);
+  } catch { tags = []; }
+  return [...new Set(tags)].slice(0, 8);
+}
+
 // ---- Метчинг: які матеріали підходять під порожні слоти плану (дешевий один виклик) ----
 export async function matchPlanSlots(workspaceId: string): Promise<number> {
   const slots = await q<{ id: string; theme: string; rubric: string }>(

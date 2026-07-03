@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton, suggestHashtags } from "./pipeline.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
 import * as meta from "./meta.js";
@@ -25,7 +25,7 @@ import { startRssPoller, pullFeed } from "./rss-poller.js";
 import { MEDIA_DIR, saveMedia, deleteMediaFile, convertAllHeif, getThumb } from "./media.js";
 import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
 import * as gdrive from "./gdrive.js";
-import { publishPostToChannels } from "./publisher.js";
+import { publishPostToChannels, alreadySentNetworks } from "./publisher.js";
 import { startLifecycleWorker } from "./lifecycle.js";
 import { generateImageForPost, imageProviders, overlayForPost } from "./images.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername } from "./tgbot.js";
@@ -502,7 +502,7 @@ app.get("/api/channels/status", async (req: any) => {
 
 // повний стан поста для композера (текст, канали, фото)
 app.get("/api/posts/:postId/full", async (req: any, reply) => {
-  const p = await one(`select p.id, p.content, p.review, p.channels, p.headline, (p.image_base is not null) as has_base, ma.filename as media_filename
+  const p = await one(`select p.id, p.content, p.review, p.channels, p.headline, p.rubric, p.image_prompt, (p.image_base is not null) as has_base, ma.filename as media_filename
      from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      left join media_asset ma on ma.id=p.media_id
      where p.id=$1 and s.workspace_id=$2`, [req.params.postId, req.user.workspace_id]);
@@ -541,13 +541,39 @@ app.post("/api/posts/:postId/publish-all", async (req: any, reply) => {
   try {
     const results = await publishPostToChannels(ws, req.params.postId);
     if (!results.length) return reply.code(400).send({ error: "Оберіть хоча б одну мережу" });
-    // гасимо ще не відпрацьовані planned-слоти цього поста - інакше autopost опублікує ВДРУГЕ
+    // Публікація один раз на мережу: гасимо запланований слот ЛИШЕ якщо не лишилось не надісланих обраних мереж
+    // (інакше слот має відпрацювати решту мереж пізніше). Так уникаємо і дубля, і скасування запланованого каналу.
     if (results.some((r) => r.status === "sent")) {
-      await q(`update schedule_slot set status='posted', result='опубліковано вручну (слот погашено)' where post_id=$1 and status='planned'`, [req.params.postId]);
-      await q(`update plan_slot set status='published' where post_id=$1 and status in ('drafted','approved','scheduled')`, [req.params.postId]);
+      const post = await one<{ channels: any }>(`select channels from post where id=$1`, [req.params.postId]);
+      const enabled = Object.keys(post?.channels || {}).filter((k) => post!.channels[k] && post!.channels[k].on);
+      const sent = new Set(await alreadySentNetworks(req.params.postId));
+      const remaining = enabled.filter((k) => !sent.has(k));
+      if (!remaining.length) {
+        await q(`update schedule_slot set status='posted', result='опубліковано вручну (слот погашено)' where post_id=$1 and status='planned'`, [req.params.postId]);
+        await q(`update plan_slot set status='published' where post_id=$1 and status in ('drafted','approved','scheduled')`, [req.params.postId]);
+      }
     }
     return { ok: true, results };
   } catch (e: any) { return reply.code(500).send({ error: e.message }); }
+});
+
+// стан публікації поста: у які мережі вже відправлено (для композера — блокуємо повторну відправку)
+app.get("/api/posts/:postId/publish-state", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  const sent = await alreadySentNetworks(req.params.postId);
+  return { sent };
+});
+
+// AI-хештеги для поста (кнопка «# Хештеги» у композері)
+app.post("/api/posts/:postId/hashtags", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const post = await one<{ content: string }>(
+    `select p.content from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where p.id=$1 and s.workspace_id=$2`,
+    [req.params.postId, ws]);
+  if (!post) return reply.code(404).send({ error: "пост не знайдено" });
+  try { const hashtags = await suggestHashtags(ws, String(req.body?.text || post.content || "")); return { ok: true, hashtags }; }
+  catch (e: any) { await logEvent("error", "hashtags", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
 });
 
 // ===================== GOOGLE DRIVE =====================
@@ -734,7 +760,7 @@ app.post("/api/runs/:id/ideas", async (req: any, reply) => {
 app.post("/api/posts/:postId/image", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
-  try { const filename = await generateImageForPost(ws, req.params.postId, { headline: req.body?.headline }); return { ok: true, filename }; }
+  try { const filename = await generateImageForPost(ws, req.params.postId, { headline: req.body?.headline, aspect: req.body?.aspect, provider: req.body?.provider, prompt: req.body?.prompt }); return { ok: true, filename }; }
   catch (e: any) { await logEvent("error", "image", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
 });
 
@@ -1122,7 +1148,8 @@ async function postOwned(postId: string, ws: string) {
 
 app.put("/api/posts/:postId", async (req: any, reply) => {
   if (!(await postOwned(req.params.postId, req.user.workspace_id))) return reply.code(404).send({ error: "пост не знайдено" });
-  await q(`update post set content=$2 where id=$1`, [req.params.postId, String(req.body?.content ?? "")]);
+  if (typeof req.body?.content === "string") await q(`update post set content=$2 where id=$1`, [req.params.postId, req.body.content]);
+  if (typeof req.body?.rubric === "string") await q(`update post set rubric=nullif($2,'') where id=$1`, [req.params.postId, req.body.rubric.slice(0, 60)]);
   return { ok: true };
 });
 
