@@ -1256,7 +1256,8 @@ app.post("/api/plan/generate", async (req: any, reply) => {
         n++;
       }
     } else {
-      const slots = await buildLiteSkeleton(ws, horizon); // кидає чітку помилку, якщо нема стратегії
+      const ppw = Math.max(1, Math.min(14, Number(req.body?.posts_per_week) || 4));
+      const slots = await buildLiteSkeleton(ws, horizon, ppw); // кидає чітку помилку, якщо нема стратегії
       // Lite = ОДИН спільний скелет: прибираємо незаповнені слоти БУДЬ-ЯКОГО каналу (включно з легасі-скелетами до переходу на channel='all')
       await q(`delete from plan_slot where workspace_id=$1 and status in ('empty','matched')`, [ws]);
       for (const sl of slots) {

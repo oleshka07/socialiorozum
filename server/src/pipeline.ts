@@ -508,7 +508,7 @@ export async function generateChannelPlan(workspaceId: string, channel: string, 
 
 // ---- Lite-скелет плану: ДЕТЕРМІНОВАНО зі стратегії (рубрики × best_days × теми) ----
 // Канало-незалежний, не залежить від крихкого LLM-плану → порожнім не буде, якщо є стратегія.
-export async function buildLiteSkeleton(workspaceId: string, horizonDays: number): Promise<{ day: number; rubric: string; theme: string; hook: string }[]> {
+export async function buildLiteSkeleton(workspaceId: string, horizonDays: number, postsPerWeek = 4): Promise<{ day: number; rubric: string; theme: string; hook: string }[]> {
   const strat = await one<{ data: any }>(`select data from strategy where workspace_id=$1`, [workspaceId]);
   const data: any = strat?.data || {};
   const rubrics: { name: string; share?: number }[] = Array.isArray(data.rubrics) ? data.rubrics.filter((r: any) => r?.name) : [];
@@ -516,17 +516,23 @@ export async function buildLiteSkeleton(workspaceId: string, horizonDays: number
   const DMAP: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
   let bestDays: number[] = Array.isArray(data.best_days) ? data.best_days.map((d: string) => DMAP[String(d).toLowerCase().slice(0, 3)]).filter((x: any) => x != null) : [];
   if (!bestDays.length) bestDays = [1, 3, 5];
-  const perDay = Array.isArray(data.times) && data.times.length ? Math.min(3, data.times.length) : 1;
   // зважений «мішок» рубрик за share
   const bag: string[] = [];
   for (const r of rubrics) { const w = Math.max(1, Math.round((Number(r.share) || 25) / 10)); for (let k = 0; k < w; k++) bag.push(r.name); }
+  // кількість слотів = «постів на тиждень» × кількість тижнів у горизонті
+  const ppw = Math.max(1, Math.min(14, Math.round(postsPerWeek) || 4));
+  const totalTarget = Math.max(1, Math.min(60, Math.round((horizonDays / 7) * ppw)));
+  // дні-кандидати для постингу (best_days у межах горизонту; якщо порожньо - будь-який день)
+  const candidates: number[] = [];
+  for (let day = 1; day <= horizonDays; day++) {
+    const dow = new Date(Date.now() + day * 864e5).getUTCDay();
+    if (bestDays.includes(dow)) candidates.push(day);
+  }
+  if (!candidates.length) for (let day = 1; day <= horizonDays; day++) candidates.push(day);
   const slots: { day: number; rubric: string; theme: string; hook: string }[] = [];
   let bi = 0;
-  for (let day = 1; day <= horizonDays && slots.length < 40; day++) {
-    const dow = new Date(Date.now() + day * 864e5).getUTCDay();
-    if (!bestDays.includes(dow)) continue;
-    for (let p = 0; p < perDay && slots.length < 40; p++) slots.push({ day, rubric: bag[bi++ % bag.length], theme: "", hook: "" });
-  }
+  for (let i = 0; i < totalTarget; i++) slots.push({ day: candidates[i % candidates.length], rubric: bag[bi++ % bag.length], theme: "", hook: "" });
+  slots.sort((a, b) => a.day - b.day);
   // теми: ОДИН дешевий виклик; фолбек - рубрика (щоб ніколи не порожньо)
   if (slots.length) {
     try {
