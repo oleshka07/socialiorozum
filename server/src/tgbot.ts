@@ -6,6 +6,7 @@ import { env } from "./env.js";
 import { q, one } from "./db.js";
 import * as tg from "./telegram.js";
 import { logEvent } from "./log.js";
+import { generatePostsOnePass } from "./pipeline.js";
 
 let BOT_ID = 0;
 let BOT_USERNAME = env.telegram.botUsername;
@@ -48,36 +49,132 @@ async function attachChannel(fromId: number, chatId: number, title: string): Pro
   return `✅ Канал «${title || chatId}» підключено! Пости з кабінету тепер публікуватимуться сюди.`;
 }
 
+// ---- DM-асистент: власник, «живий меседж», банк ідей ----
+
+// tg-користувач -> його воркспейс (для DM-асистента). Фолбек на tg_connect, якщо ще не закріплено.
+async function ownerWorkspace(fromId: number): Promise<string | null> {
+  const o = await one<{ workspace_id: string }>(`select workspace_id from tg_owner where tg_user_id=$1`, [fromId]);
+  if (o) return o.workspace_id;
+  const c = await one<{ workspace_id: string }>(`select workspace_id from tg_connect where tg_user_id=$1 order by created_at desc limit 1`, [fromId]);
+  return c?.workspace_id ?? null;
+}
+async function setOwner(fromId: number, workspaceId: string, chatId: string): Promise<void> {
+  await q(`insert into tg_owner(tg_user_id, workspace_id, chat_id) values($1,$2,$3)
+           on conflict (tg_user_id) do update set workspace_id=excluded.workspace_id, chat_id=excluded.chat_id`, [fromId, workspaceId, chatId]);
+}
+
+// «один живий меседж на категорію»: гасить попереднє повідомлення категорії, шле нове, зберігає message_id.
+async function liveSend(workspaceId: string, chatId: string, category: string, text: string, buttons?: tg.TgButton[][]): Promise<void> {
+  const token = env.telegram.botToken;
+  const prev = await one<{ message_id: string }>(`select message_id from tg_message where workspace_id=$1 and category=$2`, [workspaceId, category]);
+  if (prev?.message_id) await tg.deleteMessage(token, chatId, Number(prev.message_id));
+  const r = await tg.sendMessage(token, chatId, text, buttons);
+  await q(`insert into tg_message(workspace_id, category, chat_id, message_id, updated_at) values($1,$2,$3,$4,now())
+           on conflict (workspace_id, category) do update set chat_id=excluded.chat_id, message_id=excluded.message_id, updated_at=now()`,
+    [workspaceId, category, chatId, r.message_id]);
+}
+
+// ідея з банку -> чернетка поста (той самий шлях, що й /api/ideas/:id/post); повертає текст поста.
+async function ideaToPost(workspaceId: string, ideaId: string): Promise<string> {
+  const it = await one<{ text: string }>(`select text from idea_bank where id=$1 and workspace_id=$2 and status <> 'archived'`, [ideaId, workspaceId]);
+  if (!it) throw new Error("ідею не знайдено");
+  const src = await one<{ id: string }>(`insert into source(workspace_id, origin, title, transcript) values($1,'idea',$2,$3) returning id`,
+    [workspaceId, it.text.slice(0, 200), `Ідея поста: ${it.text}`]);
+  const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
+  await generatePostsOnePass(run!.id, 1, [it.text]);
+  const post = await one<{ id: string; content: string }>(`select id, content from post where run_id=$1 and stage='final' limit 1`, [run!.id]);
+  await q(`update idea_bank set status='used', used_post_id=$2 where id=$1`, [ideaId, post?.id ?? null]);
+  return post?.content || "(порожньо)";
+}
+
+// зберегти надіслану думку як ідею (origin='bot') + підтвердження живим меседжем
+async function captureIdea(workspaceId: string, chatId: string, text: string): Promise<void> {
+  const r = await one<{ id: string }>(`insert into idea_bank(workspace_id, text, origin) values($1,$2,'bot') returning id`, [workspaceId, text.slice(0, 500)]);
+  await liveSend(workspaceId, chatId, "capture",
+    `💡 Збережено в Банк ідей:\n«${text.slice(0, 140)}»`,
+    [[{ text: "✨ Зробити пост зараз", data: `idea_post:${r!.id}` }], [{ text: "📋 Усі ідеї", data: "idea_list" }]]);
+}
+
+// список банку ідей (живий меседж, category='idea_list')
+async function sendIdeaList(workspaceId: string, chatId: string): Promise<void> {
+  const rows = await q<{ id: string; text: string }>(`select id, text from idea_bank where workspace_id=$1 and status='new' order by created_at desc limit 8`, [workspaceId]);
+  if (!rows.length) { await liveSend(workspaceId, chatId, "idea_list", "💡 Банк ідей порожній. Надішли мені будь-яку думку — і я збережу її як ідею."); return; }
+  const buttons = rows.map((r) => [{ text: `✨ ${r.text.slice(0, 40)}`, data: `idea_post:${r.id}` }]);
+  await liveSend(workspaceId, chatId, "idea_list", `💡 Твої ідеї (${rows.length}). Тапни, щоб зробити пост:`, buttons);
+}
+
 // обробка апдейту від Telegram (виклик із вебхука)
 export async function handleUpdate(update: any): Promise<void> {
   const token = env.telegram.botToken; if (!token) return;
-  const msg = update?.message; if (!msg || !msg.from) return;
-  const fromId = msg.from.id; const text = String(msg.text || "").trim();
   try {
+    if (update?.callback_query) { await handleCallback(update.callback_query); return; }
+    const msg = update?.message; if (!msg || !msg.from) return;
+    const fromId = msg.from.id; const chatId = String(msg.chat?.id ?? fromId); const text = String(msg.text || "").trim();
+
+    // /start [code] — вітання + (за наявності коду) закріплення власника воркспейсу
     if (text.startsWith("/start")) {
       const code = text.split(/\s+/)[1] || "";
       if (code) {
         const row = await one<{ workspace_id: string }>(`select workspace_id from tg_connect where code=$1`, [code]);
         if (row) {
           await q(`update tg_connect set tg_user_id=$2 where code=$1`, [code, fromId]);
-          await tg.sendMessage(token, String(fromId), "Вітаю! 🤝 Підключимо твій канал:\n1) Додай мене АДМІНОМ у свій канал (з правом публікувати).\n2) Перешли сюди будь-який пост із цього каналу (або надішли його @username).");
+          await setOwner(fromId, row.workspace_id, chatId);
+          await tg.sendMessage(token, chatId, "Вітаю! 🤝 Я тепер твій контент-помічник.\n\n• Надішли будь-яку думку — збережу як ідею в Банк.\n• /idea — твої ідеї, зробити з них пост у 1 тап.\n\nЩоб публікувати у свій канал: додай мене АДМІНОМ у канал і перешли сюди будь-який пост із нього.");
           return;
         }
       }
-      await tg.sendMessage(token, String(fromId), "Привіт! Щоб підключити канал, відкрий посилання з кабінету socialio (кнопка «Підключити наш бот»).");
+      await tg.sendMessage(token, chatId, "Привіт! Щоб під'єднати мене до твого кабінету, відкрий посилання «Підключити наш бот» у socialio.");
       return;
     }
+
+    // /idea — банк ідей
+    if (text.toLowerCase().startsWith("/idea")) {
+      const ws = await ownerWorkspace(fromId);
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio (кнопка «Підключити наш бот»)."); return; }
+      await sendIdeaList(ws, chatId);
+      return;
+    }
+
+    // переслали пост із каналу -> підключення каналу (як було)
     if (msg.forward_from_chat && msg.forward_from_chat.type === "channel") {
-      await tg.sendMessage(token, String(fromId), await attachChannel(fromId, msg.forward_from_chat.id, msg.forward_from_chat.title));
+      await tg.sendMessage(token, chatId, await attachChannel(fromId, msg.forward_from_chat.id, msg.forward_from_chat.title));
       return;
     }
+    // @username каналу -> підключення каналу; якщо не канал — впаде в захоплення ідеї
     if (text.startsWith("@")) {
-      let chat: { id: number; title?: string; type?: string };
-      try { chat = await tg.getChat(token, text); } catch { await tg.sendMessage(token, String(fromId), "Не знайшов такий канал. Краще перешли пост із каналу."); return; }
-      if (chat.type === "channel") await tg.sendMessage(token, String(fromId), await attachChannel(fromId, chat.id, chat.title || text));
-      else await tg.sendMessage(token, String(fromId), "Це не канал. Перешли пост із свого каналу.");
+      try { const chat = await tg.getChat(token, text); if (chat.type === "channel") { await tg.sendMessage(token, chatId, await attachChannel(fromId, chat.id, chat.title || text)); return; } } catch { /* не канал */ }
+    }
+
+    // будь-який інший текст -> ідея в Банк
+    if (text && !text.startsWith("/")) {
+      const ws = await ownerWorkspace(fromId);
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio (кнопка «Підключити наш бот»), тоді я збережу твої ідеї."); return; }
+      await captureIdea(ws, chatId, text);
       return;
     }
-    await tg.sendMessage(token, String(fromId), "Перешли мені пост із свого каналу (я маю бути там адміном), щоб його підключити.");
+
+    await tg.sendMessage(token, chatId, "Надішли думку — збережу як ідею 💡. /idea — твої ідеї.");
   } catch (e: any) { await logEvent("error", "tgbot", "update: " + e.message); }
+}
+
+// натискання inline-кнопок
+async function handleCallback(cbq: any): Promise<void> {
+  const token = env.telegram.botToken;
+  const fromId = cbq.from?.id; const chatId = String(cbq.message?.chat?.id ?? fromId); const data = String(cbq.data || "");
+  const ws = await ownerWorkspace(fromId);
+  if (!ws) { await tg.answerCallbackQuery(token, cbq.id, "Спершу під'єднай кабінет socialio"); return; }
+  try {
+    if (data === "idea_list") { await tg.answerCallbackQuery(token, cbq.id); await sendIdeaList(ws, chatId); return; }
+    if (data.startsWith("idea_post:")) {
+      await tg.answerCallbackQuery(token, cbq.id, "Генерую пост…");
+      const content = await ideaToPost(ws, data.slice("idea_post:".length));
+      await tg.sendMessage(token, chatId, `✅ Пост готовий (у Чорновиках кабінету):\n\n${content.slice(0, 3500)}\n\nВідкрий застосунок, щоб додати фото й опублікувати.`);
+      await sendIdeaList(ws, chatId);
+      return;
+    }
+    await tg.answerCallbackQuery(token, cbq.id);
+  } catch (e: any) {
+    await tg.answerCallbackQuery(token, cbq.id, "Помилка: " + String(e.message).slice(0, 150));
+    await logEvent("error", "tgbot", "callback: " + e.message);
+  }
 }

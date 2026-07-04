@@ -409,3 +409,22 @@ create table if not exists idea_bank (
   created_at   timestamptz not null default now()
 );
 create index if not exists idx_idea_bank_ws_status on idea_bank(workspace_id, status);
+
+-- Telegram DM-асистент: хто власник якого воркспейсу (для проактивних DM + атрибуції захоплених ідей)
+create table if not exists tg_owner (
+  tg_user_id   bigint primary key,
+  workspace_id uuid not null references workspace(id) on delete cascade,
+  chat_id      text,
+  created_at   timestamptz not null default now()
+);
+create index if not exists idx_tg_owner_ws on tg_owner(workspace_id);
+
+-- «один живий меседж на категорію»: тримаємо message_id останнього повідомлення категорії, щоб гасити старе
+create table if not exists tg_message (
+  workspace_id uuid not null references workspace(id) on delete cascade,
+  category     text not null,
+  chat_id      text not null,
+  message_id   bigint not null,
+  updated_at   timestamptz not null default now(),
+  primary key (workspace_id, category)
+);

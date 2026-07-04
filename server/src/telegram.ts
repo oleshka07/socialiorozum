@@ -43,15 +43,39 @@ export function toTgHtml(text: string): string {
   t = t.replace(/`([^`\n]+)`/g, "<code>$1</code>");
   return t;
 }
+// Inline-клавіатура: масив рядів кнопок {text, callback_data} | {text, url}
+export type TgButton = { text: string; data?: string; url?: string };
+const kb = (buttons?: TgButton[][]) =>
+  buttons && buttons.length
+    ? { reply_markup: { inline_keyboard: buttons.map((row) => row.map((b) => (b.url ? { text: b.text, url: b.url } : { text: b.text, callback_data: b.data || "" }))) } }
+    : {};
+
 // HTML-форматування з фолбеком: якщо Telegram не зміг розпарсити — шлемо простим текстом (публікація не падає).
-export async function sendMessage(token: string, chatId: string, text: string) {
+export async function sendMessage(token: string, chatId: string, text: string, buttons?: TgButton[][]) {
+  const extra = kb(buttons);
   try {
-    return await tg<{ message_id: number }>(token, "sendMessage", { chat_id: chatId, text: toTgHtml(text), parse_mode: "HTML", disable_web_page_preview: true });
+    return await tg<{ message_id: number }>(token, "sendMessage", { chat_id: chatId, text: toTgHtml(text), parse_mode: "HTML", disable_web_page_preview: true, ...extra });
   } catch (e: any) {
     if (/parse entities|unsupported start tag|can't find end/i.test(String(e.message)))
-      return tg<{ message_id: number }>(token, "sendMessage", { chat_id: chatId, text, disable_web_page_preview: true });
+      return tg<{ message_id: number }>(token, "sendMessage", { chat_id: chatId, text, disable_web_page_preview: true, ...extra });
     throw e;
   }
+}
+export async function deleteMessage(token: string, chatId: string, messageId: number): Promise<void> {
+  try { await tg(token, "deleteMessage", { chat_id: chatId, message_id: messageId }); } catch { /* уже видалено/застаре — не критично */ }
+}
+export async function editMessageText(token: string, chatId: string, messageId: number, text: string, buttons?: TgButton[][]) {
+  const extra = kb(buttons);
+  try {
+    return await tg(token, "editMessageText", { chat_id: chatId, message_id: messageId, text: toTgHtml(text), parse_mode: "HTML", disable_web_page_preview: true, ...extra });
+  } catch (e: any) {
+    if (/parse entities|unsupported start tag|can't find end/i.test(String(e.message)))
+      return tg(token, "editMessageText", { chat_id: chatId, message_id: messageId, text, disable_web_page_preview: true, ...extra });
+    throw e;
+  }
+}
+export async function answerCallbackQuery(token: string, callbackQueryId: string, text?: string): Promise<void> {
+  try { await tg(token, "answerCallbackQuery", { callback_query_id: callbackQueryId, ...(text ? { text } : {}) }); } catch { /* не критично */ }
 }
 export async function sendPhoto(token: string, chatId: string, photoUrl: string, caption: string) {
   try {
@@ -63,4 +87,4 @@ export async function sendPhoto(token: string, chatId: string, photoUrl: string,
   }
 }
 export const setWebhook = (token: string, url: string, secretToken?: string) =>
-  tg(token, "setWebhook", { url, allowed_updates: ["message", "channel_post", "my_chat_member"], ...(secretToken ? { secret_token: secretToken } : {}) });
+  tg(token, "setWebhook", { url, allowed_updates: ["message", "channel_post", "my_chat_member", "callback_query"], ...(secretToken ? { secret_token: secretToken } : {}) });
