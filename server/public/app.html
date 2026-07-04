@@ -789,6 +789,7 @@ function selectView(v){
   if(v==='settings'){ loadAccount(); loadPlans(); }
   if(typeof loadTasks==='function') loadTasks();
   curView=v; if(typeof renderTaskStrip==='function') renderTaskStrip(v);
+  try{ localStorage.setItem('kg_view', v); }catch(e){} // памʼятаємо розділ між оновленнями сторінки
 }
 function go(v){ selectView(v); }
 document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>selectView(n.dataset.view));
@@ -1998,7 +1999,10 @@ async function renderObConnect(oc){
 (async()=>{
   try{ const _q=new URLSearchParams(location.search); if(window.opener && window.opener!==window && (_q.has('meta')||_q.has('threads')||_q.has('gdrive'))){ window.opener.postMessage({oauth:true, meta:_q.get('meta'), threads:_q.get('threads'), gdrive:_q.get('gdrive')}, location.origin); document.body.innerHTML='<div style="padding:40px;text-align:center;font-family:sans-serif;color:#333">Готово ✓ Можна закрити це вікно.</div>'; try{window.close();}catch(e){} return; } }catch(e){}
   setTheme(localStorage.getItem('kg_theme')||'light');
-  selectView('create'); setLayout('studio'); renderCountChips();
+  // відновлюємо останній відкритий розділ (щоб оновлення сторінки лишало юзера де він був), інакше «Створення»
+  const _views=['create','publish','brand','strategy','sources','analytics','settings'];
+  const _lastView=localStorage.getItem('kg_view');
+  selectView(_views.includes(_lastView)?_lastView:'create'); setLayout('studio'); renderCountChips();
   renderStudio(); renderInbox(); renderStudioSteps({}); renderSourceCard(null);
   try{ const me=await api('/auth/me'); $('userEmail').textContent=me.email; if(me.email) $('avatar').textContent=(me.email[0]||'О').toUpperCase(); }
   catch(e){ location.href='/login'; return; }
