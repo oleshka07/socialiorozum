@@ -66,8 +66,11 @@ export async function publishPostToChannels(ws: string, postId: string): Promise
         if (!tgc?.bot_token) throw new Error("Telegram не підключено");
         let any = false;
         const cap = textOf(k);
+        const sentChats = new Set<string>(); // один фізичний чат не отримує пост двічі (channel==group → дубль)
         for (const [t, chat] of [["channel", tgc.channel_chat_id], ["group", tgc.group_chat_id]] as const) {
           if (!chat) continue;
+          if (sentChats.has(chat)) continue; // той самий chat_id в обох полях → пропускаємо повтор
+          sentChats.add(chat);
           let r: { message_id: number };
           if (imageUrl) {
             r = await tg.sendPhoto(tgc.bot_token, chat, imageUrl, cap.length <= 1024 ? cap : "");
