@@ -6,7 +6,7 @@ import { env } from "./env.js";
 import { q, one } from "./db.js";
 import * as tg from "./telegram.js";
 import { logEvent } from "./log.js";
-import { generatePostsOnePass } from "./pipeline.js";
+import { generatePostsOnePass, buildLiteSkeleton } from "./pipeline.js";
 import { publishPostToChannels } from "./publisher.js";
 
 let BOT_ID = 0;
@@ -65,7 +65,7 @@ async function setOwner(fromId: number, workspaceId: string, chatId: string): Pr
 }
 
 // «один живий меседж на категорію»: гасить попереднє повідомлення категорії, шле нове, зберігає message_id.
-async function liveSend(workspaceId: string, chatId: string, category: string, text: string, buttons?: tg.TgButton[][]): Promise<void> {
+export async function liveSend(workspaceId: string, chatId: string, category: string, text: string, buttons?: tg.TgButton[][]): Promise<void> {
   const token = env.telegram.botToken;
   const prev = await one<{ message_id: string }>(`select message_id from tg_message where workspace_id=$1 and category=$2`, [workspaceId, category]);
   if (prev?.message_id) await tg.deleteMessage(token, chatId, Number(prev.message_id));
@@ -86,6 +86,21 @@ async function ideaToPost(workspaceId: string, ideaId: string): Promise<{ id: st
   const post = await one<{ id: string; content: string }>(`select id, content from post where run_id=$1 and stage='final' limit 1`, [run!.id]);
   await q(`update idea_bank set status='used', used_post_id=$2 where id=$1`, [ideaId, post?.id ?? null]);
   return { id: post?.id ?? null, content: post?.content || "(порожньо)" };
+}
+
+// побудувати Lite-скелет плану (14 днів × 4/тиж) - той самий шлях, що й /api/plan/generate (lite)
+async function buildPlan(workspaceId: string): Promise<number> {
+  const slots = await buildLiteSkeleton(workspaceId, 14, 4);
+  const anchor = new Date(); anchor.setUTCHours(12, 0, 0, 0);
+  await q(`delete from plan_slot where workspace_id=$1 and status in ('empty','matched')`, [workspaceId]);
+  let n = 0;
+  for (const sl of slots) {
+    const d = new Date(anchor); d.setUTCDate(d.getUTCDate() + sl.day);
+    await q(`insert into plan_slot(workspace_id, slot_date, channel, rubric, theme, hook) values($1,$2,'all',$3,$4,$5)`,
+      [workspaceId, d.toISOString().slice(0, 10), sl.rubric || null, sl.theme.slice(0, 300), sl.hook.slice(0, 300) || null]);
+    n++;
+  }
+  return n;
 }
 
 // зберегти надіслану думку як ідею (origin='bot') + підтвердження живим меседжем
@@ -166,6 +181,12 @@ async function handleCallback(cbq: any): Promise<void> {
   if (!ws) { await tg.answerCallbackQuery(token, cbq.id, "Спершу під'єднай кабінет socialio"); return; }
   try {
     if (data === "idea_list") { await tg.answerCallbackQuery(token, cbq.id); await sendIdeaList(ws, chatId); return; }
+    if (data === "plan_gen") {
+      await tg.answerCallbackQuery(token, cbq.id, "Будую план…");
+      try { const n = await buildPlan(ws); await tg.sendMessage(token, chatId, `📅 Готово: скелет плану на 2 тижні (${n} слотів). Заповнюй його ідеями — /idea, або відкрий застосунок.`); }
+      catch (e: any) { await tg.sendMessage(token, chatId, "⚠️ " + String(e.message).slice(0, 200) + "\n(Спершу згенеруй стратегію в кабінеті: розділ Стратегія.)"); }
+      return;
+    }
     if (data.startsWith("idea_post:")) {
       await tg.answerCallbackQuery(token, cbq.id, "Генерую пост…");
       const p = await ideaToPost(ws, data.slice("idea_post:".length));

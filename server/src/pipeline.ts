@@ -656,3 +656,30 @@ export async function rewritePost(workspaceId: string, text: string, instruction
     NO_DASH_RULE + `\n\nПоверни лише текст поста. Мова: ${lang}.`;
   return chat("openai/gpt-4o", system, `---\n${text}`, { workspaceId, step: "regenerate" });
 }
+
+// ---- Щоденний інсайт: пул на ~30 (1 виклик), тягнемо по одному (settings_block 'insight_pool') ----
+async function generateInsightPool(workspaceId: string): Promise<string[]> {
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const niche = s.marketing_context ? `\nНіша бренду (для релевантності): ${s.marketing_context.slice(0, 500)}` : "";
+  const system = "Ти контент-ментор. Згенеруй 30 коротких (до 12 слів) щоденних інсайтів про контент, SMM, дисципліну ведення соцмереж і залучення аудиторії - таких, що дають поштовх діяти. " +
+    "Різні, конкретні, без води й без кліше." + niche +
+    `\n\nПоверни ЛИШЕ валідний JSON-масив рядків (30 шт). Мова: ${lang}.`;
+  try {
+    const raw = await chat("openai/gpt-4o-mini", system, "Згенеруй масив із 30 інсайтів.", { workspaceId, step: "insights" });
+    const arr = extractJsonArray<any>(raw).map((x: any) => (typeof x === "string" ? x : String(x?.insight || x?.text || ""))).map((x: string) => x.trim()).filter(Boolean);
+    return arr.length ? arr : ["Контент, який ти не опублікував, не працює."];
+  } catch { return ["Контент дає результат лише коли виходить регулярно."]; }
+}
+// Наступний інсайт із пулу; коли пул вичерпано - генерує нову пачку (=> ~1-2 виклики/місяць).
+export async function nextInsight(workspaceId: string): Promise<string> {
+  const block = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='insight_pool'`, [workspaceId]);
+  let pool: { items: string[]; cursor: number } = { items: [], cursor: 0 };
+  try { if (block?.content) pool = JSON.parse(block.content); } catch { /* перегенеруємо */ }
+  if (!Array.isArray(pool.items) || pool.cursor >= pool.items.length) pool = { items: await generateInsightPool(workspaceId), cursor: 0 };
+  const insight = pool.items[pool.cursor] || "Контент, який ти не опублікував, не працює.";
+  pool.cursor++;
+  await q(`insert into settings_block(workspace_id, key, content) values($1,'insight_pool',$2)
+           on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`, [workspaceId, JSON.stringify(pool)]);
+  return insight;
+}

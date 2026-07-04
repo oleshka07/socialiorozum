@@ -27,6 +27,7 @@ import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
 import * as gdrive from "./gdrive.js";
 import { publishPostToChannels, alreadySentNetworks } from "./publisher.js";
 import { startLifecycleWorker } from "./lifecycle.js";
+import { startDigest } from "./digest.js";
 import { generateImageForPost, imageProviders, overlayForPost } from "./images.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername } from "./tgbot.js";
 
@@ -1796,6 +1797,7 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
   startRssPoller();
   startGdrivePoller();
   startLifecycleWorker();
+  startDigest();
   initTelegramBot();
   // одноразово полагодити залишкові iPhone HEIF -> JPEG (у фоні; ідемпотентно)
   convertAllHeif().then((n) => { if (n) app.log.info(`HEIF→JPEG конвертовано: ${n}`); }).catch((e: any) => app.log.error("convertAllHeif: " + e.message));
