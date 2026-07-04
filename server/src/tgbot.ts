@@ -7,6 +7,7 @@ import { q, one } from "./db.js";
 import * as tg from "./telegram.js";
 import { logEvent } from "./log.js";
 import { generatePostsOnePass } from "./pipeline.js";
+import { publishPostToChannels } from "./publisher.js";
 
 let BOT_ID = 0;
 let BOT_USERNAME = env.telegram.botUsername;
@@ -74,8 +75,8 @@ async function liveSend(workspaceId: string, chatId: string, category: string, t
     [workspaceId, category, chatId, r.message_id]);
 }
 
-// ідея з банку -> чернетка поста (той самий шлях, що й /api/ideas/:id/post); повертає текст поста.
-async function ideaToPost(workspaceId: string, ideaId: string): Promise<string> {
+// ідея з банку -> чернетка поста (той самий шлях, що й /api/ideas/:id/post); повертає id+текст поста.
+async function ideaToPost(workspaceId: string, ideaId: string): Promise<{ id: string | null; content: string }> {
   const it = await one<{ text: string }>(`select text from idea_bank where id=$1 and workspace_id=$2 and status <> 'archived'`, [ideaId, workspaceId]);
   if (!it) throw new Error("ідею не знайдено");
   const src = await one<{ id: string }>(`insert into source(workspace_id, origin, title, transcript) values($1,'idea',$2,$3) returning id`,
@@ -84,7 +85,7 @@ async function ideaToPost(workspaceId: string, ideaId: string): Promise<string> 
   await generatePostsOnePass(run!.id, 1, [it.text]);
   const post = await one<{ id: string; content: string }>(`select id, content from post where run_id=$1 and stage='final' limit 1`, [run!.id]);
   await q(`update idea_bank set status='used', used_post_id=$2 where id=$1`, [ideaId, post?.id ?? null]);
-  return post?.content || "(порожньо)";
+  return { id: post?.id ?? null, content: post?.content || "(порожньо)" };
 }
 
 // зберегти надіслану думку як ідею (origin='bot') + підтвердження живим меседжем
@@ -167,9 +168,20 @@ async function handleCallback(cbq: any): Promise<void> {
     if (data === "idea_list") { await tg.answerCallbackQuery(token, cbq.id); await sendIdeaList(ws, chatId); return; }
     if (data.startsWith("idea_post:")) {
       await tg.answerCallbackQuery(token, cbq.id, "Генерую пост…");
-      const content = await ideaToPost(ws, data.slice("idea_post:".length));
-      await tg.sendMessage(token, chatId, `✅ Пост готовий (у Чорновиках кабінету):\n\n${content.slice(0, 3500)}\n\nВідкрий застосунок, щоб додати фото й опублікувати.`);
-      await sendIdeaList(ws, chatId);
+      const p = await ideaToPost(ws, data.slice("idea_post:".length));
+      const btns = p.id ? [[{ text: "✅ Опублікувати в Telegram", data: `pub:${p.id}` }], [{ text: "📋 Ще ідеї", data: "idea_list" }]] : undefined;
+      await tg.sendMessage(token, chatId, `✅ Чернетка готова:\n\n${p.content.slice(0, 3500)}\n\nОпублікувати зараз чи докрутити в застосунку (фото, час)?`, btns);
+      return;
+    }
+    if (data.startsWith("pub:")) {
+      const postId = data.slice("pub:".length);
+      await tg.answerCallbackQuery(token, cbq.id, "Публікую…");
+      await q(`update post set channels = coalesce(channels, '{}'::jsonb) || '{"telegram":{"on":true}}'::jsonb where id=$1`, [postId]);
+      const results = await publishPostToChannels(ws, postId);
+      const ok = results.filter((r) => r.status === "sent").map((r) => r.channel);
+      const err = results.filter((r) => r.status === "error");
+      if (ok.length) await tg.sendMessage(token, chatId, "✈️ Опубліковано: " + ok.join(", "));
+      else await tg.sendMessage(token, chatId, "⚠️ Не вдалося: " + (err.map((e) => `${e.channel} — ${e.error}`).join("; ") || "немає підключеного каналу") + ".\nПідключи канал: додай мене АДМІНОМ у свій канал і перешли сюди пост із нього.");
       return;
     }
     await tg.answerCallbackQuery(token, cbq.id);
