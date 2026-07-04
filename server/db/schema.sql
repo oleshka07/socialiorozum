@@ -394,3 +394,18 @@ create table if not exists tg_connect (
   created_at   timestamptz not null default now()
 );
 create index if not exists idx_tgconnect_user on tg_connect(tg_user_id);
+
+-- Банк ідей: постійні (workspace-scoped) концепти постів, окремо від run-bound `idea`.
+-- Наповнюється вручну / ботом (origin='bot') / AI; «→ пост» ставить status='used'.
+create table if not exists idea_bank (
+  id           uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspace(id) on delete cascade,
+  text         text not null,
+  angle        text,
+  rubric       text,
+  origin       text not null default 'manual', -- manual|ai|bot|plan|material
+  status       text not null default 'new',    -- new|used|archived
+  used_post_id uuid references post(id) on delete set null,
+  created_at   timestamptz not null default now()
+);
+create index if not exists idx_idea_bank_ws_status on idea_bank(workspace_id, status);

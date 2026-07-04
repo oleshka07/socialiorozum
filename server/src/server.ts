@@ -1347,6 +1347,41 @@ app.post("/api/materials/:id/ideas", async (req: any, reply) => {
   try { const ideas = await extractIdeasFromText(req.user.workspace_id, m.transcript, Number(req.body?.count) || 6, Array.isArray(req.body?.rubrics) ? req.body.rubrics : undefined); return { ok: true, ideas }; }
   catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
+
+// ---- Банк ідей (workspace-scoped, окремо від run-bound idea; джерело для /idea в боті) ----
+app.get("/api/ideas", async (req: any) => {
+  const rows = await q(`select id, text, angle, rubric, origin, created_at from idea_bank
+                        where workspace_id=$1 and status='new' order by created_at desc limit 100`, [req.user.workspace_id]);
+  return { ideas: rows };
+});
+app.post("/api/ideas", async (req: any, reply) => {
+  const text = String(req.body?.text ?? "").trim();
+  if (!text) return reply.code(400).send({ error: "порожня ідея" });
+  const r = await one<{ id: string }>(
+    `insert into idea_bank(workspace_id, text, angle, rubric, origin) values($1,$2,$3,$4,$5) returning id`,
+    [req.user.workspace_id, text.slice(0, 500), String(req.body?.angle ?? "").slice(0, 300) || null,
+     String(req.body?.rubric ?? "").slice(0, 60) || null, ["bot", "ai", "plan", "material"].includes(req.body?.origin) ? req.body.origin : "manual"]);
+  return { ok: true, id: r!.id };
+});
+app.post("/api/ideas/:id/archive", async (req: any, reply) => {
+  const r = await one(`update idea_bank set status='archived' where id=$1 and workspace_id=$2 returning id`, [req.params.id, req.user.workspace_id]);
+  if (!r) return reply.code(404).send({ error: "ідею не знайдено" });
+  return { ok: true };
+});
+app.post("/api/ideas/:id/post", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const it = await one<{ text: string }>(`select text from idea_bank where id=$1 and workspace_id=$2 and status <> 'archived'`, [req.params.id, ws]);
+  if (!it) return reply.code(404).send({ error: "ідею не знайдено" });
+  try {
+    const src = await one<{ id: string }>(`insert into source(workspace_id, origin, title, transcript) values($1,'idea',$2,$3) returning id`,
+      [ws, it.text.slice(0, 200), `Ідея поста: ${it.text}`]);
+    const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
+    await generatePostsOnePass(run!.id, 1, [it.text]);
+    const post = await one<{ id: string }>(`select id from post where run_id=$1 and stage='final' limit 1`, [run!.id]);
+    await q(`update idea_bank set status='used', used_post_id=$2 where id=$1 and workspace_id=$3`, [req.params.id, post?.id ?? null, ws]);
+    return { ok: true, count: 1 };
+  } catch (e: any) { return reply.code(500).send({ error: e.message }); }
+});
 // Створити пости з матеріалу (всі обрані ідеї, або 1 пост без ідей)
 app.post("/api/materials/:id/posts", async (req: any, reply) => {
   const ws = req.user.workspace_id;

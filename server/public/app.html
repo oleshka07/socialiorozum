@@ -881,14 +881,18 @@ document.querySelectorAll('#layoutTabs .tab').forEach(t=>t.onclick=()=>setLayout
 $('toStudio').onclick=()=>setLayout('studio');
 
 // ---------- МАТЕРІАЛИ: стрічка сировини ----------
-let Mats=[], MatFilter='Усі', MatOpen=null;
-const MAT_TYPE={manual:'✍️ Нотатка',rss:'📡 RSS',fireflies:'🎙 Транскрипт',grain:'🎙 Транскрипт',meetgeek:'🎙 Транскрипт',gdrive:'📁 Drive',brand:'✨ Бренд',plan:'📅 План'};
-async function loadMaterials(){ try{ const r=await api('/materials'); Mats=r.materials||[]; }catch(e){ Mats=[]; } renderMaterials(); updateCounts(); }
+let Mats=[], MatFilter='Усі', MatOpen=null, Ideas=[];
+const BANK_FILTER='💡 Банк ідей';
+const MAT_TYPE={manual:'✍️ Нотатка',rss:'📡 RSS',fireflies:'🎙 Транскрипт',grain:'🎙 Транскрипт',meetgeek:'🎙 Транскрипт',gdrive:'📁 Drive',brand:'✨ Бренд',plan:'📅 План',idea:'💡 Ідея'};
+async function loadMaterials(){ try{ const r=await api('/materials'); Mats=r.materials||[]; }catch(e){ Mats=[]; } try{ const ib=await api('/ideas'); Ideas=ib.ideas||[]; }catch(e){ Ideas=[]; } renderMaterials(); updateCounts(); }
 function matType(m){ return MAT_TYPE[m.origin]||m.origin; }
 function renderMaterials(){
   const feed=$('matFeed'); if(!feed) return;
   const types=['Усі',...new Set(Mats.map(matType))];
-  const ft=$('matFilters'); if(ft){ ft.innerHTML=types.map(t=>{ const n=t==='Усі'?Mats.length:Mats.filter(m=>matType(m)===t).length; return '<div class="ftab'+(MatFilter===t?' on':'')+'" data-mf="'+esc(t)+'">'+esc(t)+' <span style="opacity:.6">'+n+'</span></div>'; }).join(''); ft.querySelectorAll('[data-mf]').forEach(x=>x.onclick=()=>{ MatFilter=x.dataset.mf; renderMaterials(); }); }
+  const ft=$('matFilters'); if(ft){ let html=types.map(t=>{ const n=t==='Усі'?Mats.length:Mats.filter(m=>matType(m)===t).length; return '<div class="ftab'+(MatFilter===t?' on':'')+'" data-mf="'+esc(t)+'">'+esc(t)+' <span style="opacity:.6">'+n+'</span></div>'; }).join('');
+    html+='<div class="ftab'+(MatFilter===BANK_FILTER?' on':'')+'" data-mf="'+esc(BANK_FILTER)+'" style="margin-left:6px">'+esc(BANK_FILTER)+' <span style="opacity:.6">'+Ideas.length+'</span></div>';
+    ft.innerHTML=html; ft.querySelectorAll('[data-mf]').forEach(x=>x.onclick=()=>{ MatFilter=x.dataset.mf; renderMaterials(); }); }
+  if(MatFilter===BANK_FILTER){ renderIdeaBank(feed); return; }
   const show=MatFilter==='Усі'?Mats:Mats.filter(m=>matType(m)===MatFilter);
   if(!show.length){ feed.innerHTML='<div class="empty" style="padding:20px">Порожньо. Додай матеріал кнопкою вище - або підключи RSS/транскрибатор у «Джерелах», нове зʼявиться тут само.</div>'; return; }
   feed.innerHTML=show.map(m=>{
@@ -911,6 +915,27 @@ function renderMaterials(){
       if(a==='post'){ aiBusy('✨ Створюю пост з матеріалу…'); setCTab('posts'); setLayout('studio');
         try{ await api('/materials/'+id+'/posts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}); await loadStudioPosts(); flash('Готово - пост у стрічці ✓'); }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } return; }
       if(a==='ideas'){ openMaterialIdeas(id); }
+    });
+  });
+}
+function bindIbAdd(){ const b=$('ibAdd'); if(b) b.onclick=async()=>{ const t=prompt('Нова ідея (1 рядок):'); if(!t||!t.trim()) return; try{ await api('/ideas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t.trim()})}); await loadMaterials(); }catch(e){ flash('⚠ '+e.message); } }; }
+function renderIdeaBank(feed){
+  const addBtn='<div style="padding:12px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px"><span style="font-size:12.5px;color:var(--muted)">Готові концепти постів. Витягуються в Telegram-боті командою /idea.</span><button class="ghost" id="ibAdd" style="margin-left:auto">＋ Додати ідею</button></div>';
+  if(!Ideas.length){ feed.innerHTML=addBtn+'<div class="empty" style="padding:20px">Банк порожній. Додай ідею вручну - або вони зʼявляться сюди з Telegram-бота.</div>'; bindIbAdd(); return; }
+  feed.innerHTML=addBtn+Ideas.map(it=>{
+    const tag=(s,c)=>'<span class="ptag"'+(c?' style="color:'+c+';border-color:'+c+'"':'')+'>'+s+'</span>';
+    const meta=(it.rubric?tag('🏷 '+esc(it.rubric)):'')+(it.origin==='bot'?tag('🤖 з Telegram','var(--tg)'):'')+(it.origin==='ai'?tag('✨ AI'):'');
+    return '<div data-idea="'+it.id+'" style="padding:13px 18px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">'
+      +'<div style="flex:1;min-width:180px;font-size:14px;line-height:1.5">'+esc(it.text||'')+(meta?' '+meta:'')+'</div>'
+      +'<div class="btnrow" style="margin:0"><button class="primary" data-ia="post">✨ Пост</button><button class="ghost" data-ia="del" style="color:var(--danger)">🗑</button></div>'
+      +'</div>';
+  }).join('');
+  bindIbAdd();
+  feed.querySelectorAll('[data-idea]').forEach(row=>{ const id=row.dataset.idea;
+    row.querySelectorAll('[data-ia]').forEach(b=>b.onclick=async()=>{ const a=b.dataset.ia;
+      if(a==='del'){ try{ await api('/ideas/'+id+'/archive',{method:'POST'}); await loadMaterials(); }catch(e){ flash('⚠ '+e.message); } return; }
+      if(a==='post'){ aiBusy('✨ Створюю пост з ідеї…'); setCTab('posts'); setLayout('studio');
+        try{ await api('/ideas/'+id+'/post',{method:'POST'}); await loadStudioPosts(); await loadMaterials(); flash('Готово - пост у Чорновиках ✓'); }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } return; }
     });
   });
 }
