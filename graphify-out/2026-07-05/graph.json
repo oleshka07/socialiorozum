@@ -943,7 +943,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_db",
-      "community": 8,
+      "community": 0,
       "norm_label": "db.ts"
     },
     {
@@ -953,7 +953,7 @@
       "source_location": "L4",
       "_origin": "ast",
       "id": "server_src_db_pool",
-      "community": 8,
+      "community": 6,
       "norm_label": "pool"
     },
     {
@@ -963,7 +963,7 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "server_src_db_q",
-      "community": 6,
+      "community": 0,
       "norm_label": "q()"
     },
     {
@@ -1013,7 +1013,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_digest",
-      "community": 15,
+      "community": 0,
       "norm_label": "digest.ts"
     },
     {
@@ -1023,7 +1023,7 @@
       "source_location": "L12",
       "_origin": "ast",
       "id": "server_src_digest_localparts",
-      "community": 15,
+      "community": 0,
       "norm_label": "localparts()"
     },
     {
@@ -1033,7 +1033,7 @@
       "source_location": "L18",
       "_origin": "ast",
       "id": "server_src_digest_plusday",
-      "community": 15,
+      "community": 0,
       "norm_label": "plusday()"
     },
     {
@@ -1043,7 +1043,7 @@
       "source_location": "L22",
       "_origin": "ast",
       "id": "server_src_digest_senddigest",
-      "community": 15,
+      "community": 0,
       "norm_label": "senddigest()"
     },
     {
@@ -1053,7 +1053,7 @@
       "source_location": "L43",
       "_origin": "ast",
       "id": "server_src_digest_tick",
-      "community": 15,
+      "community": 0,
       "norm_label": "tick()"
     },
     {
@@ -1063,7 +1063,7 @@
       "source_location": "L61",
       "_origin": "ast",
       "id": "server_src_digest_startdigest",
-      "community": 15,
+      "community": 0,
       "norm_label": "startdigest()"
     },
     {
@@ -1163,7 +1163,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_env",
-      "community": 8,
+      "community": 0,
       "norm_label": "env.ts"
     },
     {
@@ -1173,7 +1173,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_env_env",
-      "community": 8,
+      "community": 0,
       "norm_label": "env"
     },
     {
@@ -1223,7 +1223,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_gdrive_poller",
-      "community": 35,
+      "community": 0,
       "norm_label": "gdrive-poller.ts"
     },
     {
@@ -1233,7 +1233,7 @@
       "source_location": "L11",
       "_origin": "ast",
       "id": "server_src_gdrive_poller_folder",
-      "community": 35,
+      "community": 0,
       "norm_label": "folder"
     },
     {
@@ -1243,7 +1243,7 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "server_src_gdrive_poller_validtoken",
-      "community": 35,
+      "community": 0,
       "norm_label": "validtoken()"
     },
     {
@@ -1253,7 +1253,7 @@
       "source_location": "L30",
       "_origin": "ast",
       "id": "server_src_gdrive_poller_pullfolder",
-      "community": 35,
+      "community": 0,
       "norm_label": "pullfolder()"
     },
     {
@@ -1263,7 +1263,7 @@
       "source_location": "L52",
       "_origin": "ast",
       "id": "server_src_gdrive_poller_tick",
-      "community": 35,
+      "community": 0,
       "norm_label": "tick()"
     },
     {
@@ -1273,7 +1273,7 @@
       "source_location": "L61",
       "_origin": "ast",
       "id": "server_src_gdrive_poller_pullgdrivefolder",
-      "community": 35,
+      "community": 0,
       "norm_label": "pullgdrivefolder()"
     },
     {
@@ -1283,7 +1283,7 @@
       "source_location": "L68",
       "_origin": "ast",
       "id": "server_src_gdrive_poller_startgdrivepoller",
-      "community": 35,
+      "community": 0,
       "norm_label": "startgdrivepoller()"
     },
     {
@@ -1683,7 +1683,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_log",
-      "community": 15,
+      "community": 0,
       "norm_label": "log.ts"
     },
     {
@@ -1693,7 +1693,7 @@
       "source_location": "L3",
       "_origin": "ast",
       "id": "server_src_log_loglevel",
-      "community": 15,
+      "community": 0,
       "norm_label": "loglevel"
     },
     {
@@ -1703,7 +1703,7 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "server_src_log_logevent",
-      "community": 15,
+      "community": 0,
       "norm_label": "logevent()"
     },
     {
@@ -1983,7 +1983,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_migrate",
-      "community": 8,
+      "community": 6,
       "norm_label": "migrate.ts"
     },
     {
@@ -1993,7 +1993,7 @@
       "source_location": "L7",
       "_origin": "ast",
       "id": "server_src_migrate_dirname",
-      "community": 8,
+      "community": 6,
       "norm_label": "__dirname"
     },
     {
@@ -2003,7 +2003,7 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "server_src_migrate_main",
-      "community": 8,
+      "community": 6,
       "norm_label": "main()"
     },
     {
@@ -2013,7 +2013,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_openrouter",
-      "community": 8,
+      "community": 0,
       "norm_label": "openrouter.ts"
     },
     {
@@ -2023,7 +2023,7 @@
       "source_location": "L4",
       "_origin": "ast",
       "id": "server_src_openrouter_chatctx",
-      "community": 8,
+      "community": 0,
       "norm_label": "chatctx"
     },
     {
@@ -2033,7 +2033,7 @@
       "source_location": "L7",
       "_origin": "ast",
       "id": "server_src_openrouter_openai_prices",
-      "community": 8,
+      "community": 0,
       "norm_label": "openai_prices"
     },
     {
@@ -2313,7 +2313,7 @@
       "source_location": "L450",
       "_origin": "ast",
       "id": "server_src_pipeline_generatepostsonepass",
-      "community": 15,
+      "community": 0,
       "norm_label": "generatepostsonepass()"
     },
     {
@@ -2383,7 +2383,7 @@
       "source_location": "L614",
       "_origin": "ast",
       "id": "server_src_pipeline_matchplanslots",
-      "community": 15,
+      "community": 0,
       "norm_label": "matchplanslots()"
     },
     {
@@ -2413,7 +2413,7 @@
       "source_location": "L675",
       "_origin": "ast",
       "id": "server_src_pipeline_nextinsight",
-      "community": 15,
+      "community": 0,
       "norm_label": "nextinsight()"
     },
     {
@@ -2473,7 +2473,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_rss_poller",
-      "community": 15,
+      "community": 0,
       "norm_label": "rss-poller.ts"
     },
     {
@@ -2483,7 +2483,7 @@
       "source_location": "L11",
       "_origin": "ast",
       "id": "server_src_rss_poller_feed",
-      "community": 15,
+      "community": 0,
       "norm_label": "feed"
     },
     {
@@ -2493,7 +2493,7 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "server_src_rss_poller_ingest",
-      "community": 15,
+      "community": 0,
       "norm_label": "ingest()"
     },
     {
@@ -2503,7 +2503,7 @@
       "source_location": "L42",
       "_origin": "ast",
       "id": "server_src_rss_poller_runpipelines",
-      "community": 15,
+      "community": 0,
       "norm_label": "runpipelines()"
     },
     {
@@ -2513,7 +2513,7 @@
       "source_location": "L49",
       "_origin": "ast",
       "id": "server_src_rss_poller_tick",
-      "community": 15,
+      "community": 0,
       "norm_label": "tick()"
     },
     {
@@ -2523,7 +2523,7 @@
       "source_location": "L60",
       "_origin": "ast",
       "id": "server_src_rss_poller_pullfeed",
-      "community": 15,
+      "community": 0,
       "norm_label": "pullfeed()"
     },
     {
@@ -2533,7 +2533,7 @@
       "source_location": "L69",
       "_origin": "ast",
       "id": "server_src_rss_poller_startrsspoller",
-      "community": 15,
+      "community": 0,
       "norm_label": "startrsspoller()"
     },
     {
@@ -2993,7 +2993,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_tgbot",
-      "community": 15,
+      "community": 0,
       "norm_label": "tgbot.ts"
     },
     {
@@ -3003,7 +3003,7 @@
       "source_location": "L15",
       "_origin": "ast",
       "id": "server_src_tgbot_botenabled",
-      "community": 15,
+      "community": 0,
       "norm_label": "botenabled()"
     },
     {
@@ -3013,7 +3013,7 @@
       "source_location": "L16",
       "_origin": "ast",
       "id": "server_src_tgbot_botusername",
-      "community": 15,
+      "community": 0,
       "norm_label": "botusername()"
     },
     {
@@ -3023,7 +3023,7 @@
       "source_location": "L18",
       "_origin": "ast",
       "id": "server_src_tgbot_inittelegrambot",
-      "community": 15,
+      "community": 0,
       "norm_label": "inittelegrambot()"
     },
     {
@@ -3033,7 +3033,7 @@
       "source_location": "L29",
       "_origin": "ast",
       "id": "server_src_tgbot_createconnectlink",
-      "community": 15,
+      "community": 0,
       "norm_label": "createconnectlink()"
     },
     {
@@ -3043,7 +3043,7 @@
       "source_location": "L37",
       "_origin": "ast",
       "id": "server_src_tgbot_attachchannel",
-      "community": 15,
+      "community": 0,
       "norm_label": "attachchannel()"
     },
     {
@@ -3053,7 +3053,7 @@
       "source_location": "L56",
       "_origin": "ast",
       "id": "server_src_tgbot_ownerworkspace",
-      "community": 15,
+      "community": 0,
       "norm_label": "ownerworkspace()"
     },
     {
@@ -3063,7 +3063,7 @@
       "source_location": "L62",
       "_origin": "ast",
       "id": "server_src_tgbot_setowner",
-      "community": 15,
+      "community": 0,
       "norm_label": "setowner()"
     },
     {
@@ -3073,7 +3073,7 @@
       "source_location": "L68",
       "_origin": "ast",
       "id": "server_src_tgbot_livesend",
-      "community": 15,
+      "community": 0,
       "norm_label": "livesend()"
     },
     {
@@ -3083,7 +3083,7 @@
       "source_location": "L79",
       "_origin": "ast",
       "id": "server_src_tgbot_ideatopost",
-      "community": 15,
+      "community": 0,
       "norm_label": "ideatopost()"
     },
     {
@@ -3103,7 +3103,7 @@
       "source_location": "L107",
       "_origin": "ast",
       "id": "server_src_tgbot_captureidea",
-      "community": 15,
+      "community": 0,
       "norm_label": "captureidea()"
     },
     {
@@ -3113,7 +3113,7 @@
       "source_location": "L115",
       "_origin": "ast",
       "id": "server_src_tgbot_sendidealist",
-      "community": 15,
+      "community": 0,
       "norm_label": "sendidealist()"
     },
     {
@@ -3123,27 +3123,17 @@
       "source_location": "L123",
       "_origin": "ast",
       "id": "server_src_tgbot_handleupdate",
-      "community": 15,
+      "community": 0,
       "norm_label": "handleupdate()"
-    },
-    {
-      "label": "draftButtons()",
-      "file_type": "code",
-      "source_file": "server/src/tgbot.ts",
-      "source_location": "L177",
-      "_origin": "ast",
-      "id": "server_src_tgbot_draftbuttons",
-      "community": 15,
-      "norm_label": "draftbuttons()"
     },
     {
       "label": "handleCallback()",
       "file_type": "code",
       "source_file": "server/src/tgbot.ts",
-      "source_location": "L183",
+      "source_location": "L177",
       "_origin": "ast",
       "id": "server_src_tgbot_handlecallback",
-      "community": 15,
+      "community": 0,
       "norm_label": "handlecallback()"
     },
     {
@@ -3480,7 +3470,7 @@
       "label": "graphify",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L88",
+      "source_location": "L87",
       "_origin": "ast",
       "id": "claude_graphify",
       "community": 33,
@@ -8765,7 +8755,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/src/tgbot.ts",
-      "source_location": "L209",
+      "source_location": "L200",
       "weight": 1.0,
       "source": "server_src_tgbot_handlecallback",
       "target": "server_src_db_q",
@@ -10937,7 +10927,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/src/tgbot.ts",
-      "source_location": "L230",
+      "source_location": "L211",
       "weight": 1.0,
       "source": "server_src_tgbot_handlecallback",
       "target": "server_src_log_logevent",
@@ -12716,28 +12706,6 @@
       "confidence_score": 1.0
     },
     {
-      "relation": "imports",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "server/src/tgbot.ts",
-      "source_location": "L9",
-      "weight": 1.0,
-      "source": "server_src_tgbot",
-      "target": "server_src_pipeline_rewritepost",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "server/src/tgbot.ts",
-      "source_location": "L208",
-      "weight": 1.0,
-      "source": "server_src_tgbot_handlecallback",
-      "target": "server_src_pipeline_rewritepost",
-      "confidence_score": 1.0
-    },
-    {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
@@ -12892,7 +12860,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/src/tgbot.ts",
-      "source_location": "L220",
+      "source_location": "L201",
       "weight": 1.0,
       "source": "server_src_tgbot_handlecallback",
       "target": "server_src_publisher_publishposttochannels",
@@ -13874,16 +13842,6 @@
       "source_location": "L177",
       "weight": 1.0,
       "source": "server_src_tgbot",
-      "target": "server_src_tgbot_draftbuttons",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "server/src/tgbot.ts",
-      "source_location": "L183",
-      "weight": 1.0,
-      "source": "server_src_tgbot",
       "target": "server_src_tgbot_handlecallback",
       "confidence_score": 1.0
     },
@@ -13973,7 +13931,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/src/tgbot.ts",
-      "source_location": "L186",
+      "source_location": "L180",
       "weight": 1.0,
       "source": "server_src_tgbot_handlecallback",
       "target": "server_src_tgbot_ownerworkspace",
@@ -14028,7 +13986,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/src/tgbot.ts",
-      "source_location": "L198",
+      "source_location": "L192",
       "weight": 1.0,
       "source": "server_src_tgbot_handlecallback",
       "target": "server_src_tgbot_ideatopost",
@@ -14039,7 +13997,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/src/tgbot.ts",
-      "source_location": "L192",
+      "source_location": "L186",
       "weight": 1.0,
       "source": "server_src_tgbot_handlecallback",
       "target": "server_src_tgbot_buildplan",
@@ -14061,7 +14019,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/src/tgbot.ts",
-      "source_location": "L189",
+      "source_location": "L183",
       "weight": 1.0,
       "source": "server_src_tgbot_handlecallback",
       "target": "server_src_tgbot_sendidealist",
@@ -14087,17 +14045,6 @@
       "weight": 1.0,
       "source": "server_src_tgbot_handleupdate",
       "target": "server_src_tgbot_handlecallback",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "server/src/tgbot.ts",
-      "source_location": "L199",
-      "weight": 1.0,
-      "source": "server_src_tgbot_handlecallback",
-      "target": "server_src_tgbot_draftbuttons",
       "confidence_score": 1.0
     },
     {
@@ -14448,7 +14395,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CLAUDE.md",
-      "source_location": "L88",
+      "source_location": "L87",
       "weight": 1.0,
       "source": "claude_socialio_\u043a\u043e\u043d\u0442\u0435\u043d\u0442\u0433\u0440\u043e\u0432_project_memory_single_source_of_truth",
       "target": "claude_graphify",
@@ -16507,5 +16454,5 @@
       "source_file": "server/public/app.html"
     }
   ],
-  "built_at_commit": "a29d8d1a7b0d4872a5b8c8fc79f17ffc7fa5d519"
+  "built_at_commit": "eb754e3937b717b1fa057bd7391074c506dc8581"
 }
