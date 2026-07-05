@@ -6,7 +6,7 @@ import { env } from "./env.js";
 import { q, one } from "./db.js";
 import * as tg from "./telegram.js";
 import { logEvent } from "./log.js";
-import { generatePostsOnePass, buildLiteSkeleton } from "./pipeline.js";
+import { generatePostsOnePass, buildLiteSkeleton, rewritePost } from "./pipeline.js";
 import { publishPostToChannels } from "./publisher.js";
 
 let BOT_ID = 0;
@@ -173,6 +173,12 @@ export async function handleUpdate(update: any): Promise<void> {
   } catch (e: any) { await logEvent("error", "tgbot", "update: " + e.message); }
 }
 
+// кнопки під згенерованою чернеткою в DM
+const draftButtons = (postId: string): tg.TgButton[][] => [
+  [{ text: "✅ Опублікувати в Telegram", data: `pub:${postId}` }],
+  [{ text: "✍️ Переробити", data: `rw:${postId}` }, { text: "📋 Ще ідеї", data: "idea_list" }],
+];
+
 // натискання inline-кнопок
 async function handleCallback(cbq: any): Promise<void> {
   const token = env.telegram.botToken;
@@ -190,8 +196,21 @@ async function handleCallback(cbq: any): Promise<void> {
     if (data.startsWith("idea_post:")) {
       await tg.answerCallbackQuery(token, cbq.id, "Генерую пост…");
       const p = await ideaToPost(ws, data.slice("idea_post:".length));
-      const btns = p.id ? [[{ text: "✅ Опублікувати в Telegram", data: `pub:${p.id}` }], [{ text: "📋 Ще ідеї", data: "idea_list" }]] : undefined;
-      await tg.sendMessage(token, chatId, `✅ Чернетка готова:\n\n${p.content.slice(0, 3500)}\n\nОпублікувати зараз чи докрутити в застосунку (фото, час)?`, btns);
+      await tg.sendMessage(token, chatId, `✅ Чернетка готова:\n\n${p.content.slice(0, 3500)}\n\nОпублікувати, переробити чи докрутити в застосунку (фото, час)?`, p.id ? draftButtons(p.id) : undefined);
+      return;
+    }
+    if (data.startsWith("rw:")) {
+      const postId = data.slice("rw:".length);
+      await tg.answerCallbackQuery(token, cbq.id, "Переробляю…");
+      const post = await one<{ content: string }>(
+        `select p.content from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
+      if (!post) { await tg.sendMessage(token, chatId, "Пост не знайдено."); return; }
+      const rewritten = await rewritePost(ws, post.content);
+      await q(`update post set content=$2 where id=$1`, [postId, rewritten]);
+      const mid = cbq.message?.message_id;
+      const text = `✅ Оновлена чернетка:\n\n${rewritten.slice(0, 3500)}`;
+      if (mid) await tg.editMessageText(token, chatId, mid, text, draftButtons(postId));
+      else await tg.sendMessage(token, chatId, text, draftButtons(postId));
       return;
     }
     if (data.startsWith("pub:")) {
