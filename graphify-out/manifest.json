@@ -105,8 +105,8 @@
     "semantic_hash": "146bd4a919c3218078bd4f79b9182554"
   },
   "server/src/pipeline.ts": {
-    "mtime": 1783340746.6284173,
-    "ast_hash": "760678acb76db56c48ecbd8260d7d8e2",
+    "mtime": 1783341484.5644362,
+    "ast_hash": "a4c9786c3fe3aea7ce26c67ff6097a96",
     "semantic_hash": ""
   },
   "server/src/publisher.ts": {
@@ -135,8 +135,8 @@
     "semantic_hash": ""
   },
   "server/src/tgbot.ts": {
-    "mtime": 1783340746.6284173,
-    "ast_hash": "b6a656067db6e4cad8976bad7caeeda2",
+    "mtime": 1783341663.8404408,
+    "ast_hash": "7bd70eb6d62561b8f8ac45239c83f080",
     "semantic_hash": ""
   },
   "server/src/threads.ts": {
@@ -155,8 +155,8 @@
     "semantic_hash": "352df4b84f4af2922ccd9adaf8e4608f"
   },
   "CLAUDE.md": {
-    "mtime": 1783341076.3324258,
-    "ast_hash": "88c8a77662adbbf73e740c511041f13c",
+    "mtime": 1783341700.9204416,
+    "ast_hash": "e6a03e0d571d3b3ea5e180cd9e81badc",
     "semantic_hash": ""
   },
   "DEPLOY.md": {
@@ -275,8 +275,8 @@
     "semantic_hash": ""
   },
   "server/src/digest.ts": {
-    "mtime": 1783340746.6284173,
-    "ast_hash": "9a56140ca1e818a15e8efbd9e176f895",
+    "mtime": 1783341641.9204402,
+    "ast_hash": "4747a5fdabe0be44856789b10c00cce1",
     "semantic_hash": ""
   }
 }

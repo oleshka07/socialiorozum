@@ -1,6 +1,6 @@
 {
   "server/db/schema.sql": {
-    "mtime": 1783227334.5986168,
+    "mtime": 1783340746.6284173,
     "ast_hash": "6194b3bd944fef9393a3d02e42ed675f",
     "semantic_hash": ""
   },
@@ -15,7 +15,7 @@
     "semantic_hash": "0a46780760c16475d3cdf6c024879292"
   },
   "server/src/autopost.ts": {
-    "mtime": 1783227334.5986168,
+    "mtime": 1783340746.6284173,
     "ast_hash": "7a54d6f720239a13f4d429e1ae162259",
     "semantic_hash": ""
   },
@@ -65,7 +65,7 @@
     "semantic_hash": "6c2ff85822659e4bfac582a0db70ce2e"
   },
   "server/src/images.ts": {
-    "mtime": 1783227334.5986168,
+    "mtime": 1783340746.6284173,
     "ast_hash": "03db15ba605dde39307eda4061368fe4",
     "semantic_hash": ""
   },
@@ -105,17 +105,17 @@
     "semantic_hash": "146bd4a919c3218078bd4f79b9182554"
   },
   "server/src/pipeline.ts": {
-    "mtime": 1783227334.5986168,
+    "mtime": 1783340746.6284173,
     "ast_hash": "760678acb76db56c48ecbd8260d7d8e2",
     "semantic_hash": ""
   },
   "server/src/publisher.ts": {
-    "mtime": 1783227334.6026168,
+    "mtime": 1783340746.6284173,
     "ast_hash": "78a5aec9f623129ddfebad4af722332c",
     "semantic_hash": ""
   },
   "server/src/rss-poller.ts": {
-    "mtime": 1783227334.6026168,
+    "mtime": 1783340746.6284173,
     "ast_hash": "a53d8722fb8a15602e9b2ef0c71a2e06",
     "semantic_hash": ""
   },
@@ -125,17 +125,17 @@
     "semantic_hash": "3e929595c91643444c4c4d540a929c55"
   },
   "server/src/server.ts": {
-    "mtime": 1783227334.6026168,
+    "mtime": 1783340746.6284173,
     "ast_hash": "bbef7494ad1a8a523e564c0ce00ce8cc",
     "semantic_hash": ""
   },
   "server/src/telegram.ts": {
-    "mtime": 1783227334.6026168,
+    "mtime": 1783340746.6284173,
     "ast_hash": "c33996089cf750d405b30e632ff7a2d2",
     "semantic_hash": ""
   },
   "server/src/tgbot.ts": {
-    "mtime": 1783227427.0546143,
+    "mtime": 1783340746.6284173,
     "ast_hash": "b6a656067db6e4cad8976bad7caeeda2",
     "semantic_hash": ""
   },
@@ -155,8 +155,8 @@
     "semantic_hash": "352df4b84f4af2922ccd9adaf8e4608f"
   },
   "CLAUDE.md": {
-    "mtime": 1783227453.4986134,
-    "ast_hash": "30e92be9db313eb6cf395d4c38bf7c7f",
+    "mtime": 1783341076.3324258,
+    "ast_hash": "88c8a77662adbbf73e740c511041f13c",
     "semantic_hash": ""
   },
   "DEPLOY.md": {
@@ -225,8 +225,8 @@
     "semantic_hash": "199a92f19b822e467cdaf95780db5fee"
   },
   "server/public/app.html": {
-    "mtime": 1783227334.5986168,
-    "ast_hash": "00ace77a3799c0937287c45011183a23",
+    "mtime": 1783341042.824425,
+    "ast_hash": "16d8f7a1041e1d6ac7721016dce99df0",
     "semantic_hash": ""
   },
   "server/public/auth.html": {
@@ -275,7 +275,7 @@
     "semantic_hash": ""
   },
   "server/src/digest.ts": {
-    "mtime": 1783227334.5986168,
+    "mtime": 1783340746.6284173,
     "ast_hash": "9a56140ca1e818a15e8efbd9e176f895",
     "semantic_hash": ""
   }
