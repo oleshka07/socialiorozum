@@ -23,21 +23,31 @@ async function sendDigest(ws: string, chatId: string, localDate: string): Promis
   let insight = "Контент, який ти не опублікував, не працює.";
   try { insight = await nextInsight(ws); } catch { /* фолбек лишається */ }
   const tomorrow = plusDay(localDate, 1);
-  const [slotTomorrow, ideasCount, anyPlan] = await Promise.all([
+  const [slotTomorrow, ideasCount, anyPlan, nextSlot] = await Promise.all([
     one<{ n: number }>(`select count(*)::int n from plan_slot where workspace_id=$1 and slot_date=$2 and status <> 'published'`, [ws, tomorrow]),
     one<{ n: number }>(`select count(*)::int n from idea_bank where workspace_id=$1 and status='new'`, [ws]),
     one<{ n: number }>(`select count(*)::int n from plan_slot where workspace_id=$1 and slot_date >= $2`, [ws, localDate]),
+    one<{ id: string; theme: string }>(`select id, theme from plan_slot where workspace_id=$1 and slot_date >= $2 and status in ('empty','matched') order by slot_date limit 1`, [ws, localDate]),
   ]);
   const lines = [`💡 **${insight}**`];
   if (!(slotTomorrow?.n)) lines.push("\n⚠️ Завтра нема запланованого поста. Виділи 5 хвилин.");
+  if (nextSlot?.theme) lines.push(`✍️ Найближча тема: «${nextSlot.theme.slice(0, 90)}»`);
   if (ideasCount?.n) lines.push(`💡 У Банку ${ideasCount.n} ідей — зроби пост у 1 тап.`);
   if (!(anyPlan?.n)) lines.push("📭 Контент-плану ще нема — сформуймо кістяк на 2 тижні.");
 
   const buttons: { text: string; data?: string; url?: string }[][] = [];
+  if (nextSlot?.id) buttons.push([{ text: "✍️ Зробити пост зараз", data: `slot_post:${nextSlot.id}` }]); // 1 тап: тема слота → чернетка в DM
   if (ideasCount?.n) buttons.push([{ text: "💡 Показати ідеї", data: "idea_list" }]);
   if (!(anyPlan?.n)) buttons.push([{ text: "⚡ Сформувати план", data: "plan_gen" }]);
   buttons.push([{ text: "🌐 Відкрити застосунок", url: env.appBaseUrl + "/app" }]);
   await liveSend(ws, chatId, "daily", lines.join("\n"), buttons);
+}
+
+// Надіслати зведення НЕГАЙНО (команда /digest у боті - для перевірки без очікування 9:00).
+export async function sendDigestNow(ws: string, chatId: string): Promise<void> {
+  const tzRow = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='timezone'`, [ws]);
+  const { date } = localParts(tzRow?.content || "Europe/Kyiv");
+  await sendDigest(ws, chatId, date);
 }
 
 async function tick(): Promise<void> {

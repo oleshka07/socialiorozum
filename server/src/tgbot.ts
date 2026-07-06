@@ -8,6 +8,7 @@ import * as tg from "./telegram.js";
 import { logEvent } from "./log.js";
 import { generatePostsOnePass, buildLiteSkeleton, rewritePost } from "./pipeline.js";
 import { publishPostToChannels } from "./publisher.js";
+import { sendDigestNow } from "./digest.js";
 
 let BOT_ID = 0;
 let BOT_USERNAME = env.telegram.botUsername;
@@ -103,6 +104,28 @@ async function buildPlan(workspaceId: string): Promise<number> {
   return n;
 }
 
+// слот плану -> чернетка поста (той самий шлях, що й /api/plan/slots/:id/generate «з теми»)
+async function slotToPost(workspaceId: string, slotId: string): Promise<{ id: string; content: string } | null> {
+  const slot = await one<{ id: string; theme: string; hook: string | null; cta: string | null; rubric: string | null; channel: string; match_source_id: string | null }>(
+    `select id, theme, hook, cta, rubric, channel, match_source_id from plan_slot where id=$1 and workspace_id=$2 and status in ('empty','matched')`, [slotId, workspaceId]);
+  if (!slot) return null;
+  let sourceId = slot.match_source_id;
+  if (!sourceId) {
+    const src = await one<{ id: string }>(`insert into source(workspace_id, origin, title, transcript) values($1,'plan',$2,$3) returning id`,
+      [workspaceId, slot.theme.slice(0, 200), `Тема поста: ${slot.theme}${slot.hook ? `\nГачок: ${slot.hook}` : ""}${slot.cta ? `\nЗаклик: ${slot.cta}` : ""}`]);
+    sourceId = src!.id;
+  }
+  const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [sourceId]);
+  const idea = `${slot.theme}${slot.hook ? `. Гачок: ${slot.hook}` : ""}${slot.cta ? `. Заклик: ${slot.cta}` : ""}`;
+  await generatePostsOnePass(run!.id, 1, [idea]);
+  const post = await one<{ id: string; content: string }>(`select id, content from post where run_id=$1 and stage='final' limit 1`, [run!.id]);
+  if (!post) return null;
+  await q(`update post set rubric=coalesce($2, rubric), channels=coalesce(channels,'{}'::jsonb) || $3::jsonb where id=$1`,
+    [post.id, slot.rubric, JSON.stringify({ [slot.channel]: { on: true } })]);
+  await q(`update plan_slot set status='drafted', post_id=$2 where id=$1`, [slot.id, post.id]);
+  return { id: post.id, content: post.content };
+}
+
 // зберегти надіслану думку як ідею (origin='bot') + підтвердження живим меседжем
 async function captureIdea(workspaceId: string, chatId: string, text: string): Promise<void> {
   const r = await one<{ id: string }>(`insert into idea_bank(workspace_id, text, origin) values($1,$2,'bot') returning id`, [workspaceId, text.slice(0, 500)]);
@@ -151,6 +174,14 @@ export async function handleUpdate(update: any): Promise<void> {
       return;
     }
 
+    // /digest — надіслати ранкове зведення негайно (перевірка)
+    if (text.toLowerCase().startsWith("/digest")) {
+      const ws = await ownerWorkspace(fromId);
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio."); return; }
+      await sendDigestNow(ws, chatId);
+      return;
+    }
+
     // переслали пост із каналу -> підключення каналу (як було)
     if (msg.forward_from_chat && msg.forward_from_chat.type === "channel") {
       await tg.sendMessage(token, chatId, await attachChannel(fromId, msg.forward_from_chat.id, msg.forward_from_chat.title));
@@ -187,6 +218,13 @@ async function handleCallback(cbq: any): Promise<void> {
   if (!ws) { await tg.answerCallbackQuery(token, cbq.id, "Спершу під'єднай кабінет socialio"); return; }
   try {
     if (data === "idea_list") { await tg.answerCallbackQuery(token, cbq.id); await sendIdeaList(ws, chatId); return; }
+    if (data.startsWith("slot_post:")) {
+      await tg.answerCallbackQuery(token, cbq.id, "Генерую пост…");
+      const p = await slotToPost(ws, data.slice("slot_post:".length));
+      if (!p) { await tg.sendMessage(token, chatId, "Слот уже опрацьовано або не знайдено. /idea — інші ідеї."); return; }
+      await tg.sendMessage(token, chatId, `✅ Чернетка готова:\n\n${p.content.slice(0, 3500)}\n\nОпублікувати, переробити чи докрутити в застосунку?`, draftButtons(p.id));
+      return;
+    }
     if (data === "plan_gen") {
       await tg.answerCallbackQuery(token, cbq.id, "Будую план…");
       try { const n = await buildPlan(ws); await tg.sendMessage(token, chatId, `📅 Готово: скелет плану на 2 тижні (${n} слотів). Заповнюй його ідеями — /idea, або відкрий застосунок.`); }
