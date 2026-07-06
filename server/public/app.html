@@ -400,6 +400,7 @@
               <label style="font-size:12px;color:var(--muted)">днів <input id="planHorizon" class="txt" type="number" value="14" min="7" max="90" style="width:60px;display:inline-block;padding:7px 9px"></label>
               <label id="planPpwWrap" style="font-size:12px;color:var(--muted)">постів/тиждень <input id="planPpw" class="txt" type="number" value="4" min="1" max="14" style="width:54px;display:inline-block;padding:7px 9px"></label>
               <button class="primary" id="planGenBtn">↻ Згенерувати скелет</button>
+              <button class="ghost" id="planMatchBtn" title="Підібрати наявні матеріали під теми слотів">🔗 Підібрати матеріали</button>
               <span id="planMsg" style="font-size:12px;color:var(--muted)"></span>
             </div>
           </div>
@@ -1068,6 +1069,11 @@ if($('planGenBtn')) $('planGenBtn').onclick=async()=>{
   if(mode==='pro') body.channel=PlanChan;
   try{ const r=await api('/plan/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     m.style.color='var(--brand)'; m.textContent='готово ✓ '+r.slots+' слотів'+(r.matched?(' · '+r.matched+' метчів'):''); await loadPlan(); }
+  catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } finally{ aiDone(); }
+};
+if($('planMatchBtn')) $('planMatchBtn').onclick=async()=>{
+  const m=$('planMsg'); m.style.color='var(--muted)'; m.textContent='шукаю матеріали під слоти…'; aiBusy('🔗 Підбираю наявні матеріали під теми плану…');
+  try{ const r=await api('/plan/match',{method:'POST'}); m.style.color='var(--brand)'; m.textContent=r.matched?('підібрано матеріалів: '+r.matched+' ✓'):'нових метчів нема (додай матеріали в «Матеріали»)'; await loadPlan(); }
   catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } finally{ aiDone(); }
 };
 // лічильники на вкладках конвеєра
