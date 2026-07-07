@@ -9,6 +9,9 @@ export const env = {
     referer: process.env.OPENROUTER_REFERER ?? "",
     title: process.env.OPENROUTER_TITLE ?? "KontentGrov",
   },
+  // Модель для дешевих/неважливих кроків (метчинг, теми плану, ідеї, хештеги, інсайти).
+  // За замовч. gpt-4o-mini; постав CHEAP_MODEL=google/gemini-2.5-flash у .env → підуть на Gemini (безкоштовний тариф).
+  cheapModel: process.env.CHEAP_MODEL || "openai/gpt-4o-mini",
   openai: {
     apiKey: process.env.OPENAI_API_KEY ?? "",   // прямий OpenAI для Lite (дешевше за наценку OpenRouter) + gpt-image-1
   },

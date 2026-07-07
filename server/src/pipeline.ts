@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { q, one } from "./db.js";
 import { chat, extractJsonArray, extractJsonObject } from "./openrouter.js";
+import { env } from "./env.js";
 
 // порядок кроків кишки (strategy = v2)
 export const STEP_ORDER = ["extract_ideas", "drafts", "tone", "format", "deai", "strategy"] as const;
@@ -544,7 +545,7 @@ export async function buildLiteSkeleton(workspaceId: string, horizonDays: number
         (themes.length ? `\nОрієнтир тем: ${themes.slice(0, 10).join("; ")}` : "") +
         `\n\nПоверни ЛИШЕ валідний JSON-масив рівно з ${slots.length} рядків-тем, у тому ж порядку, що рубрики нижче. Мова: ${lang}.`;
       const user = slots.map((x, i) => `${i + 1}. [${x.rubric}]`).join("\n");
-      const raw = await chat("openai/gpt-4o-mini", system, user, { workspaceId, step: "plan_themes" });
+      const raw = await chat(env.cheapModel, system, user, { workspaceId, step: "plan_themes" });
       const arr = extractJsonArray<any>(raw).map((x: any) => String(x?.theme || x || "").trim());
       slots.forEach((x, i) => { x.theme = (arr[i] || "").slice(0, 300) || `${x.rubric}: ідея дня`; });
     } catch { slots.forEach((x) => { x.theme = x.theme || `${x.rubric}: ідея дня`; }); }
@@ -585,7 +586,7 @@ export async function extractIdeasFromText(workspaceId: string, text: string, co
     (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") +
     (rubList ? `\nРубрики бренду: ${rubList}. Кожній ідеї признач НАЙБЛИЖЧУ рубрику з цього переліку.` : "") +
     `\n\nЗнайди до ${Math.max(1, Math.min(10, count))} ідей. Поверни ЛИШЕ валідний JSON-масив: [{"idea":"суть ідеї одним реченням","rubric":"назва рубрики"}]. Мова: ${lang}.`;
-  const raw = await chat("openai/gpt-4o-mini", system, `Матеріал:\n---\n${(text || "").slice(0, 20000)}`, { workspaceId, step: "ideas" });
+  const raw = await chat(env.cheapModel, system, `Матеріал:\n---\n${(text || "").slice(0, 20000)}`, { workspaceId, step: "ideas" });
   let out: { idea: string; rubric: string }[] = [];
   try {
     out = extractJsonArray<any>(raw).map((x) => ({ idea: String(x?.idea || x || "").trim(), rubric: String(x?.rubric || "").trim() })).filter((x) => x.idea);
@@ -601,7 +602,7 @@ export async function suggestHashtags(workspaceId: string, text: string): Promis
     "Ти SMM-фахівець. Підбери 5-8 релевантних хештегів для цього поста: суміш нішевих і ширших, без пробілів усередині тега, без дублів, реально вживаних. " +
     (s.marketing_context ? `\nНіша бренду: ${s.marketing_context}` : "") +
     `\n\nПоверни ЛИШЕ валідний JSON-масив рядків, кожен починається з #. Мова тегів: ${lang}.`;
-  const raw = await chat("openai/gpt-4o-mini", system, `Пост:\n---\n${(text || "").slice(0, 4000)}`, { workspaceId, step: "hashtags" });
+  const raw = await chat(env.cheapModel, system, `Пост:\n---\n${(text || "").slice(0, 4000)}`, { workspaceId, step: "hashtags" });
   let tags: string[] = [];
   try {
     tags = extractJsonArray<any>(raw).map((x) => String(x || "").trim())
@@ -624,7 +625,7 @@ export async function matchPlanSlots(workspaceId: string): Promise<number> {
   const user =
     "СЛОТИ ПЛАНУ:\n" + slots.map((s) => `${s.id} | [${s.rubric}] ${s.theme}`).join("\n") +
     "\n\nМАТЕРІАЛИ:\n" + mats.map((m) => `${m.id} | ${m.title}: ${m.transcript.replace(/\n+/g, " ")}`).join("\n");
-  const raw = await chat("openai/gpt-4o-mini", system, user, { workspaceId, step: "plan_match" });
+  const raw = await chat(env.cheapModel, system, user, { workspaceId, step: "plan_match" });
   let pairs: { slotId: string; sourceId: string }[] = [];
   try { pairs = extractJsonArray<any>(raw).map((x) => ({ slotId: String(x?.slotId || ""), sourceId: String(x?.sourceId || "") })); } catch { pairs = []; }
   const slotIds = new Set(slots.map((s) => s.id)); const matIds = new Map(mats.map((m) => [m.id, m.title]));
@@ -668,7 +669,7 @@ async function generateInsightPool(workspaceId: string): Promise<string[]> {
     "Різні, конкретні, без води й без кліше." + niche +
     `\n\nПоверни ЛИШЕ валідний JSON-масив рядків (30 шт). Мова: ${lang}.`;
   try {
-    const raw = await chat("openai/gpt-4o-mini", system, "Згенеруй масив із 30 інсайтів.", { workspaceId, step: "insights" });
+    const raw = await chat(env.cheapModel, system, "Згенеруй масив із 30 інсайтів.", { workspaceId, step: "insights" });
     const arr = extractJsonArray<any>(raw).map((x: any) => (typeof x === "string" ? x : String(x?.insight || x?.text || ""))).map((x: string) => x.trim()).filter(Boolean);
     return arr.length ? arr : ["Контент, який ти не опублікував, не працює."];
   } catch { return ["Контент дає результат лише коли виходить регулярно."]; }

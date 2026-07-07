@@ -9,7 +9,44 @@ const OPENAI_PRICES: Record<string, [number, number]> = {
   "gpt-4o-mini": [0.15, 0.6],
 };
 
+// ціни Gemini ($/1M токенів). Ставимо 0 — цільовий сценарій це БЕЗКОШТОВНИЙ тариф Gemini для дешевих кроків.
+// (Якщо перейдете на платний тариф - підставте реальні ставки, напр. gemini-2.5-flash ≈ [0.30, 2.50].)
+const GEMINI_PRICES: Record<string, [number, number]> = { "gemini-2.5-flash": [0, 0] };
+
+// Gemini через Google AI Studio (generativelanguage) — інший формат запиту/відповіді, ніж OpenAI.
+async function geminiChat(model: string, system: string, user: string, ctx?: ChatCtx): Promise<string> {
+  const apiModel = model.replace(/^google\//, "");
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${env.gemini.apiKey}`;
+  const body = {
+    systemInstruction: { parts: [{ text: system }] },
+    contents: [{ role: "user", parts: [{ text: user }] }],
+    generationConfig: { temperature: 0.7, maxOutputTokens: 1500 },
+  };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  let res: Response;
+  try {
+    res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify(body) });
+  } catch (e: any) {
+    if (e && e.name === "AbortError") throw new Error("Gemini timeout 60s");
+    throw e;
+  } finally { clearTimeout(timer); }
+  if (!res.ok) { const t = await res.text(); throw new Error(`Gemini ${res.status}: ${t.slice(0, 300)}`); }
+  const j: any = await res.json();
+  const text = (j.candidates?.[0]?.content?.parts || []).map((p: any) => p?.text || "").join("");
+  if (ctx?.workspaceId) {
+    const um = j.usageMetadata || {};
+    const pin = um.promptTokenCount || 0, pout = um.candidatesTokenCount || 0;
+    const [cin, cout] = GEMINI_PRICES[apiModel] || [0, 0];
+    const cost = (pin / 1e6) * cin + (pout / 1e6) * cout;
+    try { await q(`insert into llm_usage(workspace_id, step, model, prompt_tokens, completion_tokens, cost) values($1,$2,$3,$4,$5,$6)`, [ctx.workspaceId, ctx.step ?? null, model, pin, pout, cost]); } catch { /* облік не критичний */ }
+  }
+  return text;
+}
+
 export async function chat(model: string, system: string, user: string, ctx?: ChatCtx): Promise<string> {
+  // "google/*" → напряму в Gemini, якщо є GEMINI_API_KEY; інакше падає у OpenRouter (він теж уміє google/gemini-*)
+  if (model.startsWith("google/") && env.gemini.apiKey) return geminiChat(model, system, user, ctx);
   // моделі "openai/*" ідуть напряму в OpenAI, якщо заданий OPENAI_API_KEY (дешевше за наценку OpenRouter)
   const useOpenAI = model.startsWith("openai/") && !!env.openai.apiKey;
   if (!useOpenAI && !env.openrouter.apiKey) throw new Error("Не задано ні OPENAI_API_KEY, ні OPENROUTER_API_KEY");
