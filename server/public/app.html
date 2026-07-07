@@ -284,11 +284,20 @@
   .dashbtn:disabled{opacity:.45;cursor:not-allowed}
   .aspchip{font-size:12px;font-weight:700;padding:5px 11px;border-radius:8px;border:1px solid var(--line2);background:transparent;color:var(--muted);cursor:pointer}
   .aspchip.on{background:var(--brand-soft);border-color:var(--brand);color:var(--brand)}
-  .phone{max-width:330px;margin:0 auto 18px;background:var(--surface);border:1px solid var(--line);border-radius:20px;box-shadow:0 6px 24px rgba(0,0,0,.10);overflow:hidden}
+  .phone{max-width:330px;margin:0 auto 6px;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.10);overflow:hidden}
   .phone-h{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line);font-size:12.5px;font-weight:700}
-  .phone-b{padding:11px 13px}
+  .phone-b{padding:9px 13px 11px}
   .phone-txt{font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
   .cmp-cnt{font-size:11.5px;font-weight:700}
+  /* реалістичне прев'ю соцмереж */
+  .pv-label{display:block;width:fit-content;margin:0 auto 8px;padding:3px 13px;border-radius:20px;color:#fff;font-size:11.5px;font-weight:800;letter-spacing:.02em}
+  .phone-av{width:27px;height:27px;border-radius:50%;background:var(--surface2);display:grid;place-items:center;font-size:11px;font-weight:800;color:var(--ink2);flex:none}
+  .phone-user{font-weight:700;font-size:12.5px}
+  .ig-acts{display:flex;gap:14px;align-items:center;padding:8px 12px 4px;font-size:18px;color:var(--ink2)}
+  .ig-acts .sp{flex:1}
+  .pv-more{color:var(--faint);cursor:pointer;font-weight:600}
+  .pv-more:hover{text-decoration:underline}
+  .pv-note{font-size:10.5px;color:var(--faint);padding:0 13px 9px}
   @media(max-width:820px){ .cmp-body{flex-direction:column} .cmp-right{width:auto;border-left:none;border-top:1px solid var(--line)} }
 </style>
 <script src="https://apis.google.com/js/api.js"></script>
@@ -1410,6 +1419,9 @@ function chooseMedia(){ return new Promise(async resolve=>{
 // ---------- композер: опублікувати / запланувати ----------
 // ---------- КОМПОЗЕР: повноекранна панель (ліворуч редактор, праворуч мобільне прев'ю) ----------
 const NETLIM={telegram:1024,threads:500,instagram:2200,facebook:2000};
+// скільки символів мережа показує ДО «… ще»/«показати повністю» (візуальний згин, як у застосунках); telegram - без згину
+const NETFOLD={instagram:125,facebook:280,threads:320};
+const NETMORE={instagram:'… ще',facebook:'… ще',threads:'Показати повністю'};
 async function openComposer(postId, opts){
   opts=opts||{};
   let full; try{ full=await api('/posts/'+postId+'/full'); }catch(e){ flash('Не вдалося відкрити: '+e.message); return; }
@@ -1458,13 +1470,25 @@ async function openComposer(postId, opts){
       ?'<img src="/media/'+esc(mediaFilename)+'" style="max-height:120px;border-radius:10px;border:1px solid var(--line)">'
       :'<div style="font-size:12px;color:var(--muted)">Фото ще нема - додай через «⚡ AI фото».</div>'); }
   // ----- прев'ю мобільне по кожній обраній мережі -----
+  const _pvExp=new Set(); // мережі, де натиснуто «… ще» → показуємо повністю
+  const pvCap=(k,t)=>{ const fold=NETFOLD[k];
+    if(_pvExp.has(k)||!fold||t.length<=fold) return esc(t);
+    let cut=t.slice(0,fold); const sp=cut.lastIndexOf(' '); if(sp>fold*0.6) cut=cut.slice(0,sp);
+    return esc(cut).replace(/\s+$/,'')+'… <span class="pv-more" data-more="'+k+'">'+NETMORE[k]+'</span>'; };
   function renderPrev(){ const box=ov.querySelector('#cmpPrev'); const sel=NETS.filter(n=>C[n[0]]&&C[n[0]].on);
     if(!sel.length){ box.innerHTML='<div style="font-size:12px;color:var(--muted);text-align:center">Обери канал ліворуч.</div>'; return; }
+    const av=(($('avatar')&&$('avatar').textContent)||'В').slice(0,2);
     box.innerHTML=sel.map(n=>{ const k=n[0]; const t=textOf(k); const lim=NETLIM[k]||2200; const over=t.length>lim; const sent=sentSet.has(k);
-      return '<div class="phone"><div class="phone-h"><span class="cdot" style="background:var('+NETVAR[k]+')"><svg width="11" height="11" viewBox="0 0 24 24" fill="#fff"><path d="'+NETICON[k]+'"></path></svg></span>'+n[1]
-        +(sent?'<span style="margin-left:auto;font-size:11px;font-weight:700;color:var(--brand)">✓ Опубліковано</span>':'<span class="cmp-cnt" style="margin-left:auto;color:'+(over?'var(--danger)':'var(--muted)')+'">'+t.length+'/'+lim+'</span>')+'</div>'
-        +(mediaFilename?'<img src="/media/'+esc(mediaFilename)+'" style="width:100%;display:block">':'')
-        +'<div class="phone-b"><div class="phone-txt">'+(t?esc(t):'<span style="color:var(--muted)">порожньо</span>')+'</div></div></div>'; }).join(''); }
+      const img=mediaFilename?'<img src="/media/'+esc(mediaFilename)+'" style="width:100%;display:block">':'';
+      const cnt=sent?'<span style="margin-left:auto;font-size:11px;font-weight:800;color:var(--brand)">✓</span>':'<span class="cmp-cnt" style="margin-left:auto;color:'+(over?'var(--danger)':'var(--faint)')+'">'+t.length+'/'+lim+'</span>';
+      const head='<div class="phone-h"><span class="phone-av">'+esc(av)+'</span><span class="phone-user">ваш_профіль</span>'+cnt+'</div>';
+      const empty='<span style="color:var(--muted)">порожньо</span>';
+      let body;
+      if(k==='instagram') body=head+img+'<div class="ig-acts">♡ 💬 ↗<span class="sp"></span>🔖</div><div class="phone-b"><span class="phone-user">ваш_профіль</span> <span class="phone-txt" style="display:inline">'+(t?pvCap(k,t):empty)+'</span></div>';
+      else if(k==='telegram') body=head+img+'<div class="phone-b"><div class="phone-txt">'+(t?esc(t):empty)+'</div></div>'+((over&&mediaFilename)?'<div class="pv-note">довгий підпис Telegram надішле окремим повідомленням під фото</div>':'');
+      else body=head+'<div class="phone-b"><div class="phone-txt">'+(t?pvCap(k,t):empty)+'</div></div>'+img;
+      return '<div class="pv-label" style="background:var('+NETVAR[k]+')">'+n[1]+'</div><div class="phone">'+body+'</div>'; }).join('');
+    box.querySelectorAll('[data-more]').forEach(el=>el.onclick=()=>{ _pvExp.add(el.dataset.more); renderPrev(); }); }
   txt.addEventListener('input',()=>{ master=txt.value; renderPrev(); });
   ov.querySelector('#cmpRubric').onchange=(e)=>{ rubric=e.target.value; };
   renderChips(); renderMedia(); renderPrev();
