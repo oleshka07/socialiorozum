@@ -21,6 +21,12 @@ export async function initTelegramBot(): Promise<void> {
   try {
     const me = await tg.getMe(env.telegram.botToken);
     BOT_ID = me.id; if (me.username) BOT_USERNAME = me.username;
+    if (env.beta.telegramWebhookOff) {
+      // БЕТА зі спільним прод-токеном: webhook НЕ чіпаємо, інакше вкрадемо його в прода.
+      // Публікація в канали з бети працює (прямі API-виклики); DM-фічі бота обробляє прод.
+      console.log(`[tgbot] бот @${BOT_USERNAME} (id ${BOT_ID}); TELEGRAM_WEBHOOK_OFF=1 → webhook лишається за продом`);
+      return;
+    }
     const url = `${env.appBaseUrl}/api/webhooks/telegram/${env.telegram.webhookSecret}`;
     await tg.setWebhook(env.telegram.botToken, url, env.telegram.webhookSecret);
     console.log(`[tgbot] спільний бот @${BOT_USERNAME} (id ${BOT_ID}); webhook → ${url}`);

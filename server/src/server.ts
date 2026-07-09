@@ -5,7 +5,7 @@ import multipart from "@fastify/multipart";
 import cookie from "@fastify/cookie";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
 import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton, suggestHashtags } from "./pipeline.js";
@@ -80,6 +80,34 @@ function rateLimited(key: string, max: number, windowMs = 60000): boolean {
   if (!h || now - h.t > windowMs) { rlHits.set(key, { n: 1, t: now }); return false; }
   h.n++;
   return h.n > max;
+}
+
+// ---- БЕТА: PIN-гейт (env BETA_PIN; на проді не заданий - блок неактивний). ----
+// Відкриті без PIN: /health, вебхуки (Telegram/Fireflies шлють POST без кукі) і /media/
+// (Telegram/Meta ТЯГНУТЬ картинку по URL при публікації - PIN зламав би фото-пости).
+if (env.beta.pin) {
+  const PIN_COOKIE = "beta_ok";
+  const pinToken = createHash("sha256").update(env.beta.pin + env.sessionSecret).digest("hex").slice(0, 32);
+  const pinPage = `<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>socialio BETA</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#101014;color:#eee;font-family:system-ui,sans-serif}.c{text-align:center;padding:24px}.b{display:inline-block;background:#e67e22;color:#fff;font-weight:800;font-size:12px;padding:3px 12px;border-radius:20px;letter-spacing:.08em;margin-bottom:14px}input{font-size:22px;letter-spacing:.4em;text-align:center;width:170px;padding:10px;border-radius:12px;border:1px solid #333;background:#1a1a20;color:#fff;outline:none}button{display:block;margin:14px auto 0;padding:10px 26px;border-radius:12px;border:0;background:#7c5cff;color:#fff;font-weight:700;font-size:14px;cursor:pointer}#e{color:#ff6b6b;font-size:13px;min-height:18px;margin-top:10px}</style></head>
+<body><div class="c"><div class="b">BETA</div><h3 style="margin:0 0 16px;font-weight:600">Тестове середовище socialio</h3>
+<input id="p" type="password" inputmode="numeric" maxlength="8" placeholder="PIN" autofocus>
+<button onclick="go()">Увійти</button><div id="e"></div></div>
+<script>function go(){fetch('/beta-pin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin:document.getElementById('p').value})}).then(r=>{if(r.ok)location.href='/app';else document.getElementById('e').textContent='Невірний PIN';});}
+document.getElementById('p').addEventListener('keydown',e=>{if(e.key==='Enter')go();});</script></body></html>`;
+  app.addHook("onRequest", async (req: any, reply) => {
+    const url = (req.raw.url || "").split("?")[0];
+    if (url === "/health" || url === "/beta-pin" || url === "/favicon.svg" || url.startsWith("/api/webhooks/") || url.startsWith("/media/")) return;
+    if (req.cookies?.[PIN_COOKIE] === pinToken) return;
+    if (url.startsWith("/api/")) return reply.code(401).send({ error: "beta: потрібен PIN" });
+    return reply.type("text/html").send(pinPage);
+  });
+  app.post("/beta-pin", async (req: any, reply) => {
+    if (rateLimited("betapin:" + req.ip, 10)) return reply.code(429).send({ error: "Забагато спроб - зачекай хвилину" });
+    if (String((req.body as any)?.pin ?? "").trim() !== env.beta.pin) return reply.code(401).send({ error: "невірний PIN" });
+    reply.setCookie(PIN_COOKIE, pinToken, { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 30 });
+    return { ok: true };
+  });
 }
 
 const COOKIE = "sid";

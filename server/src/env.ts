@@ -26,6 +26,10 @@ export const env = {
     botUsername: process.env.TELEGRAM_BOT_USERNAME ?? "",
     webhookSecret: (process.env.TELEGRAM_WEBHOOK_SECRET || process.env.SESSION_SECRET || "tgwh").slice(0, 48),
   },
+  beta: {
+    pin: process.env.BETA_PIN ?? "",              // задано -> інстанс є БЕТОЮ: PIN-гейт на вході (прод не задає)
+    telegramWebhookOff: process.env.TELEGRAM_WEBHOOK_OFF === "1", // бета НЕ реєструє webhook (не краде його в прода)
+  },
   resend: {
     apiKey: process.env.RESEND_API_KEY ?? "",
     from: process.env.RESEND_FROM ?? "socialio <onboarding@resend.dev>",

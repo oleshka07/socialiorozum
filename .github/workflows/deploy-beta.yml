@@ -1,0 +1,33 @@
+name: deploy-beta
+
+# БЕТА: push у гілку beta → деплой на /opt/socialio-beta (beta.socialio.rozum.one).
+# Ізольований стек: свій compose-проєкт (COMPOSE_PROJECT_NAME у .env бети), своя БД/медіа, порт 8081.
+# Промоушн у прод: merge beta → main (спрацює звичайний deploy.yml).
+
+on:
+  push:
+    branches: [beta]
+  workflow_dispatch:
+
+jobs:
+  deploy-beta:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy BETA on Hetzner via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          script: |
+            set -e
+            BETA_DIR="${{ secrets.APP_DIR }}-beta"
+            if [ ! -d "$BETA_DIR" ]; then
+              echo "beta не розгорнута на сервері ($BETA_DIR відсутня) - пропускаю (див. server/BETA.md)"
+              exit 0
+            fi
+            cd "$BETA_DIR"
+            git pull origin beta
+            cd server
+            docker compose up -d --build
+            docker image prune -f

@@ -27,7 +27,8 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "127.0.0.1:8080:8080"   # назовні віддаємо через reverse proxy (Caddy/nginx)
+      # назовні віддаємо через reverse proxy (nginx). APP_PORT з .env: прод 8080 (дефолт), бета 8081.
+      - "127.0.0.1:${APP_PORT:-8080}:8080"
     volumes:
       - media:/app/media        # завантажені фото/відео — переживають деплої
 
