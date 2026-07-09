@@ -35,8 +35,8 @@
     "semantic_hash": ""
   },
   "server/src/env.ts": {
-    "mtime": 1783623687.6592057,
-    "ast_hash": "02589d3db546ae89d6dca96786ecc455",
+    "mtime": 1783427248.6611934,
+    "ast_hash": "397204875e2c354a6e45ad64565af219",
     "semantic_hash": ""
   },
   "server/src/fireflies.ts": {
@@ -125,8 +125,8 @@
     "semantic_hash": "3e929595c91643444c4c4d540a929c55"
   },
   "server/src/server.ts": {
-    "mtime": 1783623730.3272054,
-    "ast_hash": "e98e6abaeeec6eb724b79aab947e7b16",
+    "mtime": 1783427183.9811957,
+    "ast_hash": "bbef7494ad1a8a523e564c0ce00ce8cc",
     "semantic_hash": ""
   },
   "server/src/telegram.ts": {
@@ -135,8 +135,8 @@
     "semantic_hash": ""
   },
   "server/src/tgbot.ts": {
-    "mtime": 1783623743.5872052,
-    "ast_hash": "00a51f0760201d7542b1eee3aa27f258",
+    "mtime": 1783427183.9811957,
+    "ast_hash": "7bd70eb6d62561b8f8ac45239c83f080",
     "semantic_hash": ""
   },
   "server/src/threads.ts": {
@@ -155,8 +155,8 @@
     "semantic_hash": "352df4b84f4af2922ccd9adaf8e4608f"
   },
   "CLAUDE.md": {
-    "mtime": 1783623869.3712041,
-    "ast_hash": "21fd1fd5664e649ed34b6c16791b1b9b",
+    "mtime": 1783428502.1820347,
+    "ast_hash": "ea2c17807a11b8904395dd7a0c33da75",
     "semantic_hash": ""
   },
   "DEPLOY.md": {
@@ -220,13 +220,13 @@
     "semantic_hash": "b437bfd4d7bb00953d18c865fd379193"
   },
   "server/docker-compose.yml": {
-    "mtime": 1783623757.4912052,
-    "ast_hash": "2c7817cd6aaccc35cabecf47ddb2c6f3",
-    "semantic_hash": ""
+    "mtime": 1782731362.9550133,
+    "ast_hash": "199a92f19b822e467cdaf95780db5fee",
+    "semantic_hash": "199a92f19b822e467cdaf95780db5fee"
   },
   "server/public/app.html": {
-    "mtime": 1783623789.8592048,
-    "ast_hash": "3235531926545e79e6bca06eb484f036",
+    "mtime": 1783428329.366041,
+    "ast_hash": "e49bc78d241b2615475bd70f38b70f10",
     "semantic_hash": ""
   },
   "server/public/auth.html": {
@@ -277,16 +277,6 @@
   "server/src/digest.ts": {
     "mtime": 1783427183.9811957,
     "ast_hash": "4747a5fdabe0be44856789b10c00cce1",
-    "semantic_hash": ""
-  },
-  ".github/workflows/deploy-beta.yml": {
-    "mtime": 1783623772.279205,
-    "ast_hash": "c10e4138dbe979ae606674a52e289cba",
-    "semantic_hash": ""
-  },
-  "server/BETA.md": {
-    "mtime": 1783623836.2632043,
-    "ast_hash": "9a601bd97ed7276d31fa530e0c64b420",
     "semantic_hash": ""
   }
 }
