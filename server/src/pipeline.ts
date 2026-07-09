@@ -41,6 +41,25 @@ export const DEFAULT_PROMPTS: Record<StepKey, { model: string; content: string }
 // Наскрізне правило стилю для ВСІЄЇ генерації тексту: широке тире («—») - типовий AI-маркер.
 const NO_DASH_RULE = "\n\nПунктуація: НІКОЛИ не використовуй широке тире («—») чи середнє тире («–») у тексті. Замінюй їх комою, двокрапкою, дефісом або розбивай на окремі речення.";
 
+// Бан хук-кліше + принцип кульмінації («Хук-майстер»): відкриття з найсильнішого моменту, не зі штучної інтриги.
+const HOOK_RULE = "\n\nГачки-кліше ЗАБОРОНЕНІ (штучна інтрига): «СТОП», «не гортай», «зупинись», «99% не знають», «шок», «ти не повіриш», «зараз розкажу», «УВАГА». Натомість знайди КУЛЬМІНАЦІЮ матеріалу (найсильніший факт, цифру, момент чи висновок) і відкрий пост прямо з неї.";
+
+// Компактний каталог AI-слідів для української («Антидетектор»): детерміновані заборони поверх deai_rules юзера.
+const ANTI_AI_RULE = "\n\nAI-сліди, які ЗАБОРОНЕНО вживати: конструкція «не просто X, а Y»; канцелярит («здійснювати», «забезпечувати», «варто зазначити», «наразі», «даний»); пусті вступи («у сучасному світі», «давайте розберемось», «як відомо»); фінальні підсумки («отже, підсумуємо», «сподіваюсь, було корисно»); симетричні парні речення; слова-паразити «ключовий», «важливо розуміти», «варто памʼятати»; три однорідні прикметники поспіль.";
+
+// «Директор»: головна бізнес-ціль контенту - фільтр «веде до цілі чи контент заради контенту».
+export const GOAL_LABELS: Record<string, string> = {
+  money: "продажі та гроші (контент має підводити до покупки)",
+  leads: "ліди й заявки (контент має вести до звернення чи заявки)",
+  growth: "зростання аудиторії (охоплення, підписки, поширення)",
+  authority: "авторитет і експертність (довіра та репутація в ніші)",
+  quality: "якість аудиторії (утримання й залучення саме цільових людей)",
+};
+const goalRule = (s: Record<string, string>): string =>
+  s.primary_goal && GOAL_LABELS[s.primary_goal]
+    ? `\n\nГОЛОВНА БІЗНЕС-ЦІЛЬ контенту: ${GOAL_LABELS[s.primary_goal]}. Кожен пост має конкретно просувати до цієї цілі. Жодного «контенту заради контенту».`
+    : "";
+
 // ХАРДКОД (не редагується юзером): контекст бренду + контракт формату відповіді.
 const STEP_CONTEXT: Record<StepKey, (s: Record<string, string>) => string> = {
   extract_ideas: (s) => (s.marketing_context ? `\n\nКонтекст бренду й аудиторії: ${s.marketing_context}` : ""),
@@ -282,7 +301,7 @@ export async function executeStep(runId: string, step: StepKey, opts?: { count?:
   }
   if (step === "extract_ideas") countText = `\n\nЗнайди до ${Math.max(1, Math.min(12, Number(opts?.count) || 6))} контент-ідей.`;
   const system = fillPrompt(tpl.content, settings) + STEP_CONTEXT[step](settings) + (STEP_FORMAT[step] || "")
-    + countText + NO_DASH_RULE + `\n\nМова всього тексту у відповіді: ${lang}.` + rubricsText;
+    + countText + goalRule(settings) + (step === "drafts" ? HOOK_RULE : "") + NO_DASH_RULE + ANTI_AI_RULE + `\n\nМова всього тексту у відповіді: ${lang}.` + rubricsText;
   const ctx = { workspaceId: workspace_id, step };
   await upsertStepRun(runId, step, { status: "running", model: tpl.model, prompt_version: tpl.version });
 
@@ -380,10 +399,23 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
     ? "\nПлейбуки каналів (перекладай пост у нативний формат, НЕ вигадуй новий зміст):\n" + want.map((c) => `[${c}] ${CHANNEL_PLAYBOOK[c] || rules[c]}\nФормат: ${rules[c]}`).join("\n")
     : "\nПравила:\n" + want.map((c) => "- " + rules[c]).join("\n");
   const critique = v2 ? "\nПеред видачею перевір кожну версію: гачок працює саме для цього каналу; довжина й формат нативні; голос не зламано. Слабке перепиши." : "";
+  // «Дистриб'ютор»: CTA, замаршрутизований під механіку кожної площадки (settings_block.cta_config).
+  let ctaCfg: Record<string, { type?: string; value?: string }> = {};
+  try { ctaCfg = JSON.parse(s.cta_config || "{}"); } catch { /* некоректний JSON - без CTA */ }
+  const ctaLines = want.map((c) => {
+    const cc = ctaCfg[c]; if (!cc || !String(cc.value || "").trim()) return "";
+    const v = String(cc.value).trim().slice(0, 200);
+    const mech = cc.type === "keyword"
+      ? `заклич написати кодове слово «${v}» у коментар або дірект (посилання в цій мережі не клікаються)`
+      : cc.type === "action" ? `заклич до дії: ${v}`
+      : `заклич перейти за посиланням ${v}`;
+    return `\n[${c}] ${mech}`;
+  }).filter(Boolean).join("");
+  const ctaRule = ctaLines ? `\n\nКонверсійний заклик наприкінці кожної версії - ОДИН заклик = ОДНА дія, нативно вплетений:${ctaLines}` : "";
   const system = "Адаптуй пост під кожну вказану соцмережу, зберігаючи зміст, голос бренду й живу людську мову." +
     (brief ? `\n\n<strategy_brief>\n${brief}\n</strategy_brief>` : "") +
-    tone + deai + playbooks + critique +
-    NO_DASH_RULE + `\n\nПоверни ЛИШЕ валідний JSON-обʼєкт виду {${want.map((c) => `"${c}":"…"`).join(",")}}. Мова: ${lang}.`;
+    tone + deai + playbooks + critique + goalRule(s) + ctaRule +
+    NO_DASH_RULE + ANTI_AI_RULE + `\n\nПоверни ЛИШЕ валідний JSON-обʼєкт виду {${want.map((c) => `"${c}":"…"`).join(",")}}. Мова: ${lang}.`;
   const raw = await chat(v2 ? "openai/gpt-4o" : "openai/gpt-4o-mini", system, `Пост:\n---\n${content}`, { workspaceId, step: "format" });
   const obj = extractJsonObject(raw) as Record<string, string>;
   const out: Record<string, string> = {};
@@ -422,6 +454,7 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
       (s.deai_rules ? `\nПравила «без AI»: ${s.deai_rules}` : "") +
       "\n</brand>" +
       (examples ? `\n\n<voice_examples>\nРЕАЛЬНІ пости автора - еталон голосу. Відтворюй ритм, лексику, звертання й розмір абзаців САМЕ як тут, але НЕ копіюй зміст:\n---\n${examples}\n---\n</voice_examples>` : "") +
+      (s.primary_goal && GOAL_LABELS[s.primary_goal] ? `\n\n<business_goal>\nГоловна бізнес-ціль контенту: ${GOAL_LABELS[s.primary_goal]}. Кожен пост має конкретно просувати до неї - жодного контенту заради контенту.\n</business_goal>` : "") +
       "\n\n<rules>" +
       "\n- Кожен пост ОДРАЗУ фінальний: жива людська мова, без канцеляризмів, без «варто зазначити/у сучасному світі», без шаблонних списків заради списків." +
       "\n- Фреймворк під стадію воронки поста: AIDA або PAS - холодна аудиторія (awareness); BAB - короткі залучальні пости; FAB/4P - тепла аудиторія (consideration/conversion)." +
@@ -429,6 +462,8 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
       "\n- Один чіткий мʼякий заклик на пост, не більше." +
       rubricsText +
       NO_DASH_RULE.replace(/^\n+/, "\n- ") +
+      HOOK_RULE.replace(/^\n+/, "\n- ") +
+      ANTI_AI_RULE.replace(/^\n+/, "\n- ") +
       "\n</rules>" +
       `\n\n<task>\nЗгенеруй рівно ${n} різних постів за вхідним матеріалом.${ideasText}\nПеред видачею САМО-КРИТИКА кожного поста за 5 критеріями: (а) гачок зупиняє скрол; (б) голос як у зразках; (в) один чіткий CTA; (г) нативний формат; (д) реальна користь для читача. Усе, що слабке, перепиши до видачі.\n</task>` +
       `\n\n<output_format>\n${outputFormat}\n</output_format>`;
@@ -442,7 +477,7 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
     (s.marketing_context ? `\n\nБренд і аудиторія: ${s.marketing_context}` : "") +
     (s.tone_of_voice ? `\n\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") +
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
-    rubricsText + ideasText +
+    rubricsText + ideasText + goalRule(s) + HOOK_RULE + ANTI_AI_RULE +
     NO_DASH_RULE + `\n\nЗгенеруй рівно ${n} різних постів. ${outputFormat}`;
   return { system, model: "openai/gpt-4o" };
 }
@@ -584,6 +619,7 @@ export async function extractIdeasFromText(workspaceId: string, text: string, co
   const system =
     "Ти контент-стратег. Знайди в матеріалі окремі контент-ідеї для соцмереж, кожна зі своїм кутом подачі. " +
     (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") +
+    goalRule(s) +
     (rubList ? `\nРубрики бренду: ${rubList}. Кожній ідеї признач НАЙБЛИЖЧУ рубрику з цього переліку.` : "") +
     `\n\nЗнайди до ${Math.max(1, Math.min(10, count))} ідей. Поверни ЛИШЕ валідний JSON-масив: [{"idea":"суть ідеї одним реченням","rubric":"назва рубрики"}]. Мова: ${lang}.`;
   const raw = await chat(env.cheapModel, system, `Матеріал:\n---\n${(text || "").slice(0, 20000)}`, { workspaceId, step: "ideas" });
@@ -654,8 +690,39 @@ export async function rewritePost(workspaceId: string, text: string, instruction
     (brief ? `\n\nСТРАТЕГІЧНИЙ БРИФ (тримай бренд): ${brief}` : "") +
     (s.tone_of_voice ? `\n\nГолос бренду: ${s.tone_of_voice}` : "") +
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
+    goalRule(s) + ANTI_AI_RULE +
     NO_DASH_RULE + `\n\nПоверни лише текст поста. Мова: ${lang}.`;
   return chat("openai/gpt-4o", system, `---\n${text}`, { workspaceId, step: "regenerate" });
+}
+
+// ---- «Директор»: вердикт, чи веде чернетка до головної бізнес-цілі ----
+export async function directorVerdict(workspaceId: string, content: string): Promise<{ verdict: string; reason: string; fix: string }> {
+  const s = await loadSettings(workspaceId);
+  const goal = GOAL_LABELS[s.primary_goal || ""];
+  if (!goal) throw new Error("Спершу вибери головну ціль контенту (розділ Стратегія → 🎯 Головна ціль)");
+  const system = `Ти суворий контент-директор. Головна бізнес-ціль бренду: ${goal}.` +
+    (s.marketing_context ? `\nНіша й аудиторія: ${s.marketing_context.slice(0, 400)}` : "") +
+    "\nОціни чернетку поста: реально веде до цілі, частково, чи це «контент заради контенту»." +
+    '\nПоверни ЛИШЕ валідний JSON: {"verdict":"yes"|"partial"|"no","reason":"одне речення чому","fix":"конкретна правка одним реченням, що наблизить пост до цілі"}. Мова: Українська.';
+  const raw = await chat(env.cheapModel, system, `Чернетка:\n---\n${(content || "").slice(0, 4000)}`, { workspaceId, step: "director" });
+  const o = extractJsonObject<any>(raw) || {};
+  return {
+    verdict: ["yes", "partial", "no"].includes(o.verdict) ? o.verdict : "partial",
+    reason: String(o.reason || "").slice(0, 300),
+    fix: String(o.fix || "").slice(0, 300),
+  };
+}
+
+// ---- «Антидетектор»: аудит AI-слідів БЕЗ правки (діагностика, юзер вирішує сам) ----
+export async function aiAudit(workspaceId: string, content: string): Promise<{ pattern: string; quote: string }[]> {
+  const system = "Ти редактор, що знаходить сліди AI-тексту в українській мові. Каталог патернів: «не просто X, а Y»; канцелярит (здійснювати/забезпечувати/варто зазначити/наразі/даний); пусті вступи (у сучасному світі/давайте розберемось/як відомо); фінальні підсумки (отже, підсумуємо); симетричні парні конструкції; слова-паразити (ключовий/важливо розуміти/варто памʼятати); три однорідні прикметники поспіль; широке тире; кліше-гачки (СТОП/не гортай/99% не знають); занадто рівні абзаци-близнюки. " +
+    'Знайди в тексті лише РЕАЛЬНІ входження (нічого не вигадуй). Поверни ЛИШЕ валідний JSON-масив (порожній [], якщо текст чистий): [{"pattern":"назва патерну","quote":"точна цитата з тексту до 60 символів"}]. Мова: Українська.';
+  const raw = await chat(env.cheapModel, system, `Текст:\n---\n${(content || "").slice(0, 4000)}`, { workspaceId, step: "ai_audit" });
+  try {
+    return extractJsonArray<any>(raw)
+      .map((x) => ({ pattern: String(x?.pattern || "").slice(0, 80), quote: String(x?.quote || "").slice(0, 80) }))
+      .filter((x) => x.pattern).slice(0, 12);
+  } catch { return []; }
 }
 
 // ---- Щоденний інсайт: пул на ~30 (1 виклик), тягнемо по одному (settings_block 'insight_pool') ----

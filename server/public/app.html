@@ -545,6 +545,11 @@
       <!-- ============ STRATEGY ============ -->
       <section class="viewsec" data-view="strategy">
         <div class="panel">
+          <div class="ph" style="margin:0 0 6px">🎯 Головна ціль контенту</div>
+          <div class="hint" style="margin-bottom:10px">Одна ціль, яка керує всією генерацією. Кнопка 🎯 на чернетці перевіряє: веде пост до цілі чи це «контент заради контенту».</div>
+          <div id="goalChips" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+        </div>
+        <div class="panel">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             <div class="ph" style="margin:0">🤖 Згенерована стратегія <span class="badge" id="stratStatus">-</span></div>
             <div class="btnrow" style="margin:0 0 0 auto"><button class="primary" id="genStrat">✨ Згенерувати</button><span id="stratMsg" style="font-size:12px;color:var(--muted)"></span></div>
@@ -639,6 +644,12 @@
         </div>
         </div>
         <div id="setChannels" style="display:none">
+        <div class="panel">
+          <div class="ph" style="margin:0 0 6px">📮 Конверсійні заклики (CTA)</div>
+          <div class="hint" style="margin-bottom:10px">Куди вести людей з постів у кожній мережі: посилання (Telegram/FB), кодове слово в коментар/дірект (Instagram, бо лінки там не клікаються) або конкретна дія. «Підлаштувати під канали» вплітає це в кінець поста. Один заклик = одна дія.</div>
+          <div id="ctaRows"></div>
+          <div class="btnrow" style="margin-top:10px"><button class="primary" id="ctaSave">💾 Зберегти заклики</button><span id="ctaMsg" style="font-size:12px;color:var(--muted)"></span></div>
+        </div>
         <div class="panel">
           <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--tg)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M22 4L2 11l6 2 2 6 3-4 5 4 4-15z"></path></svg></span>Telegram</div>
           <div id="tgSharedBox" style="display:none;margin:8px 0 4px">
@@ -1205,6 +1216,38 @@ function renderPosts(oid,posts,emptyTxt){ const o=$(oid); if(!o) return; if(!pos
 // ---------- мережі ----------
 const NETS=[['telegram','Telegram'],['instagram','Instagram'],['facebook','Facebook'],['threads','Threads']];
 const NETVAR={telegram:'--tg',instagram:'--ig',facebook:'--fb',threads:'--th'};
+// ---------- 🎯 головна ціль («Директор») + 📮 CTA-конфіг («Дистриб'ютор») ----------
+const GOALS=[['money','💰 Гроші / продажі'],['leads','📩 Ліди / заявки'],['growth','📈 Зростання аудиторії'],['authority','🎓 Авторитет'],['quality','💎 Якість аудиторії']];
+const CTA_TYPES=[['link','🔗 Посилання'],['keyword','🔑 Кодове слово'],['action','👉 Дія']];
+let CurGoal='', CtaCfg={};
+function renderGoal(){ const box=$('goalChips'); if(!box) return;
+  box.innerHTML=GOALS.map(g=>'<div class="cchip'+(CurGoal===g[0]?' on':'')+'" data-g="'+g[0]+'">'+g[1]+'</div>').join('');
+  box.querySelectorAll('[data-g]').forEach(c=>c.onclick=async()=>{ CurGoal=CurGoal===c.dataset.g?'':c.dataset.g; await saveSetting('primary_goal',CurGoal); renderGoal(); }); }
+function renderCta(){ const box=$('ctaRows'); if(!box) return;
+  box.innerHTML=NETS.map(n=>{ const k=n[0],c=CtaCfg[k]||{};
+    return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap"><span style="min-width:88px;font-size:13px;font-weight:600">'+n[1]+'</span>'
+      +'<select class="txt ctaType" data-net="'+k+'" style="width:auto;padding:7px 9px;display:inline-block">'+CTA_TYPES.map(t=>'<option value="'+t[0]+'"'+((c.type||'link')===t[0]?' selected':'')+'>'+t[1]+'</option>').join('')+'</select>'
+      +'<input class="txt ctaVal" data-net="'+k+'" placeholder="https://… / слово ГАЙД / дія" value="'+esc(c.value||'')+'" style="flex:1;min-width:180px;display:inline-block;padding:7px 9px">'
+      +'</div>'; }).join(''); }
+if($('ctaSave')) $('ctaSave').onclick=async()=>{ const cfg={};
+  document.querySelectorAll('.ctaVal').forEach(i=>{ const k=i.dataset.net,v=i.value.trim(); if(v){ const t=document.querySelector('.ctaType[data-net="'+k+'"]'); cfg[k]={type:(t&&t.value)||'link',value:v}; } });
+  CtaCfg=cfg; await saveSetting('cta_config',JSON.stringify(cfg)); const m=$('ctaMsg'); if(m){ m.style.color='var(--brand)'; m.textContent='збережено ✓'; setTimeout(()=>m.textContent='',2000); } };
+async function loadGoalCta(){ try{ const st=await api('/settings');
+    const g=st.find(r=>r.key==='primary_goal'); CurGoal=(g&&g.content)||'';
+    const c=st.find(r=>r.key==='cta_config'); try{ CtaCfg=JSON.parse((c&&c.content)||'{}')||{}; }catch(e){ CtaCfg={}; }
+  }catch(e){} renderGoal(); renderCta(); }
+// 🎯 вердикт Директора на чернетці: веде до цілі / частково / ні + правка в 1 клік
+async function directorCheck(id){ aiBusy('🎯 Директор перевіряє пост на відповідність цілі…');
+  try{ const r=await api('/posts/'+id+'/director',{method:'POST'});
+    const E={yes:'✅ ВЕДЕ ДО ЦІЛІ',partial:'⚠ ЧАСТКОВО ВЕДЕ',no:'✖ НЕ ВЕДЕ ДО ЦІЛІ'};
+    const msg=(E[r.verdict]||r.verdict)+'\n\n'+(r.reason||'');
+    if(r.verdict!=='yes'&&r.fix){ aiDone();
+      if(confirm(msg+'\n\nПравка Директора: '+r.fix+'\n\nЗастосувати (перепише пост)?')){
+        aiBusy('⚡ Загострюю пост під ціль…');
+        await api('/posts/'+id+'/regenerate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instruction:r.fix})});
+        await loadStudioPosts(); flash('Пост загострено під ціль ✓'); } }
+    else alert(msg);
+  }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } }
 const NETICON={telegram:'M22 4L2 11l6 2 2 6 3-4 5 4 4-15z',instagram:'M7 3h10a4 4 0 014 4v10a4 4 0 01-4 4H7a4 4 0 01-4-4V7a4 4 0 014-4zm5 5a4 4 0 100 8 4 4 0 000-8z',facebook:'M14 9V7c0-1 .5-1.5 1.5-1.5H17V2h-3c-2.5 0-4 1.5-4 4v3H7v3h3v9h4v-9h3l.5-3H14z',threads:'M12 3c5 0 8 3 8 9s-3 9-8 9-8-3-8-9c0-2 .5-3.5 1.5-4.5'};
 let ChanStatus={};
 async function loadChanStatus(){ try{ ChanStatus=await api('/channels/status'); }catch(e){ ChanStatus={}; } }
@@ -1255,6 +1298,7 @@ function renderStudio(){
         +'<button class="icon" data-a="regen" title="Переробити (можна вказати, що саме змінити)">↻</button>'
         +'<button class="icon" data-a="copy" title="Копіювати">⧉</button>'
         +'<button class="icon" data-a="archive" title="В архів">🗄</button>'
+        +'<button class="icon" data-a="director" title="🎯 Директор: чи веде пост до цілі">🎯</button>'
         +'<button class="icon" data-a="image" title="Згенерувати зображення">🎨</button>'
         +(PRO?'<button class="icon" data-a="atomize" title="Розтиражувати під усі канали">♻️</button>':'')
         +'<button class="icon" data-a="composer" title="Опублікувати / запланувати">📣</button>'
@@ -1264,7 +1308,7 @@ function renderStudio(){
   grid.querySelectorAll('.pcard').forEach(card=>{ const id=card.dataset.post; const cont=card.querySelector('.pcontent');
     cont.addEventListener('blur',()=>saveContent(id,cont.textContent));
     const cb=card.querySelector('.psel'); if(cb) cb.onchange=()=>{ cb.checked?SelPosts.add(id):SelPosts.delete(id); card.classList.toggle('selc',cb.checked); renderBulkBar(); };
-    card.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(id); return; } if(a==='image'){ openImageEditor(id); return; } if(a==='atomize'){ openAtomize(id); return; } postAction(card,id,a); });
+    card.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(id); return; } if(a==='image'){ openImageEditor(id); return; } if(a==='atomize'){ openAtomize(id); return; } if(a==='director'){ directorCheck(id); return; } postAction(card,id,a); });
   });
 }
 // панель масових дій (зʼявляється коли є обрані пости)
@@ -1444,7 +1488,7 @@ async function openComposer(postId, opts){
         +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Канали</div><div id="cmpChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px"></div>'
         +'<label style="font-size:12px;color:var(--muted);display:inline-block;margin-bottom:12px">Рубрика <select id="cmpRubric" class="txt" style="width:auto;padding:6px 9px;display:inline-block;margin-left:4px">'+rubOpts+'</select></label>'
         +'<textarea id="cmpText" class="txt" style="min-height:240px;font-size:14px;line-height:1.55;resize:vertical"></textarea>'
-        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="dashbtn" id="cmpHash"># Хештеги</button><button class="dashbtn" id="cmpPhoto">⚡ AI фото</button><button class="dashbtn" id="cmpRewrite">✍ Переписати</button></div>'
+        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="dashbtn" id="cmpHash"># Хештеги</button><button class="dashbtn" id="cmpPhoto">⚡ AI фото</button><button class="dashbtn" id="cmpRewrite">✍ Переписати</button><button class="dashbtn" id="cmpAudit">🔍 AI-сліди</button></div>'
         +'<div id="cmpMediaWrap" style="margin-top:14px"></div>'
         +'<div id="cmpMsg" style="font-size:12.5px;margin-top:10px;min-height:18px"></div>'
       +'</div>'
@@ -1495,6 +1539,11 @@ async function openComposer(postId, opts){
   // ----- дії: хештеги / фото / переписати -----
   ov.querySelector('#cmpHash').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('# добираю хештеги…'); aiBusy('# Добираю хештеги…'); try{ const r=await api('/posts/'+postId+'/hashtags',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:master})}); const tags=(r.hashtags||[]).join(' '); if(tags){ master=(master.trimEnd()+'\n\n'+tags); txt.value=master; renderPrev(); setMsg('готово ✓','var(--brand)'); } else setMsg('не знайшлося тегів'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpRewrite').onclick=async(e)=>{ const instruction=prompt('Що змінити? (порожньо = переписати іншими словами, голос збережеться)'); if(instruction===null) return; const b=e.target; b.disabled=true; setMsg('✍ переписую…'); aiBusy('✍ Переписую пост…'); try{ await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master})}); const r=await api('/posts/'+postId+'/regenerate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instruction})}); master=r.content||master; txt.value=master; renderPrev(); setMsg('готово ✓','var(--brand)'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
+  ov.querySelector('#cmpAudit').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('🔍 шукаю AI-сліди…'); aiBusy('🔍 Шукаю сліди AI у тексті…');
+    try{ const r=await api('/posts/'+postId+'/ai-audit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:master})}); const f=r.findings||[];
+      if(!f.length) setMsg('чисто - слідів AI не знайдено ✓','var(--brand)');
+      else { setMsg('знайдено слідів: '+f.length,'var(--danger)'); alert('🔍 AI-сліди ('+f.length+'):\n\n'+f.map(x=>'• '+x.pattern+': «'+x.quote+'»').join('\n')+'\n\nПрибрати їх можна кнопкою «✍ Переписати».'); }
+    }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpPhoto').onclick=()=>openPhotoTool(postId, full.image_prompt||'', (f)=>{ mediaFilename=f; renderMedia(); renderPrev(); });
   // ----- зберегти / адаптувати / публікувати / планувати -----
   const saveDraft=async()=>{ await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master,rubric})}); await api('/posts/'+postId+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:C})}); };
@@ -2074,7 +2123,7 @@ async function renderObConnect(oc){
   if(_mtq){ go('settings'); alert(_mtq==='ok'?'Facebook/Instagram підключено ✓':(_mtq==='nopage'?'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).':'Не вдалося підключити Facebook/Instagram.')); }
   if(_gdq){ go('sources'); alert(_gdq==='ok'?'Google Drive підключено ✓':'Не вдалося підключити Google Drive.'); }
   await loadPrompts();
-  loadRubrics(); loadStrategy(); loadFF(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadTasks(); loadStudioPosts();
+  loadRubrics(); loadStrategy(); loadFF(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadTasks(); loadStudioPosts(); loadGoalCta();
   loadMaterials(); // стрічка + лічильник
   loadPlan().then(()=>{ const _ct=localStorage.getItem('kg_ctab'); if(_ct&&['materials','plan','posts'].includes(_ct)) setCTab(_ct); else if(PlanSlots.length) setCTab('plan'); }); // відновлюємо під-вкладку; уперше - План якщо скелет є
   await loadChanStatus();
