@@ -3,10 +3,13 @@ name: provision-beta
 # РАЗОВЕ розгортання бета-середовища на сервері (ідемпотентне - можна перезапускати безпечно).
 # Кроки: клон /opt/socialio-beta (гілка beta) → .env бети (копія прод + бета-рядки; НОВИЙ пароль БД
 # генерується НА СЕРВЕРІ, в лог не виводиться) → docker compose up → nginx vhost → certbot SSL.
-# Запуск: вкладка Actions → provision-beta → Run workflow (або через API).
+# Запуск: вкладка Actions → provision-beta → Run workflow, АБО push у гілку provision-beta
+# (git push origin main:provision-beta -f) - для запуску без прав на workflow_dispatch.
 
 on:
   workflow_dispatch:
+  push:
+    branches: [provision-beta]
 
 jobs:
   provision:
