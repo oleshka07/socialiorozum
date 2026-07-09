@@ -1549,7 +1549,7 @@ async function openComposer(postId, opts){
   ov.querySelector('#cmpHook').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('🪝 шукаю кульмінацію…'); aiBusy('🪝 Складаю 3 варіанти відкриття з кульмінації…');
     try{ const r=await api('/posts/'+postId+'/hooks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:master})}); const hooks=r.hooks||[];
       if(!hooks.length){ setMsg('не вдалося скласти варіанти','var(--danger)'); return; }
-      const hv=document.createElement('div'); hv.className='modal'; hv.style.zIndex='75';
+      const hv=document.createElement('div'); hv.className='modal'; hv.style.zIndex='90'; // понад композером (.cmp-ov z-index:80)
       hv.innerHTML='<div class="modal-card" style="max-width:520px;padding:20px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><b style="font-size:16px">🪝 Обери відкриття</b><button class="icon" id="hkX" style="margin-left:auto">✕</button></div>'
         +hooks.map((h,i)=>'<div class="card" data-h="'+i+'" style="cursor:pointer;margin-bottom:8px;padding:12px 14px;font-size:13.5px;line-height:1.5">'+esc(h)+'</div>').join('')
         +'<div class="hint">Клік замінює перший абзац поста. Поточний перший рядок зникне.</div></div>';
