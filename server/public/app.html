@@ -551,6 +551,14 @@
         </div>
         <div class="panel">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <div class="ph" style="margin:0">🧲 Лід-магніти</div>
+            <div class="btnrow" style="margin:0 0 0 auto"><button class="primary" id="lmGen">✨ Запропонувати</button><span id="lmMsg" style="font-size:12px;color:var(--muted)"></span></div>
+          </div>
+          <div class="hint">Що віддати аудиторії за контакт - конкретика з твого досвіду, з оцінкою лідогену/витрат. Кодове слово одним кліком стає CTA для Instagram.</div>
+          <div id="lmList"></div>
+        </div>
+        <div class="panel">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             <div class="ph" style="margin:0">🤖 Згенерована стратегія <span class="badge" id="stratStatus">-</span></div>
             <div class="btnrow" style="margin:0 0 0 auto"><button class="primary" id="genStrat">✨ Згенерувати</button><span id="stratMsg" style="font-size:12px;color:var(--muted)"></span></div>
           </div>
@@ -925,7 +933,7 @@ function renderMaterials(){
         +'<div style="font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+esc(m.preview||'')+'</div>'
       +'</div>'
       +(open?'<div id="matFull" style="margin-top:10px;background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:12px 14px;font-size:13px;line-height:1.6;color:var(--ink2);white-space:pre-wrap;max-height:300px;overflow:auto"><span class="spin"></span></div>'
-        +'<div class="btnrow" style="margin-top:10px;flex-wrap:wrap"><button class="primary" data-ma="post">✨ Створити пост</button><button class="ghost" data-ma="ideas">💡 Витягнути ідеї</button><button class="ghost" data-ma="reels">🎬 Сценарій Reels</button><button class="ghost" data-ma="del" style="margin-left:auto;color:var(--danger)">🗑 Прибрати</button></div>':'')
+        +'<div class="btnrow" style="margin-top:10px;flex-wrap:wrap"><button class="primary" data-ma="post">✨ Створити пост</button><button class="ghost" data-ma="series">⚡ Серія (~6 постів)</button><button class="ghost" data-ma="ideas">💡 Витягнути ідеї</button><button class="ghost" data-ma="reels">🎬 Сценарій Reels</button><button class="ghost" data-ma="del" style="margin-left:auto;color:var(--danger)">🗑 Прибрати</button></div>':'')
       +'</div>';
   }).join('');
   feed.querySelectorAll('[data-mat]').forEach(row=>{
@@ -935,6 +943,9 @@ function renderMaterials(){
       if(a==='del'){ if(!confirm('Прибрати матеріал зі стрічки?')) return; try{ await api('/materials/'+id+'/archive',{method:'POST'}); await loadMaterials(); }catch(e){ flash('⚠ '+e.message); } return; }
       if(a==='post'){ aiBusy('✨ Створюю пост з матеріалу…'); setCTab('posts'); setLayout('studio');
         try{ await api('/materials/'+id+'/posts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}); await loadStudioPosts(); flash('Готово - пост у стрічці ✓'); }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } return; }
+      if(a==='series'){ if(!confirm('Нарізати матеріал на серію з ~6 постів? Кожен - окремий тейк зі своїм кутом і гачком.')) return;
+        aiBusy('⚡ Нарізаю матеріал на серію постів…'); setCTab('posts'); setLayout('studio');
+        try{ const r=await api('/materials/'+id+'/series',{method:'POST'}); await loadStudioPosts(); flash('Серія готова - '+(r.count||0)+' постів у Чорновиках ✓'); }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } return; }
       if(a==='reels'){ aiBusy('🎬 Пишу сценарій Reels з матеріалу…'); setCTab('posts'); setLayout('studio');
         try{ await api('/materials/'+id+'/reels',{method:'POST'}); await loadStudioPosts(); flash('Сценарій Reels у Чорновиках ✓'); }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } return; }
       if(a==='ideas'){ openMaterialIdeas(id); }
@@ -1240,6 +1251,23 @@ async function loadGoalCta(){ try{ const st=await api('/settings');
     const g=st.find(r=>r.key==='primary_goal'); CurGoal=(g&&g.content)||'';
     const c=st.find(r=>r.key==='cta_config'); try{ CtaCfg=JSON.parse((c&&c.content)||'{}')||{}; }catch(e){ CtaCfg={}; }
   }catch(e){} renderGoal(); renderCta(); }
+// 🧲 лід-магніти («Магніт»): конкретика з досвіду + кодове слово → CTA Instagram
+function renderMagnets(list){ const box=$('lmList'); if(!box) return;
+  if(!list||!list.length){ box.innerHTML='<div class="empty">Натисни «Запропонувати» - AI складе 3 конкретні магніти з твого досвіду.</div>'; return; }
+  box.innerHTML=list.map(m=>'<div class="card" style="margin-top:8px"><b>'+esc(m.title)+'</b><div style="font-size:13px;color:var(--ink2);margin:5px 0;line-height:1.5">'+esc(m.what)+'</div>'
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="ptag">🧲 лідоген: '+esc(m.leadgen||'?')+'</span><span class="ptag">🔧 витрати: '+esc(m.effort||'?')+'</span>'
+    +(m.keyword?'<span class="ptag">🔑 '+esc(m.keyword)+'</span><button class="ghost lmKey" data-kw="'+esc(m.keyword)+'" style="padding:4px 10px;font-size:12px;margin-left:auto">→ CTA для Instagram</button>':'')+'</div></div>').join('');
+  box.querySelectorAll('.lmKey').forEach(b=>b.onclick=async()=>{ CtaCfg.instagram={type:'keyword',value:b.dataset.kw}; await saveSetting('cta_config',JSON.stringify(CtaCfg)); renderCta(); flash('Кодове слово «'+b.dataset.kw+'» тепер CTA для Instagram ✓'); }); }
+async function loadMagnets(){ try{ const r=await api('/lead-magnets'); renderMagnets(r.magnets||[]); }catch(e){} }
+if($('lmGen')) $('lmGen').onclick=async()=>{ const m=$('lmMsg'); m.textContent='думаю…'; aiBusy('🧲 Складаю лід-магніти з твого досвіду…');
+  try{ const r=await api('/lead-magnets',{method:'POST'}); renderMagnets(r.magnets||[]); m.textContent=''; }catch(e){ m.textContent='⚠ '+e.message; } finally{ aiDone(); } };
+// 🔥 «Продовження»: 5 кутів розвитку теми поста → Банк ідей
+async function developPost(id){ aiBusy('🔥 Шукаю кути розвитку теми…');
+  try{ const r=await api('/posts/'+id+'/develop',{method:'POST'}); const ideas=r.ideas||[];
+    if(!ideas.length){ flash('не вийшло - спробуй ще раз'); return; }
+    alert('🔥 Кути розвитку додано в Банк ідей:\n\n'+ideas.map((x,i)=>(i+1)+'. '+x.idea+(x.angle?' ('+x.angle+')':'')).join('\n')+'\n\nЗнайдеш їх: Створення → Матеріали → 💡 Банк ідей.');
+    try{ await loadMaterials(); }catch(_){}
+  }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } }
 // 🎯 вердикт Директора на чернетці: веде до цілі / частково / ні + правка в 1 клік
 async function directorCheck(id){ aiBusy('🎯 Директор перевіряє пост на відповідність цілі…');
   try{ const r=await api('/posts/'+id+'/director',{method:'POST'});
@@ -1303,6 +1331,7 @@ function renderStudio(){
         +'<button class="icon" data-a="copy" title="Копіювати">⧉</button>'
         +'<button class="icon" data-a="archive" title="В архів">🗄</button>'
         +'<button class="icon" data-a="director" title="🎯 Директор: чи веде пост до цілі">🎯</button>'
+        +'<button class="icon" data-a="develop" title="🔥 Розвинути тему: 5 кутів-продовжень у Банк ідей">🔥</button>'
         +'<button class="icon" data-a="image" title="Згенерувати зображення">🎨</button>'
         +(PRO?'<button class="icon" data-a="atomize" title="Розтиражувати під усі канали">♻️</button>':'')
         +'<button class="icon" data-a="composer" title="Опублікувати / запланувати">📣</button>'
@@ -1312,7 +1341,7 @@ function renderStudio(){
   grid.querySelectorAll('.pcard').forEach(card=>{ const id=card.dataset.post; const cont=card.querySelector('.pcontent');
     cont.addEventListener('blur',()=>saveContent(id,cont.textContent));
     const cb=card.querySelector('.psel'); if(cb) cb.onchange=()=>{ cb.checked?SelPosts.add(id):SelPosts.delete(id); card.classList.toggle('selc',cb.checked); renderBulkBar(); };
-    card.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(id); return; } if(a==='image'){ openImageEditor(id); return; } if(a==='atomize'){ openAtomize(id); return; } if(a==='director'){ directorCheck(id); return; } postAction(card,id,a); });
+    card.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(id); return; } if(a==='image'){ openImageEditor(id); return; } if(a==='atomize'){ openAtomize(id); return; } if(a==='director'){ directorCheck(id); return; } if(a==='develop'){ developPost(id); return; } postAction(card,id,a); });
   });
 }
 // панель масових дій (зʼявляється коли є обрані пости)
@@ -1427,10 +1456,17 @@ function openRegenModal(postId, cont){
     const instruction=ta.value.trim(); close();
     if(cont) cont.innerHTML='<span class="spin"></span> перегенерація…';
     aiBusy('↻ Переробляю пост'+(instruction?' за твоєю правкою':'')+'…');
-    try{ await api('/posts/'+postId+'/regenerate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(instruction?{instruction}:{})}); await loadStudioPosts(); flashSaved(); }
+    try{ await api('/posts/'+postId+'/regenerate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(instruction?{instruction}:{})}); await loadStudioPosts(); flashSaved(); rememberVoiceRule(instruction); }
     catch(e){ flash('⚠ '+e.message); await loadStudioPosts(); }
     finally{ aiDone(); }
   };
+}
+// «Коваль» (самонавчання голосу): правка юзера може стати постійним правилом tone_of_voice
+function rememberVoiceRule(instruction){
+  const t=String(instruction||'').trim();
+  if(!t || t.length<8) return; // разові дрібниці не пропонуємо
+  setTimeout(()=>{ if(confirm('Запамʼятати цю правку як ПОСТІЙНЕ правило голосу бренду?\n\n«'+t+'»\n\nAI застосовуватиме її до всіх наступних постів.'))
+    api('/voice-rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rule:t})}).then(()=>flash('Правило голосу збережено ✓')).catch(e=>flash('⚠ '+e.message)); }, 300);
 }
 // ---------- Атомізація: 1 пост → варіанти під усі канали (v2) ----------
 async function openAtomize(postId){
@@ -1545,7 +1581,7 @@ async function openComposer(postId, opts){
   renderChips(); renderMedia(); renderPrev();
   // ----- дії: хештеги / фото / переписати -----
   ov.querySelector('#cmpHash').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('# добираю хештеги…'); aiBusy('# Добираю хештеги…'); try{ const r=await api('/posts/'+postId+'/hashtags',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:master})}); const tags=(r.hashtags||[]).join(' '); if(tags){ master=(master.trimEnd()+'\n\n'+tags); txt.value=master; renderPrev(); setMsg('готово ✓','var(--brand)'); } else setMsg('не знайшлося тегів'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
-  ov.querySelector('#cmpRewrite').onclick=async(e)=>{ const instruction=prompt('Що змінити? (порожньо = переписати іншими словами, голос збережеться)'); if(instruction===null) return; const b=e.target; b.disabled=true; setMsg('✍ переписую…'); aiBusy('✍ Переписую пост…'); try{ await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master})}); const r=await api('/posts/'+postId+'/regenerate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instruction})}); master=r.content||master; txt.value=master; renderPrev(); setMsg('готово ✓','var(--brand)'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
+  ov.querySelector('#cmpRewrite').onclick=async(e)=>{ const instruction=prompt('Що змінити? (порожньо = переписати іншими словами, голос збережеться)'); if(instruction===null) return; const b=e.target; b.disabled=true; setMsg('✍ переписую…'); aiBusy('✍ Переписую пост…'); try{ await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master})}); const r=await api('/posts/'+postId+'/regenerate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instruction})}); master=r.content||master; txt.value=master; renderPrev(); setMsg('готово ✓','var(--brand)'); rememberVoiceRule(instruction); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpHook').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('🪝 шукаю кульмінацію…'); aiBusy('🪝 Складаю 3 варіанти відкриття з кульмінації…');
     try{ const r=await api('/posts/'+postId+'/hooks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:master})}); const hooks=r.hooks||[];
       if(!hooks.length){ setMsg('не вдалося скласти варіанти','var(--danger)'); return; }
@@ -2142,7 +2178,7 @@ async function renderObConnect(oc){
   if(_mtq){ go('settings'); alert(_mtq==='ok'?'Facebook/Instagram підключено ✓':(_mtq==='nopage'?'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).':'Не вдалося підключити Facebook/Instagram.')); }
   if(_gdq){ go('sources'); alert(_gdq==='ok'?'Google Drive підключено ✓':'Не вдалося підключити Google Drive.'); }
   await loadPrompts();
-  loadRubrics(); loadStrategy(); loadFF(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadTasks(); loadStudioPosts(); loadGoalCta();
+  loadRubrics(); loadStrategy(); loadFF(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadTasks(); loadStudioPosts(); loadGoalCta(); loadMagnets();
   loadMaterials(); // стрічка + лічильник
   loadPlan().then(()=>{ const _ct=localStorage.getItem('kg_ctab'); if(_ct&&['materials','plan','posts'].includes(_ct)) setCTab(_ct); else if(PlanSlots.length) setCTab('plan'); }); // відновлюємо під-вкладку; уперше - План якщо скелет є
   await loadChanStatus();

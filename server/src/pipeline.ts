@@ -774,6 +774,46 @@ export async function reelsScript(workspaceId: string, text: string): Promise<st
   return chat("openai/gpt-4o", system, `Матеріал:\n---\n${(text || "").slice(0, 12000)}`, { workspaceId, step: "reels" });
 }
 
+// ---- «Мультиплікатор», режим «Продовження»: пост зайшов → 5 кутів розвитку теми ----
+export async function suggestDevelopment(workspaceId: string, content: string): Promise<{ idea: string; angle: string }[]> {
+  const s = await loadSettings(workspaceId);
+  const system = "Цей пост «вистрілив» - аудиторії зайшло. Запропонуй 5 кутів РОЗВИТКУ теми (серія-продовження, кожен пост стоїть сам по собі): глибше в одну деталь; суміжне питання аудиторії; контр-теза до самого себе; живий кейс/приклад; практичний інструмент/чекліст." +
+    (s.marketing_context ? `\nНіша й аудиторія: ${s.marketing_context.slice(0, 400)}` : "") +
+    goalRule(s) +
+    '\n\nПоверни ЛИШЕ валідний JSON-масив із 5: [{"idea":"тема одним реченням","angle":"кут 2-3 словами"}]. Мова: Українська.';
+  const raw = await chat(env.cheapModel, system, `Пост:\n---\n${(content || "").slice(0, 4000)}`, { workspaceId, step: "develop" });
+  try {
+    return extractJsonArray<any>(raw)
+      .map((x) => ({ idea: String(x?.idea || x || "").trim(), angle: String(x?.angle || "").trim() }))
+      .filter((x) => x.idea).slice(0, 5);
+  } catch { return []; }
+}
+
+// ---- «Магніт»: 3 конкретні лід-магніти з досвіду бренду + кодове слово (кешуються в settings_block) ----
+export async function suggestLeadMagnets(workspaceId: string): Promise<{ title: string; what: string; leadgen: string; effort: string; keyword: string }[]> {
+  const s = await loadSettings(workspaceId);
+  const brief = (s.strategy_brief || "").trim();
+  const system = "Ти продюсер лід-магнітів. Запропонуй 3 КОНКРЕТНІ лід-магніти з наявного досвіду бренду - не «зроби PDF», а що саме всередині і чому цільова аудиторія захоче це забрати. Для кожного:" +
+    "\n- title: назва як її побачить аудиторія;\n- what: що всередині (1-2 речення) + формат (чекліст/шаблон/міні-гайд/розбір/таблиця);" +
+    "\n- leadgen: сила збору лідів (низька|середня|висока);\n- effort: витрати на збірку (низькі|середні|високі);" +
+    "\n- keyword: коротке КОДОВЕ СЛОВО ВЕЛИКИМИ літерами для коментаря/дірект." +
+    (brief ? `\n\nСТРАТЕГІЧНИЙ БРИФ: ${brief.slice(0, 1200)}` : (s.marketing_context ? `\n\nНіша й аудиторія: ${s.marketing_context}` : "")) +
+    goalRule(s) +
+    '\n\nПоверни ЛИШЕ валідний JSON-масив: [{"title":"…","what":"…","leadgen":"…","effort":"…","keyword":"…"}]. Мова: Українська.';
+  const raw = await chat("openai/gpt-4o", system, "Запропонуй 3 лід-магніти.", { workspaceId, step: "lead_magnets" });
+  let out: { title: string; what: string; leadgen: string; effort: string; keyword: string }[] = [];
+  try {
+    out = extractJsonArray<any>(raw).map((x) => ({
+      title: String(x?.title || "").slice(0, 120), what: String(x?.what || "").slice(0, 400),
+      leadgen: String(x?.leadgen || "").slice(0, 20), effort: String(x?.effort || "").slice(0, 20),
+      keyword: String(x?.keyword || "").toUpperCase().replace(/[^A-ZА-ЯІЇЄҐ0-9]/g, "").slice(0, 20),
+    })).filter((x) => x.title).slice(0, 3);
+  } catch { out = []; }
+  if (out.length) await q(`insert into settings_block(workspace_id, key, content) values($1,'lead_magnets',$2)
+    on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`, [workspaceId, JSON.stringify(out)]);
+  return out;
+}
+
 // ---- «Розвідник», режим «Питання»: після публікації - що аудиторія мовчки питає далі → Банк ідей ----
 export async function publishQuestions(workspaceId: string, postContent: string): Promise<number> {
   const cnt = await one<{ n: number }>(`select count(*)::int n from idea_bank where workspace_id=$1 and status='new'`, [workspaceId]);

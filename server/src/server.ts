@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, suggestHooks, suggestHeadline, reelsScript, publishQuestions } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, suggestHooks, suggestHeadline, reelsScript, publishQuestions, suggestDevelopment, suggestLeadMagnets } from "./pipeline.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
 import * as meta from "./meta.js";
@@ -606,6 +606,60 @@ app.post("/api/posts/:postId/hashtags", async (req: any, reply) => {
   if (!post) return reply.code(404).send({ error: "пост не знайдено" });
   try { const hashtags = await suggestHashtags(ws, String(req.body?.text || post.content || "")); return { ok: true, hashtags }; }
   catch (e: any) { await logEvent("error", "hashtags", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
+});
+
+// «Мультиплікатор», Продовження: 5 кутів розвитку теми поста → Банк ідей
+app.post("/api/posts/:postId/develop", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const post = await one<{ content: string }>(
+    `select p.content from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where p.id=$1 and s.workspace_id=$2`,
+    [req.params.postId, ws]);
+  if (!post) return reply.code(404).send({ error: "пост не знайдено" });
+  try {
+    const ideas = await suggestDevelopment(ws, post.content || "");
+    for (const it of ideas) await q(`insert into idea_bank(workspace_id, text, angle, origin) values($1,$2,$3,'ai')`, [ws, it.idea.slice(0, 500), it.angle.slice(0, 300) || "розвиток"]);
+    return { ok: true, ideas };
+  } catch (e: any) { return reply.code(500).send({ error: e.message }); }
+});
+
+// «Мультиплікатор», Нарізка: матеріал → серія постів одним кліком (тейки Розвідника → генерація)
+app.post("/api/materials/:id/series", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const m = await one<{ id: string; transcript: string; origin: string }>(`select id, transcript, origin from source where id=$1 and workspace_id=$2`, [req.params.id, ws]);
+  if (!m) return reply.code(404).send({ error: "матеріал не знайдено" });
+  try {
+    const mode = m.origin === "rss" ? "signal" as const : (m.origin === "manual" || m.origin === "idea") ? "story" as const : undefined;
+    const takes = await extractIdeasFromText(ws, m.transcript, 6, undefined, mode);
+    if (!takes.length) return reply.code(500).send({ error: "не вдалося витягнути тейки з матеріалу" });
+    const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [m.id]);
+    const count = await generatePostsOnePass(run!.id, takes.length,
+      takes.map((t) => t.idea + (t.angle ? ` Кут: ${t.angle}.` : "") + (t.hook ? ` Гачок: ${t.hook}` : "")));
+    return { ok: true, count };
+  } catch (e: any) { return reply.code(500).send({ error: e.message }); }
+});
+
+// «Магніт»: лід-магніти (генерація + збережений список)
+app.post("/api/lead-magnets", async (req: any, reply) => {
+  try { return { ok: true, magnets: await suggestLeadMagnets(req.user.workspace_id) }; }
+  catch (e: any) { return reply.code(500).send({ error: e.message }); }
+});
+app.get("/api/lead-magnets", async (req: any) => {
+  const row = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='lead_magnets'`, [req.user.workspace_id]);
+  let magnets: any[] = []; try { magnets = JSON.parse(row?.content || "[]"); } catch { magnets = []; }
+  return { magnets };
+});
+
+// «Коваль» (самонавчання голосу): правка юзера → постійне правило в tone_of_voice
+app.post("/api/voice-rules", async (req: any, reply) => {
+  const rule = String(req.body?.rule ?? "").trim().slice(0, 200);
+  if (!rule) return reply.code(400).send({ error: "порожнє правило" });
+  const cur = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='tone_of_voice'`, [req.user.workspace_id]);
+  const content = (cur?.content || "").trim();
+  if (content.length > 4000) return reply.code(400).send({ error: "Голос бренду вже завеликий - почисти його в Базі бренду, тоді додам нове правило" });
+  const next = content ? `${content}\n- ${rule}` : `Правила голосу:\n- ${rule}`;
+  await q(`insert into settings_block(workspace_id, key, content) values($1,'tone_of_voice',$2)
+           on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`, [req.user.workspace_id, next]);
+  return { ok: true };
 });
 
 // «Хук-майстер»: 3 варіанти відкриття з кульмінації (точкова заміна першого рядка)
