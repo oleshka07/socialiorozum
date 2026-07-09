@@ -1,0 +1,93 @@
+name: provision-beta
+
+# РАЗОВЕ розгортання бета-середовища на сервері (ідемпотентне - можна перезапускати безпечно).
+# Кроки: клон /opt/socialio-beta (гілка beta) → .env бети (копія прод + бета-рядки; НОВИЙ пароль БД
+# генерується НА СЕРВЕРІ, в лог не виводиться) → docker compose up → nginx vhost → certbot SSL.
+# Запуск: вкладка Actions → provision-beta → Run workflow (або через API).
+
+on:
+  workflow_dispatch:
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Provision BETA stack on Hetzner
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          command_timeout: 20m
+          script: |
+            set -e
+            PROD_DIR="${{ secrets.APP_DIR }}"
+            BETA_DIR="${PROD_DIR}-beta"
+            SUDO=""; [ "$(id -u)" != "0" ] && SUDO="sudo -n"
+
+            echo "== 1/5: код (гілка beta) =="
+            if [ ! -d "$BETA_DIR/.git" ]; then
+              git clone "$(git -C "$PROD_DIR" remote get-url origin)" "$BETA_DIR"
+            fi
+            cd "$BETA_DIR"
+            git fetch origin beta
+            git checkout beta
+            git pull origin beta
+
+            echo "== 2/5: .env бети =="
+            if [ ! -f "$BETA_DIR/server/.env" ]; then
+              cp "$PROD_DIR/server/.env" "$BETA_DIR/server/.env"
+              chmod 600 "$BETA_DIR/server/.env"
+              NEWPW=$(openssl rand -hex 18)
+              sed -i -E "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${NEWPW}|" "$BETA_DIR/server/.env"
+              sed -i -E "s|^(DATABASE_URL=postgres://[^:]+:)[^@]*(@.*)|\1${NEWPW}\2|" "$BETA_DIR/server/.env"
+              sed -i -E "s|^APP_BASE_URL=.*|APP_BASE_URL=https://beta.socialio.rozum.one|" "$BETA_DIR/server/.env"
+              {
+                echo ""
+                echo "# --- BETA (додано provision-beta) ---"
+                echo "COMPOSE_PROJECT_NAME=socialio-beta"
+                echo "APP_PORT=8081"
+                echo "BETA_PIN=2345"
+                echo "TELEGRAM_WEBHOOK_OFF=1"
+              } >> "$BETA_DIR/server/.env"
+              echo ".env створено (новий пароль БД згенеровано на сервері)"
+            else
+              echo ".env вже існує - не чіпаю (щоб не зламати наявну БД)"
+            fi
+
+            echo "== 3/5: docker-стек бети =="
+            cd "$BETA_DIR/server"
+            docker compose up -d --build
+            ok=""
+            for i in $(seq 1 30); do
+              if curl -fsS 127.0.0.1:8081/health >/dev/null 2>&1; then ok=1; break; fi
+              sleep 3
+            done
+            if [ -n "$ok" ]; then echo "health 8081: OK"; else echo "health 8081: FAIL"; docker compose logs --tail 30 app; exit 1; fi
+
+            echo "== 4/5: nginx =="
+            $SUDO tee /etc/nginx/sites-available/beta.socialio.rozum.one >/dev/null <<'NGINX'
+            server {
+                server_name beta.socialio.rozum.one;
+                listen 80;
+                client_max_body_size 20m;
+                location / {
+                    proxy_pass http://127.0.0.1:8081;
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Forwarded-Proto $scheme;
+                    proxy_set_header X-Real-IP $remote_addr;
+                }
+            }
+            NGINX
+            $SUDO ln -sf /etc/nginx/sites-available/beta.socialio.rozum.one /etc/nginx/sites-enabled/beta.socialio.rozum.one
+            $SUDO nginx -t
+            $SUDO systemctl reload nginx
+            echo "nginx: OK"
+
+            echo "== 5/5: SSL (certbot) =="
+            if $SUDO certbot --nginx -d beta.socialio.rozum.one -n --agree-tos --redirect -m o.stepeniev@swipescape.eu; then
+              echo "SSL: OK -> https://beta.socialio.rozum.one"
+            else
+              echo "SSL: не вдалось (найчастіше DNS ще не розійшовся по світу). Перезапусти цей workflow за 10-30 хв."
+              exit 1
+            fi
