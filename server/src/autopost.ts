@@ -1,6 +1,7 @@
 import { q, one } from "./db.js";
 import { logEvent } from "./log.js";
 import { publishPostToChannels } from "./publisher.js";
+import { publishQuestions } from "./pipeline.js";
 
 // Фоновий воркер: публікує заплановані (status='planned') слоти, час яких настав,
 // у ВСІ обрані мережі поста (post.channels). Якщо мережі не обрані — Telegram (legacy).
@@ -32,6 +33,9 @@ async function tick(): Promise<void> {
       const summary = [ok ? `✓ ${ok}` : "", skip ? `↩ вже: ${skip}` : "", err ? `⚠ ${err}` : ""].filter(Boolean).join(" · ") || "немає обраних каналів";
       await q(`update schedule_slot set status=$2, result=$3 where id=$1`, [slot.id, benign ? "posted" : "failed", summary]);
       if (anyOk) await q(`update plan_slot set status='published' where post_id=$1 and status in ('drafted','approved','scheduled')`, [slot.post_id]);
+      // «Питання» після публікації: 3 теми-продовження → Банк ідей (у фоні, помилка не критична)
+      if (anyOk) one<{ content: string }>(`select content from post where id=$1`, [slot.post_id])
+        .then((p) => p && publishQuestions(slot.workspace_id, p.content)).catch(() => {});
       if (anyOk) await logEvent("info", "autopost", `slot ${slot.id} → ${ok}${err ? ` (помилки: ${err})` : ""}`);
       else if (benign) await logEvent("info", "autopost", `slot ${slot.id}: усі мережі вже опубліковано (${skip})`);
       else await logEvent("warn", "autopost", `slot ${slot.id} не опубліковано: ${err || "немає каналів"}`);

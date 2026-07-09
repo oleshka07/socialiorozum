@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, suggestHooks, suggestHeadline, reelsScript, publishQuestions } from "./pipeline.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
 import * as meta from "./meta.js";
@@ -573,6 +573,9 @@ app.post("/api/posts/:postId/publish-all", async (req: any, reply) => {
     // Публікація один раз на мережу: гасимо запланований слот ЛИШЕ якщо не лишилось не надісланих обраних мереж
     // (інакше слот має відпрацювати решту мереж пізніше). Так уникаємо і дубля, і скасування запланованого каналу.
     if (results.some((r) => r.status === "sent")) {
+      // «Розвідник», режим «Питання»: у фоні - 3 питання-продовження від аудиторії → Банк ідей (не блокує відповідь)
+      one<{ content: string }>(`select content from post where id=$1`, [req.params.postId])
+        .then((p) => p && publishQuestions(ws, p.content)).catch(() => {});
       const post = await one<{ channels: any }>(`select channels from post where id=$1`, [req.params.postId]);
       const enabled = Object.keys(post?.channels || {}).filter((k) => post!.channels[k] && post!.channels[k].on);
       const sent = new Set(await alreadySentNetworks(req.params.postId));
@@ -603,6 +606,28 @@ app.post("/api/posts/:postId/hashtags", async (req: any, reply) => {
   if (!post) return reply.code(404).send({ error: "пост не знайдено" });
   try { const hashtags = await suggestHashtags(ws, String(req.body?.text || post.content || "")); return { ok: true, hashtags }; }
   catch (e: any) { await logEvent("error", "hashtags", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
+});
+
+// «Хук-майстер»: 3 варіанти відкриття з кульмінації (точкова заміна першого рядка)
+app.post("/api/posts/:postId/hooks", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const post = await one<{ content: string }>(
+    `select p.content from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where p.id=$1 and s.workspace_id=$2`,
+    [req.params.postId, ws]);
+  if (!post) return reply.code(404).send({ error: "пост не знайдено" });
+  try { return { ok: true, hooks: await suggestHooks(ws, String(req.body?.text || post.content || "")) }; }
+  catch (e: any) { return reply.code(500).send({ error: e.message }); }
+});
+
+// «Архітектор»: заголовок на картинку за принципом непересічення (не дублює текст поста)
+app.post("/api/posts/:postId/headline", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const post = await one<{ content: string }>(
+    `select p.content from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where p.id=$1 and s.workspace_id=$2`,
+    [req.params.postId, ws]);
+  if (!post) return reply.code(404).send({ error: "пост не знайдено" });
+  try { return { ok: true, headline: await suggestHeadline(ws, post.content || "") }; }
+  catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
 
 // «Директор»: вердикт чи веде пост до головної цілі (дешева модель, on-demand)
@@ -1391,12 +1416,27 @@ app.post("/api/materials/:id/archive", async (req: any, reply) => {
   await q(`update plan_slot set status='empty', match_source_id=null, match_note=null where workspace_id=$1 and match_source_id=$2 and status='matched'`, [req.user.workspace_id, req.params.id]);
   return { ok: true };
 });
-// Ідеї з матеріалу (для модалки вибору перед генерацією)
+// Ідеї з матеріалу (для модалки вибору перед генерацією).
+// «Розвідник»: режим за походженням - RSS = «Сигнал» (тейк від бренду), нотатка/ідея = «Історія» (кути кейсу).
 app.post("/api/materials/:id/ideas", async (req: any, reply) => {
-  const m = await one<{ transcript: string }>(`select transcript from source where id=$1 and workspace_id=$2`, [req.params.id, req.user.workspace_id]);
+  const m = await one<{ transcript: string; origin: string }>(`select transcript, origin from source where id=$1 and workspace_id=$2`, [req.params.id, req.user.workspace_id]);
   if (!m) return reply.code(404).send({ error: "матеріал не знайдено" });
-  try { const ideas = await extractIdeasFromText(req.user.workspace_id, m.transcript, Number(req.body?.count) || 6, Array.isArray(req.body?.rubrics) ? req.body.rubrics : undefined); return { ok: true, ideas }; }
+  const mode = m.origin === "rss" ? "signal" as const : (m.origin === "manual" || m.origin === "idea") ? "story" as const : undefined;
+  try { const ideas = await extractIdeasFromText(req.user.workspace_id, m.transcript, Number(req.body?.count) || 6, Array.isArray(req.body?.rubrics) ? req.body.rubrics : undefined, mode); return { ok: true, ideas }; }
   catch (e: any) { return reply.code(500).send({ error: e.message }); }
+});
+
+// «Сценарист»: готовий до зйомки сценарій Reels з матеріалу → чернетка в Студії
+app.post("/api/materials/:id/reels", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const m = await one<{ id: string; transcript: string }>(`select id, transcript from source where id=$1 and workspace_id=$2`, [req.params.id, ws]);
+  if (!m) return reply.code(404).send({ error: "матеріал не знайдено" });
+  try {
+    const script = await reelsScript(ws, m.transcript);
+    const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [m.id]);
+    const post = await one<{ id: string }>(`insert into post(run_id, stage, content) values($1,'final',$2) returning id`, [run!.id, script]);
+    return { ok: true, postId: post!.id };
+  } catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
 
 // ---- Банк ідей (workspace-scoped, окремо від run-bound idea; джерело для /idea в боті) ----

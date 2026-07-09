@@ -925,7 +925,7 @@ function renderMaterials(){
         +'<div style="font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+esc(m.preview||'')+'</div>'
       +'</div>'
       +(open?'<div id="matFull" style="margin-top:10px;background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:12px 14px;font-size:13px;line-height:1.6;color:var(--ink2);white-space:pre-wrap;max-height:300px;overflow:auto"><span class="spin"></span></div>'
-        +'<div class="btnrow" style="margin-top:10px;flex-wrap:wrap"><button class="primary" data-ma="post">✨ Створити пост</button><button class="ghost" data-ma="ideas">💡 Витягнути ідеї</button><button class="ghost" data-ma="del" style="margin-left:auto;color:var(--danger)">🗑 Прибрати</button></div>':'')
+        +'<div class="btnrow" style="margin-top:10px;flex-wrap:wrap"><button class="primary" data-ma="post">✨ Створити пост</button><button class="ghost" data-ma="ideas">💡 Витягнути ідеї</button><button class="ghost" data-ma="reels">🎬 Сценарій Reels</button><button class="ghost" data-ma="del" style="margin-left:auto;color:var(--danger)">🗑 Прибрати</button></div>':'')
       +'</div>';
   }).join('');
   feed.querySelectorAll('[data-mat]').forEach(row=>{
@@ -935,6 +935,8 @@ function renderMaterials(){
       if(a==='del'){ if(!confirm('Прибрати матеріал зі стрічки?')) return; try{ await api('/materials/'+id+'/archive',{method:'POST'}); await loadMaterials(); }catch(e){ flash('⚠ '+e.message); } return; }
       if(a==='post'){ aiBusy('✨ Створюю пост з матеріалу…'); setCTab('posts'); setLayout('studio');
         try{ await api('/materials/'+id+'/posts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}); await loadStudioPosts(); flash('Готово - пост у стрічці ✓'); }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } return; }
+      if(a==='reels'){ aiBusy('🎬 Пишу сценарій Reels з матеріалу…'); setCTab('posts'); setLayout('studio');
+        try{ await api('/materials/'+id+'/reels',{method:'POST'}); await loadStudioPosts(); flash('Сценарій Reels у Чорновиках ✓'); }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } return; }
       if(a==='ideas'){ openMaterialIdeas(id); }
     });
   });
@@ -1007,10 +1009,12 @@ async function openMaterialIdeas(matId){
   finally{ aiDone(); }
   const list=card.querySelector('#miList'); if(!list) return;
   if(ideas.length){
-    list.innerHTML=ideas.map((it,i)=>'<label class="rchip on" style="display:flex;gap:8px;align-items:flex-start;width:100%;padding:9px 12px;margin-bottom:5px;text-align:left;font-weight:500;line-height:1.4"><input type="checkbox" class="miCb" data-i="'+i+'" checked><span style="flex:1">'+esc(it.idea)+'</span>'+(it.rubric?'<span class="ptag">🏷 '+esc(it.rubric)+'</span>':'')+'</label>').join('');
+    list.innerHTML=ideas.map((it,i)=>'<label class="rchip on" style="display:flex;gap:8px;align-items:flex-start;width:100%;padding:9px 12px;margin-bottom:5px;text-align:left;font-weight:500;line-height:1.4"><input type="checkbox" class="miCb" data-i="'+i+'" checked><span style="flex:1">'+esc(it.idea)
+      +(it.hook?'<span style="display:block;font-size:12px;color:var(--muted);font-weight:400;margin-top:3px">🪝 '+esc(it.hook)+'</span>':'')+'</span>'
+      +((it.angle||it.rubric)?'<span style="display:flex;flex-direction:column;gap:3px;align-items:flex-end">'+(it.rubric?'<span class="ptag">🏷 '+esc(it.rubric)+'</span>':'')+(it.angle?'<span class="ptag">🎯 '+esc(it.angle)+'</span>':'')+'</span>':'')+'</label>').join('');
     list.querySelectorAll('.rchip').forEach(l=>{ const cb=l.querySelector('input'); cb.addEventListener('change',()=>l.classList.toggle('on',cb.checked)); });
     const go=card.querySelector('#miGo'); go.disabled=false;
-    go.onclick=async()=>{ const picked=[...list.querySelectorAll('.miCb:checked')].map(c=>ideas[+c.dataset.i].idea); if(!picked.length){ flash('Обери хоча б одну ідею'); return; }
+    go.onclick=async()=>{ const picked=[...list.querySelectorAll('.miCb:checked')].map(c=>{ const it=ideas[+c.dataset.i]; return it.idea+(it.angle?' Кут: '+it.angle+'.':'')+(it.hook?' Гачок: '+it.hook:''); }); if(!picked.length){ flash('Обери хоча б одну ідею'); return; }
       close(); aiBusy('✨ Створюю '+picked.length+' постів з ідей…'); setCTab('posts'); setLayout('studio');
       try{ const r=await api('/materials/'+matId+'/posts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ideas:picked})}); await loadStudioPosts(); flash('Готово - '+(r.count||0)+' постів ✓'); }
       catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } };
@@ -1345,7 +1349,7 @@ async function openImageEditor(postId, onDone){
     +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><b style="font-size:16px">🎨 Зображення поста</b><button class="icon" id="ieX" style="margin-left:auto">✕</button></div>'
     +'<div id="iePrev">'+imgHtml()+'</div>'
     +'<label class="fl" style="margin-top:12px">Текст на зображенні</label>'
-    +'<input class="txt" id="ieText" placeholder="Короткий заголовок" value="'+esc(full.headline||firstLine.slice(0,48))+'">'
+    +'<div style="display:flex;gap:8px"><input class="txt" id="ieText" placeholder="Короткий заголовок" value="'+esc(full.headline||firstLine.slice(0,48))+'" style="flex:1"><button class="ghost" id="ieSuggest" title="Заголовок, що ДОПОВНЮЄ текст поста, а не повторює його">✨ Підказати</button></div>'
     +'<label class="rchip" style="margin-top:8px;display:inline-flex"><input type="checkbox" id="ieOv" checked> Накладати текст</label>'
     +'<div id="ieMsg" style="font-size:12px;color:var(--muted);margin-top:6px"></div>'
     +'<div class="btnrow" style="margin-top:14px"><button class="primary" id="ieGen">🎨 Згенерувати</button><button class="ghost" id="ieText2"'+(hasBase?'':' disabled title="Спершу згенеруй"')+'>✍ Оновити лише текст</button></div>'
@@ -1356,6 +1360,9 @@ async function openImageEditor(postId, onDone){
   ov.querySelector('#ieX').onclick=close;
   const msg=ov.querySelector('#ieMsg');
   const done=(r)=>{ fn=r.filename; hasBase=true; ov.querySelector('#iePrev').innerHTML=imgHtml(); const t2=ov.querySelector('#ieText2'); t2.disabled=false; t2.title=''; msg.style.color='var(--brand)'; msg.textContent='готово ✓'; if(onDone)onDone(fn); try{loadStudioPosts();}catch(e){} };
+  ov.querySelector('#ieSuggest').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='✨ добираю заголовок…';
+    try{ const r=await api('/posts/'+postId+'/headline',{method:'POST'}); if(r.headline){ ov.querySelector('#ieText').value=r.headline; msg.style.color='var(--brand)'; msg.textContent='заголовок доповнює пост, не дублює ✓'; } else msg.textContent=''; }
+    catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; } finally{ b.disabled=false; } };
   ov.querySelector('#ieGen').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='малюю зображення… (10-30с)'; aiBusy('🎨 Малюю зображення… (10-30 секунд)'); try{ const r=await api('/posts/'+postId+'/image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headline:ov.querySelector('#ieOv').checked?ov.querySelector('#ieText').value:''})}); done(r); }catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#ieText2').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='оновлюю текст…'; aiBusy('✍ Оновлюю текст на зображенні…'); try{ const r=await api('/posts/'+postId+'/image-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headline:ov.querySelector('#ieText').value,overlay:ov.querySelector('#ieOv').checked})}); done(r); }catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; } finally{ b.disabled=false; aiDone(); } };
 }
@@ -1488,7 +1495,7 @@ async function openComposer(postId, opts){
         +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Канали</div><div id="cmpChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px"></div>'
         +'<label style="font-size:12px;color:var(--muted);display:inline-block;margin-bottom:12px">Рубрика <select id="cmpRubric" class="txt" style="width:auto;padding:6px 9px;display:inline-block;margin-left:4px">'+rubOpts+'</select></label>'
         +'<textarea id="cmpText" class="txt" style="min-height:240px;font-size:14px;line-height:1.55;resize:vertical"></textarea>'
-        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="dashbtn" id="cmpHash"># Хештеги</button><button class="dashbtn" id="cmpPhoto">⚡ AI фото</button><button class="dashbtn" id="cmpRewrite">✍ Переписати</button><button class="dashbtn" id="cmpAudit">🔍 AI-сліди</button></div>'
+        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="dashbtn" id="cmpHash"># Хештеги</button><button class="dashbtn" id="cmpPhoto">⚡ AI фото</button><button class="dashbtn" id="cmpRewrite">✍ Переписати</button><button class="dashbtn" id="cmpHook">🪝 Гачок</button><button class="dashbtn" id="cmpAudit">🔍 AI-сліди</button></div>'
         +'<div id="cmpMediaWrap" style="margin-top:14px"></div>'
         +'<div id="cmpMsg" style="font-size:12.5px;margin-top:10px;min-height:18px"></div>'
       +'</div>'
@@ -1539,6 +1546,18 @@ async function openComposer(postId, opts){
   // ----- дії: хештеги / фото / переписати -----
   ov.querySelector('#cmpHash').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('# добираю хештеги…'); aiBusy('# Добираю хештеги…'); try{ const r=await api('/posts/'+postId+'/hashtags',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:master})}); const tags=(r.hashtags||[]).join(' '); if(tags){ master=(master.trimEnd()+'\n\n'+tags); txt.value=master; renderPrev(); setMsg('готово ✓','var(--brand)'); } else setMsg('не знайшлося тегів'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpRewrite').onclick=async(e)=>{ const instruction=prompt('Що змінити? (порожньо = переписати іншими словами, голос збережеться)'); if(instruction===null) return; const b=e.target; b.disabled=true; setMsg('✍ переписую…'); aiBusy('✍ Переписую пост…'); try{ await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master})}); const r=await api('/posts/'+postId+'/regenerate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instruction})}); master=r.content||master; txt.value=master; renderPrev(); setMsg('готово ✓','var(--brand)'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
+  ov.querySelector('#cmpHook').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('🪝 шукаю кульмінацію…'); aiBusy('🪝 Складаю 3 варіанти відкриття з кульмінації…');
+    try{ const r=await api('/posts/'+postId+'/hooks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:master})}); const hooks=r.hooks||[];
+      if(!hooks.length){ setMsg('не вдалося скласти варіанти','var(--danger)'); return; }
+      const hv=document.createElement('div'); hv.className='modal'; hv.style.zIndex='75';
+      hv.innerHTML='<div class="modal-card" style="max-width:520px;padding:20px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><b style="font-size:16px">🪝 Обери відкриття</b><button class="icon" id="hkX" style="margin-left:auto">✕</button></div>'
+        +hooks.map((h,i)=>'<div class="card" data-h="'+i+'" style="cursor:pointer;margin-bottom:8px;padding:12px 14px;font-size:13.5px;line-height:1.5">'+esc(h)+'</div>').join('')
+        +'<div class="hint">Клік замінює перший абзац поста. Поточний перший рядок зникне.</div></div>';
+      document.body.appendChild(hv); const hclose=()=>hv.remove();
+      hv.addEventListener('click',ev=>{ if(ev.target===hv) hclose(); }); hv.querySelector('#hkX').onclick=hclose;
+      hv.querySelectorAll('[data-h]').forEach(c=>c.onclick=()=>{ const h=hooks[+c.dataset.h]; const parts=master.split('\n\n'); parts[0]=h; master=parts.join('\n\n'); txt.value=master; renderPrev(); hclose(); setMsg('гачок замінено ✓ (не забудь зберегти)','var(--brand)'); });
+      setMsg('');
+    }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpAudit').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('🔍 шукаю AI-сліди…'); aiBusy('🔍 Шукаю сліди AI у тексті…');
     try{ const r=await api('/posts/'+postId+'/ai-audit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:master})}); const f=r.findings||[];
       if(!f.length) setMsg('чисто - слідів AI не знайдено ✓','var(--brand)');

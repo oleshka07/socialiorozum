@@ -610,22 +610,32 @@ export async function atomizePost(workspaceId: string, content: string, channels
 }
 
 // ---- Стрічка матеріалів: витягнути ідеї з одного матеріалу (модалка «Ідеї з матеріалу») ----
-export async function extractIdeasFromText(workspaceId: string, text: string, count = 6, rubricsFilter?: string[]): Promise<{ idea: string; rubric: string }[]> {
+// «Розвідник»: не тема, а ТЕЙК (кут + чорновий гачок). mode за походженням матеріалу:
+// 'signal' (стороння новина/RSS - що бренд каже від себе), 'story' (власний кейс - кути подачі), default - універсальний.
+export async function extractIdeasFromText(workspaceId: string, text: string, count = 6, rubricsFilter?: string[], mode?: "signal" | "story"): Promise<{ idea: string; angle: string; hook: string; rubric: string }[]> {
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
   const rubs = await q<{ name: string }>(`select name from rubric where workspace_id=$1 order by idx`, [workspaceId]);
   const picked = (rubricsFilter || []).map((r) => String(r).trim()).filter(Boolean);
   const rubList = (picked.length ? rubs.filter((r) => picked.includes(r.name)) : rubs).map((r) => r.name).join(", ");
+  const lead = mode === "signal"
+    ? "Це СТОРОННЯ новина/чужий матеріал («Сигнал»). Знайди, що бренд може сказати ВІД СЕБЕ з цього приводу: позиція, висновок, застосування для своєї аудиторії. Кожна ідея - ТЕЙК (власна думка), а не переказ новини."
+    : mode === "story"
+    ? "Це ВЛАСНИЙ кейс/думка автора («Історія»). Розклади на РІЗНІ кути подачі: історія як було, помилка і урок, контр-теза до загальноприйнятого, покрокова інструкція, спостереження-інсайт."
+    : "Знайди в матеріалі окремі контент-ідеї для соцмереж, кожна зі своїм кутом подачі.";
   const system =
-    "Ти контент-стратег. Знайди в матеріалі окремі контент-ідеї для соцмереж, кожна зі своїм кутом подачі. " +
+    "Ти контент-розвідник. " + lead +
     (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") +
     goalRule(s) +
     (rubList ? `\nРубрики бренду: ${rubList}. Кожній ідеї признач НАЙБЛИЖЧУ рубрику з цього переліку.` : "") +
-    `\n\nЗнайди до ${Math.max(1, Math.min(10, count))} ідей. Поверни ЛИШЕ валідний JSON-масив: [{"idea":"суть ідеї одним реченням","rubric":"назва рубрики"}]. Мова: ${lang}.`;
+    `\n\nЗнайди до ${Math.max(1, Math.min(10, count))} ідей. Для кожної: idea - суть одним реченням; angle - кут подачі 2-4 словами; hook - чорновий перший рядок поста (з кульмінації, без кліше «СТОП/99% не знають»). Поверни ЛИШЕ валідний JSON-масив: [{"idea":"…","angle":"…","hook":"…","rubric":"назва рубрики"}]. Мова: ${lang}.`;
   const raw = await chat(env.cheapModel, system, `Матеріал:\n---\n${(text || "").slice(0, 20000)}`, { workspaceId, step: "ideas" });
-  let out: { idea: string; rubric: string }[] = [];
+  let out: { idea: string; angle: string; hook: string; rubric: string }[] = [];
   try {
-    out = extractJsonArray<any>(raw).map((x) => ({ idea: String(x?.idea || x || "").trim(), rubric: String(x?.rubric || "").trim() })).filter((x) => x.idea);
+    out = extractJsonArray<any>(raw).map((x) => ({
+      idea: String(x?.idea || x || "").trim(), angle: String(x?.angle || "").trim(),
+      hook: String(x?.hook || "").trim(), rubric: String(x?.rubric || "").trim(),
+    })).filter((x) => x.idea);
   } catch { out = []; }
   return out;
 }
@@ -723,6 +733,60 @@ export async function aiAudit(workspaceId: string, content: string): Promise<{ p
       .map((x) => ({ pattern: String(x?.pattern || "").slice(0, 80), quote: String(x?.quote || "").slice(0, 80) }))
       .filter((x) => x.pattern).slice(0, 12);
   } catch { return []; }
+}
+
+// ---- «Хук-майстер»: 3 варіанти відкриття поста з кульмінації (точкова заміна першого рядка) ----
+export async function suggestHooks(workspaceId: string, text: string): Promise<string[]> {
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const system = "Ти майстер перших рядків. Знайди в пості КУЛЬМІНАЦІЮ (найсильніший факт, цифру, момент, висновок) і запропонуй 3 РІЗНІ варіанти відкриття прямо з неї: різкий факт/цифра; контр-теза; особистий момент. Кожен - 1-2 короткі речення, органічно веде в наявний текст." +
+    (s.tone_of_voice ? `\nГолос бренду: ${s.tone_of_voice.slice(0, 600)}` : "") +
+    HOOK_RULE + NO_DASH_RULE +
+    `\n\nПоверни ЛИШЕ валідний JSON-масив із 3 рядків: ["…","…","…"]. Мова: ${lang}.`;
+  const raw = await chat("openai/gpt-4o", system, `Пост:\n---\n${(text || "").slice(0, 4000)}`, { workspaceId, step: "hooks" });
+  try { return extractJsonArray<any>(raw).map((x) => String(x?.hook || x || "").trim()).filter(Boolean).slice(0, 3); } catch { return []; }
+}
+
+// ---- «Архітектор» (принцип непересічення): заголовок на картинку, що ДОПОВНЮЄ текст, а не дублює його ----
+export async function suggestHeadline(workspaceId: string, text: string): Promise<string> {
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const system = "Запропонуй короткий заголовок на зображення поста: 2-5 слів, ВЕЛИКИЙ сенс маленькими словами. ПРАВИЛО НЕПЕРЕСІЧЕННЯ: заголовок НЕ повторює перший рядок і жодну фразу поста - він додає другий кут (емоцію, наслідок, питання), щоб картинка і текст працювали в парі, а не дублювались. Без крапки в кінці, без лапок." +
+    `\n\nПоверни ЛИШЕ сам заголовок одним рядком. Мова: ${lang}.`;
+  const raw = await chat(env.cheapModel, system, `Пост:\n---\n${(text || "").slice(0, 2500)}`, { workspaceId, step: "headline" });
+  return raw.replace(/^["«»']+|["«»'.]+$/g, "").trim().slice(0, 60);
+}
+
+// ---- «Сценарист»: повний сценарій Reels/Shorts (текстовий деліверабл - юзер знімає сам) ----
+export async function reelsScript(workspaceId: string, text: string): Promise<string> {
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const brief = (s.strategy_brief || "").trim();
+  const system = "Ти сценарист коротких відео (Reels/Shorts/TikTok). За матеріалом напиши ГОТОВИЙ ДО ЗЙОМКИ сценарій:" +
+    "\n- ХУК (0-2с): відкриття з кульмінації, без кліше." +
+    "\n- 4-5 БІТІВ: один біт = одна думка = один короткий рядок озвучки + [візуал: що в кадрі/на екрані]." +
+    "\n- CTA: один заклик = одна дія." +
+    "\nФормат виводу рівно такий:\n🎬 СЦЕНАРІЙ REELS: <назва 3-5 слів>\n\nХУК (0-2с): <рядок>\n[візуал: <що в кадрі>]\n\nБІТ 1: <рядок>\n[візуал: <…>]\n(і так далі)\n\nCTA: <рядок>" +
+    (brief ? `\n\nСТРАТЕГІЧНИЙ БРИФ: ${brief.slice(0, 1200)}` : (s.marketing_context ? `\n\nБренд і аудиторія: ${s.marketing_context}` : "")) +
+    (s.tone_of_voice ? `\nГолос бренду: ${s.tone_of_voice.slice(0, 600)}` : "") +
+    goalRule(s) + HOOK_RULE + ANTI_AI_RULE + NO_DASH_RULE +
+    `\n\nПоверни лише сценарій. Мова: ${lang}.`;
+  return chat("openai/gpt-4o", system, `Матеріал:\n---\n${(text || "").slice(0, 12000)}`, { workspaceId, step: "reels" });
+}
+
+// ---- «Розвідник», режим «Питання»: після публікації - що аудиторія мовчки питає далі → Банк ідей ----
+export async function publishQuestions(workspaceId: string, postContent: string): Promise<number> {
+  const cnt = await one<{ n: number }>(`select count(*)::int n from idea_bank where workspace_id=$1 and status='new'`, [workspaceId]);
+  if ((cnt?.n || 0) >= 40) return 0; // банк і так повний - не роздуваємо
+  const s = await loadSettings(workspaceId);
+  const system = "Пост уже опубліковано. Сформулюй 3 питання, які лишились у голові читача ПІСЛЯ цього поста (те, що аудиторія мовчки хоче спитати далі). Кожне питання - готова тема наступного поста." +
+    (s.marketing_context ? `\nНіша: ${s.marketing_context.slice(0, 400)}` : "") +
+    '\n\nПоверни ЛИШЕ валідний JSON-масив: ["питання 1","питання 2","питання 3"]. Мова: Українська.';
+  const raw = await chat(env.cheapModel, system, `Опублікований пост:\n---\n${(postContent || "").slice(0, 3000)}`, { workspaceId, step: "post_questions" });
+  let qs: string[] = [];
+  try { qs = extractJsonArray<any>(raw).map((x) => String(x?.question || x || "").trim()).filter(Boolean).slice(0, 3); } catch { return 0; }
+  for (const t of qs) await q(`insert into idea_bank(workspace_id, text, angle, origin) values($1,$2,'продовження',$3)`, [workspaceId, t.slice(0, 500), "ai"]);
+  return qs.length;
 }
 
 // ---- Щоденний інсайт: пул на ~30 (1 виклик), тягнемо по одному (settings_block 'insight_pool') ----
