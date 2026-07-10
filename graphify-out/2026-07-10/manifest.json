@@ -1,7 +1,7 @@
 {
   "server/db/schema.sql": {
-    "mtime": 1783427183.9771957,
-    "ast_hash": "6194b3bd944fef9393a3d02e42ed675f",
+    "mtime": 1783696609.154042,
+    "ast_hash": "ee4376b643ec5d555d352c2f0e5abac1",
     "semantic_hash": ""
   },
   "server/package.json": {
@@ -100,13 +100,13 @@
     "semantic_hash": "a756c8683b93081ba184ed42c00f79c1"
   },
   "server/src/openrouter.ts": {
-    "mtime": 1783427273.9411924,
-    "ast_hash": "6e394382dd011182ddd0f6f720b33418",
+    "mtime": 1783696858.0020363,
+    "ast_hash": "3373c6cfea58beb91b0a8c37ecb4ccb0",
     "semantic_hash": ""
   },
   "server/src/pipeline.ts": {
-    "mtime": 1783634525.8404999,
-    "ast_hash": "4262f673c7e8691b733d6e25e2053abf",
+    "mtime": 1783696944.8060343,
+    "ast_hash": "ea4a3c61016b0f1cfa881972aa776d41",
     "semantic_hash": ""
   },
   "server/src/publisher.ts": {
@@ -125,8 +125,8 @@
     "semantic_hash": "3e929595c91643444c4c4d540a929c55"
   },
   "server/src/server.ts": {
-    "mtime": 1783667207.323778,
-    "ast_hash": "edf94ab0f6a9829466b4ea3d6ee69bd2",
+    "mtime": 1783696650.970041,
+    "ast_hash": "f4732c7a43c8d63b20f110fc0b5e3e75",
     "semantic_hash": ""
   },
   "server/src/telegram.ts": {
@@ -155,8 +155,8 @@
     "semantic_hash": "352df4b84f4af2922ccd9adaf8e4608f"
   },
   "CLAUDE.md": {
-    "mtime": 1783667504.6637843,
-    "ast_hash": "84e7a740c89aafde4d3fe5752928711d",
+    "mtime": 1783696987.5220335,
+    "ast_hash": "23d67df1365ac35c96d8068ec3c8031c",
     "semantic_hash": ""
   },
   "DEPLOY.md": {
@@ -225,8 +225,8 @@
     "semantic_hash": ""
   },
   "server/public/app.html": {
-    "mtime": 1783667270.1397793,
-    "ast_hash": "bfc475f22db14b1b11aecbc792d7d3b7",
+    "mtime": 1783696766.1100385,
+    "ast_hash": "956cb7bf24d25c9522dec848935d01ee",
     "semantic_hash": ""
   },
   "server/public/auth.html": {
@@ -295,8 +295,13 @@
     "semantic_hash": ""
   },
   "server/src/reelvideo.ts": {
-    "mtime": 1783667141.1517766,
-    "ast_hash": "17a69c94c527bc92039ef625fec95e8a",
+    "mtime": 1783696632.6980414,
+    "ast_hash": "68366dcfa35900126fedc8bf6631100e",
+    "semantic_hash": ""
+  },
+  ".github/workflows/beta-check.yml": {
+    "mtime": 1783690353.8318865,
+    "ast_hash": "eb231ca5876e5c2bdd12f4cd2f442b78",
     "semantic_hash": ""
   }
 }

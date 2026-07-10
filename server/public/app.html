@@ -1386,32 +1386,9 @@ async function bulkReview(status){
     SelPosts.clear(); await loadStudioPosts(); flash('Готово: '+ok+'/'+ids.length);
   }finally{ aiDone(); }
 }
+// редактор зображення поста = той самий двокроковий фото-інструмент, що і в композері
 async function openImageEditor(postId, onDone){
-  let full; try{ full=await api('/posts/'+postId+'/full'); }catch(e){ flash('⚠ '+e.message); return; }
-  let fn=full.media_filename||null, hasBase=!!full.has_base;
-  const firstLine=(full.content||'').split('\n').map(s=>s.trim()).find(Boolean)||'';
-  const imgHtml=()=>fn?'<img src="/media/'+esc(fn)+'" style="width:100%;max-height:340px;object-fit:cover;border-radius:10px;border:1px solid var(--line)">':'<div style="height:190px;border-radius:10px;border:1px dashed var(--line2);display:grid;place-items:center;color:var(--muted);font-size:13px">Зображення ще нема - натисни «Згенерувати»</div>';
-  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='65';
-  ov.innerHTML='<div class="modal-card" style="max-width:520px;padding:20px">'
-    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><b style="font-size:16px">🎨 Зображення поста</b><button class="icon" id="ieX" style="margin-left:auto">✕</button></div>'
-    +'<div id="iePrev">'+imgHtml()+'</div>'
-    +'<label class="fl" style="margin-top:12px">Текст на зображенні</label>'
-    +'<div style="display:flex;gap:8px"><input class="txt" id="ieText" placeholder="Короткий заголовок" value="'+esc(full.headline||firstLine.slice(0,48))+'" style="flex:1"><button class="ghost" id="ieSuggest" title="Заголовок, що ДОПОВНЮЄ текст поста, а не повторює його">✨ Підказати</button></div>'
-    +'<label class="rchip" style="margin-top:8px;display:inline-flex"><input type="checkbox" id="ieOv" checked> Накладати текст</label>'
-    +'<div id="ieMsg" style="font-size:12px;color:var(--muted);margin-top:6px"></div>'
-    +'<div class="btnrow" style="margin-top:14px"><button class="primary" id="ieGen">🎨 Згенерувати</button><button class="ghost" id="ieText2"'+(hasBase?'':' disabled title="Спершу згенеруй"')+'>✍ Оновити лише текст</button></div>'
-    +'<div class="hint" style="margin-top:8px">«Згенерувати» малює нову картинку (коштує). «Оновити лише текст» - дешево, на тій самій базі.</div>'
-    +'</div>';
-  document.body.appendChild(ov); const close=()=>ov.remove();
-  ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
-  ov.querySelector('#ieX').onclick=close;
-  const msg=ov.querySelector('#ieMsg');
-  const done=(r)=>{ fn=r.filename; hasBase=true; ov.querySelector('#iePrev').innerHTML=imgHtml(); const t2=ov.querySelector('#ieText2'); t2.disabled=false; t2.title=''; msg.style.color='var(--brand)'; msg.textContent='готово ✓'; if(onDone)onDone(fn); try{loadStudioPosts();}catch(e){} };
-  ov.querySelector('#ieSuggest').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='✨ добираю заголовок…';
-    try{ const r=await api('/posts/'+postId+'/headline',{method:'POST'}); if(r.headline){ ov.querySelector('#ieText').value=r.headline; msg.style.color='var(--brand)'; msg.textContent='заголовок доповнює пост, не дублює ✓'; } else msg.textContent=''; }
-    catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; } finally{ b.disabled=false; } };
-  ov.querySelector('#ieGen').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='малюю зображення… (10-30с)'; aiBusy('🎨 Малюю зображення… (10-30 секунд)'); try{ const r=await api('/posts/'+postId+'/image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headline:ov.querySelector('#ieOv').checked?ov.querySelector('#ieText').value:''})}); done(r); }catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; } finally{ b.disabled=false; aiDone(); } };
-  ov.querySelector('#ieText2').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='оновлюю текст…'; aiBusy('✍ Оновлюю текст на зображенні…'); try{ const r=await api('/posts/'+postId+'/image-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headline:ov.querySelector('#ieText').value,overlay:ov.querySelector('#ieOv').checked})}); done(r); }catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; } finally{ b.disabled=false; aiDone(); } };
+  openPhotoTool(postId, '', (fn)=>{ if(onDone)onDone(fn); try{loadStudioPosts();}catch(e){} });
 }
 async function loadImageProvider(){ const sel=$('imgProv'); if(!sel) return; try{ const c=await api('/integrations/images'); const A=c.available||{}; const opts=[['openai','OpenAI gpt-image-1',A.openai],['fal','FLUX schnell (fal.ai)',A.fal],['gemini','Nano Banana (Gemini)',A.gemini]]; sel.innerHTML=opts.map(o=>'<option value="'+o[0]+'"'+(c.provider===o[0]?' selected':'')+(o[2]?'':' disabled')+'>'+o[1]+(o[2]?'':' - нема ключа')+'</option>').join(''); sel.onchange=async()=>{ try{ await api('/integrations/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:sel.value})}); flashSaved(); }catch(e){ flash('⚠ '+e.message); } }; }catch(e){} }
 let InboxSel=null;
@@ -1512,7 +1489,7 @@ async function openAtomize(postId){
 function chooseMedia(){ return new Promise(async resolve=>{
   let media=[]; try{ media=await api('/media'); }catch(e){ flash('Не вдалося завантажити бібліотеку'); resolve(undefined); return; }
   const imgs=media.filter(m=>m.kind==='image');
-  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='96'; // понад фото-редактором (90) і композером (80)
   const grid=imgs.length?imgs.map(m=>'<img loading="lazy" src="/thumb/'+esc(m.filename)+'" data-id="'+m.id+'" data-fn="'+esc(m.filename)+'" onerror="this.style.opacity=.3" style="height:84px;border-radius:8px;cursor:pointer;background:var(--surface2)">').join(''):'<div class="empty">Бібліотека порожня - завантаж фото у «Джерела».</div>';
   ov.innerHTML='<div class="modal-card" style="max-width:620px;padding:20px"><b>Обери фото</b><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">'+grid+'</div><div class="btnrow"><button class="ghost" id="cmClose">Скасувати</button><button id="cmDetach">Без фото</button></div></div>';
   document.body.appendChild(ov); const close=()=>ov.remove();
@@ -1632,29 +1609,87 @@ async function openComposer(postId, opts){
   ov.querySelector('#cmpNow').onclick=async(e)=>{ const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('усі обрані канали вже опубліковано','var(--danger)'); return; } const b=e.target; b.disabled=true; setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const r=await api('/posts/'+postId+'/publish-all',{method:'POST'}); const res=r.results||[]; const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); ok.forEach(k=>sentSet.add(k)); renderChips(); renderPrev(); setMsg((ok.length?'✓ '+ok.join(', '):'')+(err.length?' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; '):''), err.length?'var(--danger)':'var(--brand)'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ setMsg('вкажи дату й час','var(--danger)'); return; } const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('немає каналів для планування (усі вже опубліковано)','var(--danger)'); return; } const b=e.target; b.disabled=true; setMsg('🗓 зберігаю…'); const at=zonedToUTCISO(d,t); try{ await saveDraft(); if(opts.slotId){ await api('/schedule/'+opts.slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:at})}); } else { await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:at})}); } setMsg('заплановано ✓ ('+todo.join(', ')+')','var(--brand)'); try{await loadPublish();}catch(_){} try{await loadStudioPosts();}catch(_){} setTimeout(close,1000); }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); b.disabled=false; } };
 }
-// підбір/генерація фото для композера: галерея · завантаження · AI (промт + пропорції 1:1/4:5/16:9)
-function openPhotoTool(postId, initPrompt, onDone){
-  let aspect='1:1'; let overlayOn=false;
+// двокроковий редактор фото поста: крок 1 - джерело (галерея/завантаження/генерація) + формат (кроп),
+// крок 2 - текст на фото (шрифт/місце/фон, безкоштовне перенакладання) + перегенерація з коментарем
+async function openPhotoTool(postId, initPrompt, onDone){
+  let full={}; try{ full=await api('/posts/'+postId+'/full'); }catch(e){}
+  let aspect='1:1', fn=full.media_filename||null, hasBase=!!full.has_base, headline=full.headline||'';
+  let lastPrompt=(initPrompt||full.image_prompt||'').trim();
+  let canRegen=!!(fn&&hasBase&&lastPrompt); // «перегенерувати» має сенс лише коли є промт
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='90';
-  ov.innerHTML='<div class="modal-card" style="max-width:520px;padding:20px">'
-    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><b style="font-size:16px">⚡ AI фото</b><button class="icon" id="ptX" style="margin-left:auto">✕</button></div>'
-    +'<div class="btnrow" style="margin-bottom:12px"><button class="ghost" id="ptGallery">📎 З галереї</button><button class="ghost" id="ptUpload">⬆ Завантажити</button><input type="file" id="ptFile" accept="image/*" style="display:none"></div>'
-    +'<label class="fl">Опис зображення (промт)</label><textarea id="ptPrompt" class="txt" rows="3" placeholder="Що на зображенні…">'+esc(initPrompt||'')+'</textarea>'
-    +'<div style="font-size:12px;color:var(--muted);margin:12px 0 6px">Пропорції</div><div style="display:flex;gap:6px" id="ptAsp">'+[['1:1','1:1 квадрат'],['4:5','4:5 вертикаль'],['16:9','16:9 горизонталь']].map(a=>'<button class="aspchip'+(a[0]==='1:1'?' on':'')+'" data-a="'+a[0]+'">'+a[1]+'</button>').join('')+'</div>'
-    +'<label class="rchip" style="margin-top:12px;display:inline-flex"><input type="checkbox" id="ptOv"> Заголовок на фото</label>'
-    +'<input class="txt" id="ptHead" placeholder="Короткий заголовок" style="margin-top:8px;display:none">'
-    +'<div id="ptMsg" style="font-size:12px;color:var(--muted);margin-top:8px"></div>'
-    +'<div class="btnrow" style="margin-top:14px"><button class="primary" id="ptGen">🎨 Згенерувати (коштує)</button></div>'
-    +'<div class="hint" style="margin-top:8px">Генерація малює нову картинку. «З галереї» / «Завантажити» - без витрат.</div></div>';
+  ov.innerHTML='<div class="modal-card" style="max-width:560px;padding:20px" id="ptCard"></div>';
   document.body.appendChild(ov); const close=()=>ov.remove();
-  ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#ptX').onclick=close;
-  const msg=ov.querySelector('#ptMsg');
-  ov.querySelectorAll('#ptAsp .aspchip').forEach(c=>c.onclick=()=>{ aspect=c.dataset.a; ov.querySelectorAll('#ptAsp .aspchip').forEach(x=>x.classList.toggle('on',x===c)); });
-  ov.querySelector('#ptOv').onchange=(e)=>{ overlayOn=e.target.checked; ov.querySelector('#ptHead').style.display=overlayOn?'block':'none'; };
-  ov.querySelector('#ptGallery').onclick=async()=>{ const sel=await chooseMedia(); if(sel===undefined) return; try{ await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:sel.id})}); if(onDone)onDone(sel.filename); close(); }catch(e){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+e.message; } };
-  ov.querySelector('#ptUpload').onclick=()=>ov.querySelector('#ptFile').click();
-  ov.querySelector('#ptFile').onchange=async(e)=>{ const file=e.target.files&&e.target.files[0]; if(!file) return; msg.style.color='var(--muted)'; msg.textContent='завантаження…'; try{ const fd=new FormData(); fd.append('file',file); const r=await fetch('/api/media',{method:'POST',body:fd,credentials:'same-origin'}); const j=await r.json(); if(!r.ok||j.error) throw new Error(j.error||('HTTP '+r.status)); const up=(j.saved||[])[0]; if(!up) throw new Error('файл не збережено'); await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:up.id})}); if(onDone)onDone(up.url.replace('/media/','')); close(); }catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; } };
-  ov.querySelector('#ptGen').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='малюю зображення… (10-30с)'; aiBusy('🎨 Малюю зображення… (10-30с)'); try{ const body={prompt:ov.querySelector('#ptPrompt').value,aspect}; if(overlayOn) body.headline=ov.querySelector('#ptHead').value; const r=await api('/posts/'+postId+'/image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(onDone)onDone(r.filename); close(); }catch(err){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+err.message; b.disabled=false; }finally{ aiDone(); } };
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
+  const card=ov.querySelector('#ptCard');
+  const header=(t)=>'<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><b style="font-size:16px">'+t+'</b><button class="icon" id="ptX" style="margin-left:auto">✕</button></div>';
+  const prevHtml=()=>fn?'<img src="/media/'+esc(fn)+'" style="width:100%;max-height:320px;object-fit:contain;border-radius:10px;border:1px solid var(--line);background:var(--surface2)">':'';
+
+  function step1(){
+    card.innerHTML=header('🖼 Фото · крок 1: джерело')
+      +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Формат</div><div style="display:flex;gap:6px" id="ptAsp">'+[['1:1','1:1 квадрат'],['4:5','4:5 вертикаль'],['16:9','16:9 горизонт']].map(a=>'<button class="aspchip'+(a[0]===aspect?' on':'')+'" data-a="'+a[0]+'">'+a[1]+'</button>').join('')+'</div>'
+      +'<div style="display:flex;gap:8px;margin-top:14px"><button class="ghost" id="ptGallery" style="flex:1">📎 З галереї</button><button class="ghost" id="ptUpload" style="flex:1">⬆ Завантажити</button><button class="primary" id="ptGenBtn" style="flex:1">🎨 Згенерувати</button></div>'
+      +'<input type="file" id="ptFile" accept="image/*" style="display:none">'
+      +'<div id="ptGenBox" style="display:none;margin-top:12px"><label class="fl">Опис зображення (промт)</label><textarea id="ptPrompt" class="txt" rows="3" placeholder="Що на зображенні…">'+esc(lastPrompt)+'</textarea><div class="btnrow" style="margin-top:10px"><button class="primary" id="ptGen">🎨 Малювати (коштує)</button></div></div>'
+      +(fn?'<div class="btnrow" style="margin-top:12px"><button class="ghost" id="ptToText">✍ Поточне фото → додати текст</button></div>':'')
+      +'<div id="ptMsg" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px"></div>'
+      +'<div class="hint" style="margin-top:6px">Фото з галереї чи з комп\'ютера буде обітнуто під обраний формат. Генерація малює нову картинку (коштує).</div>';
+    card.querySelector('#ptX').onclick=close;
+    const msg=card.querySelector('#ptMsg');
+    const err=(e)=>{ msg.style.color='var(--danger)'; msg.textContent='⚠ '+e.message; };
+    card.querySelectorAll('#ptAsp .aspchip').forEach(c=>c.onclick=()=>{ aspect=c.dataset.a; card.querySelectorAll('#ptAsp .aspchip').forEach(x=>x.classList.toggle('on',x===c)); });
+    card.querySelector('#ptGallery').onclick=async()=>{ const sel=await chooseMedia(); if(!sel||!sel.id){ if(sel&&sel.id===null){ try{ await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:null})}); fn=null; hasBase=false; if(onDone)onDone(null); close(); }catch(e){ err(e); } } return; }
+      msg.style.color='var(--muted)'; msg.textContent='обтинаю під '+aspect+'…';
+      try{ const r=await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:sel.id,aspect})}); fn=r.filename||sel.filename; hasBase=true; canRegen=false; headline=''; if(onDone)onDone(fn); step2(); }catch(e){ err(e); } };
+    card.querySelector('#ptUpload').onclick=()=>card.querySelector('#ptFile').click();
+    card.querySelector('#ptFile').onchange=async(e)=>{ const file=e.target.files&&e.target.files[0]; if(!file) return; msg.style.color='var(--muted)'; msg.textContent='завантаження + обтинання…';
+      try{ const fd=new FormData(); fd.append('file',file); const r=await fetch('/api/media',{method:'POST',body:fd,credentials:'same-origin'}); const j=await r.json(); if(!r.ok||j.error) throw new Error(j.error||('HTTP '+r.status)); const up=(j.saved||[])[0]; if(!up) throw new Error('файл не збережено');
+        const r2=await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:up.id,aspect})}); fn=r2.filename||up.url.replace('/media/',''); hasBase=true; canRegen=false; headline=''; if(onDone)onDone(fn); step2(); }catch(e2){ err(e2); } };
+    card.querySelector('#ptGenBtn').onclick=()=>{ const b=card.querySelector('#ptGenBox'); b.style.display=b.style.display==='none'?'block':'none'; if(b.style.display==='block') card.querySelector('#ptPrompt').focus(); };
+    card.querySelector('#ptGen').onclick=async(e)=>{ const b=e.target; b.disabled=true; lastPrompt=card.querySelector('#ptPrompt').value.trim(); msg.style.color='var(--muted)'; msg.textContent='малюю зображення… (10-30с)'; aiBusy('🎨 Малюю зображення… (10-30с)');
+      try{ const r=await api('/posts/'+postId+'/image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:lastPrompt,aspect})}); fn=r.filename; hasBase=true; canRegen=true; headline=''; if(onDone)onDone(fn); step2(); }catch(e2){ err(e2); b.disabled=false; } finally{ aiDone(); } };
+    const tt=card.querySelector('#ptToText'); if(tt) tt.onclick=()=>step2();
+  }
+
+  function step2(){
+    const firstLine=(full.content||'').split('\n').map(s=>s.trim()).find(Boolean)||'';
+    card.innerHTML=header('🖼 Фото · крок 2: текст')
+      +'<div id="ptPrev">'+prevHtml()+'</div>'
+      +(canRegen?'<div style="display:flex;gap:8px;margin-top:10px"><input class="txt" id="ptRegenNote" placeholder="Що змінити? (напр.: світліше, без людей)" style="flex:1"><button class="ghost" id="ptRegen">🔁 Перегенерувати</button></div>':'')
+      +'<label class="fl" style="margin-top:12px">Текст на фото</label>'
+      +'<div style="display:flex;gap:8px"><input class="txt" id="ptHead" placeholder="Короткий заголовок" value="'+esc(headline||firstLine.slice(0,48))+'" style="flex:1"><button class="ghost" id="ptSuggest" title="Заголовок, що ДОПОВНЮЄ пост, а не повторює його">✨ Підказати</button></div>'
+      +'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">'
+        +'<label style="font-size:12px;color:var(--muted)">Шрифт<br><select id="ptFont" class="txt" style="width:auto;padding:6px 9px;margin-top:2px">'+[['sans','Звичайний'],['serif','Із засічками'],['mono','Моно']].map(o=>'<option value="'+o[0]+'">'+o[1]+'</option>').join('')+'</select></label>'
+        +'<label style="font-size:12px;color:var(--muted)">Місце<br><select id="ptPos" class="txt" style="width:auto;padding:6px 9px;margin-top:2px">'+[['bottom','Внизу'],['center','По центру'],['top','Вгорі']].map(o=>'<option value="'+o[0]+'">'+o[1]+'</option>').join('')+'</select></label>'
+        +'<label style="font-size:12px;color:var(--muted)">Фон за текстом<br><select id="ptBg" class="txt" style="width:auto;padding:6px 9px;margin-top:2px">'+[['gradient','Затемнення'],['plate','Плашка'],['none','Без фону']].map(o=>'<option value="'+o[0]+'">'+o[1]+'</option>').join('')+'</select></label>'
+      +'</div>'
+      +'<div id="ptMsg2" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px"></div>'
+      +'<div class="btnrow" style="margin-top:12px;flex-wrap:wrap"><button class="ghost" id="ptBack">← Інше фото</button><button id="ptApply">✍ Накласти текст</button><button class="ghost" id="ptClear"'+(headline?'':' style="display:none"')+'>Прибрати текст</button><button class="primary" id="ptDone">Готово</button></div>'
+      +'<div class="hint" style="margin-top:6px">Текст накладається без нової генерації - безкоштовно, пробуй стилі скільки завгодно.</div>';
+    card.querySelector('#ptX').onclick=close;
+    const msg=card.querySelector('#ptMsg2');
+    const setPrev=()=>{ card.querySelector('#ptPrev').innerHTML=prevHtml(); };
+    const err=(e)=>{ msg.style.color='var(--danger)'; msg.textContent='⚠ '+e.message; };
+    card.querySelector('#ptBack').onclick=()=>step1();
+    card.querySelector('#ptDone').onclick=()=>{ if(onDone)onDone(fn); close(); };
+    card.querySelector('#ptSuggest').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='✨ добираю заголовок…';
+      try{ const r=await api('/posts/'+postId+'/headline',{method:'POST'}); if(r.headline){ card.querySelector('#ptHead').value=r.headline; msg.style.color='var(--brand)'; msg.textContent='заголовок доповнює пост, не дублює ✓'; } else msg.textContent=''; }
+      catch(e2){ err(e2); } finally{ b.disabled=false; } };
+    card.querySelector('#ptApply').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='накладаю текст…'; aiBusy('✍ Накладаю текст на фото…');
+      try{ const body={headline:card.querySelector('#ptHead').value,overlay:true,position:card.querySelector('#ptPos').value,font:card.querySelector('#ptFont').value,bg:card.querySelector('#ptBg').value};
+        const r=await api('/posts/'+postId+'/image-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        fn=r.filename; headline=body.headline; setPrev(); card.querySelector('#ptClear').style.display=''; if(onDone)onDone(fn); msg.style.color='var(--brand)'; msg.textContent='готово ✓'; }
+      catch(e2){ err(e2); } finally{ b.disabled=false; aiDone(); } };
+    card.querySelector('#ptClear').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='прибираю текст…';
+      try{ const r=await api('/posts/'+postId+'/image-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headline:'',overlay:false})}); fn=r.filename; headline=''; setPrev(); b.style.display='none'; if(onDone)onDone(fn); msg.style.color='var(--brand)'; msg.textContent='текст прибрано ✓'; }
+      catch(e2){ err(e2); } finally{ b.disabled=false; } };
+    const rg=card.querySelector('#ptRegen'); if(rg) rg.onclick=async(e)=>{ const b=e.target; b.disabled=true; const note=(card.querySelector('#ptRegenNote').value||'').trim();
+      msg.style.color='var(--muted)'; msg.textContent='перемальовую… (10-30с)'; aiBusy('🔁 Перемальовую зображення… (10-30с)');
+      try{ const p=lastPrompt+(note?('. Зміни: '+note):''); const r=await api('/posts/'+postId+'/image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:p,aspect})});
+        fn=r.filename; lastPrompt=p; headline=''; setPrev(); card.querySelector('#ptClear').style.display='none'; if(onDone)onDone(fn); msg.style.color='var(--brand)'; msg.textContent='готово ✓ (текст наклади заново)'; card.querySelector('#ptRegenNote').value=''; }
+      catch(e2){ err(e2); } finally{ b.disabled=false; aiDone(); } };
+  }
+
+  if(fn&&hasBase) step2(); else step1();
 }
 function openDayScheduler(iso){
   const posts=(Pub&&Pub.bank)?Pub.bank:[];

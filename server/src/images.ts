@@ -101,10 +101,20 @@ function deriveHeadline(content: string): string {
   if (h.length > 48) h = h.slice(0, 46).trim() + "…";
   return h;
 }
-async function overlayHeadline(buf: Buffer, headline: string): Promise<{ buffer: Buffer; mime: string }> {
+// стилі накладання тексту (міні-редактор «як в Instagram»): місце, шрифт, фон за текстом
+export type OverlayStyle = { position?: "top" | "center" | "bottom"; font?: "sans" | "serif" | "mono"; bg?: "gradient" | "plate" | "none" };
+const OVERLAY_FONTS: Record<string, string> = {
+  sans: "'DejaVu Sans','Segoe UI',Arial,sans-serif",
+  serif: "'DejaVu Serif',Georgia,serif",
+  mono: "'DejaVu Sans Mono','Courier New',monospace",
+};
+async function overlayHeadline(buf: Buffer, headline: string, style?: OverlayStyle): Promise<{ buffer: Buffer; mime: string }> {
   // беремо реальні розміри зображення (щоб не кропити 4:5 / 16:9 до квадрата)
   let W = 1024, H = 1024;
   try { const meta = await sharp(buf).metadata(); if (meta.width && meta.height) { W = meta.width; H = meta.height; } } catch { /* дефолт 1024² */ }
+  const pos = style?.position === "top" || style?.position === "center" ? style.position : "bottom";
+  const fontFam = OVERLAY_FONTS[style?.font || "sans"] || OVERLAY_FONTS.sans;
+  const bg = style?.bg === "plate" || style?.bg === "none" ? style.bg : "gradient";
   const base = sharp(buf);
   const scale = W / 1024; // масштабуємо типографіку відносно ширини
   const words = headline.split(/\s+/); const lines: string[] = []; let cur = "";
@@ -112,7 +122,30 @@ async function overlayHeadline(buf: Buffer, headline: string): Promise<{ buffer:
   for (const w of words) { if ((cur + " " + w).trim().length > maxChars) { if (cur) lines.push(cur.trim()); cur = w; } else cur = (cur + " " + w).trim(); }
   if (cur) lines.push(cur);
   const fs = Math.round(66 * scale), lh = Math.round(80 * scale), pad = Math.round(56 * scale); const blockH = lines.length * lh + pad;
-  const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.78"/></linearGradient></defs><rect x="0" y="${H - blockH - 40}" width="${W}" height="${blockH + 40}" fill="url(#g)"/>${lines.map((ln, i) => `<text x="${pad}" y="${H - pad - (lines.length - 1 - i) * lh}" font-family="'Segoe UI',Arial,sans-serif" font-size="${fs}" font-weight="800" fill="#fff">${escXml(ln)}</text>`).join("")}</svg>`;
+  // базова лінія КОЖНОГО рядка залежно від позиції блоку
+  const yOf = (i: number): number => {
+    if (pos === "top") return pad + fs + i * lh;
+    if (pos === "center") return Math.round((H - lines.length * lh) / 2) + fs + i * lh;
+    return H - pad - (lines.length - 1 - i) * lh; // bottom
+  };
+  // фон за текстом
+  let bgSvg = "";
+  if (bg === "gradient") {
+    // затемнення від краю; для «по центру» градієнт не має сенсу - малюємо м'яку плашку на всю ширину
+    if (pos === "bottom") bgSvg = `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.78"/></linearGradient></defs><rect x="0" y="${H - blockH - 40}" width="${W}" height="${blockH + 40}" fill="url(#g)"/>`;
+    else if (pos === "top") bgSvg = `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0.78"/><stop offset="1" stop-color="#000" stop-opacity="0"/></linearGradient></defs><rect x="0" y="0" width="${W}" height="${blockH + 40}" fill="url(#g)"/>`;
+    else bgSvg = `<rect x="0" y="${yOf(0) - fs - Math.round(20 * scale)}" width="${W}" height="${lines.length * lh + Math.round(40 * scale)}" fill="#000" fill-opacity="0.5"/>`;
+  } else if (bg === "plate") {
+    const chW = fs * (style?.font === "mono" ? 0.62 : 0.58); // приблизна ширина символа для розміру плашки
+    const maxLn = Math.max(...lines.map((l) => l.length), 1);
+    const plW = Math.min(W - pad, Math.round(maxLn * chW) + Math.round(48 * scale));
+    bgSvg = `<rect x="${pad - Math.round(24 * scale)}" y="${yOf(0) - fs - Math.round(16 * scale)}" width="${plW}" height="${lines.length * lh + Math.round(30 * scale)}" rx="${Math.round(18 * scale)}" fill="#000" fill-opacity="0.55"/>`;
+  }
+  // «без фону» = тінь під текстом, щоб лишався читабельним на світлому фото
+  const shadow = bg === "none"
+    ? lines.map((ln, i) => `<text x="${pad + Math.round(3 * scale)}" y="${yOf(i) + Math.round(3 * scale)}" font-family="${fontFam}" font-size="${fs}" font-weight="800" fill="#000" fill-opacity="0.6">${escXml(ln)}</text>`).join("")
+    : "";
+  const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${bgSvg}${shadow}${lines.map((ln, i) => `<text x="${pad}" y="${yOf(i)}" font-family="${fontFam}" font-size="${fs}" font-weight="800" fill="#fff">${escXml(ln)}</text>`).join("")}</svg>`;
   const out = await base.composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).jpeg({ quality: 88 }).toBuffer();
   return { buffer: out, mime: "image/jpeg" };
 }
@@ -143,17 +176,33 @@ export async function generateImageForPost(ws: string, postId: string, opts?: { 
 }
 
 // перенакласти текст на ВЖЕ згенероване базове зображення (дешево, без нової генерації)
-export async function overlayForPost(ws: string, postId: string, headline: string, overlayOn: boolean): Promise<string> {
+export async function overlayForPost(ws: string, postId: string, headline: string, overlayOn: boolean, style?: OverlayStyle): Promise<string> {
   const post = await one<{ image_base: string | null }>(
     `select p.image_base from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
-  if (!post?.image_base) throw new Error("Спершу згенеруй зображення");
+  if (!post?.image_base) throw new Error("Спершу додай або згенеруй зображення");
   const baseBuf = await readFile(join(MEDIA_DIR, post.image_base));
   const hl = (headline || "").trim();
   let buf: Buffer, mime = "image/jpeg";
-  if (overlayOn && hl) { const r = await overlayHeadline(baseBuf, hl); buf = r.buffer; mime = r.mime; }
+  if (overlayOn && hl) { const r = await overlayHeadline(baseBuf, hl, style); buf = r.buffer; mime = r.mime; }
   else { buf = await sharp(baseBuf).jpeg({ quality: 88 }).toBuffer(); }
   const saved = await saveMedia(ws, { buffer: buf, mime, name: "ai.jpg", source: "ai" });
   await q(`update post set media_id=$2, headline=$3 where id=$1`, [postId, saved.id, overlayOn ? (hl || null) : null]);
   return saved.filename;
+}
+
+// прикріпити фото з галереї/завантаження, ОБІТНУВШИ під обраний формат (центр-кроп зі smart-фокусом).
+// Обітнута копія стає й image_base поста — тож накладання тексту працює і для НЕ-AI фото.
+export async function attachCroppedImage(ws: string, postId: string, mediaId: string, aspect?: Aspect | string): Promise<{ id: string; filename: string }> {
+  const m = await one<{ filename: string; kind: string }>(`select filename, kind from media_asset where id=$1 and workspace_id=$2`, [mediaId, ws]);
+  if (!m) throw new Error("медіа не знайдено");
+  if (m.kind !== "image") throw new Error("це не зображення");
+  const a = normAspect(aspect);
+  const { w, h } = ASPECT_DIM[a];
+  const buf = await readFile(join(MEDIA_DIR, m.filename));
+  // rotate() шанує EXIF-орієнтацію фото з телефона; attention = кроп навколо найцікавішої зони
+  const out = await sharp(buf).rotate().resize(w, h, { fit: "cover", position: "attention" }).jpeg({ quality: 90 }).toBuffer();
+  const saved = await saveMedia(ws, { buffer: out, mime: "image/jpeg", name: "crop.jpg", source: "crop" });
+  await q(`update post set media_id=$2, image_base=$3, headline=null where id=$1`, [postId, saved.id, saved.filename]);
+  return { id: saved.id, filename: saved.filename };
 }

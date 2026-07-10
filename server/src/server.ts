@@ -29,7 +29,7 @@ import * as gdrive from "./gdrive.js";
 import { publishPostToChannels, alreadySentNetworks } from "./publisher.js";
 import { startLifecycleWorker } from "./lifecycle.js";
 import { startDigest } from "./digest.js";
-import { generateImageForPost, imageProviders, overlayForPost } from "./images.js";
+import { generateImageForPost, imageProviders, overlayForPost, attachCroppedImage } from "./images.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername } from "./tgbot.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -501,11 +501,15 @@ app.delete("/api/media/:id", async (req: any, reply) => {
   return { ok: true };
 });
 
-// прикріпити/відкріпити медіа до поста
+// прикріпити/відкріпити медіа до поста; з aspect — обітнути під формат (кроп-копія стає image_base)
 app.post("/api/posts/:postId/media", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
   const mediaId = req.body?.mediaId || null;
+  if (mediaId && req.body?.aspect) {
+    try { const r = await attachCroppedImage(ws, req.params.postId, mediaId, req.body.aspect); return { ok: true, filename: r.filename }; }
+    catch (e: any) { return reply.code(400).send({ error: e.message }); }
+  }
   if (mediaId && !(await one(`select id from media_asset where id=$1 and workspace_id=$2`, [mediaId, ws])))
     return reply.code(404).send({ error: "медіа не знайдено" });
   await q(`update post set media_id=$2 where id=$1`, [req.params.postId, mediaId]);
@@ -923,7 +927,7 @@ app.post("/api/posts/:postId/image", async (req: any, reply) => {
 app.post("/api/posts/:postId/image-text", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
-  try { const filename = await overlayForPost(ws, req.params.postId, String(req.body?.headline ?? ""), req.body?.overlay !== false); return { ok: true, filename }; }
+  try { const filename = await overlayForPost(ws, req.params.postId, String(req.body?.headline ?? ""), req.body?.overlay !== false, { position: req.body?.position, font: req.body?.font, bg: req.body?.bg }); return { ok: true, filename }; }
   catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
 
