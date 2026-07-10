@@ -52,7 +52,9 @@ jobs:
                 try{
                   const { fetchArticleText, resolveGoogleNewsUrl } = await import("/app/dist/rss.js").catch(()=>import("./dist/rss.js"));
                   const real=await resolveGoogleNewsUrl(rr.preview[0].link);
-                  console.log("GNEWS_DECODE:", real?("OK "+real.slice(0,80)):"FAIL(consent/формат)");
+                  console.log("GNEWS_DECODE:", real?("OK "+real.slice(0,120)):"FAIL(consent/формат)");
+                  if(real){ const pr=await fetch(real,{headers:{"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0","Accept":"text/html"},redirect:"follow"}).catch(e=>({status:"ERR "+e.message}));
+                    const ph=pr.text?await pr.text():""; console.log("PUBLISHER_FETCH:", pr.status, (ph||"").length+" bytes", "p-tags:", ((ph||"").match(/<p[\s>]/gi)||[]).length); }
                   const t=await fetchArticleText(rr.preview[0].link);
                   console.log("ARTICLE_TEXT:", t.length+" chars", t.length>200?"OK":"THIN(фолбек=заголовок)", JSON.stringify(t.slice(0,90)));
                 }catch(e){ console.log("ARTICLE_TEXT: ERR", e.message); }
