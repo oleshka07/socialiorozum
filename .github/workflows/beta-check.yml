@@ -1,0 +1,46 @@
+name: beta-check
+
+# Разовий smoke-check бета-стека (запуск: push у гілку beta-check).
+# Перевіряє БЕЗ виводу секретів: наявність ключів у контейнері (лише довжини),
+# ffmpeg+шрифти в образі, живий виклик Azure TTS (укр.) і Pexels.
+
+on:
+  push:
+    branches: [beta-check]
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Smoke-check BETA stack
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          command_timeout: 5m
+          script: |
+            set -e
+            cd "${{ secrets.APP_DIR }}-beta/server"
+            echo "== образ: ffmpeg + шрифти =="
+            docker compose exec -T app ffmpeg -version 2>/dev/null | head -1 || echo "FFMPEG MISSING ❌ (образ ще старий? перезапусти deploy-beta)"
+            echo "dejavu fonts: $(docker compose exec -T app fc-list 2>/dev/null | grep -ci dejavu || echo 0)"
+            echo "== ключі та живі виклики =="
+            docker compose exec -T app node - <<'NODE'
+            const k=process.env.AZURE_SPEECH_KEY, r=process.env.AZURE_SPEECH_REGION||"westeurope", p=process.env.PEXELS_API_KEY;
+            console.log("AZURE key len:", (k||"").length, "| region:", r, "| PEXELS key len:", (p||"").length);
+            const ssml="<speak version='1.0' xml:lang='uk-UA'><voice name='uk-UA-PolinaNeural'>Привіт! Це перевірка українського голосу.</voice></speak>";
+            (async()=>{
+              if(k){ try{
+                const res=await fetch(`https://${r}.tts.speech.microsoft.com/cognitiveservices/v1`,{method:"POST",headers:{"Ocp-Apim-Subscription-Key":k,"Content-Type":"application/ssml+xml","X-Microsoft-OutputFormat":"audio-24khz-96kbitrate-mono-mp3","User-Agent":"socialio-check"},body:ssml});
+                const b=Buffer.from(await res.arrayBuffer());
+                console.log("AZURE_TTS:", res.status, b.length+" bytes", (res.status===200&&b.length>1000)?"OK":"FAIL "+b.toString().slice(0,150));
+              }catch(e){ console.log("AZURE_TTS: ERR", e.message); } } else console.log("AZURE_TTS: KEY MISSING");
+              if(p){ try{
+                const res=await fetch("https://api.pexels.com/videos/search?query=city&orientation=portrait&per_page=1",{headers:{Authorization:p}});
+                const j=await res.json().catch(()=>({}));
+                console.log("PEXELS:", res.status, (j.videos&&j.videos.length)?"OK":"EMPTY/FAIL");
+              }catch(e){ console.log("PEXELS: ERR", e.message); } } else console.log("PEXELS: key not set (фолбек = картинка поста)");
+            })();
+            NODE
