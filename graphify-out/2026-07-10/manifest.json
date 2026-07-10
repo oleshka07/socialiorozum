@@ -35,8 +35,8 @@
     "semantic_hash": ""
   },
   "server/src/env.ts": {
-    "mtime": 1783667154.1797767,
-    "ast_hash": "a9173359a689bf6529e16bd8f8c75ada",
+    "mtime": 1783623687.6592057,
+    "ast_hash": "02589d3db546ae89d6dca96786ecc455",
     "semantic_hash": ""
   },
   "server/src/fireflies.ts": {
@@ -125,8 +125,8 @@
     "semantic_hash": "3e929595c91643444c4c4d540a929c55"
   },
   "server/src/server.ts": {
-    "mtime": 1783667207.323778,
-    "ast_hash": "edf94ab0f6a9829466b4ea3d6ee69bd2",
+    "mtime": 1783634558.0845017,
+    "ast_hash": "ef79bf1ac462e36e3381f9f8a20c8548",
     "semantic_hash": ""
   },
   "server/src/telegram.ts": {
@@ -155,8 +155,8 @@
     "semantic_hash": "352df4b84f4af2922ccd9adaf8e4608f"
   },
   "CLAUDE.md": {
-    "mtime": 1783667504.6637843,
-    "ast_hash": "84e7a740c89aafde4d3fe5752928711d",
+    "mtime": 1783634748.196513,
+    "ast_hash": "78ca829a050dc4a423dd2546b26ccc08",
     "semantic_hash": ""
   },
   "DEPLOY.md": {
@@ -225,8 +225,8 @@
     "semantic_hash": ""
   },
   "server/public/app.html": {
-    "mtime": 1783667270.1397793,
-    "ast_hash": "bfc475f22db14b1b11aecbc792d7d3b7",
+    "mtime": 1783634719.4965115,
+    "ast_hash": "8a1f1c88372acb1f322ee7a74d15fe75",
     "semantic_hash": ""
   },
   "server/public/auth.html": {
@@ -292,11 +292,6 @@
   ".github/workflows/provision-beta.yml": {
     "mtime": 1783624752.503773,
     "ast_hash": "a1a79ad1bf861282b3b6e17e469edf3c",
-    "semantic_hash": ""
-  },
-  "server/src/reelvideo.ts": {
-    "mtime": 1783667141.1517766,
-    "ast_hash": "17a69c94c527bc92039ef625fec95e8a",
     "semantic_hash": ""
   }
 }
