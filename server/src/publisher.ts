@@ -4,6 +4,7 @@ import { env } from "./env.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
 import * as meta from "./meta.js";
+import { adaptForChannels } from "./pipeline.js";
 
 async function thValidToken(ws: string): Promise<{ token: string; userId: string } | null> {
   const c = await one<{ threads_user_id: string | null; access_token: string | null; token_expires_at: string | null }>(
@@ -51,6 +52,18 @@ export async function publishPostToChannels(ws: string, postId: string): Promise
   const ch = post.channels || {};
   const enabled = Object.keys(ch).filter((k) => ch[k] && ch[k].on);
   const sentSet = new Set(await alreadySentNetworks(postId));
+  // «Створи один раз - сервіс сам перепакує»: мережі без власної версії тексту адаптуються
+  // автоматично перед відправкою (один LLM-виклик на всі відсутні; при збої - майстер-текст як раніше).
+  // Покриває і плановий автопостер, і публікацію з бота - не лише кнопку «Підлаштувати» в композері.
+  const missing = enabled.filter((k) => !sentSet.has(k) && !(ch[k] && String(ch[k].text || "").trim()));
+  if (missing.length) {
+    try {
+      const variants = await adaptForChannels(ws, post.content, missing);
+      let changed = false;
+      for (const k of missing) if (variants[k]) { ch[k] = { ...(ch[k] || {}), on: true, text: variants[k] }; changed = true; }
+      if (changed) await q(`update post set channels=$2 where id=$1`, [postId, JSON.stringify(ch)]);
+    } catch { /* адаптація не критична - публікуємо майстер-текстом */ }
+  }
   const textOf = (k: string) => (ch[k] && ch[k].text) || post.content;
   const imageUrl = post.filename ? `${env.appBaseUrl}/media/${post.filename}` : null;
   const results: PubResult[] = [];

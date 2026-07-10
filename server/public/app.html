@@ -208,12 +208,13 @@
   .idea input[type=checkbox]{margin-top:4px;width:16px;height:16px;accent-color:var(--brand)}
   .idea .ang{color:var(--muted);font-size:12px;margin-top:3px}
   /* calendar */
-  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:7px;margin-top:7px}
+  /* minmax(0,1fr): без нього 1fr=minmax(auto,1fr) і чіп з довгим словом РОЗТЯГУЄ свою колонку - календар «з'їжджає» */
+  .cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px;margin-top:7px}
   .dow{text-align:center;font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.04em;padding-bottom:2px}
   .day{min-height:96px;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:7px 8px;display:flex;flex-direction:column;gap:5px}
   .day.over{border-color:var(--brand);background:var(--brand-soft)}
   .day .dn{font-size:12px;font-weight:600;color:var(--faint)}
-  .pchip{background:var(--surface2);border-left:3px solid var(--brand);border-radius:6px;padding:4px 6px;cursor:pointer;font-size:11px}
+  .pchip{background:var(--surface2);border-left:3px solid var(--brand);border-radius:6px;padding:4px 6px;cursor:pointer;font-size:11px;min-width:0;overflow-wrap:anywhere}
   .pchip b{font-size:10.5px;color:var(--muted);font-weight:700}
   /* stat cards / charts */
   .stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
@@ -408,6 +409,7 @@
               <label class="proonly" id="planChannelWrap" style="display:none;font-size:12px;color:var(--muted)">канал <select id="planChannel"><option value="telegram">Telegram</option><option value="instagram">Instagram</option><option value="threads">Threads</option><option value="facebook">Facebook</option></select></label>
               <label style="font-size:12px;color:var(--muted)">днів <input id="planHorizon" class="txt" type="number" value="14" min="7" max="90" style="width:60px;display:inline-block;padding:7px 9px"></label>
               <label id="planPpwWrap" style="font-size:12px;color:var(--muted)">постів/тиждень <input id="planPpw" class="txt" type="number" value="4" min="1" max="14" style="width:54px;display:inline-block;padding:7px 9px"></label>
+              <span id="planEst" style="font-size:12px;font-weight:700;color:var(--brand)"></span>
               <button class="primary" id="planGenBtn">↻ Згенерувати скелет</button>
               <button class="ghost" id="planMatchBtn" title="Підібрати наявні матеріали під теми слотів">🔗 Підібрати матеріали</button>
               <span id="planMsg" style="font-size:12px;color:var(--muted)"></span>
@@ -657,6 +659,12 @@
           <div class="hint" style="margin-bottom:10px">Куди вести людей з постів у кожній мережі: посилання (Telegram/FB), кодове слово в коментар/дірект (Instagram, бо лінки там не клікаються) або конкретна дія. «Підлаштувати під канали» вплітає це в кінець поста. Один заклик = одна дія.</div>
           <div id="ctaRows"></div>
           <div class="btnrow" style="margin-top:10px"><button class="primary" id="ctaSave">💾 Зберегти заклики</button><span id="ctaMsg" style="font-size:12px;color:var(--muted)"></span></div>
+        </div>
+        <div class="panel">
+          <div class="ph" style="margin:0 0 6px">📏 Формат постів у мережах</div>
+          <div class="hint" style="margin-bottom:10px">Як «Підлаштувати під канали» пакує пост для кожної мережі. Напр. Threads → «Короткий»: 50-150 символів, 1-2 речення під тренди. Нотатка - твої правила стилю для цієї мережі.</div>
+          <div id="fmtRows"></div>
+          <div class="btnrow" style="margin-top:10px"><button class="primary" id="fmtSave">💾 Зберегти формати</button><span id="fmtMsg" style="font-size:12px;color:var(--muted)"></span></div>
         </div>
         <div class="panel">
           <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--tg)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M22 4L2 11l6 2 2 6 3-4 5 4 4-15z"></path></svg></span>Telegram</div>
@@ -1106,6 +1114,10 @@ if($('planGenBtn')) $('planGenBtn').onclick=async()=>{
     m.style.color='var(--brand)'; m.textContent='готово ✓ '+r.slots+' слотів'+(r.matched?(' · '+r.matched+' метчів'):''); await loadPlan(); }
   catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } finally{ aiDone(); }
 };
+// живий підрахунок «скільки постів вийде» з днів × постів/тиждень (та сама формула, що на сервері)
+function updPlanEst(){ const el=$('planEst'); if(!el) return; const h=+$('planHorizon').value||14, p=+$('planPpw').value||4;
+  el.textContent='≈ '+Math.max(1,Math.min(120,Math.round(h/7*p)))+' постів'; }
+if($('planHorizon')){ $('planHorizon').addEventListener('input',updPlanEst); $('planPpw').addEventListener('input',updPlanEst); updPlanEst(); }
 if($('planMatchBtn')) $('planMatchBtn').onclick=async()=>{
   const m=$('planMsg'); m.style.color='var(--muted)'; m.textContent='шукаю матеріали під слоти…'; aiBusy('🔗 Підбираю наявні матеріали під теми плану…');
   try{ const r=await api('/plan/match',{method:'POST'}); m.style.color='var(--brand)'; m.textContent=r.matched?('підібрано матеріалів: '+r.matched+' ✓'):'нових метчів нема (додай матеріали в «Матеріали»)'; await loadPlan(); }
@@ -1247,10 +1259,24 @@ function renderCta(){ const box=$('ctaRows'); if(!box) return;
 if($('ctaSave')) $('ctaSave').onclick=async()=>{ const cfg={};
   document.querySelectorAll('.ctaVal').forEach(i=>{ const k=i.dataset.net,v=i.value.trim(); if(v){ const t=document.querySelector('.ctaType[data-net="'+k+'"]'); cfg[k]={type:(t&&t.value)||'link',value:v}; } });
   CtaCfg=cfg; await saveSetting('cta_config',JSON.stringify(cfg)); const m=$('ctaMsg'); if(m){ m.style.color='var(--brand)'; m.textContent='збережено ✓'; setTimeout(()=>m.textContent='',2000); } };
+// 📏 формат постів під мережу (channel_format): довжина + нотатка стилю → adaptForChannels
+let FmtCfg={};
+const FMT_LENS=[['','Стандарт (плейбук мережі)'],['short','Короткий (50-150 симв, 1-2 речення)'],['long','Довгий (ближче до ліміту)']];
+function renderFmt(){ const box=$('fmtRows'); if(!box) return;
+  box.innerHTML=NETS.map(n=>{ const k=n[0],c=FmtCfg[k]||{};
+    return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap"><span style="min-width:88px;font-size:13px;font-weight:600">'+n[1]+'</span>'
+      +'<select class="txt fmtLen" data-net="'+k+'" style="width:auto;padding:7px 9px;display:inline-block">'+FMT_LENS.map(t=>'<option value="'+t[0]+'"'+((c.len||'')===t[0]?' selected':'')+'>'+t[1]+'</option>').join('')+'</select>'
+      +'<input class="txt fmtNote" data-net="'+k+'" placeholder="стиль для цієї мережі (напр.: одне речення, під тренд, питання в кінці)" value="'+esc(c.note||'')+'" style="flex:1;min-width:180px;display:inline-block;padding:7px 9px">'
+      +'</div>'; }).join(''); }
+if($('fmtSave')) $('fmtSave').onclick=async()=>{ const cfg={};
+  document.querySelectorAll('.fmtLen').forEach(s=>{ const k=s.dataset.net; const noteEl=document.querySelector('.fmtNote[data-net="'+k+'"]'); const note=(noteEl&&noteEl.value.trim())||'';
+    if(s.value||note) cfg[k]={len:s.value||'',note}; });
+  FmtCfg=cfg; await saveSetting('channel_format',JSON.stringify(cfg)); const m=$('fmtMsg'); if(m){ m.style.color='var(--brand)'; m.textContent='збережено ✓'; setTimeout(()=>m.textContent='',2000); } };
 async function loadGoalCta(){ try{ const st=await api('/settings');
     const g=st.find(r=>r.key==='primary_goal'); CurGoal=(g&&g.content)||'';
     const c=st.find(r=>r.key==='cta_config'); try{ CtaCfg=JSON.parse((c&&c.content)||'{}')||{}; }catch(e){ CtaCfg={}; }
-  }catch(e){} renderGoal(); renderCta(); }
+    const f=st.find(r=>r.key==='channel_format'); try{ FmtCfg=JSON.parse((f&&f.content)||'{}')||{}; }catch(e){ FmtCfg={}; }
+  }catch(e){} renderGoal(); renderCta(); renderFmt(); }
 // 🧲 лід-магніти («Магніт»): конкретика з досвіду + кодове слово → CTA Instagram
 function renderMagnets(list){ const box=$('lmList'); if(!box) return;
   if(!list||!list.length){ box.innerHTML='<div class="empty">Натисни «Запропонувати» - AI складе 3 конкретні магніти з твого досвіду.</div>'; return; }
@@ -1606,7 +1632,16 @@ async function openComposer(postId, opts){
   const saveDraft=async()=>{ await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master,rubric})}); await api('/posts/'+postId+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:C})}); };
   ov.querySelector('#cmpSave').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('💾 зберігаю…'); try{ await saveDraft(); setMsg('чернетку збережено ✓','var(--brand)'); try{await loadStudioPosts();}catch(_){} }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; } };
   ov.querySelector('#cmpAdapt').onclick=async(e)=>{ const sel=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!sel.length){ setMsg('немає каналів для адаптації','var(--danger)'); return; } const b=e.target; b.disabled=true; setMsg('✨ AI підлаштовує під канали…'); aiBusy('✨ Підлаштовую під канали (з чернетки)…'); try{ await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master})}); const r=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:sel})}); Object.keys(r.channels||{}).forEach(k=>{ if(!sentSet.has(k)) C[k]=r.channels[k]; }); renderPrev(); setMsg('готово ✓ кожна мережа у своєму форматі','var(--brand)'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
-  ov.querySelector('#cmpNow').onclick=async(e)=>{ const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('усі обрані канали вже опубліковано','var(--danger)'); return; } const b=e.target; b.disabled=true; setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const r=await api('/posts/'+postId+'/publish-all',{method:'POST'}); const res=r.results||[]; const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); ok.forEach(k=>sentSet.add(k)); renderChips(); renderPrev(); setMsg((ok.length?'✓ '+ok.join(', '):'')+(err.length?' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; '):''), err.length?'var(--danger)':'var(--brand)'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
+  ov.querySelector('#cmpNow').onclick=async(e)=>{ const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('усі обрані канали вже опубліковано','var(--danger)'); return; } const b=e.target; b.disabled=true;
+    try{
+      // авто-перепаковка: мережі без власної версії адаптуються перед публікацією (щоб прев'ю = те, що вийде)
+      const missing=todo.filter(k=>!(C[k]&&typeof C[k].text==='string'&&C[k].text.trim()));
+      if(missing.length){ setMsg('✨ пакую під канали…'); aiBusy('✨ Пакую пост під кожну мережу…');
+        await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master})});
+        const ra=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:missing})});
+        Object.keys(ra.channels||{}).forEach(k=>{ if(!sentSet.has(k)) C[k]=ra.channels[k]; }); renderPrev(); }
+    }catch(_){ /* адаптація не критична - публікуємо майстер-текстом */ }
+    setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const r=await api('/posts/'+postId+'/publish-all',{method:'POST'}); const res=r.results||[]; const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); ok.forEach(k=>sentSet.add(k)); renderChips(); renderPrev(); setMsg((ok.length?'✓ '+ok.join(', '):'')+(err.length?' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; '):''), err.length?'var(--danger)':'var(--brand)'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ setMsg('вкажи дату й час','var(--danger)'); return; } const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('немає каналів для планування (усі вже опубліковано)','var(--danger)'); return; } const b=e.target; b.disabled=true; setMsg('🗓 зберігаю…'); const at=zonedToUTCISO(d,t); try{ await saveDraft(); if(opts.slotId){ await api('/schedule/'+opts.slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:at})}); } else { await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:at})}); } setMsg('заплановано ✓ ('+todo.join(', ')+')','var(--brand)'); try{await loadPublish();}catch(_){} try{await loadStudioPosts();}catch(_){} setTimeout(close,1000); }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); b.disabled=false; } };
 }
 // двокроковий редактор фото поста: крок 1 - джерело (галерея/завантаження/генерація) + формат (кроп),

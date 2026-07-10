@@ -412,9 +412,23 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
     return `\n[${c}] ${mech}`;
   }).filter(Boolean).join("");
   const ctaRule = ctaLines ? `\n\nКонверсійний заклик наприкінці кожної версії - ОДИН заклик = ОДНА дія, нативно вплетений:${ctaLines}` : "";
+  // Формат постів під конкретну мережу (settings_block.channel_format): короткий/стандарт/довгий + нотатка стилю.
+  // Закриває кейс «Threads під тренди на 50-100 символів» - юзер задає формат один раз у Налаштуваннях.
+  let fmtCfg: Record<string, { len?: string; note?: string }> = {};
+  try { fmtCfg = JSON.parse(s.channel_format || "{}"); } catch { /* некоректний JSON - стандартні формати */ }
+  const FMT_RULES: Record<string, string> = {
+    short: "ЦІЛЬОВА довжина: КОРОТКО, 50-150 символів, 1-2 живі речення, одна думка, без хештегів і без вступів",
+    long: "ЦІЛЬОВА довжина: розгорнуто, використовуй більшу частину ліміту мережі",
+  };
+  const fmtLines = want.map((c) => {
+    const fc = fmtCfg[c]; if (!fc) return "";
+    const parts = [FMT_RULES[String(fc.len || "")] || "", String(fc.note || "").trim().slice(0, 300)].filter(Boolean);
+    return parts.length ? `\n[${c}] ${parts.join(". ")}` : "";
+  }).filter(Boolean).join("");
+  const fmtRule = fmtLines ? `\n\nФормат, який обрав користувач для конкретних мереж (ПРІОРИТЕТ над плейбуком):${fmtLines}` : "";
   const system = "Адаптуй пост під кожну вказану соцмережу, зберігаючи зміст, голос бренду й живу людську мову." +
     (brief ? `\n\n<strategy_brief>\n${brief}\n</strategy_brief>` : "") +
-    tone + deai + playbooks + critique + goalRule(s) + ctaRule +
+    tone + deai + playbooks + critique + goalRule(s) + ctaRule + fmtRule +
     "\n\nЖОРСТКІ ліміти довжини версій (НЕ перевищуй, це технічні ліміти мереж): telegram 1024, threads 500, instagram 2200, facebook 2000 символів." +
     NO_DASH_RULE + ANTI_AI_RULE + `\n\nПоверни ЛИШЕ валідний JSON-обʼєкт виду {${want.map((c) => `"${c}":"…"`).join(",")}}. Мова: ${lang}.`;
   const raw = await chat(v2 ? "openai/gpt-4o" : "openai/gpt-4o-mini", system, `Пост:\n---\n${content}`, { workspaceId, step: "format" });
@@ -570,18 +584,31 @@ export async function buildLiteSkeleton(workspaceId: string, horizonDays: number
   for (const r of rubrics) { const w = Math.max(1, Math.round((Number(r.share) || 25) / 10)); for (let k = 0; k < w; k++) bag.push(r.name); }
   // кількість слотів = «постів на тиждень» × кількість тижнів у горизонті
   const ppw = Math.max(1, Math.min(14, Math.round(postsPerWeek) || 4));
-  const totalTarget = Math.max(1, Math.min(60, Math.round((horizonDays / 7) * ppw)));
-  // дні-кандидати для постингу (best_days у межах горизонту; якщо порожньо - будь-який день)
-  const candidates: number[] = [];
-  for (let day = 1; day <= horizonDays; day++) {
-    const dow = new Date(Date.now() + day * 864e5).getUTCDay();
-    if (bestDays.includes(dow)) candidates.push(day);
+  const totalTarget = Math.max(1, Math.min(120, Math.round((horizonDays / 7) * ppw)));
+  // Розкладка: слоти РІВНОМІРНО по всьому горизонту, БЕЗ дублювання дат (поки target ≤ днів).
+  // best_days - лише «магніт»: якщо поруч (±2 дні) є вільний найкращий день, слот присувається туди.
+  // Друге коло (target > днів) знову йде рівномірно - по 2-й пост на день. Так «30 днів × 10/тиж»
+  // дає рівно 43 слоти, а не купку постів у ті самі 3 дні тижня.
+  const isBest = (d: number) => bestDays.includes(new Date(Date.now() + d * 864e5).getUTCDay());
+  const countByDay = new Map<number, number>();
+  const days: number[] = [];
+  for (let i = 0; i < totalTarget; i++) {
+    const round = Math.floor(i / horizonDays); // 0 = перше коло: кожна дата максимум один раз
+    const idxInRound = i % horizonDays;
+    const perRound = Math.min(totalTarget - round * horizonDays, horizonDays);
+    const ideal = Math.max(1, Math.min(horizonDays, Math.round(((idxInRound + 0.5) * horizonDays) / perRound)));
+    const free = (d: number) => d >= 1 && d <= horizonDays && (countByDay.get(d) || 0) <= round;
+    let pick = -1;
+    for (const off of [0, 1, -1, 2, -2]) { const d = ideal + off; if (free(d) && isBest(d)) { pick = d; break; } }
+    if (pick < 0) for (const off of [0, 1, -1, 2, -2, 3, -3]) { const d = ideal + off; if (free(d)) { pick = d; break; } }
+    if (pick < 0) pick = ideal;
+    countByDay.set(pick, (countByDay.get(pick) || 0) + 1);
+    days.push(pick);
   }
-  if (!candidates.length) for (let day = 1; day <= horizonDays; day++) candidates.push(day);
+  days.sort((a, b) => a - b);
   const slots: { day: number; rubric: string; theme: string; hook: string }[] = [];
   let bi = 0;
-  for (let i = 0; i < totalTarget; i++) slots.push({ day: candidates[i % candidates.length], rubric: bag[bi++ % bag.length], theme: "", hook: "" });
-  slots.sort((a, b) => a.day - b.day);
+  for (const day of days) slots.push({ day, rubric: bag[bi++ % bag.length], theme: "", hook: "" });
   // теми: ОДИН дешевий виклик; фолбек - рубрика (щоб ніколи не порожньо)
   if (slots.length) {
     try {
