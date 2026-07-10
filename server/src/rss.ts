@@ -86,7 +86,7 @@ const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 // Google News ховає URL видавця за JS-редіректом. Два обходи:
 // старий формат id (CBMi… base64 з URL всередині) і новий (сторінка статті містить підпис
 // data-n-a-sg/ts → внутрішній batchexecute повертає справжній URL). Обидва - best-effort.
-async function resolveGoogleNewsUrl(link: string): Promise<string> {
+export async function resolveGoogleNewsUrl(link: string): Promise<string> {
   const m = link.match(/news\.google\.com\/(?:rss\/)?articles\/([^?/]+)/i);
   if (!m) return "";
   const id = m[1];
@@ -96,7 +96,9 @@ async function resolveGoogleNewsUrl(link: string): Promise<string> {
     if (um && !/news\.google/.test(um[0])) return um[0].replace(/[^\x20-\x7e]+.*$/, "");
   } catch { /* не старий формат */ }
   try { // новий формат (AU_yq…)
-    const pageRes = await fetchWithTimeout(`https://news.google.com/articles/${id}`, { headers: { "User-Agent": BROWSER_UA, Accept: "text/html" } });
+    // SOCS/CONSENT-кукі: без них європейські IP (Hetzner) отримують GDPR-сторінку згоди без підпису статті
+    const gCookie = "SOCS=CAISHAgBEhJnd3NfMjAyNDAxMDktMF9SQzIaAnVrIAEaBgiA_LyaBg; CONSENT=YES+";
+    const pageRes = await fetchWithTimeout(`https://news.google.com/articles/${id}`, { headers: { "User-Agent": BROWSER_UA, Accept: "text/html", Cookie: gCookie } });
     if (!pageRes?.ok) return "";
     const page = await pageRes.text();
     const sg = page.match(/data-n-a-sg="([^"]+)"/)?.[1];
@@ -106,7 +108,7 @@ async function resolveGoogleNewsUrl(link: string): Promise<string> {
     const req = JSON.stringify([[["Fbv4je", inner, null, "generic"]]]);
     const res = await fetchWithTimeout("https://news.google.com/_/DotsSplashUi/data/batchexecute", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "User-Agent": BROWSER_UA },
+      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "User-Agent": BROWSER_UA, Cookie: gCookie },
       body: "f.req=" + encodeURIComponent(req),
     });
     if (!res?.ok) return "";

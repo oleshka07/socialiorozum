@@ -50,7 +50,9 @@ jobs:
                 console.log("GNEWS first:", JSON.stringify(rr.preview[0]&&rr.preview[0].title).slice(0,100));
                 // догрузка тексту статті за лінком першого айтема (для «тонких» фідів)
                 try{
-                  const { fetchArticleText } = await import("/app/dist/rss.js").catch(()=>import("./dist/rss.js"));
+                  const { fetchArticleText, resolveGoogleNewsUrl } = await import("/app/dist/rss.js").catch(()=>import("./dist/rss.js"));
+                  const real=await resolveGoogleNewsUrl(rr.preview[0].link);
+                  console.log("GNEWS_DECODE:", real?("OK "+real.slice(0,80)):"FAIL(consent/формат)");
                   const t=await fetchArticleText(rr.preview[0].link);
                   console.log("ARTICLE_TEXT:", t.length+" chars", t.length>200?"OK":"THIN(фолбек=заголовок)", JSON.stringify(t.slice(0,90)));
                 }catch(e){ console.log("ARTICLE_TEXT: ERR", e.message); }
