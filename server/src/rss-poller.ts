@@ -30,6 +30,8 @@ async function ingest(feed: Feed): Promise<string[]> {
     if (content.replace(/\s+/g, " ").length < 180 && it.link) {
       const art = await fetchArticleText(it.link).catch(() => "");
       if (art) content = `${it.title}\n\n${art}`;
+      // видавець закритий від ботів (403/Cloudflare) → лишаємо заголовок + посилання, щоб можна було відкрити
+      else content = `${content || it.title}\n\n${it.link}`;
     }
     if (!content.trim()) content = it.title;
     const src = await one<{ id: string }>(
