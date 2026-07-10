@@ -2,9 +2,9 @@
 // дедуп за external_id, опційно одразу проганяє пайплайн (auto_run).
 import { q, one } from "./db.js";
 import { logEvent } from "./log.js";
-import { fetchFeed, fetchArticleText, cleanText, RssItem } from "./rss.js";
+import { fetchFeed, fetchArticleText, resolveGoogleNewsUrl, cleanText, RssItem } from "./rss.js";
 import { businessDiscovery } from "./meta.js";
-import { generatePostsOnePass, matchPlanSlots } from "./pipeline.js";
+import { generatePostsOnePass, matchPlanSlots, scoreMaterials } from "./pipeline.js";
 
 const POLL_MS = 15 * 60 * 1000; // кожні 15 хв
 const MAX_NEW_PER_TICK = 8;     // обмеження, щоб великий фід не залив систему
@@ -36,6 +36,7 @@ async function ingest(feed: Feed): Promise<string[]> {
     throw e;
   }
   const runIds: string[] = [];
+  const created: { id: string; title: string; excerpt: string }[] = [];
   for (const it of items) {
     if (runIds.length >= MAX_NEW_PER_TICK) break;
     if (!it.externalId || !(it.content || it.title)) continue;
@@ -46,15 +47,21 @@ async function ingest(feed: Feed): Promise<string[]> {
     let content = it.content || "";
     // догрузка статті - лише для класичних фідів (IG-підписи самодостатні, а instagram.com ботів не пускає)
     if (feed.kind !== "instagram" && content.replace(/\s+/g, " ").length < 180 && it.link) {
-      const art = await fetchArticleText(it.link).catch(() => "");
-      if (art) content = `${it.title}\n\n${art}`;
-      // видавець закритий від ботів (403/Cloudflare) → лишаємо заголовок + посилання, щоб можна було відкрити
-      else content = `${content || it.title}\n\n${it.link}`;
+      // google-лінк спершу розкодовуємо у URL видавця: і стаття тягнеться з нього, і у фолбеку лінк людський
+      const real = /news\.google\.com/i.test(it.link) ? await resolveGoogleNewsUrl(it.link).catch(() => "") : it.link;
+      const art = real ? await fetchArticleText(real).catch(() => "") : "";
+      if (art) content = `${it.title}\n\n${art}\n\n${real}`;
+      else {
+        // видавець закритий від ботів → заголовок ОДИН раз + видавець + чисте посилання (без сирого google-URL)
+        const publisher = (it.content || "").startsWith(it.title) ? (it.content || "").slice(it.title.length).trim() : "";
+        content = [it.title, publisher ? `Джерело: ${publisher}` : "", real || it.link].filter(Boolean).join("\n");
+      }
     }
     if (!content.trim()) content = it.title;
     const src = await one<{ id: string }>(
-      `insert into source(workspace_id,origin,title,transcript,external_id) values($1,'rss',$2,$3,$4) returning id`,
-      [feed.workspace_id, (it.title || feed.url).slice(0, 200), content.slice(0, 50000), it.externalId]);
+      `insert into source(workspace_id,origin,title,transcript,external_id,feed_id) values($1,'rss',$2,$3,$4,$5) returning id`,
+      [feed.workspace_id, (it.title || feed.url).slice(0, 200), content.slice(0, 50000), it.externalId, feed.id]);
+    created.push({ id: src!.id, title: (it.title || "").slice(0, 200), excerpt: content.slice(0, 250) });
     const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
     runIds.push(run!.id);
   }
@@ -62,6 +69,8 @@ async function ingest(feed: Feed): Promise<string[]> {
   if (runIds.length) {
     await logEvent("info", "rss", `${feed.url}: +${runIds.length} нових`);
     try { await matchPlanSlots(feed.workspace_id); } catch { /* метчинг не критичний */ }
+    // ⭐ оцінка цікавості для аудиторії - один виклик безкоштовного Gemini на весь батч, у фоні
+    scoreMaterials(feed.workspace_id, created).catch(() => { /* оцінка не критична */ });
   }
   return runIds;
 }
@@ -112,9 +121,23 @@ async function cleanBrokenItems(): Promise<void> {
   if (rows.length) await logEvent("info", "rss", `почищено сирих HTML-матеріалів: ${rows.length}`);
 }
 
+// разовий бекфіл оцінок для нещодавніх матеріалів без балу (по одному батчу на воркспейс)
+async function scoreBackfill(): Promise<void> {
+  const rows = await q<{ workspace_id: string; id: string; title: string; excerpt: string }>(
+    `select workspace_id, id, coalesce(title,'') as title, left(transcript,250) as excerpt
+     from source where origin='rss' and ai_score is null and archived=false and coalesce(transcript,'')<>''
+     order by created_at desc limit 40`);
+  const byWs = new Map<string, typeof rows>();
+  for (const r of rows) { const a = byWs.get(r.workspace_id) || []; a.push(r); byWs.set(r.workspace_id, a); }
+  for (const [ws, list] of byWs) {
+    try { await scoreMaterials(ws, list.slice(0, 10)); } catch { /* не критично */ }
+  }
+}
+
 let running = false;
 export function startRssPoller(): void {
   cleanBrokenItems().catch(() => { /* чистка не критична */ });
+  scoreBackfill().catch(() => { /* бекфіл не критичний */ });
   setInterval(async () => {
     if (running) return;
     running = true;

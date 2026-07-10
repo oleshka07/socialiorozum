@@ -1542,9 +1542,11 @@ app.post("/api/plan/slots/:id/generate", async (req: any, reply) => {
 app.get("/api/materials", async (req: any) => {
   const rows = await q(
     `select s.id, s.origin, coalesce(s.title,'') as title, left(s.transcript, 260) as preview,
-            length(s.transcript) as chars, s.created_at,
+            length(s.transcript) as chars, s.created_at, s.feed_id, s.ai_score, s.ai_score_why,
+            cs.title as feed_title, cs.url as feed_url,
             ps.id as slot_id, ps.theme as slot_theme, ps.rubric as slot_rubric, ps.slot_date
      from source s
+     left join content_source cs on cs.id = s.feed_id
      left join plan_slot ps on ps.match_source_id = s.id and ps.status='matched'
      where s.workspace_id=$1 and s.archived=false and coalesce(s.transcript,'') <> ''
      order by s.created_at desc limit 60`, [req.user.workspace_id]);

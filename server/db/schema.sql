@@ -389,6 +389,11 @@ alter table post add column if not exists headline text;
 alter table post add column if not exists reel_video text;
 -- лічильник підряд невдалих спроб фіда - для експоненційного бекофу поллера (0 = здоровий)
 alter table content_source add column if not exists error_count int not null default 0;
+-- з якої стрічки прийшов матеріал (фільтр «ця інста / ця тема новин / той телеграм» у Матеріалах)
+alter table source add column if not exists feed_id uuid references content_source(id) on delete set null;
+-- AI-оцінка цікавості матеріалу для аудиторії бренду (1-10, безкоштовний Gemini) + пояснення
+alter table source add column if not exists ai_score int;
+alter table source add column if not exists ai_score_why text;
 
 -- LinkedIn-автопостинг (5-та мережа, шаблон Threads): підключення профілю + журнал публікацій
 create table if not exists linkedin_config (

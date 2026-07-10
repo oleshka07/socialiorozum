@@ -930,7 +930,7 @@ document.querySelectorAll('#layoutTabs .tab').forEach(t=>t.onclick=()=>setLayout
 $('toStudio').onclick=()=>setLayout('studio');
 
 // ---------- МАТЕРІАЛИ: стрічка сировини ----------
-let Mats=[], MatFilter='Усі', MatOpen=null, Ideas=[];
+let Mats=[], MatFilter='Усі', MatFeedFilter=null, MatOpen=null, Ideas=[];
 const BANK_FILTER='💡 Банк ідей';
 const MAT_TYPE={manual:'✍️ Нотатка',rss:'📡 RSS',fireflies:'🎙 Транскрипт',grain:'🎙 Транскрипт',meetgeek:'🎙 Транскрипт',gdrive:'📁 Drive',brand:'✨ Бренд',plan:'📅 План',idea:'💡 Ідея'};
 async function loadMaterials(){ try{ const r=await api('/materials'); Mats=r.materials||[]; }catch(e){ Mats=[]; } try{ const ib=await api('/ideas'); Ideas=ib.ideas||[]; }catch(e){ Ideas=[]; } renderMaterials(); updateCounts(); }
@@ -940,16 +940,24 @@ function renderMaterials(){
   const types=['Усі',...new Set(Mats.map(matType))];
   const ft=$('matFilters'); if(ft){ let html=types.map(t=>{ const n=t==='Усі'?Mats.length:Mats.filter(m=>matType(m)===t).length; return '<div class="ftab'+(MatFilter===t?' on':'')+'" data-mf="'+esc(t)+'">'+esc(t)+' <span style="opacity:.6">'+n+'</span></div>'; }).join('');
     html+='<div class="ftab'+(MatFilter===BANK_FILTER?' on':'')+'" data-mf="'+esc(BANK_FILTER)+'" style="margin-left:6px">'+esc(BANK_FILTER)+' <span style="opacity:.6">'+Ideas.length+'</span></div>';
-    ft.innerHTML=html; ft.querySelectorAll('[data-mf]').forEach(x=>x.onclick=()=>{ MatFilter=x.dataset.mf; renderMaterials(); }); }
+    // другий ряд: фільтр за КОНКРЕТНОЮ стрічкою («ця інста / ця тема новин / той телеграм»)
+    const feeds={}; Mats.forEach(m=>{ if(m.feed_id&&!feeds[m.feed_id]) feeds[m.feed_id]=(typeof rssNiceUrl==='function'&&m.feed_url&&rssNiceUrl({url:m.feed_url})!==m.feed_url)?rssNiceUrl({url:m.feed_url}):(m.feed_title||'стрічка'); });
+    if(Object.keys(feeds).length) html+='<div style="flex-basis:100%;height:0"></div>'+Object.entries(feeds).map(([id,t])=>{ const n=Mats.filter(m=>m.feed_id===id).length; const lbl=String(t).length>26?String(t).slice(0,24)+'…':t; return '<div class="ftab'+(MatFeedFilter===id?' on':'')+'" data-mff="'+id+'" title="'+esc(String(t))+'">'+esc(lbl)+' <span style="opacity:.6">'+n+'</span></div>'; }).join('');
+    ft.style.flexWrap='wrap';
+    ft.innerHTML=html;
+    ft.querySelectorAll('[data-mf]').forEach(x=>x.onclick=()=>{ MatFilter=x.dataset.mf; MatFeedFilter=null; renderMaterials(); });
+    ft.querySelectorAll('[data-mff]').forEach(x=>x.onclick=()=>{ MatFeedFilter=MatFeedFilter===x.dataset.mff?null:x.dataset.mff; if(MatFilter===BANK_FILTER) MatFilter='Усі'; renderMaterials(); }); }
   if(MatFilter===BANK_FILTER){ renderIdeaBank(feed); return; }
-  const show=MatFilter==='Усі'?Mats:Mats.filter(m=>matType(m)===MatFilter);
+  let show=MatFilter==='Усі'?Mats:Mats.filter(m=>matType(m)===MatFilter);
+  if(MatFeedFilter) show=show.filter(m=>m.feed_id===MatFeedFilter);
   if(!show.length){ feed.innerHTML='<div class="empty" style="padding:20px">Порожньо. Додай матеріал кнопкою вище - або підключи RSS/транскрибатор у «Джерелах», нове зʼявиться тут само.</div>'; return; }
   feed.innerHTML=show.map(m=>{
     const open=MatOpen===m.id;
     const match=m.slot_id?'<span class="ptag" style="color:var(--amber);border-color:var(--amber)">🏷 підходить: '+esc(m.slot_rubric||'')+' · '+esc(String(m.slot_date||'').slice(5,10))+'</span>':'';
+    const score=m.ai_score?'<span class="ptag" title="'+esc(m.ai_score_why||'AI-оцінка цікавості для твоєї аудиторії')+'" style="'+(m.ai_score>=8?'color:var(--brand);border-color:var(--brand);font-weight:700':(m.ai_score>=5?'color:var(--amber);border-color:var(--amber)':'color:var(--faint)'))+'">⭐ '+m.ai_score+'/10</span>':'';
     return '<div data-mat="'+m.id+'" style="padding:13px 18px;border-bottom:1px solid var(--line);background:'+(open?'var(--surface2)':'transparent')+'">'
       +'<div class="matHead" style="cursor:pointer">'
-        +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="ptag">'+esc(matType(m))+'</span><b style="font-size:14px;flex:1;min-width:180px">'+esc(m.title||'Без назви')+'</b>'+match+'<span style="font-size:11.5px;color:var(--faint)">'+new Date(m.created_at).toLocaleDateString('uk')+' · '+(m.chars||0)+' симв.</span></div>'
+        +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="ptag">'+esc(matType(m))+'</span><b style="font-size:14px;flex:1;min-width:180px">'+esc(m.title||'Без назви')+'</b>'+score+match+'<span style="font-size:11.5px;color:var(--faint)">'+new Date(m.created_at).toLocaleDateString('uk')+' · '+(m.chars||0)+' симв.</span></div>'
         +'<div style="font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+esc(m.preview||'')+'</div>'
       +'</div>'
       +(open?'<div id="matFull" style="margin-top:10px;background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:12px 14px;font-size:13px;line-height:1.6;color:var(--ink2);white-space:pre-wrap;max-height:300px;overflow:auto"><span class="spin"></span></div>'

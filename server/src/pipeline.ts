@@ -698,6 +698,30 @@ export async function suggestHashtags(workspaceId: string, text: string): Promis
   return [...new Set(tags)].slice(0, 8);
 }
 
+// ---- Оцінка цікавості матеріалів для аудиторії бренду (1-10, ОДИН виклик безкоштовного Gemini на батч) ----
+const SCORE_MODEL = "google/gemini-2.5-flash"; // free tier; без GEMINI_API_KEY chat() сам піде через OpenRouter
+export async function scoreMaterials(workspaceId: string, items: { id: string; title: string; excerpt: string }[]): Promise<number> {
+  if (!items.length) return 0;
+  const s = await loadSettings(workspaceId);
+  const ctx = [s.marketing_context, s.audience, (s.strategy_brief || "").slice(0, 800)].filter(Boolean).join("\n").slice(0, 1500);
+  const system = "Ти редактор контенту бренду. Оціни КОЖЕН матеріал за шкалою 1-10: наскільки тема цікава й резонансна САМЕ для нашої аудиторії (актуальність, близькість до ніші, потенціал обговорення й емоційного відгуку; 1-3 = офтоп/нудно, 8-10 = гаряча тема для поста)." +
+    (ctx ? `\n\nБренд і аудиторія:\n${ctx}` : "") +
+    `\n\nПоверни ЛИШЕ валідний JSON-масив рівно з ${items.length} обʼєктів у тому ж порядку: [{"i":1,"score":7,"why":"одне коротке речення чому"}] . Мова why: українська.`;
+  const user = items.map((m, i) => `${i + 1}. ${m.title}\n${m.excerpt.slice(0, 250)}`).join("\n\n");
+  const raw = await chat(SCORE_MODEL, system, user, { workspaceId, step: "score" });
+  let arr: any[] = [];
+  try { arr = extractJsonArray(raw); } catch { return 0; }
+  let n = 0;
+  for (let i = 0; i < items.length; i++) {
+    const a = arr[i] || arr.find((x) => Number(x?.i) === i + 1);
+    const score = Math.max(1, Math.min(10, Math.round(Number(a?.score)) || 0));
+    if (!score) continue;
+    await q(`update source set ai_score=$2, ai_score_why=$3 where id=$1`, [items[i].id, score, String(a?.why || "").slice(0, 300) || null]);
+    n++;
+  }
+  return n;
+}
+
 // ---- Метчинг: які матеріали підходять під порожні слоти плану (дешевий один виклик) ----
 export async function matchPlanSlots(workspaceId: string): Promise<number> {
   const slots = await q<{ id: string; theme: string; rubric: string }>(
