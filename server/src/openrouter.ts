@@ -3,6 +3,10 @@ import { q } from "./db.js";
 
 export type ChatCtx = { workspaceId: string; step?: string };
 
+// «—»/«–» - найстійкіший AI-маркер: промпти просять їх не вживати, але моделі однаково їх вставляють.
+// Гарантію дає лише зачистка КОДОМ на виході кожного виклику (безпечно і для JSON-відповідей).
+const stripDashes = (s: string) => s.replace(/[ \t]*[—–][ \t]*/g, " - ");
+
 // ціни OpenAI для прямих викликів ($/1M токенів: [вхід, вихід]) — щоб рахувати вартість у llm_usage
 const OPENAI_PRICES: Record<string, [number, number]> = {
   "gpt-4o": [2.5, 10],
@@ -33,7 +37,7 @@ async function geminiChat(model: string, system: string, user: string, ctx?: Cha
   } finally { clearTimeout(timer); }
   if (!res.ok) { const t = await res.text(); throw new Error(`Gemini ${res.status}: ${t.slice(0, 300)}`); }
   const j: any = await res.json();
-  const text = (j.candidates?.[0]?.content?.parts || []).map((p: any) => p?.text || "").join("");
+  const text = stripDashes((j.candidates?.[0]?.content?.parts || []).map((p: any) => p?.text || "").join(""));
   if (ctx?.workspaceId) {
     const um = j.usageMetadata || {};
     const pin = um.promptTokenCount || 0, pout = um.candidatesTokenCount || 0;
@@ -98,7 +102,7 @@ export async function chat(model: string, system: string, user: string, ctx?: Ch
       );
     } catch { /* облік не критичний */ }
   }
-  return j.choices?.[0]?.message?.content ?? "";
+  return stripDashes(j.choices?.[0]?.message?.content ?? "");
 }
 
 // надійний витяг JSON-масиву (терпить markdown-огорожі та текст довкола)

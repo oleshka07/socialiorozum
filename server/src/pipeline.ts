@@ -383,7 +383,7 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
   const rules: Record<string, string> = {
     telegram: "Telegram: короткі абзаци, помірні емодзі, 1-2 хештеги.",
     instagram: "Instagram: чіпкий підпис + 5-10 релевантних хештегів наприкінці.",
-    threads: "Threads: до 500 символів, без хештегів, розмовний тон.",
+    threads: "Threads: ЖОРСТКИЙ ліміт 500 символів (довший пост НЕ опублікується - скороти безжально), без хештегів, розмовний тон.",
     facebook: "Facebook: 1-3 абзаци, нейтральний тон, без надлишку хештегів.",
   };
   const want = channels.filter((c) => rules[c]);
@@ -415,11 +415,24 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
   const system = "Адаптуй пост під кожну вказану соцмережу, зберігаючи зміст, голос бренду й живу людську мову." +
     (brief ? `\n\n<strategy_brief>\n${brief}\n</strategy_brief>` : "") +
     tone + deai + playbooks + critique + goalRule(s) + ctaRule +
+    "\n\nЖОРСТКІ ліміти довжини версій (НЕ перевищуй, це технічні ліміти мереж): telegram 1024, threads 500, instagram 2200, facebook 2000 символів." +
     NO_DASH_RULE + ANTI_AI_RULE + `\n\nПоверни ЛИШЕ валідний JSON-обʼєкт виду {${want.map((c) => `"${c}":"…"`).join(",")}}. Мова: ${lang}.`;
   const raw = await chat(v2 ? "openai/gpt-4o" : "openai/gpt-4o-mini", system, `Пост:\n---\n${content}`, { workspaceId, step: "format" });
   const obj = extractJsonObject(raw) as Record<string, string>;
   const out: Record<string, string> = {};
   for (const c of want) if (obj && obj[c]) out[c] = String(obj[c]);
+  // LLM інколи ігнорує ліміти («до 500 симв.» у Threads) - перевіряємо КОДОМ і скорочуємо повторним викликом.
+  const HARD_LIMITS: Record<string, number> = { telegram: 1024, threads: 500, instagram: 2200, facebook: 2000 };
+  for (const c of want) {
+    const lim = HARD_LIMITS[c];
+    if (!out[c] || !lim || out[c].length <= lim) continue;
+    try {
+      const short = await chat(v2 ? "openai/gpt-4o" : "openai/gpt-4o-mini",
+        `Скороти пост до МАКСИМУМ ${lim - 40} символів (жорсткий технічний ліміт мережі ${c}), зберігши гачок, головну думку, голос і заклик.` + NO_DASH_RULE + `\nПоверни лише текст поста. Мова: ${lang}.`,
+        out[c], { workspaceId, step: "format" });
+      if (short && short.trim()) out[c] = short.length <= lim ? short.trim() : short.slice(0, lim - 1).replace(/\s+\S*$/, "") + "…";
+    } catch { /* лишаємо як є - композер підсвітить перевищення червоним */ }
+  }
   return out;
 }
 
@@ -723,16 +736,48 @@ export async function directorVerdict(workspaceId: string, content: string): Pro
   };
 }
 
-// ---- «Антидетектор»: аудит AI-слідів БЕЗ правки (діагностика, юзер вирішує сам) ----
+// ---- «Антидетектор»: гібридний аудит AI-слідів ----
+// Детермінований сканер (код, 100% надійний: тире, кліше, канцелярит) + LLM лише для тонких патернів.
+const AI_TRACE_RX: [string, RegExp][] = [
+  ["широке тире «—»", /—/],
+  ["середнє тире «–»", /–/],
+  ["конструкція «не просто X, а Y»", /не просто[^.\n]{0,60}?,\s*а\s/i],
+  ["«варто зазначити»", /варто (зазначити|відзначити)/i],
+  ["«у сучасному світі»", /у сучасному світі/i],
+  ["«давайте розберемось»", /давайте розберемо/i],
+  // УВАГА: \b не працює з кирилицею в JS - межі слів через lookbehind/lookahead
+  ["«як відомо»", /(?<![а-щьюяіїєґ])як відомо(?![а-щьюяіїєґ])/i],
+  ["фінальний підсумок «отже…»", /(?<![а-щьюяіїєґ])отже,?\s+(підсумуємо|памʼятай|головне)/i],
+  ["слово-паразит «ключовий»", /(?<![а-щьюяіїєґ])ключов(ий|а|е|і|ого|ої)(?![а-щьюяіїєґ])/i],
+  ["«важливо розуміти»", /важливо (розуміти|памʼятати)/i],
+  ["«наразі»/«даний»", /(?<![а-щьюяіїєґ])(наразі|дан(ий|а|е))(?![а-щьюяіїєґ])/i],
+  ["канцелярит «здійснювати/забезпечувати»", /(здійсню(є|вати)|забезпечу(є|вати))/i],
+  ["кліше-гачок", /(СТОП[!.\s]|не гортай|99\s?%|ти не повіриш|шок(уюч)?)/i],
+];
+export function scanAiTraces(content: string): { pattern: string; quote: string }[] {
+  const t = String(content || "");
+  const out: { pattern: string; quote: string }[] = [];
+  for (const [name, rx] of AI_TRACE_RX) {
+    const m = t.match(rx);
+    if (m && m.index != null) {
+      const from = Math.max(0, m.index - 20);
+      out.push({ pattern: name, quote: t.slice(from, m.index + m[0].length + 25).replace(/\n/g, " ").trim() });
+    }
+  }
+  return out;
+}
 export async function aiAudit(workspaceId: string, content: string): Promise<{ pattern: string; quote: string }[]> {
-  const system = "Ти редактор, що знаходить сліди AI-тексту в українській мові. Каталог патернів: «не просто X, а Y»; канцелярит (здійснювати/забезпечувати/варто зазначити/наразі/даний); пусті вступи (у сучасному світі/давайте розберемось/як відомо); фінальні підсумки (отже, підсумуємо); симетричні парні конструкції; слова-паразити (ключовий/важливо розуміти/варто памʼятати); три однорідні прикметники поспіль; широке тире; кліше-гачки (СТОП/не гортай/99% не знають); занадто рівні абзаци-близнюки. " +
-    'Знайди в тексті лише РЕАЛЬНІ входження (нічого не вигадуй). Поверни ЛИШЕ валідний JSON-масив (порожній [], якщо текст чистий): [{"pattern":"назва патерну","quote":"точна цитата з тексту до 60 символів"}]. Мова: Українська.';
-  const raw = await chat(env.cheapModel, system, `Текст:\n---\n${(content || "").slice(0, 4000)}`, { workspaceId, step: "ai_audit" });
+  const hard = scanAiTraces(content); // детермінована частина - завжди спрацьовує
+  let soft: { pattern: string; quote: string }[] = [];
   try {
-    return extractJsonArray<any>(raw)
+    const system = "Ти редактор, що знаходить ТОНКІ сліди AI-тексту в українській (очевидні тире/кліше вже перевірені окремо, їх не шукай). Шукай: симетричні парні речення-близнюки; три однорідні прикметники поспіль; занадто рівні абзаци однакової довжини; порожні узагальнення без конкретики; неприродно гладкі переходи («крім того», «водночас» ланцюжком). " +
+      'Знайди лише РЕАЛЬНІ входження (нічого не вигадуй; якщо чисто - порожній масив). Поверни ЛИШЕ валідний JSON-масив: [{"pattern":"назва","quote":"точна цитата до 60 симв"}]. Мова: Українська.';
+    const raw = await chat(env.cheapModel, system, `Текст:\n---\n${(content || "").slice(0, 4000)}`, { workspaceId, step: "ai_audit" });
+    soft = extractJsonArray<any>(raw)
       .map((x) => ({ pattern: String(x?.pattern || "").slice(0, 80), quote: String(x?.quote || "").slice(0, 80) }))
-      .filter((x) => x.pattern).slice(0, 12);
-  } catch { return []; }
+      .filter((x) => x.pattern);
+  } catch { /* детермінованих знахідок достатньо */ }
+  return [...hard, ...soft].slice(0, 15);
 }
 
 // ---- «Хук-майстер»: 3 варіанти відкриття поста з кульмінації (точкова заміна першого рядка) ----

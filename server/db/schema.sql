@@ -385,6 +385,8 @@ alter table post add column if not exists image_prompt text;
 -- редактор зображення: базова картинка без тексту (для дешевого перенакладання) + поточний заголовок
 alter table post add column if not exists image_base text;
 alter table post add column if not exists headline text;
+-- зібраний відео-рілс (mp4 у MEDIA_DIR) - щоб результат не губився після збірки
+alter table post add column if not exists reel_video text;
 
 -- підключення каналу до СПІЛЬНОГО Telegram-бота: код deep-link -> воркспейс, + хто почав діалог
 create table if not exists tg_connect (

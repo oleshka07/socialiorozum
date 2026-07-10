@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { env } from "./env.js";
+import { q } from "./db.js";
 import { chat, extractJsonArray } from "./openrouter.js";
 import { MEDIA_DIR } from "./media.js";
 import { logEvent } from "./log.js";
@@ -170,6 +171,10 @@ export async function buildReelVideo(ws: string, postId: string, content: string
 export function startReelJob(ws: string, postId: string, content: string, bgImage: string | null): void {
   reelJobs.set(postId, { status: "running", startedAt: Date.now() });
   buildReelVideo(ws, postId, content, bgImage)
-    .then((filename) => reelJobs.set(postId, { status: "done", filename, startedAt: Date.now() }))
+    .then(async (filename) => {
+      reelJobs.set(postId, { status: "done", filename, startedAt: Date.now() });
+      // персист у пост - щоб рілс не загубився, навіть якщо юзер закрив сторінку/попап заблоковано
+      await q(`update post set reel_video=$2 where id=$1`, [postId, filename]).catch(() => {});
+    })
     .catch(async (e) => { reelJobs.set(postId, { status: "error", error: String(e.message).slice(0, 300), startedAt: Date.now() }); await logEvent("error", "reel", e.message); });
 }

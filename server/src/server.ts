@@ -626,7 +626,11 @@ app.post("/api/posts/:postId/reel-video", async (req: any, reply) => {
 });
 app.get("/api/posts/:postId/reel-video", async (req: any, reply) => {
   if (!(await postOwned(req.params.postId, req.user.workspace_id))) return reply.code(404).send({ error: "пост не знайдено" });
-  return reelJobs.get(req.params.postId) || { status: "none" };
+  const j = reelJobs.get(req.params.postId);
+  if (j) return j;
+  // після рестарту/для іншої вкладки: готовий рілс лежить на пості
+  const p = await one<{ reel_video: string | null }>(`select reel_video from post where id=$1`, [req.params.postId]);
+  return p?.reel_video ? { status: "done", filename: p.reel_video } : { status: "none" };
 });
 
 // «Мультиплікатор», Продовження: 5 кутів розвитку теми поста → Банк ідей
@@ -1668,7 +1672,7 @@ app.get("/api/bank", async (req: any) => {
 
 // усі фінальні пости воркспейсу (Студія/Інбокс - глобальний список, НЕ привʼязаний до активного джерела)
 app.get("/api/posts/studio", async (req: any) => {
-  return q(`select p.id, p.content, p.review, p.channels, p.rubric, src.origin as source_origin, ma.filename as media_filename, p.created_at, src.title as source_title
+  return q(`select p.id, p.content, p.review, p.channels, p.rubric, p.reel_video, src.origin as source_origin, ma.filename as media_filename, p.created_at, src.title as source_title
             from post p join pipeline_run r on r.id=p.run_id join source src on src.id=r.source_id
             left join media_asset ma on ma.id=p.media_id
             where src.workspace_id=$1 and p.stage='final' and (p.review is null or p.review <> 'archived')
