@@ -21,6 +21,14 @@ export const env = {
   gemini: {
     apiKey: process.env.GEMINI_API_KEY ?? "",    // Gemini 2.5 Flash Image (Nano Banana)
   },
+  azure: {                                        // Azure Speech: укр. TTS для відео-рілсів (безкоштовний тариф F0)
+    speechKey: process.env.AZURE_SPEECH_KEY ?? "",
+    speechRegion: process.env.AZURE_SPEECH_REGION ?? "westeurope",
+    voice: process.env.AZURE_SPEECH_VOICE ?? "uk-UA-PolinaNeural", // або uk-UA-OstapNeural (чол.)
+  },
+  pexels: {
+    apiKey: process.env.PEXELS_API_KEY ?? "",     // безкоштовний сток b-roll для рілсів (опційно)
+  },
   telegram: {                                     // СПІЛЬНИЙ бот (користувач не створює свій)
     botToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
     botUsername: process.env.TELEGRAM_BOT_USERNAME ?? "",

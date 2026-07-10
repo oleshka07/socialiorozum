@@ -1261,6 +1261,16 @@ function renderMagnets(list){ const box=$('lmList'); if(!box) return;
 async function loadMagnets(){ try{ const r=await api('/lead-magnets'); renderMagnets(r.magnets||[]); }catch(e){} }
 if($('lmGen')) $('lmGen').onclick=async()=>{ const m=$('lmMsg'); m.textContent='думаю…'; aiBusy('🧲 Складаю лід-магніти з твого досвіду…');
   try{ const r=await api('/lead-magnets',{method:'POST'}); renderMagnets(r.magnets||[]); m.textContent=''; }catch(e){ m.textContent='⚠ '+e.message; } finally{ aiDone(); } };
+// 🎞 ПРОТОТИП: сценарій Reels → готове відео (озвучка Azure укр + сток + монтаж). Старт джоби + полінг.
+async function reelVideoRun(id){ aiBusy('🎞 Збираю відео-рілс: озвучка → кліпи → монтаж… (1-3 хв, не закривай сторінку)');
+  try{ await api('/posts/'+id+'/reel-video',{method:'POST'});
+    for(let i=0;i<60;i++){ await new Promise(r=>setTimeout(r,5000));
+      let s; try{ s=await api('/posts/'+id+'/reel-video'); }catch(_){ continue; }
+      if(s.status==='done'){ flash('Рілс готовий ✓'); window.open('/media/'+s.filename,'_blank'); return; }
+      if(s.status==='error') throw new Error(s.error||'збірка не вдалася');
+    }
+    throw new Error('час вийшов (5 хв) - спробуй ще раз');
+  }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } }
 // 🔥 «Продовження»: 5 кутів розвитку теми поста → Банк ідей
 async function developPost(id){ aiBusy('🔥 Шукаю кути розвитку теми…');
   try{ const r=await api('/posts/'+id+'/develop',{method:'POST'}); const ideas=r.ideas||[];
@@ -1332,6 +1342,7 @@ function renderStudio(){
         +'<button class="icon" data-a="archive" title="В архів">🗄</button>'
         +'<button class="icon" data-a="director" title="🎯 Директор: чи веде пост до цілі">🎯</button>'
         +'<button class="icon" data-a="develop" title="🔥 Розвинути тему: 5 кутів-продовжень у Банк ідей">🔥</button>'
+        +(String(p.content||'').startsWith('🎬')?'<button class="icon" data-a="reelvideo" title="🎞 Зібрати відео з цього сценарію (бета, 1-3 хв)">🎞</button>':'')
         +'<button class="icon" data-a="image" title="Згенерувати зображення">🎨</button>'
         +(PRO?'<button class="icon" data-a="atomize" title="Розтиражувати під усі канали">♻️</button>':'')
         +'<button class="icon" data-a="composer" title="Опублікувати / запланувати">📣</button>'
@@ -1341,7 +1352,7 @@ function renderStudio(){
   grid.querySelectorAll('.pcard').forEach(card=>{ const id=card.dataset.post; const cont=card.querySelector('.pcontent');
     cont.addEventListener('blur',()=>saveContent(id,cont.textContent));
     const cb=card.querySelector('.psel'); if(cb) cb.onchange=()=>{ cb.checked?SelPosts.add(id):SelPosts.delete(id); card.classList.toggle('selc',cb.checked); renderBulkBar(); };
-    card.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(id); return; } if(a==='image'){ openImageEditor(id); return; } if(a==='atomize'){ openAtomize(id); return; } if(a==='director'){ directorCheck(id); return; } if(a==='develop'){ developPost(id); return; } postAction(card,id,a); });
+    card.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(id); return; } if(a==='image'){ openImageEditor(id); return; } if(a==='atomize'){ openAtomize(id); return; } if(a==='director'){ directorCheck(id); return; } if(a==='develop'){ developPost(id); return; } if(a==='reelvideo'){ reelVideoRun(id); return; } postAction(card,id,a); });
   });
 }
 // панель масових дій (зʼявляється коли є обрані пости)

@@ -9,6 +9,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
 import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, suggestHooks, suggestHeadline, reelsScript, publishQuestions, suggestDevelopment, suggestLeadMagnets } from "./pipeline.js";
+import { startReelJob, reelJobs, parseReelScript } from "./reelvideo.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
 import * as meta from "./meta.js";
@@ -606,6 +607,26 @@ app.post("/api/posts/:postId/hashtags", async (req: any, reply) => {
   if (!post) return reply.code(404).send({ error: "пост не знайдено" });
   try { const hashtags = await suggestHashtags(ws, String(req.body?.text || post.content || "")); return { ok: true, hashtags }; }
   catch (e: any) { await logEvent("error", "hashtags", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
+});
+
+// ПРОТОТИП (бета): сценарій Reels → готове відео. Старт фонової збірки + полінг статусу (nginx-таймаути не заважають).
+app.post("/api/posts/:postId/reel-video", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const post = await one<{ content: string; filename: string | null }>(
+    `select p.content, ma.filename from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+       left join media_asset ma on ma.id=p.media_id
+     where p.id=$1 and s.workspace_id=$2`, [req.params.postId, ws]);
+  if (!post) return reply.code(404).send({ error: "пост не знайдено" });
+  if (!env.azure.speechKey) return reply.code(400).send({ error: "Потрібен AZURE_SPEECH_KEY у .env (Azure Speech, безкоштовний тариф F0) + перезапуск стека" });
+  if (parseReelScript(post.content || "").length < 2) return reply.code(400).send({ error: "Це не сценарій Reels - спершу зроби «🎬 Сценарій Reels» на матеріалі" });
+  const j = reelJobs.get(req.params.postId);
+  if (j?.status === "running") return { ok: true, status: "running" };
+  startReelJob(ws, req.params.postId, post.content, post.filename);
+  return { ok: true, status: "running" };
+});
+app.get("/api/posts/:postId/reel-video", async (req: any, reply) => {
+  if (!(await postOwned(req.params.postId, req.user.workspace_id))) return reply.code(404).send({ error: "пост не знайдено" });
+  return reelJobs.get(req.params.postId) || { status: "none" };
 });
 
 // «Мультиплікатор», Продовження: 5 кутів розвитку теми поста → Банк ідей

@@ -12,6 +12,8 @@ RUN npm run build
 FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+# ffmpeg + шрифт із кирилицею - збірка відео-рілсів (укр. субтитри через libass/DejaVu Sans)
+RUN apk add --no-cache ffmpeg font-dejavu
 COPY package*.json ./
 RUN npm install --omit=dev
 COPY --from=build /app/dist ./dist
