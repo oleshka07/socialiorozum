@@ -74,24 +74,58 @@ function extractParagraphs(html: string): string {
   return [og, body].filter(Boolean).join("\n\n").trim();
 }
 
+async function fetchWithTimeout(url: string, init?: RequestInit, ms = 15000): Promise<Response | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try { return await fetch(url, { ...init, signal: controller.signal }); }
+  catch { return null; }
+  finally { clearTimeout(timer); }
+}
+const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
+
+// Google News ховає URL видавця за JS-редіректом. Два обходи:
+// старий формат id (CBMi… base64 з URL всередині) і новий (сторінка статті містить підпис
+// data-n-a-sg/ts → внутрішній batchexecute повертає справжній URL). Обидва - best-effort.
+async function resolveGoogleNewsUrl(link: string): Promise<string> {
+  const m = link.match(/news\.google\.com\/(?:rss\/)?articles\/([^?/]+)/i);
+  if (!m) return "";
+  const id = m[1];
+  try { // старий формат: URL лежить прямо в base64 id
+    const raw = Buffer.from(id.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("latin1");
+    const um = raw.match(/https?:\/\/[\x20-\x7e]+/);
+    if (um && !/news\.google/.test(um[0])) return um[0].replace(/[^\x20-\x7e]+.*$/, "");
+  } catch { /* не старий формат */ }
+  try { // новий формат (AU_yq…)
+    const pageRes = await fetchWithTimeout(`https://news.google.com/articles/${id}`, { headers: { "User-Agent": BROWSER_UA, Accept: "text/html" } });
+    if (!pageRes?.ok) return "";
+    const page = await pageRes.text();
+    const sg = page.match(/data-n-a-sg="([^"]+)"/)?.[1];
+    const ts = page.match(/data-n-a-ts="([^"]+)"/)?.[1];
+    if (!sg || !ts) return "";
+    const inner = `["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],"${id}",${ts},"${sg}"]`;
+    const req = JSON.stringify([[["Fbv4je", inner, null, "generic"]]]);
+    const res = await fetchWithTimeout("https://news.google.com/_/DotsSplashUi/data/batchexecute", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "User-Agent": BROWSER_UA },
+      body: "f.req=" + encodeURIComponent(req),
+    });
+    if (!res?.ok) return "";
+    const txt = await res.text();
+    const um = txt.match(/https?:\\?\/\\?\/(?!news\.google)[^"\\]+/);
+    if (um) return um[0].replace(/\\\//g, "/").replace(/\\u003d/gi, "=").replace(/\\u0026/gi, "&");
+  } catch { /* формат змінився - фолбек нижче */ }
+  return "";
+}
+
 // тягне сторінку статті (з редіректами) і повертає текст; "" якщо не вдалося (сайт закритий/JS-only)
 export async function fetchArticleText(link: string): Promise<string> {
   if (!/^https?:\/\//i.test(link || "")) return "";
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15000);
-  try {
-    const res = await fetch(link, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; socialio/1.0; +https://socialio.rozum.one)", Accept: "text/html" },
-      redirect: "follow", signal: controller.signal,
-    });
-    if (!res.ok) return "";
-    const html = (await res.text()).slice(0, 800_000);
-    // Google News інколи віддає проміжну сторінку-редірект: витягаємо цільовий лінк видавця і йдемо за ним
-    if (/news\.google\.com/i.test(res.url || link)) {
-      const m = html.match(/href=["'](https?:\/\/(?!news\.google\.com|accounts\.google|support\.google)[^"']+)["']/i);
-      if (m) { clearTimeout(timer); return fetchArticleText(m[1]); }
-    }
-    return extractParagraphs(html);
-  } catch { return ""; }
-  finally { clearTimeout(timer); }
+  // Google News-посилання спершу розкодовуємо у справжній URL видавця
+  if (/news\.google\.com/i.test(link)) {
+    const real = await resolveGoogleNewsUrl(link);
+    return real ? fetchArticleText(real) : "";
+  }
+  const res = await fetchWithTimeout(link, { headers: { "User-Agent": BROWSER_UA, Accept: "text/html" }, redirect: "follow" });
+  if (!res?.ok) return "";
+  try { return extractParagraphs((await res.text()).slice(0, 800_000)); } catch { return ""; }
 }
