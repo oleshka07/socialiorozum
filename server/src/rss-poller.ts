@@ -2,18 +2,35 @@
 // дедуп за external_id, опційно одразу проганяє пайплайн (auto_run).
 import { q, one } from "./db.js";
 import { logEvent } from "./log.js";
-import { fetchFeed, fetchArticleText, cleanText } from "./rss.js";
+import { fetchFeed, fetchArticleText, cleanText, RssItem } from "./rss.js";
+import { businessDiscovery } from "./meta.js";
 import { generatePostsOnePass, matchPlanSlots } from "./pipeline.js";
 
 const POLL_MS = 15 * 60 * 1000; // кожні 15 хв
 const MAX_NEW_PER_TICK = 8;     // обмеження, щоб великий фід не залив систему
 
-type Feed = { id: string; workspace_id: string; url: string; auto_run: boolean; error_count?: number; last_pulled_at?: string | null };
+type Feed = { id: string; workspace_id: string; url: string; kind?: string; auto_run: boolean; error_count?: number; last_pulled_at?: string | null };
+
+// kind='instagram': url = маркер instagram:username; читаємо чужу бізнес-сторінку через
+// business_discovery Meta Graph (токен ПІДКЛЮЧЕНОГО Instagram цього воркспейсу)
+async function fetchInstagramItems(feed: Feed): Promise<RssItem[]> {
+  const user = feed.url.replace(/^instagram:/, "");
+  const mt = await one<{ ig_user_id: string | null; page_token: string | null }>(
+    `select ig_user_id, page_token from meta_config where workspace_id=$1`, [feed.workspace_id]);
+  if (!mt?.ig_user_id || !mt.page_token) throw new Error("Instagram воркспейсу відключено - джерело не читається");
+  const bd = await businessDiscovery(mt.ig_user_id, mt.page_token, user, 12);
+  return bd.media.filter((m) => m.caption).map((m) => ({
+    externalId: `ig:${m.id}`,
+    title: m.caption.split("\n").find(Boolean)?.slice(0, 200) || `@${user}`,
+    content: m.caption + (m.permalink ? `\n\n${m.permalink}` : ""),
+    link: m.permalink || "",
+  }));
+}
 
 // створює source+run для нових статей; повертає id нових прогонів
 async function ingest(feed: Feed): Promise<string[]> {
   let items;
-  try { items = await fetchFeed(feed.url); }
+  try { items = feed.kind === "instagram" ? await fetchInstagramItems(feed) : await fetchFeed(feed.url); }
   catch (e: any) {
     await q(`update content_source set last_error=$2, last_pulled_at=now(), error_count=error_count+1 where id=$1`, [feed.id, String(e.message).slice(0, 300)]);
     throw e;
@@ -27,7 +44,8 @@ async function ingest(feed: Feed): Promise<string[]> {
     // «тонкий» айтем (Google News: лише заголовок+джерело) → догрузити текст статті за посиланням;
     // не вийшло (сайт закритий/JS-only) → матеріалом стає заголовок, Розвідник дасть кут з нього
     let content = it.content || "";
-    if (content.replace(/\s+/g, " ").length < 180 && it.link) {
+    // догрузка статті - лише для класичних фідів (IG-підписи самодостатні, а instagram.com ботів не пускає)
+    if (feed.kind !== "instagram" && content.replace(/\s+/g, " ").length < 180 && it.link) {
       const art = await fetchArticleText(it.link).catch(() => "");
       if (art) content = `${it.title}\n\n${art}`;
       // видавець закритий від ботів (403/Cloudflare) → лишаємо заголовок + посилання, щоб можна було відкрити
@@ -57,7 +75,7 @@ async function runPipelines(runIds: string[]): Promise<void> {
 }
 
 async function tick(): Promise<void> {
-  const feeds = await q<Feed>(`select id, workspace_id, url, auto_run, error_count, last_pulled_at from content_source where active=true and kind='rss' limit 50`);
+  const feeds = await q<Feed>(`select id, workspace_id, url, kind, auto_run, error_count, last_pulled_at from content_source where active=true and kind in ('rss','instagram') limit 50`);
   for (const f of feeds) {
     // експоненційний бекоф для битих фідів: 15хв → 30хв → 1г → … → стеля 6г (щоб не довбати мертве джерело)
     const errs = f.error_count || 0;
@@ -76,7 +94,7 @@ async function tick(): Promise<void> {
 
 // on-demand: підтягнути один фід зараз (пайплайн — у фоні, щоб запит відповів швидко)
 export async function pullFeed(feedId: string, ws: string): Promise<number> {
-  const f = await one<Feed>(`select id, workspace_id, url, auto_run from content_source where id=$1 and workspace_id=$2`, [feedId, ws]);
+  const f = await one<Feed>(`select id, workspace_id, url, kind, auto_run from content_source where id=$1 and workspace_id=$2`, [feedId, ws]);
   if (!f) throw new Error("стрічку не знайдено");
   const runIds = await ingest(f);
   if (f.auto_run && runIds.length) runPipelines(runIds).catch(() => {});

@@ -63,6 +63,11 @@ jobs:
                   const tg=await resolveSource("telegram","@telegram");
                   console.log("RSSHUB_TG:", tg.preview.length+" items", "title:", JSON.stringify(tg.title).slice(0,60), tg.preview.length?"OK":"FAIL");
                 }catch(e){ console.log("RSSHUB_TG: ERR", e.message, "(контейнер rsshub піднявся? docker compose ps)"); }
+                // Threads-профіль через RSSHub (публічний акаунт zuck)
+                try{
+                  const th=await resolveSource("threads","@zuck");
+                  console.log("RSSHUB_THREADS:", th.preview.length+" items", "title:", JSON.stringify(th.title).slice(0,60), th.preview.length?"OK":"FAIL");
+                }catch(e){ console.log("RSSHUB_THREADS: ERR", e.message); }
               }catch(e){ console.log("GNEWS_RESOLVE: ERR", e.message); }
             })();
             NODE

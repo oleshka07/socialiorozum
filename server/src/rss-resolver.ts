@@ -1,17 +1,28 @@
 // Резолвер джерел-стрічок: перетворює «те, що ввів користувач» у валідний feed URL + прев'ю.
 // Флоу «Додати джерело»: resolve (цей модуль, нічого не зберігає) → юзер бачить прев'ю → підтверджує → POST /sources/rss.
 // Типи: 'news' (Google News за темою або готовий RSS-URL), 'rss' (прямий URL з автопошуком фіда),
-// 'telegram' (публічний канал через self-hosted RSSHub /telegram/channel/:user - без API і логіну).
+// 'telegram' і 'threads' (публічні сторінки через self-hosted RSSHub - без API і логіну),
+// 'instagram' (business_discovery Meta Graph через ПІДКЛЮЧЕНИЙ Instagram воркспейсу - офіційний API,
+// тому kind='instagram' і замість feed URL зберігаємо маркер instagram:username; тягне поллер напряму).
 import { env } from "./env.js";
+import { one } from "./db.js";
 import { fetchFeedRaw, parseFeed, parseFeedTitle } from "./rss.js";
+import { businessDiscovery } from "./meta.js";
 
-export type SourceType = "news" | "rss" | "telegram";
+export type SourceType = "news" | "rss" | "telegram" | "threads" | "instagram";
 export type ResolveResult = {
   feedUrl: string;
   title: string;
   preview: { title: string; link: string }[]; // 3-5 останніх айтемів — юзер підтверджує, що бачить те джерело
+  kind?: string; // 'instagram' → поллер читає Graph API, не RSS
   note?: string;
 };
+
+// нормалізація хендла: @user / instagram.com/user / threads.net/@user / просто user
+function extractHandle(input: string, hosts: RegExp): string | null {
+  const m = input.trim().match(new RegExp(`^(?:https?:\\/\\/)?(?:www\\.)?(?:${hosts.source})?@?([A-Za-z0-9_.]{2,40})\\/?(?:\\?.*)?$`, "i"));
+  return m ? m[1] : null;
+}
 
 // Google News RSS: пошук за ключовими словами, мова/регіон через hl/gl/ceid (безкоштовно, без ключа)
 function googleNewsUrl(queryRaw: string, lang: string): string {
@@ -56,9 +67,39 @@ async function resolveDirectUrl(input: string): Promise<ResolveResult> {
   throw lastErr || new Error("Не знайшов RSS за цим посиланням.");
 }
 
-export async function resolveSource(type: SourceType, inputRaw: string, lang?: string): Promise<ResolveResult> {
+export async function resolveSource(type: SourceType, inputRaw: string, lang?: string, workspaceId?: string): Promise<ResolveResult> {
   const input = (inputRaw || "").trim();
   if (!input) throw new Error("Введи тему або посилання.");
+  if (type === "instagram") {
+    const user = extractHandle(input, /instagram\.com\//);
+    if (!user) throw new Error("Не схоже на Instagram-акаунт. Встав @назву або посилання instagram.com/назва.");
+    if (!workspaceId) throw new Error("внутрішня помилка: нема workspace");
+    const mt = await one<{ ig_user_id: string | null; page_token: string | null }>(
+      `select ig_user_id, page_token from meta_config where workspace_id=$1`, [workspaceId]);
+    if (!mt?.ig_user_id || !mt.page_token)
+      throw new Error("Спершу підключи СВІЙ Instagram (Налаштування → Канали) - через нього офіційно читаються інші сторінки.");
+    let bd;
+    try { bd = await businessDiscovery(mt.ig_user_id, mt.page_token, user, 8); }
+    catch (e: any) { throw new Error(`Не бачу @${user}: ${/business/i.test(e.message) ? "сторінка має бути бізнес- або креатор-акаунтом (особисті API не віддає)" : e.message}`); }
+    if (!bd.media.length) throw new Error(`@${bd.username}: постів не видно (порожня сторінка?).`);
+    return {
+      feedUrl: `instagram:${bd.username}`, kind: "instagram",
+      title: `IG: @${bd.username}${bd.name ? ` (${bd.name})` : ""}`,
+      preview: bd.media.slice(0, 5).map((m) => ({ title: (m.caption || "(без підпису)").slice(0, 140), link: m.permalink || "" })),
+      note: "Instagram, офіційний API",
+    };
+  }
+  if (type === "threads") {
+    const user = extractHandle(input, /threads\.(?:net|com)\//);
+    if (!user) throw new Error("Не схоже на Threads-профіль. Встав @назву або посилання threads.net/@назва.");
+    let r: ResolveResult;
+    try { r = await validateFeed(`${env.rsshub.baseUrl}/threads/${user}`); }
+    catch (e: any) {
+      if (/HTTP 40|порожня|Не бачу/i.test(String(e.message))) throw new Error(`Не бачу профіль @${user} у Threads. Він існує і публічний?`);
+      throw e;
+    }
+    return { ...r, title: r.title || `Threads: @${user}`, note: "Threads-профіль" };
+  }
   if (type === "telegram") {
     // приймаємо будь-який формат: https://t.me/durov · t.me/s/durov · @durov · durov
     const m = input.match(/(?:t\.me\/(?:s\/)?|@)?([A-Za-z0-9_]{4,32})\/?$/);

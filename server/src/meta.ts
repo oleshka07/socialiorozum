@@ -125,6 +125,22 @@ export async function getRecentMedia(igUserId: string, pageToken: string, limit 
   return (j.data || []).map((m) => ({ caption: m.caption || "", like_count: m.like_count, comments_count: m.comments_count, timestamp: m.timestamp }));
 }
 
+// Business Discovery: читання постів ЧУЖОЇ публічної бізнес/креатор-сторінки IG через власний
+// підключений акаунт (офіційний API - без кук і скрейпінгу). Особисті акаунти API не віддає.
+export async function businessDiscovery(igUserId: string, pageToken: string, targetUsername: string, limit = 12):
+  Promise<{ username: string; name?: string; media: Array<{ id: string; caption: string; permalink?: string; timestamp?: string }> }> {
+  const u = new URL(`${GRAPH}/${igUserId}`);
+  u.searchParams.set("fields", `business_discovery.username(${targetUsername}){username,name,media.limit(${limit}){id,caption,permalink,timestamp}}`);
+  u.searchParams.set("access_token", pageToken);
+  const j = await fbFetch<any>(u.toString());
+  const bd = j.business_discovery;
+  if (!bd) throw new Error("акаунт не знайдено або він не бізнес/креатор");
+  return {
+    username: bd.username, name: bd.name,
+    media: ((bd.media && bd.media.data) || []).map((m: any) => ({ id: String(m.id), caption: m.caption || "", permalink: m.permalink, timestamp: m.timestamp })),
+  };
+}
+
 // Instagram: двокроковий публіш (контейнер із image_url+caption -> media_publish)
 export async function publishToInstagram(igUserId: string, pageToken: string, imageUrl: string, caption: string) {
   const cbody = new URLSearchParams({ image_url: imageUrl, caption, access_token: pageToken });

@@ -437,25 +437,28 @@ app.post("/api/generate/from-brand", async (req: any, reply) => {
 
 // ----- контент-джерела (RSS) -----
 app.get("/api/sources/rss", async (req: any) =>
-  q(`select id, url, title, active, auto_run, last_pulled_at, last_error from content_source
-     where workspace_id=$1 and kind='rss' order by created_at desc`, [req.user.workspace_id]));
+  q(`select id, url, title, kind, active, auto_run, last_pulled_at, last_error from content_source
+     where workspace_id=$1 and kind in ('rss','instagram') order by created_at desc`, [req.user.workspace_id]));
 
 // крок 1 флоу «Додати джерело»: резолв вводу (тема / посилання) у feed URL + прев'ю останніх постів.
 // НІЧОГО не зберігає - юзер спочатку бачить «Знайдено: … ось останні пости» і підтверджує.
 app.post("/api/sources/rss/resolve", async (req: any, reply) => {
-  const type = req.body?.type === "news" ? "news" : req.body?.type === "telegram" ? "telegram" : "rss";
-  try { return { ok: true, ...(await resolveSource(type, String(req.body?.input ?? ""), req.body?.lang)) }; }
+  const t = String(req.body?.type ?? "rss");
+  const type = (["news", "telegram", "threads", "instagram"].includes(t) ? t : "rss") as any;
+  try { return { ok: true, ...(await resolveSource(type, String(req.body?.input ?? ""), req.body?.lang, req.user.workspace_id)) }; }
   catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
 
 app.post("/api/sources/rss", async (req: any, reply) => {
   const url = String(req.body?.url ?? "").trim();
-  if (!/^https?:\/\//i.test(url)) return reply.code(400).send({ error: "Вкажіть коректний URL стрічки (https://…)" });
+  const kind = req.body?.kind === "instagram" ? "instagram" : "rss";
+  if (kind === "instagram" ? !/^instagram:[A-Za-z0-9_.]{2,40}$/.test(url) : !/^https?:\/\//i.test(url))
+    return reply.code(400).send({ error: "Вкажіть коректний URL стрічки (https://…)" });
   const autoRun = req.body?.autoRun === true;
   const title = String(req.body?.title ?? "").trim().slice(0, 200) || null;
   const r = await one<{ id: string }>(
-    `insert into content_source(workspace_id, kind, url, title, auto_run) values($1,'rss',$2,$3,$4) returning id`,
-    [req.user.workspace_id, url, title, autoRun]);
+    `insert into content_source(workspace_id, kind, url, title, auto_run) values($1,$2,$3,$4,$5) returning id`,
+    [req.user.workspace_id, kind, url, title, autoRun]);
   return { ok: true, id: r!.id };
 });
 
