@@ -387,6 +387,8 @@ alter table post add column if not exists image_base text;
 alter table post add column if not exists headline text;
 -- зібраний відео-рілс (mp4 у MEDIA_DIR) - щоб результат не губився після збірки
 alter table post add column if not exists reel_video text;
+-- лічильник підряд невдалих спроб фіда - для експоненційного бекофу поллера (0 = здоровий)
+alter table content_source add column if not exists error_count int not null default 0;
 
 -- підключення каналу до СПІЛЬНОГО Telegram-бота: код deep-link -> воркспейс, + хто почав діалог
 create table if not exists tg_connect (

@@ -732,10 +732,16 @@
           </div>
         </div>
         <div class="panel">
-          <div class="ph">📡 RSS-стрічки (авто-інжест)</div>
-          <div class="hint">Поллер кожні ~15 хв тягне нові статті у «Джерела». «Авто» = одразу проганяти кишку (обережно з вартістю AI).</div>
-          <div class="btnrow"><input class="txt" id="rssUrl" placeholder="https://example.com/feed.xml" style="flex:1;min-width:220px"><label class="rchip"><input type="checkbox" id="rssAuto"> авто-пілот</label><button class="primary" id="rssAdd">Додати</button></div>
+          <div class="ph">📡 Стрічки-джерела (авто-інжест)</div>
+          <div class="hint">Нові пости стрічки самі падають у «Матеріали» кожні ~15 хв. «Новини за темою» - введи ключові слова, решту зробить Google News. «Авто» = одразу генерувати чорновики (обережно з вартістю AI).</div>
+          <div class="btnrow" style="flex-wrap:wrap">
+            <select id="rssType" class="txt" style="width:auto;padding:8px 10px;display:inline-block"><option value="news">📰 Новини за темою</option><option value="rss">🔗 RSS-стрічка (URL)</option></select>
+            <select id="rssLang" class="txt" style="width:auto;padding:8px 10px;display:inline-block"><option value="uk">🇺🇦 укр</option><option value="en">🇬🇧 англ</option><option value="cs">🇨🇿 чес</option></select>
+            <input class="txt" id="rssUrl" placeholder="тема або ключові слова, напр.: готельний бізнес Чехія" style="flex:1;min-width:220px">
+            <button class="primary" id="rssFind">🔍 Знайти</button>
+          </div>
           <div id="rssMsg" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
+          <div id="rssPreview" style="display:none;margin-top:10px"></div>
           <div id="rssList" class="out" style="margin-top:10px"></div>
         </div>
         <div class="panel">
@@ -1956,7 +1962,12 @@ async function loadRss(){
   const o=$('rssList'); if(!o) return;
   try{ const feeds=await api('/sources/rss');
     if(!feeds.length){ o.innerHTML='<div class="empty">Поки немає стрічок.</div>'; return; }
-    o.innerHTML=feeds.map(f=>'<div class="card" data-id="'+f.id+'"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap"><div style="min-width:0;flex:1"><div style="word-break:break-all">'+esc(f.url)+'</div><div style="font-size:12px;color:var(--muted)">'+(f.last_pulled_at?('останнє: '+new Date(f.last_pulled_at).toLocaleString()):'ще не тягнулось')+(f.last_error?(' · ⚠ '+esc(f.last_error)):'')+'</div></div><div class="btnrow" style="margin:0;flex-wrap:nowrap"><label class="rchip"><input type="checkbox" class="rssActive" '+(f.active?'checked':'')+'> активна</label><label class="rchip"><input type="checkbox" class="rssAutoT" '+(f.auto_run?'checked':'')+'> авто</label><button class="ghost rssPull">↓</button><button class="rssDel">🗑</button></div></div></div>').join('');
+    o.innerHTML=feeds.map(f=>{ const broken=!!f.last_error;
+      return '<div class="card" data-id="'+f.id+'"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap"><div style="min-width:0;flex:1">'
+      +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><b style="font-size:13.5px">'+esc(f.title||f.url)+'</b>'+(broken?'<span class="ptag" style="color:var(--danger);border-color:var(--danger)" title="'+esc(f.last_error)+'">⚠ джерело недоступне</span>':'')+'</div>'
+      +(f.title?'<div style="word-break:break-all;font-size:11.5px;color:var(--faint)">'+esc(f.url)+'</div>':'')
+      +'<div style="font-size:12px;color:var(--muted)">'+(f.last_pulled_at?('останнє: '+new Date(f.last_pulled_at).toLocaleString()):'ще не тягнулось')+'</div></div>'
+      +'<div class="btnrow" style="margin:0;flex-wrap:nowrap"><label class="rchip"><input type="checkbox" class="rssActive" '+(f.active?'checked':'')+'> активна</label><label class="rchip"><input type="checkbox" class="rssAutoT" '+(f.auto_run?'checked':'')+'> авто</label><button class="ghost rssPull" title="підтягнути зараз">↓</button><button class="rssDel">🗑</button></div></div></div>'; }).join('');
     o.querySelectorAll('.card[data-id]').forEach(c=>{ const id=c.dataset.id;
       c.querySelectorAll('.rchip').forEach(l=>{ const cb=l.querySelector('input'); l.classList.toggle('on',cb.checked); cb.addEventListener('change',()=>l.classList.toggle('on',cb.checked)); });
       c.querySelector('.rssActive').addEventListener('change',e=>api('/sources/rss/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:e.target.checked})}).catch(()=>{}));
@@ -1966,7 +1977,30 @@ async function loadRss(){
     });
   }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }
-$('rssAdd').onclick=async()=>{ const url=$('rssUrl').value.trim(); const m=$('rssMsg'); if(!url){ m.style.color='var(--danger)'; m.textContent='Вкажи URL'; return; } if($('rssAuto').checked && !confirm(AUTORUN_WARN)) $('rssAuto').checked=false; m.style.color='var(--muted)'; m.textContent='додаю…'; try{ await api('/sources/rss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,autoRun:$('rssAuto').checked})}); $('rssUrl').value=''; $('rssAuto').checked=false; m.style.color='var(--brand)'; m.textContent='додано ✓'; await loadRss(); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
+// «Додати джерело» = 2 кроки: Знайти (резолв + прев'ю останніх постів) → Підключити (збереження + перший fetch)
+if($('rssType')) $('rssType').onchange=()=>{ const news=$('rssType').value==='news';
+  $('rssUrl').placeholder=news?'тема або ключові слова, напр.: готельний бізнес Чехія':'https://example.com/feed.xml (або просто адреса сайту - фід знайду сам)';
+  $('rssLang').style.display=news?'':'none'; };
+if($('rssFind')) $('rssFind').onclick=async()=>{ const input=$('rssUrl').value.trim(); const m=$('rssMsg'); const pv=$('rssPreview');
+  if(!input){ m.style.color='var(--danger)'; m.textContent=$('rssType').value==='news'?'Введи тему':'Встав посилання'; return; }
+  m.style.color='var(--muted)'; m.textContent='шукаю джерело…'; pv.style.display='none'; const b=$('rssFind'); b.disabled=true;
+  try{ const r=await api('/sources/rss/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:$('rssType').value,input,lang:$('rssLang').value})});
+    m.textContent='';
+    pv.style.display='block';
+    pv.innerHTML='<div class="card" style="border-color:var(--brand)"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>Знайдено: '+esc(r.title)+'</b>'+(r.note?'<span class="ptag">'+esc(r.note)+'</span>':'')+'</div>'
+      +'<div style="font-size:12.5px;color:var(--ink2);margin-top:8px">Останні пости:</div>'
+      +'<ul style="margin:6px 0 0 18px;font-size:12.5px;line-height:1.6;color:var(--muted)">'+(r.preview||[]).map(p=>'<li>'+esc(p.title)+'</li>').join('')+'</ul>'
+      +'<div class="btnrow" style="margin-top:12px"><label class="rchip"><input type="checkbox" id="rssAuto"> авто-генерація чорновиків</label><button class="primary" id="rssConnect">✓ Підключити</button><button class="ghost" id="rssCancel">Скасувати</button></div></div>';
+    pv.querySelector('#rssCancel').onclick=()=>{ pv.style.display='none'; pv.innerHTML=''; };
+    pv.querySelector('#rssConnect').onclick=async(ev)=>{ const cb=pv.querySelector('#rssAuto'); if(cb.checked && !confirm(AUTORUN_WARN)) cb.checked=false;
+      const cbtn=ev.target; cbtn.disabled=true; m.style.color='var(--muted)'; m.textContent='підключаю…';
+      try{ const add=await api('/sources/rss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:r.feedUrl,title:r.title,autoRun:cb.checked})});
+        m.textContent='тягну перші пости…';
+        try{ const pull=await api('/sources/rss/'+add.id+'/pull',{method:'POST'}); m.style.color='var(--brand)'; m.textContent='підключено ✓ '+(pull.created?('+'+pull.created+' у Матеріалах'):''); }
+        catch(_){ m.style.color='var(--brand)'; m.textContent='підключено ✓ (пости підтягнуться протягом 15 хв)'; }
+        $('rssUrl').value=''; pv.style.display='none'; pv.innerHTML=''; await loadRss(); try{await loadRecent();}catch(_){}
+      }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; cbtn.disabled=false; } };
+  }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } finally{ b.disabled=false; } };
 
 // ---------- останні джерела ----------
 async function loadRecent(){

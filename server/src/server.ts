@@ -23,6 +23,7 @@ import { sendVerifyEmail, sendResetEmail, sendDeletionScheduledEmail, sendEmailC
 import { logEvent } from "./log.js";
 import { startAutopost } from "./autopost.js";
 import { startRssPoller, pullFeed } from "./rss-poller.js";
+import { resolveSource } from "./rss-resolver.js";
 import { MEDIA_DIR, saveMedia, deleteMediaFile, convertAllHeif, getThumb } from "./media.js";
 import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
 import * as gdrive from "./gdrive.js";
@@ -438,13 +439,22 @@ app.get("/api/sources/rss", async (req: any) =>
   q(`select id, url, title, active, auto_run, last_pulled_at, last_error from content_source
      where workspace_id=$1 and kind='rss' order by created_at desc`, [req.user.workspace_id]));
 
+// крок 1 флоу «Додати джерело»: резолв вводу (тема / посилання) у feed URL + прев'ю останніх постів.
+// НІЧОГО не зберігає - юзер спочатку бачить «Знайдено: … ось останні пости» і підтверджує.
+app.post("/api/sources/rss/resolve", async (req: any, reply) => {
+  const type = req.body?.type === "news" ? "news" : "rss";
+  try { return { ok: true, ...(await resolveSource(type, String(req.body?.input ?? ""), req.body?.lang)) }; }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+
 app.post("/api/sources/rss", async (req: any, reply) => {
   const url = String(req.body?.url ?? "").trim();
   if (!/^https?:\/\//i.test(url)) return reply.code(400).send({ error: "Вкажіть коректний URL стрічки (https://…)" });
   const autoRun = req.body?.autoRun === true;
+  const title = String(req.body?.title ?? "").trim().slice(0, 200) || null;
   const r = await one<{ id: string }>(
-    `insert into content_source(workspace_id, kind, url, auto_run) values($1,'rss',$2,$3) returning id`,
-    [req.user.workspace_id, url, autoRun]);
+    `insert into content_source(workspace_id, kind, url, title, auto_run) values($1,'rss',$2,$3,$4) returning id`,
+    [req.user.workspace_id, url, title, autoRun]);
   return { ok: true, id: r!.id };
 });
 

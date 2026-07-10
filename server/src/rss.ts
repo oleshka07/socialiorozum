@@ -32,7 +32,13 @@ export function parseFeed(xml: string): RssItem[] {
   return out;
 }
 
-export async function fetchFeed(url: string): Promise<RssItem[]> {
+// назва каналу/стрічки (з <channel><title> RSS або <feed><title> Atom) — для прев'ю при підключенні
+export function parseFeedTitle(xml: string): string {
+  const head = xml.replace(/<item[\s\S]*$/i, "").replace(/<entry[\s\S]*$/i, "");
+  return decode(tag(head, "title")).slice(0, 200);
+}
+
+export async function fetchFeedRaw(url: string): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   let res: Response;
@@ -40,5 +46,9 @@ export async function fetchFeed(url: string): Promise<RssItem[]> {
   catch (e: any) { if (e && e.name === "AbortError") throw new Error("RSS timeout 15s"); throw e; }
   finally { clearTimeout(timer); }
   if (!res.ok) throw new Error(`RSS HTTP ${res.status}`);
-  return parseFeed(await res.text());
+  return res.text();
+}
+
+export async function fetchFeed(url: string): Promise<RssItem[]> {
+  return parseFeed(await fetchFeedRaw(url));
 }

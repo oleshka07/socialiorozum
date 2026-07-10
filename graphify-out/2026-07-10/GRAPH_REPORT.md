@@ -1,16 +1,16 @@
 # Graph Report - socialiorozum  (2026-07-10)
 
 ## Corpus Check
-- 44 files · ~81,469 words
+- 44 files · ~82,361 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 647 nodes · 1089 edges · 93 communities (34 shown, 59 thin omitted)
+- 647 nodes · 1092 edges · 93 communities (34 shown, 59 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 9 edges (avg confidence: 0.91)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `868fcfd9`
+- Built from commit: `11201a42`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
