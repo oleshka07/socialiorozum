@@ -48,6 +48,20 @@ jobs:
                 const rr=await resolveSource("news","готельний бізнес","uk");
                 console.log("GNEWS_RESOLVE:", rr.preview.length+" items", "title:", JSON.stringify(rr.title).slice(0,80), rr.preview.length?"OK":"FAIL");
                 console.log("GNEWS first:", JSON.stringify(rr.preview[0]&&rr.preview[0].title).slice(0,100));
+                // догрузка тексту статті за лінком першого айтема (для «тонких» фідів)
+                try{
+                  const { fetchArticleText } = await import("/app/dist/rss.js").catch(()=>import("./dist/rss.js"));
+                  const t=await fetchArticleText(rr.preview[0].link);
+                  console.log("ARTICLE_TEXT:", t.length+" chars", t.length>200?"OK":"THIN(фолбек=заголовок)", JSON.stringify(t.slice(0,90)));
+                }catch(e){ console.log("ARTICLE_TEXT: ERR", e.message); }
+                // Telegram-джерело через RSSHub у compose (публічний канал)
+                try{
+                  const tg=await resolveSource("telegram","@telegram");
+                  console.log("RSSHUB_TG:", tg.preview.length+" items", "title:", JSON.stringify(tg.title).slice(0,60), tg.preview.length?"OK":"FAIL");
+                }catch(e){ console.log("RSSHUB_TG: ERR", e.message, "(контейнер rsshub піднявся? docker compose ps)"); }
               }catch(e){ console.log("GNEWS_RESOLVE: ERR", e.message); }
             })();
             NODE
+            echo "== rsshub контейнер =="
+            docker compose ps rsshub 2>/dev/null | tail -1 || echo "rsshub: контейнера ще нема (старий compose?)"
+            free -h | head -2

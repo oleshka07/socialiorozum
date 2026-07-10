@@ -1,10 +1,11 @@
 // Резолвер джерел-стрічок: перетворює «те, що ввів користувач» у валідний feed URL + прев'ю.
 // Флоу «Додати джерело»: resolve (цей модуль, нічого не зберігає) → юзер бачить прев'ю → підтверджує → POST /sources/rss.
-// Типи Фази 1: 'news' (Google News за темою або готовий RSS-URL) і 'rss' (прямий URL з автопошуком фіда).
-// Розширення (Фаза 2+): 'telegram' → RSSHub /telegram/channel/:user — додається новою гілкою в resolveSource.
+// Типи: 'news' (Google News за темою або готовий RSS-URL), 'rss' (прямий URL з автопошуком фіда),
+// 'telegram' (публічний канал через self-hosted RSSHub /telegram/channel/:user - без API і логіну).
+import { env } from "./env.js";
 import { fetchFeedRaw, parseFeed, parseFeedTitle } from "./rss.js";
 
-export type SourceType = "news" | "rss";
+export type SourceType = "news" | "rss" | "telegram";
 export type ResolveResult = {
   feedUrl: string;
   title: string;
@@ -58,6 +59,19 @@ async function resolveDirectUrl(input: string): Promise<ResolveResult> {
 export async function resolveSource(type: SourceType, inputRaw: string, lang?: string): Promise<ResolveResult> {
   const input = (inputRaw || "").trim();
   if (!input) throw new Error("Введи тему або посилання.");
+  if (type === "telegram") {
+    // приймаємо будь-який формат: https://t.me/durov · t.me/s/durov · @durov · durov
+    const m = input.match(/(?:t\.me\/(?:s\/)?|@)?([A-Za-z0-9_]{4,32})\/?$/);
+    if (!m) throw new Error("Не схоже на Telegram-канал. Встав @назву або посилання t.me/канал.");
+    const user = m[1];
+    let r: ResolveResult;
+    try { r = await validateFeed(`${env.rsshub.baseUrl}/telegram/channel/${user}`); }
+    catch (e: any) {
+      if (/HTTP 40|порожня|Не бачу/i.test(String(e.message))) throw new Error(`Не бачу канал @${user}. Він існує і публічний? Приватні канали підключити не можна.`);
+      throw e;
+    }
+    return { ...r, title: r.title || `TG: @${user}`, note: "Telegram-канал" };
+  }
   if (type === "news") {
     // авто-детект: посилання → як прямий фід; текст → пошук Google News за темою
     if (/^https?:\/\//i.test(input)) return resolveDirectUrl(input);

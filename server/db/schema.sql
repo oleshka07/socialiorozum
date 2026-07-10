@@ -390,6 +390,25 @@ alter table post add column if not exists reel_video text;
 -- лічильник підряд невдалих спроб фіда - для експоненційного бекофу поллера (0 = здоровий)
 alter table content_source add column if not exists error_count int not null default 0;
 
+-- LinkedIn-автопостинг (5-та мережа, шаблон Threads): підключення профілю + журнал публікацій
+create table if not exists linkedin_config (
+  workspace_id     uuid primary key references workspace(id) on delete cascade,
+  member_urn       text not null,            -- urn:li:person:… (пізніше: urn:li:organization:… для сторінок)
+  display_name     text,
+  access_token     text not null,            -- живе 60 днів; програмного рефрешу на базовому доступі нема → індикатор перепідключення
+  token_expires_at timestamptz,
+  updated_at       timestamptz not null default now()
+);
+create table if not exists linkedin_publish (
+  id          uuid primary key default gen_random_uuid(),
+  post_id     uuid not null references post(id) on delete cascade,
+  external_id text,                           -- URN опублікованого поста (x-restli-id)
+  status      text not null default 'sent',
+  error       text,
+  created_at  timestamptz not null default now()
+);
+create index if not exists idx_lipub_post on linkedin_publish(post_id);
+
 -- підключення каналу до СПІЛЬНОГО Telegram-бота: код deep-link -> воркспейс, + хто почав діалог
 create table if not exists tg_connect (
   code         text primary key,

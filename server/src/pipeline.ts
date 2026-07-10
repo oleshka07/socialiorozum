@@ -385,6 +385,7 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
     instagram: "Instagram: чіпкий підпис + 5-10 релевантних хештегів наприкінці.",
     threads: "Threads: ЖОРСТКИЙ ліміт 500 символів (довший пост НЕ опублікується - скороти безжально), без хештегів, розмовний тон.",
     facebook: "Facebook: 1-3 абзаци, нейтральний тон, без надлишку хештегів.",
+    linkedin: "LinkedIn: професійний, але живий тон від першої особи; сильний перший рядок (він видимий до «…more»); 2-4 короткі абзаци з особистим досвідом/висновком; 3-5 хештегів наприкінці; без емодзі-спаму.",
   };
   const want = channels.filter((c) => rules[c]);
   if (!want.length) return {};
@@ -429,14 +430,14 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
   const system = "Адаптуй пост під кожну вказану соцмережу, зберігаючи зміст, голос бренду й живу людську мову." +
     (brief ? `\n\n<strategy_brief>\n${brief}\n</strategy_brief>` : "") +
     tone + deai + playbooks + critique + goalRule(s) + ctaRule + fmtRule +
-    "\n\nЖОРСТКІ ліміти довжини версій (НЕ перевищуй, це технічні ліміти мереж): telegram 1024, threads 500, instagram 2200, facebook 2000 символів." +
+    "\n\nЖОРСТКІ ліміти довжини версій (НЕ перевищуй, це технічні ліміти мереж): telegram 1024, threads 500, instagram 2200, facebook 2000, linkedin 3000 символів." +
     NO_DASH_RULE + ANTI_AI_RULE + `\n\nПоверни ЛИШЕ валідний JSON-обʼєкт виду {${want.map((c) => `"${c}":"…"`).join(",")}}. Мова: ${lang}.`;
   const raw = await chat(v2 ? "openai/gpt-4o" : "openai/gpt-4o-mini", system, `Пост:\n---\n${content}`, { workspaceId, step: "format" });
   const obj = extractJsonObject(raw) as Record<string, string>;
   const out: Record<string, string> = {};
   for (const c of want) if (obj && obj[c]) out[c] = String(obj[c]);
   // LLM інколи ігнорує ліміти («до 500 симв.» у Threads) - перевіряємо КОДОМ і скорочуємо повторним викликом.
-  const HARD_LIMITS: Record<string, number> = { telegram: 1024, threads: 500, instagram: 2200, facebook: 2000 };
+  const HARD_LIMITS: Record<string, number> = { telegram: 1024, threads: 500, instagram: 2200, facebook: 2000, linkedin: 3000 };
   for (const c of want) {
     const lim = HARD_LIMITS[c];
     if (!out[c] || !lim || out[c].length <= lim) continue;

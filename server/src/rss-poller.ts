@@ -2,7 +2,7 @@
 // дедуп за external_id, опційно одразу проганяє пайплайн (auto_run).
 import { q, one } from "./db.js";
 import { logEvent } from "./log.js";
-import { fetchFeed } from "./rss.js";
+import { fetchFeed, fetchArticleText, cleanText } from "./rss.js";
 import { generatePostsOnePass, matchPlanSlots } from "./pipeline.js";
 
 const POLL_MS = 15 * 60 * 1000; // кожні 15 хв
@@ -21,12 +21,20 @@ async function ingest(feed: Feed): Promise<string[]> {
   const runIds: string[] = [];
   for (const it of items) {
     if (runIds.length >= MAX_NEW_PER_TICK) break;
-    if (!it.externalId || !it.content) continue;
+    if (!it.externalId || !(it.content || it.title)) continue;
     const dup = await one(`select id from source where workspace_id=$1 and external_id=$2`, [feed.workspace_id, it.externalId]);
     if (dup) continue;
+    // «тонкий» айтем (Google News: лише заголовок+джерело) → догрузити текст статті за посиланням;
+    // не вийшло (сайт закритий/JS-only) → матеріалом стає заголовок, Розвідник дасть кут з нього
+    let content = it.content || "";
+    if (content.replace(/\s+/g, " ").length < 180 && it.link) {
+      const art = await fetchArticleText(it.link).catch(() => "");
+      if (art) content = `${it.title}\n\n${art}`;
+    }
+    if (!content.trim()) content = it.title;
     const src = await one<{ id: string }>(
       `insert into source(workspace_id,origin,title,transcript,external_id) values($1,'rss',$2,$3,$4) returning id`,
-      [feed.workspace_id, (it.title || feed.url).slice(0, 200), it.content.slice(0, 50000), it.externalId]);
+      [feed.workspace_id, (it.title || feed.url).slice(0, 200), content.slice(0, 50000), it.externalId]);
     const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
     runIds.push(run!.id);
   }
@@ -73,8 +81,20 @@ export async function pullFeed(feedId: string, ws: string): Promise<number> {
   return runIds.length;
 }
 
+// одноразова чистка матеріалів, що встигли зберегтися з сирим HTML (баг порядку розекранування в decode)
+async function cleanBrokenItems(): Promise<void> {
+  const rows = await q<{ id: string; transcript: string }>(
+    `select id, transcript from source where origin='rss' and (transcript like '%<a href%' or transcript like '%&lt;%' or transcript like '%&nbsp;%') limit 500`);
+  for (const r of rows) {
+    const fixed = cleanText(r.transcript);
+    if (fixed && fixed !== r.transcript) await q(`update source set transcript=$2 where id=$1`, [r.id, fixed]);
+  }
+  if (rows.length) await logEvent("info", "rss", `почищено сирих HTML-матеріалів: ${rows.length}`);
+}
+
 let running = false;
 export function startRssPoller(): void {
+  cleanBrokenItems().catch(() => { /* чистка не критична */ });
   setInterval(async () => {
     if (running) return;
     running = true;

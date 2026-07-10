@@ -15,7 +15,7 @@
     --line:#E8E3DA; --line2:#DCD6CB;
     --brand:#15795A; --brand2:#1C9170; --brand-ink:#FFFFFF; --brand-soft:#E4F0EA; --brand-soft2:#D2E7DD;
     --amber:#B9762A; --amber-soft:#F6EAD7; --danger:#BC4530; --danger-soft:#F7E4DF;
-    --tg:#2AABEE; --ig:#E1306C; --fb:#1877F2; --th:#101010;
+    --tg:#2AABEE; --ig:#E1306C; --fb:#1877F2; --th:#101010; --li:#0A66C2;
     --shadow:0 1px 2px rgba(28,40,33,.04), 0 4px 14px rgba(28,40,33,.06);
     --shadow-lg:0 8px 40px rgba(28,40,33,.14); --r:14px;
   }
@@ -25,7 +25,7 @@
     --line:#28302C; --line2:#323B36;
     --brand:#37B488; --brand2:#42C496; --brand-ink:#06120D; --brand-soft:#13251D; --brand-soft2:#173026;
     --amber:#D99B4E; --amber-soft:#241B0F; --danger:#E0654A; --danger-soft:#2A140E;
-    --tg:#2AABEE; --ig:#F25C9A; --fb:#4D90F5; --th:#E8EDE9;
+    --tg:#2AABEE; --ig:#F25C9A; --fb:#4D90F5; --th:#E8EDE9; --li:#3B82C4;
     --shadow:0 1px 2px rgba(0,0,0,.3), 0 6px 22px rgba(0,0,0,.4); --shadow-lg:0 12px 48px rgba(0,0,0,.55);
   }
   *{box-sizing:border-box}
@@ -694,6 +694,12 @@
             <div class="btnrow"><a id="thConnect" class="btn primary" href="/api/integrations/threads/connect" onclick="return connectPopup('/api/integrations/threads/connect')" style="display:none">🔗 Підключити Threads</a><button class="ghost" id="thDisconnect" style="display:none">Відключити</button></div>
           </div>
           <div class="panel" style="margin:0">
+            <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--li)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M4 4h4v16H4V4zm2-1a2 2 0 110-4 2 2 0 010 4zm5 5h4v2c.8-1.3 2.2-2.3 4-2.3 3 0 5 2 5 5.3V20h-4v-8c0-1.5-.8-2.5-2-2.5s-2 1-2 2.5v8h-5V8z"></path></svg></span>LinkedIn</div>
+            <div class="hint">Постинг від імені твого профілю (до 3000 символів, з фото). Токен живе 60 днів - потім перепідключення однією кнопкою.</div>
+            <div class="btnrow"><span id="liStatus" style="font-size:13px;color:var(--muted)">…</span></div>
+            <div class="btnrow"><a id="liConnect" class="btn primary" href="/api/integrations/linkedin/connect" onclick="return connectPopup('/api/integrations/linkedin/connect')" style="display:none">🔗 Підключити LinkedIn</a><button class="ghost" id="liDisconnect" style="display:none">Відключити</button></div>
+          </div>
+          <div class="panel" style="margin:0">
             <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--ig)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M7 3h10a4 4 0 014 4v10a4 4 0 01-4 4H7a4 4 0 01-4-4V7a4 4 0 014-4zm5 5a4 4 0 100 8 4 4 0 000-8z"></path></svg></span>Facebook + Instagram</div>
             <div class="hint">Постинг у FB-Сторінку + аналітика FB/IG. IG-публікація потребує фото.</div>
             <div class="btnrow"><span id="mtStatus" style="font-size:13px;color:var(--muted)">…</span></div>
@@ -735,7 +741,7 @@
           <div class="ph">📡 Стрічки-джерела (авто-інжест)</div>
           <div class="hint">Нові пости стрічки самі падають у «Матеріали» кожні ~15 хв. «Новини за темою» - введи ключові слова, решту зробить Google News. «Авто» = одразу генерувати чорновики (обережно з вартістю AI).</div>
           <div class="btnrow" style="flex-wrap:wrap">
-            <select id="rssType" class="txt" style="width:auto;padding:8px 10px;display:inline-block"><option value="news">📰 Новини за темою</option><option value="rss">🔗 RSS-стрічка (URL)</option></select>
+            <select id="rssType" class="txt" style="width:auto;padding:8px 10px;display:inline-block"><option value="news">📰 Новини за темою</option><option value="telegram">✈️ Telegram-канал</option><option value="rss">🔗 RSS-стрічка (URL)</option></select>
             <select id="rssLang" class="txt" style="width:auto;padding:8px 10px;display:inline-block"><option value="uk">🇺🇦 укр</option><option value="en">🇬🇧 англ</option><option value="cs">🇨🇿 чес</option></select>
             <input class="txt" id="rssUrl" placeholder="тема або ключові слова, напр.: готельний бізнес Чехія" style="flex:1;min-width:220px">
             <button class="primary" id="rssFind">🔍 Знайти</button>
@@ -1247,8 +1253,8 @@ async function saveSelection(){ if(!runId) return; const ids=[...$('o1').querySe
 function renderPosts(oid,posts,emptyTxt){ const o=$(oid); if(!o) return; if(!posts||!posts.length){ o.innerHTML='<div class="empty">'+(emptyTxt||'-')+'</div>'; return; } o.innerHTML=posts.map(p=>'<div class="card post">'+esc(p.content)+'</div>').join(''); }
 
 // ---------- мережі ----------
-const NETS=[['telegram','Telegram'],['instagram','Instagram'],['facebook','Facebook'],['threads','Threads']];
-const NETVAR={telegram:'--tg',instagram:'--ig',facebook:'--fb',threads:'--th'};
+const NETS=[['telegram','Telegram'],['instagram','Instagram'],['facebook','Facebook'],['threads','Threads'],['linkedin','LinkedIn']];
+const NETVAR={telegram:'--tg',instagram:'--ig',facebook:'--fb',threads:'--th',linkedin:'--li'};
 // ---------- 🎯 головна ціль («Директор») + 📮 CTA-конфіг («Дистриб'ютор») ----------
 const GOALS=[['money','💰 Гроші / продажі'],['leads','📩 Ліди / заявки'],['growth','📈 Зростання аудиторії'],['authority','🎓 Авторитет'],['quality','💎 Якість аудиторії']];
 const CTA_TYPES=[['link','🔗 Посилання'],['keyword','🔑 Кодове слово'],['action','👉 Дія']];
@@ -1328,11 +1334,11 @@ async function directorCheck(id){ aiBusy('🎯 Директор перевіря
         await loadStudioPosts(); flash('Пост загострено під ціль ✓'); } }
     else alert(msg);
   }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } }
-const NETICON={telegram:'M22 4L2 11l6 2 2 6 3-4 5 4 4-15z',instagram:'M7 3h10a4 4 0 014 4v10a4 4 0 01-4 4H7a4 4 0 01-4-4V7a4 4 0 014-4zm5 5a4 4 0 100 8 4 4 0 000-8z',facebook:'M14 9V7c0-1 .5-1.5 1.5-1.5H17V2h-3c-2.5 0-4 1.5-4 4v3H7v3h3v9h4v-9h3l.5-3H14z',threads:'M12 3c5 0 8 3 8 9s-3 9-8 9-8-3-8-9c0-2 .5-3.5 1.5-4.5'};
+const NETICON={telegram:'M22 4L2 11l6 2 2 6 3-4 5 4 4-15z',instagram:'M7 3h10a4 4 0 014 4v10a4 4 0 01-4 4H7a4 4 0 01-4-4V7a4 4 0 014-4zm5 5a4 4 0 100 8 4 4 0 000-8z',facebook:'M14 9V7c0-1 .5-1.5 1.5-1.5H17V2h-3c-2.5 0-4 1.5-4 4v3H7v3h3v9h4v-9h3l.5-3H14z',threads:'M12 3c5 0 8 3 8 9s-3 9-8 9-8-3-8-9c0-2 .5-3.5 1.5-4.5',linkedin:'M4 4h4v16H4V4zm2-1a2 2 0 110-4 2 2 0 010 4zm5 5h4v2c.8-1.3 2.2-2.3 4-2.3 3 0 5 2 5 5.3V20h-4v-8c0-1.5-.8-2.5-2-2.5s-2 1-2 2.5v8h-5V8z'};
 let ChanStatus={};
 async function loadChanStatus(){ try{ ChanStatus=await api('/channels/status'); }catch(e){ ChanStatus={}; } }
 function chanDots(ch){ if(!ch) return ''; return NETS.filter(n=>ch[n[0]]&&ch[n[0]].on).map(n=>'<span class="cdot" title="'+n[1]+'" style="background:var('+NETVAR[n[0]]+')"><svg width="11" height="11" viewBox="0 0 24 24" fill="#fff"><path d="'+NETICON[n[0]]+'"></path></svg></span>').join(''); }
-function chanIcons(ch){ if(!ch) return ''; const I={telegram:'✈️',instagram:'📸',facebook:'📘',threads:'🧵'}; return Object.keys(I).filter(k=>ch[k]&&ch[k].on).map(k=>I[k]).join(''); }
+function chanIcons(ch){ if(!ch) return ''; const I={telegram:'✈️',instagram:'📸',facebook:'📘',threads:'🧵',linkedin:'💼'}; return Object.keys(I).filter(k=>ch[k]&&ch[k].on).map(k=>I[k]).join(''); }
 function statusPill(rv){ if(rv==='approved') return ['Затверджено','sp-ok']; if(rv==='needs_work') return ['Доопрацювати','sp-warn']; return ['Готово до перегляду','sp-soft']; }
 
 // ---------- фінальні пости: Конвеєр (компактно) / Студія / Інбокс ----------
@@ -1532,10 +1538,10 @@ function chooseMedia(){ return new Promise(async resolve=>{
 }); }
 // ---------- композер: опублікувати / запланувати ----------
 // ---------- КОМПОЗЕР: повноекранна панель (ліворуч редактор, праворуч мобільне прев'ю) ----------
-const NETLIM={telegram:1024,threads:500,instagram:2200,facebook:2000};
+const NETLIM={telegram:1024,threads:500,instagram:2200,facebook:2000,linkedin:3000};
 // скільки символів мережа показує ДО «… ще»/«показати повністю» (візуальний згин, як у застосунках); telegram - без згину
-const NETFOLD={instagram:125,facebook:280,threads:320};
-const NETMORE={instagram:'… ще',facebook:'… ще',threads:'Показати повністю'};
+const NETFOLD={instagram:125,facebook:280,threads:320,linkedin:210};
+const NETMORE={instagram:'… ще',facebook:'… ще',threads:'Показати повністю',linkedin:'…more'};
 async function openComposer(postId, opts){
   opts=opts||{};
   let full; try{ full=await api('/posts/'+postId+'/full'); }catch(e){ flash('Не вдалося відкрити: '+e.message); return; }
@@ -1911,6 +1917,15 @@ async function loadThreads(){
   }catch(e){}
 }
 $('thDisconnect').onclick=async()=>{ if(!confirm('Відключити Threads?')) return; try{ await api('/integrations/threads/disconnect',{method:'POST'}); await loadThreads(); }catch(e){} };
+async function loadLinkedin(){
+  try{ const c=await api('/integrations/linkedin'); const st=$('liStatus'), conn=$('liConnect'), dis=$('liDisconnect'); if(!st) return;
+    if(!c.configured){ st.textContent='🕓 Скоро: чекаємо схвалення застосунку від LinkedIn.'; if(conn)conn.style.display='none'; if(dis)dis.style.display='none'; return; }
+    if(c.hasToken&&c.expired){ st.innerHTML='⚠ Токен протух (60 днів) - перепідключи.'; if(conn){conn.style.display='inline-flex'; conn.textContent='🔄 Перепідключити';} if(dis)dis.style.display='inline-flex'; }
+    else if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.name?(' як <b>'+esc(c.name)+'</b>'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-flex'; }
+    else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-flex'; if(dis)dis.style.display='none'; }
+  }catch(e){}
+}
+if($('liDisconnect')) $('liDisconnect').onclick=async()=>{ if(!confirm('Відключити LinkedIn?')) return; try{ await api('/integrations/linkedin/disconnect',{method:'POST'}); await loadLinkedin(); }catch(e){} };
 async function loadMeta(){
   try{ const c=await api('/integrations/meta'); const st=$('mtStatus'), conn=$('mtConnect'), dis=$('mtDisconnect'), stats=$('mtStats'); if(!st) return;
     if(!c.configured){ st.textContent='⚠ META_APP_ID не налаштований.'; [conn,dis,stats].forEach(b=>b&&(b.style.display='none')); return; }
@@ -1965,7 +1980,7 @@ async function loadRss(){
     o.innerHTML=feeds.map(f=>{ const broken=!!f.last_error;
       return '<div class="card" data-id="'+f.id+'"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap"><div style="min-width:0;flex:1">'
       +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><b style="font-size:13.5px">'+esc(f.title||f.url)+'</b>'+(broken?'<span class="ptag" style="color:var(--danger);border-color:var(--danger)" title="'+esc(f.last_error)+'">⚠ джерело недоступне</span>':'')+'</div>'
-      +(f.title?'<div style="word-break:break-all;font-size:11.5px;color:var(--faint)">'+esc(f.url)+'</div>':'')
+      +(f.title?'<div style="word-break:break-all;font-size:11.5px;color:var(--faint)">'+esc((f.url.match(/\/telegram\/channel\/([A-Za-z0-9_]+)/)||[])[1]?('✈️ t.me/'+(f.url.match(/\/telegram\/channel\/([A-Za-z0-9_]+)/)||[])[1]):f.url)+'</div>':'')
       +'<div style="font-size:12px;color:var(--muted)">'+(f.last_pulled_at?('останнє: '+new Date(f.last_pulled_at).toLocaleString()):'ще не тягнулось')+'</div></div>'
       +'<div class="btnrow" style="margin:0;flex-wrap:nowrap"><label class="rchip"><input type="checkbox" class="rssActive" '+(f.active?'checked':'')+'> активна</label><label class="rchip"><input type="checkbox" class="rssAutoT" '+(f.auto_run?'checked':'')+'> авто</label><button class="ghost rssPull" title="підтягнути зараз">↓</button><button class="rssDel">🗑</button></div></div></div>'; }).join('');
     o.querySelectorAll('.card[data-id]').forEach(c=>{ const id=c.dataset.id;
@@ -1978,11 +1993,11 @@ async function loadRss(){
   }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }
 // «Додати джерело» = 2 кроки: Знайти (резолв + прев'ю останніх постів) → Підключити (збереження + перший fetch)
-if($('rssType')) $('rssType').onchange=()=>{ const news=$('rssType').value==='news';
-  $('rssUrl').placeholder=news?'тема або ключові слова, напр.: готельний бізнес Чехія':'https://example.com/feed.xml (або просто адреса сайту - фід знайду сам)';
-  $('rssLang').style.display=news?'':'none'; };
+if($('rssType')) $('rssType').onchange=()=>{ const t=$('rssType').value;
+  $('rssUrl').placeholder=t==='news'?'тема або ключові слова, напр.: готельний бізнес Чехія':(t==='telegram'?'@канал або t.me/канал (публічний)':'https://example.com/feed.xml (або просто адреса сайту - фід знайду сам)');
+  $('rssLang').style.display=t==='news'?'':'none'; };
 if($('rssFind')) $('rssFind').onclick=async()=>{ const input=$('rssUrl').value.trim(); const m=$('rssMsg'); const pv=$('rssPreview');
-  if(!input){ m.style.color='var(--danger)'; m.textContent=$('rssType').value==='news'?'Введи тему':'Встав посилання'; return; }
+  if(!input){ m.style.color='var(--danger)'; m.textContent=$('rssType').value==='news'?'Введи тему':($('rssType').value==='telegram'?'Встав @канал':'Встав посилання'); return; }
   m.style.color='var(--muted)'; m.textContent='шукаю джерело…'; pv.style.display='none'; const b=$('rssFind'); b.disabled=true;
   try{ const r=await api('/sources/rss/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:$('rssType').value,input,lang:$('rssLang').value})});
     m.textContent='';
@@ -2267,6 +2282,7 @@ function connectPopup(url){ try{ const w=Math.min(620,screen.width||620), h=Math
 window.addEventListener('message',(ev)=>{ if(ev.origin!==location.origin) return; const d=ev.data||{}; if(!d.oauth) return;
   if(d.meta!=null){ try{loadMeta();}catch(e){} try{loadChanStatus();}catch(e){} const cs=(typeof OB_STEPS!=='undefined')&&OB_STEPS[obIdx]; if($('onboarding')&&$('onboarding').style.display!=='none'&&cs&&cs.type==='connect'){ obVoiceImported=false; renderOb(); } else flash(d.meta==='ok'?'Instagram/Facebook підключено ✓':'Не вдалося підключити Instagram/Facebook.'); }
   if(d.threads!=null){ try{loadThreads();}catch(e){} try{loadChanStatus();}catch(e){} flash(d.threads==='ok'?'Threads підключено ✓':'Не вдалося підключити Threads.'); }
+  if(d.linkedin!=null){ try{loadLinkedin();}catch(e){} try{loadChanStatus();}catch(e){} flash(d.linkedin==='ok'?'LinkedIn підключено ✓':'Не вдалося підключити LinkedIn.'); }
   if(d.gdrive!=null){ try{loadGdrive();}catch(e){} flash(d.gdrive==='ok'?'Google Drive підключено ✓':'Не вдалося підключити Google Drive.'); }
 });
 async function renderObConnect(oc){
@@ -2285,7 +2301,7 @@ async function renderObConnect(oc){
 
 // ---------- init ----------
 (async()=>{
-  try{ const _q=new URLSearchParams(location.search); if(window.opener && window.opener!==window && (_q.has('meta')||_q.has('threads')||_q.has('gdrive'))){ window.opener.postMessage({oauth:true, meta:_q.get('meta'), threads:_q.get('threads'), gdrive:_q.get('gdrive')}, location.origin); document.body.innerHTML='<div style="padding:40px;text-align:center;font-family:sans-serif;color:#333">Готово ✓ Можна закрити це вікно.</div>'; try{window.close();}catch(e){} return; } }catch(e){}
+  try{ const _q=new URLSearchParams(location.search); if(window.opener && window.opener!==window && (_q.has('meta')||_q.has('threads')||_q.has('gdrive')||_q.has('linkedin'))){ window.opener.postMessage({oauth:true, meta:_q.get('meta'), threads:_q.get('threads'), gdrive:_q.get('gdrive'), linkedin:_q.get('linkedin')}, location.origin); document.body.innerHTML='<div style="padding:40px;text-align:center;font-family:sans-serif;color:#333">Готово ✓ Можна закрити це вікно.</div>'; try{window.close();}catch(e){} return; } }catch(e){}
   setTheme(localStorage.getItem('kg_theme')||'light');
   // маркер БЕТИ: щоб завжди було видно, в якому середовищі ти (прод не зачіпає)
   if(location.hostname.startsWith('beta.')){ document.title='[BETA] '+document.title;
@@ -2300,7 +2316,7 @@ async function renderObConnect(oc){
   try{ const me=await api('/auth/me'); $('userEmail').textContent=me.email; if(me.email) $('avatar').textContent=(me.email[0]||'О').toUpperCase(); }
   catch(e){ location.href='/login'; return; }
   await loadSettings();
-  await loadTelegram(); loadThreads(); loadMeta();
+  await loadTelegram(); loadThreads(); loadMeta(); loadLinkedin();
   const _sp=new URLSearchParams(location.search); const _thq=_sp.get('threads'), _mtq=_sp.get('meta'), _gdq=_sp.get('gdrive');
   if(_thq||_mtq||_gdq) history.replaceState(null,'',location.pathname);
   if(_thq){ go('settings'); alert(_thq==='ok'?'Threads підключено ✓':'Не вдалося підключити Threads. Перевірте дозволи й Redirect URI у Meta.'); }

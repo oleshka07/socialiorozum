@@ -1,9 +1,13 @@
 // Спільна публікація поста в усі обрані мережі (composer «Опублікувати» + плановий автопостер).
 import { q, one } from "./db.js";
 import { env } from "./env.js";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
 import * as meta from "./meta.js";
+import * as linkedin from "./linkedin.js";
+import { MEDIA_DIR } from "./media.js";
 import { adaptForChannels } from "./pipeline.js";
 
 async function thValidToken(ws: string): Promise<{ token: string; userId: string } | null> {
@@ -26,15 +30,17 @@ export type PubResult = { channel: string; status: "sent" | "error" | "skipped";
 
 // Мережі, куди пост УЖЕ відправлено (status='sent') — щоб не публікувати вдруге (публікація один раз на мережу).
 export async function alreadySentNetworks(postId: string): Promise<string[]> {
-  const [tgSent, thSent, metaSent] = await Promise.all([
+  const [tgSent, thSent, metaSent, liSent] = await Promise.all([
     one<{ n: number }>(`select count(*)::int as n from telegram_publish where post_id=$1 and status='sent'`, [postId]),
     one<{ n: number }>(`select count(*)::int as n from threads_publish where post_id=$1 and status='sent'`, [postId]),
     q<{ channel: string }>(`select distinct channel from meta_publish where post_id=$1 and status='sent'`, [postId]),
+    one<{ n: number }>(`select count(*)::int as n from linkedin_publish where post_id=$1 and status='sent'`, [postId]),
   ]);
   const sent: string[] = [];
   if ((tgSent?.n || 0) > 0) sent.push("telegram");
   if ((thSent?.n || 0) > 0) sent.push("threads");
   for (const r of metaSent) if (r.channel) sent.push(r.channel); // facebook / instagram
+  if ((liSent?.n || 0) > 0) sent.push("linkedin");
   return sent;
 }
 
@@ -67,10 +73,11 @@ export async function publishPostToChannels(ws: string, postId: string): Promise
   const textOf = (k: string) => (ch[k] && ch[k].text) || post.content;
   const imageUrl = post.filename ? `${env.appBaseUrl}/media/${post.filename}` : null;
   const results: PubResult[] = [];
-  const [tgc, thTok, mt] = await Promise.all([
+  const [tgc, thTok, mt, li] = await Promise.all([
     one<{ bot_token: string | null; channel_chat_id: string | null; group_chat_id: string | null }>(`select bot_token, channel_chat_id, group_chat_id from telegram_config where workspace_id=$1`, [ws]),
     thValidToken(ws),
     one<{ page_id: string | null; page_token: string | null; ig_user_id: string | null }>(`select page_id, page_token, ig_user_id from meta_config where workspace_id=$1`, [ws]),
+    one<{ member_urn: string; access_token: string; token_expires_at: string | null }>(`select member_urn, access_token, token_expires_at from linkedin_config where workspace_id=$1`, [ws]),
   ]);
   for (const k of enabled) {
     if (sentSet.has(k)) { results.push({ channel: k, status: "skipped" }); continue; } // уже опубліковано в цю мережу
@@ -108,6 +115,15 @@ export async function publishPostToChannels(ws: string, postId: string): Promise
         if (!imageUrl) throw new Error("Instagram потребує фото");
         const r = await meta.publishToInstagram(mt.ig_user_id, mt.page_token, imageUrl, textOf(k));
         await q(`insert into meta_publish(post_id,channel,external_id,status) values($1,'instagram',$2,'sent')`, [postId, r.mediaId]);
+      } else if (k === "linkedin") {
+        if (!li?.access_token || !li.member_urn) throw new Error("LinkedIn не підключено");
+        if (li.token_expires_at && new Date(li.token_expires_at).getTime() < Date.now())
+          throw new Error("Токен LinkedIn протух (живе 60 днів) - перепідключи у Налаштування → Канали");
+        // зображення LinkedIn приймає лише через власний upload (не за URL) - читаємо локальний файл
+        let imgBuf: Buffer | undefined;
+        if (post.filename) { try { imgBuf = await readFile(join(MEDIA_DIR, post.filename)); } catch { /* без фото */ } }
+        const r = await linkedin.publish(li.access_token, li.member_urn, textOf(k), imgBuf);
+        await q(`insert into linkedin_publish(post_id,external_id,status) values($1,$2,'sent')`, [postId, r.postId || null]);
       }
       results.push({ channel: k, status: "sent" });
     } catch (e: any) { results.push({ channel: k, status: "error", error: e.message }); }

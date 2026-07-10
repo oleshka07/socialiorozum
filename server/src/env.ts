@@ -29,6 +29,13 @@ export const env = {
   pexels: {
     apiKey: process.env.PEXELS_API_KEY ?? "",     // безкоштовний сток b-roll для рілсів (опційно)
   },
+  rsshub: {                                       // self-hosted RSSHub у тому ж compose (Telegram-джерела)
+    baseUrl: (process.env.RSSHUB_BASE_URL ?? "http://rsshub:1200").replace(/\/$/, ""),
+  },
+  linkedin: {                                     // LinkedIn-автопостинг (потрібен апрув застосунку в LinkedIn Dev Portal)
+    clientId: process.env.LINKEDIN_CLIENT_ID ?? "",
+    clientSecret: process.env.LINKEDIN_CLIENT_SECRET ?? "",
+  },
   telegram: {                                     // СПІЛЬНИЙ бот (користувач не створює свій)
     botToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
     botUsername: process.env.TELEGRAM_BOT_USERNAME ?? "",

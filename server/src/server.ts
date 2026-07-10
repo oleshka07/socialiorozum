@@ -12,6 +12,7 @@ import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveB
 import { startReelJob, reelJobs, parseReelScript } from "./reelvideo.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
+import * as linkedin from "./linkedin.js";
 import * as meta from "./meta.js";
 import * as fireflies from "./fireflies.js";
 import * as grain from "./grain.js";
@@ -442,7 +443,7 @@ app.get("/api/sources/rss", async (req: any) =>
 // крок 1 флоу «Додати джерело»: резолв вводу (тема / посилання) у feed URL + прев'ю останніх постів.
 // НІЧОГО не зберігає - юзер спочатку бачить «Знайдено: … ось останні пости» і підтверджує.
 app.post("/api/sources/rss/resolve", async (req: any, reply) => {
-  const type = req.body?.type === "news" ? "news" : "rss";
+  const type = req.body?.type === "news" ? "news" : req.body?.type === "telegram" ? "telegram" : "rss";
   try { return { ok: true, ...(await resolveSource(type, String(req.body?.input ?? ""), req.body?.lang)) }; }
   catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
@@ -531,16 +532,18 @@ app.post("/api/posts/:postId/media", async (req: any, reply) => {
 // які мережі взагалі підключені (для чипів у композері)
 app.get("/api/channels/status", async (req: any) => {
   const ws = req.user.workspace_id;
-  const [tgc, th, mt] = await Promise.all([
+  const [tgc, th, mt, li] = await Promise.all([
     one<{ bot_token: string | null; channel_chat_id: string | null; group_chat_id: string | null }>(`select bot_token, channel_chat_id, group_chat_id from telegram_config where workspace_id=$1`, [ws]),
     one<{ access_token: string | null }>(`select access_token from threads_config where workspace_id=$1`, [ws]),
     one<{ page_token: string | null; ig_user_id: string | null }>(`select page_token, ig_user_id from meta_config where workspace_id=$1`, [ws]),
+    one<{ access_token: string | null }>(`select access_token from linkedin_config where workspace_id=$1`, [ws]),
   ]);
   return {
     telegram: !!(tgc && tgc.bot_token && (tgc.channel_chat_id || tgc.group_chat_id)),
     threads: !!(th && th.access_token),
     facebook: !!(mt && mt.page_token),
     instagram: !!(mt && mt.page_token && mt.ig_user_id),
+    linkedin: !!(li && li.access_token),
   };
 });
 
@@ -1157,6 +1160,52 @@ app.post("/api/integrations/threads/disconnect", async (req: any) => {
   return { ok: true };
 });
 
+// ===================== LINKEDIN (автопостинг, 5-та мережа) =====================
+const LINKEDIN_REDIRECT = `${env.appBaseUrl}/api/integrations/linkedin/callback`;
+
+app.get("/api/integrations/linkedin", async (req: any) => {
+  const c = await one<{ display_name: string | null; token_expires_at: string | null }>(
+    `select display_name, token_expires_at from linkedin_config where workspace_id=$1`, [req.user.workspace_id]);
+  const expired = !!(c?.token_expires_at && new Date(c.token_expires_at).getTime() < Date.now());
+  return { configured: !!env.linkedin.clientId, hasToken: !!c, name: c?.display_name ?? "", expiresAt: c?.token_expires_at ?? null, expired };
+});
+
+app.get("/api/integrations/linkedin/connect", async (req: any, reply) => {
+  if (!env.linkedin.clientId) return reply.code(400).send({ error: "LINKEDIN_CLIENT_ID не заданий на сервері (чекаємо апрув застосунку LinkedIn)" });
+  const state = auth.newToken();
+  reply.setCookie("linkedin_state", state, stateCookie);
+  await logEvent("info", "linkedin", `connect redirect_uri=${LINKEDIN_REDIRECT}`, null, req.user.id);
+  return reply.redirect(linkedin.authUrl(env.linkedin.clientId, LINKEDIN_REDIRECT, state));
+});
+
+app.get("/api/integrations/linkedin/callback", async (req: any, reply) => {
+  const code = String(req.query?.code ?? ""); const state = String(req.query?.state ?? "");
+  const oerr = String(req.query?.error_description ?? req.query?.error ?? "");
+  if (oerr) { await logEvent("error", "linkedin", `LinkedIn відмовив: ${oerr}`, { error: req.query?.error }, req.user.id); return reply.redirect("/app?linkedin=error"); }
+  if (!code || !state || state !== req.cookies?.linkedin_state) { await logEvent("error", "linkedin", "callback: code/state некоректні", null, req.user.id); return reply.redirect("/app?linkedin=error"); }
+  reply.clearCookie("linkedin_state", { path: "/" });
+  try {
+    const tok = await linkedin.exchangeCode(env.linkedin.clientId, env.linkedin.clientSecret, LINKEDIN_REDIRECT, code);
+    const me = await linkedin.getMe(tok.access_token);
+    const exp = new Date(Date.now() + (tok.expires_in || 60 * 86400) * 1000).toISOString();
+    await q(`insert into linkedin_config(workspace_id, member_urn, display_name, access_token, token_expires_at, updated_at)
+             values($1,$2,$3,$4,$5,now())
+             on conflict (workspace_id) do update set member_urn=excluded.member_urn, display_name=excluded.display_name,
+               access_token=excluded.access_token, token_expires_at=excluded.token_expires_at, updated_at=now()`,
+      [req.user.workspace_id, `urn:li:person:${me.sub}`, me.name ?? "", tok.access_token, exp]);
+    await logEvent("info", "linkedin", `підключено ${me.name || me.sub}`, null, req.user.id);
+    return reply.redirect("/app?linkedin=ok");
+  } catch (e: any) {
+    await logEvent("error", "linkedin", "OAuth callback: " + e.message, null, req.user.id);
+    return reply.redirect("/app?linkedin=error");
+  }
+});
+
+app.post("/api/integrations/linkedin/disconnect", async (req: any) => {
+  await q(`delete from linkedin_config where workspace_id=$1`, [req.user.workspace_id]);
+  return { ok: true };
+});
+
 
 app.get("/api/posts/:postId/threads-insights", async (req: any, reply) => {
   const ws = req.user.workspace_id;
@@ -1710,6 +1759,7 @@ app.get("/api/published", async (req: any) => {
         select post_id, 'telegram'::text as net, created_at from telegram_publish where status='sent'
         union all select post_id, 'threads', created_at from threads_publish where status='sent'
         union all select post_id, channel, created_at from meta_publish where status='sent'
+        union all select post_id, 'linkedin', created_at from linkedin_publish where status='sent'
      ) x
      join post p on p.id=x.post_id
      join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
