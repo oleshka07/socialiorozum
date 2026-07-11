@@ -30,6 +30,7 @@ jobs:
             docker compose exec -T app node - <<'NODE'
             const k=process.env.AZURE_SPEECH_KEY, r=process.env.AZURE_SPEECH_REGION||"westeurope", p=process.env.PEXELS_API_KEY;
             console.log("AZURE key len:", (k||"").length, "| region:", r, "| PEXELS key len:", (p||"").length);
+            console.log("LINKEDIN id len:", (process.env.LINKEDIN_CLIENT_ID||"").length, "| secret len:", (process.env.LINKEDIN_CLIENT_SECRET||"").length, (process.env.LINKEDIN_CLIENT_ID&&process.env.LINKEDIN_CLIENT_SECRET)?"OK (кнопка «Підключити» активна)":"MISSING");
             const ssml="<speak version='1.0' xml:lang='uk-UA'><voice name='uk-UA-PolinaNeural'>Привіт! Це перевірка українського голосу.</voice></speak>";
             (async()=>{
               if(k){ try{
