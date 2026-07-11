@@ -702,9 +702,9 @@
         <div class="grid2">
           <div class="panel" style="margin:0">
             <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--th)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M12 3c5 0 8 3 8 9s-3 9-8 9-8-3-8-9c0-2 .5-3.5 1.5-4.5"></path></svg></span>Threads</div>
-            <div class="hint">Окремий OAuth (вхід через Threads). Потрібні <code>threads_content_publish</code> + <code>threads_manage_insights</code>, акаунт у Threads Testers.</div>
+            <div class="hint">Публікуй пости з фото у свій Threads-профіль прямо звідси. Підключення - одна кнопка, вхід через твій акаунт Threads.</div>
             <div class="btnrow"><span id="thStatus" style="font-size:13px;color:var(--muted)">…</span></div>
-            <div class="btnrow"><a id="thConnect" class="btn primary" href="/api/integrations/threads/connect" onclick="return connectPopup('/api/integrations/threads/connect')" style="display:none">🔗 Підключити Threads</a><button class="ghost" id="thDisconnect" style="display:none">Відключити</button></div>
+            <div class="btnrow"><a id="thConnect" class="btn primary" href="/api/integrations/threads/connect" onclick="return openThreadsConnect()" style="display:none">🔗 Підключити Threads</a><button class="ghost" id="thDisconnect" style="display:none">Відключити</button></div>
           </div>
           <div class="panel" style="margin:0">
             <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--li)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M4 4h4v16H4V4zm2-1a2 2 0 110-4 2 2 0 010 4zm5 5h4v2c.8-1.3 2.2-2.3 4-2.3 3 0 5 2 5 5.3V20h-4v-8c0-1.5-.8-2.5-2-2.5s-2 1-2 2.5v8h-5V8z"></path></svg></span>LinkedIn</div>
@@ -740,7 +740,7 @@
           </div>
           <div class="panel" style="margin:0">
             <div class="ph">📁 Google Drive</div>
-            <div class="hint">Познач папку через рідний вибір Google - поллер тягне нові фото в медіа (scope drive.file, без верифікації).</div>
+            <div class="hint">Познач свою папку з фото - нові знімки самі підтягуються в медіатеку socialio. Доступ лише до обраної папки.</div>
             <div class="btnrow"><span id="gdStatus" style="font-size:13px;color:var(--muted)">…</span></div>
             <div class="btnrow"><a id="gdConnect" class="btn primary" href="/api/integrations/gdrive/connect" onclick="return connectPopup('/api/integrations/gdrive/connect')" style="display:none">🔗 Підключити</a><button class="ghost" id="gdDisconnect" style="display:none">Відключити</button></div>
             <div id="gdFolderBox" style="display:none;margin-top:10px">
@@ -1979,12 +1979,28 @@ async function loadTelegram(){ try{ const c=await api('/integrations/telegram');
 if($('tgConnectBot')) $('tgConnectBot').onclick=async()=>{ const m=$('tgConnMsg'); m.style.color='var(--muted)'; m.textContent='…'; try{ const r=await api('/integrations/telegram/connect-link',{method:'POST'}); const steps=$('tgBotSteps'); if(steps){ steps.style.display='block'; steps.innerHTML='1) Відкрий <a href="'+r.link+'" target="_blank"><b>@'+esc(r.bot)+'</b></a> → натисни <b>Start</b>.<br>2) Додай бота <b>адміном</b> у свій канал.<br>3) Перешли боту будь-який пост із каналу.<br>Потім онови цю сторінку - канал зʼявиться тут.'; } m.textContent=''; window.open(r.link,'_blank'); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
 async function loadThreads(){
   try{ const c=await api('/integrations/threads'); const st=$('thStatus'), conn=$('thConnect'), dis=$('thDisconnect'); if(!st) return;
-    if(!c.configured){ st.textContent='⚠ Threads App ID не налаштований (THREADS_APP_ID).'; if(conn)conn.style.display='none'; if(dis)dis.style.display='none'; return; }
+    if(!c.configured){ st.textContent='🕓 Підключення Threads тимчасово недоступне.'; if(conn)conn.style.display='none'; if(dis)dis.style.display='none'; return; }
     if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.username?(' як <b>@'+esc(c.username)+'</b>'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-flex'; }
     else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-flex'; if(dis)dis.style.display='none'; }
   }catch(e){}
 }
 $('thDisconnect').onclick=async()=>{ if(!confirm('Відключити Threads?')) return; try{ await api('/integrations/threads/disconnect',{method:'POST'}); await loadThreads(); }catch(e){} };
+// Threads не віддає списку акаунтів (на відміну від FB-сторінок): підключається той профіль,
+// під яким ти залогінений у threads.net. Тому перед OAuth - крок «який акаунт підключаємо».
+function openThreadsConnect(){
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
+  ov.innerHTML='<div class="modal-card" style="max-width:480px;padding:20px">'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">🧵 Який Threads підключаємо?</b><button class="icon" id="tcX" style="margin-left:auto">✕</button></div>'
+    +'<div style="font-size:13px;color:var(--ink2);line-height:1.6">Підключиться акаунт, під яким ти <b>зараз залогінений у Threads</b> у цьому браузері. Якщо акаунтів кілька - спершу перемкнись на потрібний.</div>'
+    +'<div class="btnrow" style="margin-top:14px;flex-wrap:wrap">'
+    +'<a class="btn ghost" href="https://www.threads.net/settings" target="_blank" rel="noopener">🔄 Перемкнути акаунт у Threads</a>'
+    +'<button class="primary" id="tcGo" style="margin-left:auto">✓ Так, підключити цей</button></div>'
+    +'<div class="hint" style="margin-top:8px">Перемкнув? Повернись сюди і натисни «Підключити цей». У вікні авторизації Threads теж можна змінити акаунт.</div></div>';
+  document.body.appendChild(ov); const close=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#tcX').onclick=close;
+  ov.querySelector('#tcGo').onclick=()=>{ close(); connectPopup('/api/integrations/threads/connect'); };
+  return false;
+}
 async function loadLinkedin(){
   try{ const c=await api('/integrations/linkedin'); const st=$('liStatus'), conn=$('liConnect'), dis=$('liDisconnect'); if(!st) return;
     if(!c.configured){ st.textContent='🕓 Скоро: чекаємо схвалення застосунку від LinkedIn.'; if(conn)conn.style.display='none'; if(dis)dis.style.display='none'; return; }
@@ -1996,7 +2012,7 @@ async function loadLinkedin(){
 if($('liDisconnect')) $('liDisconnect').onclick=async()=>{ if(!confirm('Відключити LinkedIn?')) return; try{ await api('/integrations/linkedin/disconnect',{method:'POST'}); await loadLinkedin(); }catch(e){} };
 async function loadMeta(){
   try{ const c=await api('/integrations/meta'); const st=$('mtStatus'), conn=$('mtConnect'), dis=$('mtDisconnect'), stats=$('mtStats'); if(!st) return;
-    if(!c.configured){ st.textContent='⚠ META_APP_ID не налаштований.'; [conn,dis,stats].forEach(b=>b&&(b.style.display='none')); return; }
+    if(!c.configured){ st.textContent='🕓 Підключення Facebook/Instagram тимчасово недоступне.'; [conn,dis,stats].forEach(b=>b&&(b.style.display='none')); return; }
     const row=$('mtPageRow');
     if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.pageName?(' · FB: <b>'+esc(c.pageName)+'</b>'):'')+(c.igUsername?(' · IG: <b>@'+esc(c.igUsername)+'</b>'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-flex'; if(stats)stats.style.display='inline-flex'; if($('mtVoice'))$('mtVoice').style.display=c.igUsername?'inline-flex':'none'; if(row)row.style.display='flex'; loadMetaPages(); }
     else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-flex'; if(dis)dis.style.display='none'; if(stats)stats.style.display='none'; if($('mtVoice'))$('mtVoice').style.display='none'; if(row)row.style.display='none'; }
@@ -2124,7 +2140,7 @@ $('mediaUpload').onclick=async()=>{
 async function loadGdrive(){
   const st=$('gdStatus'); if(!st) return;
   try{ const c=await api('/integrations/gdrive'); const conn=$('gdConnect'), dis=$('gdDisconnect'), box=$('gdFolderBox');
-    if(!c.configured){ st.textContent='⚠ Google OAuth не налаштований на сервері.'; [conn,dis].forEach(b=>b&&(b.style.display='none')); if(box)box.style.display='none'; return; }
+    if(!c.configured){ st.textContent='🕓 Підключення Google Drive тимчасово недоступне.'; [conn,dis].forEach(b=>b&&(b.style.display='none')); if(box)box.style.display='none'; return; }
     if(c.connected){ st.innerHTML='✅ Підключено'+(c.email?(' ('+esc(c.email)+')'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-flex'; if(box)box.style.display='block'; loadGdriveFolders(); }
     else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-flex'; if(dis)dis.style.display='none'; if(box)box.style.display='none'; }
   }catch(e){}
