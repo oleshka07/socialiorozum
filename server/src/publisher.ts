@@ -8,6 +8,7 @@ import * as threads from "./threads.js";
 import * as meta from "./meta.js";
 import * as linkedin from "./linkedin.js";
 import { MEDIA_DIR } from "./media.js";
+import { ensureIgSafeImage } from "./images.js";
 import { adaptForChannels } from "./pipeline.js";
 
 async function thValidToken(ws: string): Promise<{ token: string; userId: string } | null> {
@@ -112,8 +113,10 @@ export async function publishPostToChannels(ws: string, postId: string): Promise
         await q(`insert into meta_publish(post_id,channel,external_id,status) values($1,'facebook',$2,'sent')`, [postId, (r as any).post_id || r.id]);
       } else if (k === "instagram") {
         if (!mt?.ig_user_id || !mt.page_token) throw new Error("Instagram не підключено");
-        if (!imageUrl) throw new Error("Instagram потребує фото");
-        const r = await meta.publishToInstagram(mt.ig_user_id, mt.page_token, imageUrl, textOf(k));
+        if (!post.filename) throw new Error("Instagram потребує фото");
+        // IG приймає лише JPEG з пропорціями 0.8-1.91 → за потреби готуємо сумісну копію (PNG з AI-генерації падав)
+        const safe = await ensureIgSafeImage(ws, post.filename);
+        const r = await meta.publishToInstagram(mt.ig_user_id, mt.page_token, `${env.appBaseUrl}/media/${safe}`, textOf(k));
         await q(`insert into meta_publish(post_id,channel,external_id,status) values($1,'instagram',$2,'sent')`, [postId, r.mediaId]);
       } else if (k === "linkedin") {
         if (!li?.access_token || !li.member_urn) throw new Error("LinkedIn не підключено");

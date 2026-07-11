@@ -521,7 +521,10 @@ app.post("/api/posts/:postId/media", async (req: any, reply) => {
   if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
   const mediaId = req.body?.mediaId || null;
   if (mediaId && req.body?.aspect) {
-    try { const r = await attachCroppedImage(ws, req.params.postId, mediaId, req.body.aspect); return { ok: true, filename: r.filename }; }
+    const c = req.body?.crop;
+    const crop = (c && [c.x, c.y, c.w, c.h].every((v: any) => typeof v === "number" && isFinite(v)))
+      ? { x: c.x, y: c.y, w: c.w, h: c.h } : undefined;
+    try { const r = await attachCroppedImage(ws, req.params.postId, mediaId, req.body.aspect, crop); return { ok: true, filename: r.filename }; }
     catch (e: any) { return reply.code(400).send({ error: e.message }); }
   }
   if (mediaId && !(await one(`select id from media_asset where id=$1 and workspace_id=$2`, [mediaId, ws])))

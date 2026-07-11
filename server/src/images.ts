@@ -191,18 +191,60 @@ export async function overlayForPost(ws: string, postId: string, headline: strin
   return saved.filename;
 }
 
-// прикріпити фото з галереї/завантаження, ОБІТНУВШИ під обраний формат (центр-кроп зі smart-фокусом).
-// Обітнута копія стає й image_base поста — тож накладання тексту працює і для НЕ-AI фото.
-export async function attachCroppedImage(ws: string, postId: string, mediaId: string, aspect?: Aspect | string): Promise<{ id: string; filename: string }> {
+// прикріпити фото з галереї/завантаження, ОБІТНУВШИ під обраний формат.
+// crop (опційно) - РУЧНА рамка від користувача в нормованих координатах [0..1] вихідного фото;
+// без нього - автоматичний центр-кроп зі smart-фокусом. Копія стає image_base поста.
+export type CropRect = { x: number; y: number; w: number; h: number };
+export async function attachCroppedImage(ws: string, postId: string, mediaId: string, aspect?: Aspect | string, crop?: CropRect): Promise<{ id: string; filename: string }> {
   const m = await one<{ filename: string; kind: string }>(`select filename, kind from media_asset where id=$1 and workspace_id=$2`, [mediaId, ws]);
   if (!m) throw new Error("медіа не знайдено");
   if (m.kind !== "image") throw new Error("це не зображення");
   const a = normAspect(aspect);
   const { w, h } = ASPECT_DIM[a];
   const buf = await readFile(join(MEDIA_DIR, m.filename));
-  // rotate() шанує EXIF-орієнтацію фото з телефона; attention = кроп навколо найцікавішої зони
-  const out = await sharp(buf).rotate().resize(w, h, { fit: "cover", position: "attention" }).jpeg({ quality: 90 }).toBuffer();
+  // rotate() шанує EXIF-орієнтацію фото з телефона
+  let img = sharp(buf).rotate();
+  if (crop && crop.w > 0 && crop.h > 0) {
+    const meta = await sharp(buf).metadata();
+    // рамка юзера намальована по ВЖЕ поверненому фото (браузер шанує EXIF) → для orientation 5-8 сторони міняються місцями
+    const rot = (meta.orientation || 1) >= 5;
+    const W = (rot ? meta.height : meta.width) || 0, H = (rot ? meta.width : meta.height) || 0;
+    if (W && H) {
+      const left = Math.max(0, Math.min(W - 2, Math.round(crop.x * W)));
+      const top = Math.max(0, Math.min(H - 2, Math.round(crop.y * H)));
+      const cw = Math.max(2, Math.min(W - left, Math.round(crop.w * W)));
+      const chh = Math.max(2, Math.min(H - top, Math.round(crop.h * H)));
+      img = img.extract({ left, top, width: cw, height: chh });
+    }
+  }
+  const out = await img.resize(w, h, crop ? { fit: "fill" } : { fit: "cover", position: "attention" }).jpeg({ quality: 90 }).toBuffer();
   const saved = await saveMedia(ws, { buffer: out, mime: "image/jpeg", name: "crop.jpg", source: "crop" });
   await q(`update post set media_id=$2, image_base=$3, headline=null where id=$1`, [postId, saved.id, saved.filename]);
   return { id: saved.id, filename: saved.filename };
+}
+
+// Instagram приймає ЛИШЕ JPEG із пропорціями 0.8 (4:5) … 1.91 (близько 16:9-широке).
+// Наші AI-зображення без оверлея - PNG, а завантаження бувають будь-якими → перед IG-публікацією
+// робимо сумісну копію: конвертація в JPEG + за потреби центр-кроп до найближчої допустимої пропорції.
+export async function ensureIgSafeImage(ws: string, filename: string): Promise<string> {
+  const buf = await readFile(join(MEDIA_DIR, filename));
+  const meta = await sharp(buf).metadata();
+  const W = meta.width || 0, H = meta.height || 0;
+  if (!W || !H) throw new Error("не вдалося прочитати зображення");
+  const ratio = W / H;
+  const MIN = 0.8, MAX = 1.91;
+  const okFormat = meta.format === "jpeg";
+  const okRatio = ratio >= MIN && ratio <= MAX;
+  if (okFormat && okRatio) return filename;
+  let img = sharp(buf).rotate();
+  if (!okRatio) {
+    const target = Math.max(MIN, Math.min(MAX, ratio));
+    // кропимо по центру до допустимої пропорції (зберігаючи максимум кадру)
+    const cw = ratio > target ? Math.round(H * target) : W;
+    const ch = ratio > target ? H : Math.round(W / target);
+    img = img.extract({ left: Math.max(0, Math.round((W - cw) / 2)), top: Math.max(0, Math.round((H - ch) / 2)), width: Math.min(W, cw), height: Math.min(H, ch) });
+  }
+  const out = await img.jpeg({ quality: 90 }).toBuffer();
+  const saved = await saveMedia(ws, { buffer: out, mime: "image/jpeg", name: "ig-safe.jpg", source: "ig-safe" });
+  return saved.filename;
 }

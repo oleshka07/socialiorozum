@@ -1753,16 +1753,54 @@ async function openPhotoTool(postId, initPrompt, onDone){
     const err=(e)=>{ msg.style.color='var(--danger)'; msg.textContent='⚠ '+e.message; };
     card.querySelectorAll('#ptAsp .aspchip').forEach(c=>c.onclick=()=>{ aspect=c.dataset.a; card.querySelectorAll('#ptAsp .aspchip').forEach(x=>x.classList.toggle('on',x===c)); });
     card.querySelector('#ptGallery').onclick=async()=>{ const sel=await chooseMedia(); if(!sel||!sel.id){ if(sel&&sel.id===null){ try{ await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:null})}); fn=null; hasBase=false; if(onDone)onDone(null); close(); }catch(e){ err(e); } } return; }
-      msg.style.color='var(--muted)'; msg.textContent='обтинаю під '+aspect+'…';
-      try{ const r=await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:sel.id,aspect})}); fn=r.filename||sel.filename; hasBase=true; canRegen=false; headline=''; if(onDone)onDone(fn); step2(); }catch(e){ err(e); } };
+      cropStep(sel.id, sel.filename); };
     card.querySelector('#ptUpload').onclick=()=>card.querySelector('#ptFile').click();
-    card.querySelector('#ptFile').onchange=async(e)=>{ const file=e.target.files&&e.target.files[0]; if(!file) return; msg.style.color='var(--muted)'; msg.textContent='завантаження + обтинання…';
+    card.querySelector('#ptFile').onchange=async(e)=>{ const file=e.target.files&&e.target.files[0]; if(!file) return; msg.style.color='var(--muted)'; msg.textContent='завантаження…';
       try{ const fd=new FormData(); fd.append('file',file); const r=await fetch('/api/media',{method:'POST',body:fd,credentials:'same-origin'}); const j=await r.json(); if(!r.ok||j.error) throw new Error(j.error||('HTTP '+r.status)); const up=(j.saved||[])[0]; if(!up) throw new Error('файл не збережено');
-        const r2=await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:up.id,aspect})}); fn=r2.filename||up.url.replace('/media/',''); hasBase=true; canRegen=false; headline=''; if(onDone)onDone(fn); step2(); }catch(e2){ err(e2); } };
+        cropStep(up.id, up.url.replace('/media/','')); }catch(e2){ err(e2); } };
     card.querySelector('#ptGenBtn').onclick=()=>{ const b=card.querySelector('#ptGenBox'); b.style.display=b.style.display==='none'?'block':'none'; if(b.style.display==='block') card.querySelector('#ptPrompt').focus(); };
     card.querySelector('#ptGen').onclick=async(e)=>{ const b=e.target; b.disabled=true; lastPrompt=card.querySelector('#ptPrompt').value.trim(); msg.style.color='var(--muted)'; msg.textContent='малюю зображення… (10-30с)'; aiBusy('🎨 Малюю зображення… (10-30с)');
       try{ const r=await api('/posts/'+postId+'/image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:lastPrompt,aspect})}); fn=r.filename; hasBase=true; canRegen=true; headline=''; if(onDone)onDone(fn); step2(); }catch(e2){ err(e2); b.disabled=false; } finally{ aiDone(); } };
     const tt=card.querySelector('#ptToText'); if(tt) tt.onclick=()=>step2();
+  }
+
+  // РУЧНИЙ КРОП: рамка з пропорцією формату - тягнеш мишкою/пальцем, розмір повзунком.
+  // «⚡ Авто» = розумний центр-кроп, як раніше. Що в рамці - те і буде фото поста.
+  function cropStep(mediaId, srcFn){
+    card.innerHTML=header('🖼 Фото · кадрування '+aspect)
+      +'<div style="font-size:12px;color:var(--muted);margin-bottom:8px">Пересунь рамку на потрібне місце. Що в рамці - те лишиться.</div>'
+      +'<div id="cwrap" style="position:relative;user-select:none;touch-action:none;display:flex;justify-content:center;background:var(--surface2);border-radius:10px;overflow:hidden">'
+        +'<img id="cimg" src="/media/'+esc(srcFn)+'" style="max-width:100%;max-height:380px;display:block" draggable="false">'
+        +'<div id="cframe" style="position:absolute;border:2px solid var(--brand);box-shadow:0 0 0 9999px rgba(0,0,0,.45);cursor:move;border-radius:4px"></div>'
+      +'</div>'
+      +'<div style="display:flex;gap:10px;align-items:center;margin-top:10px"><span style="font-size:12px;color:var(--muted)">Розмір рамки</span><input type="range" id="csize" min="30" max="100" value="100" style="flex:1"></div>'
+      +'<div class="btnrow" style="margin-top:12px"><button class="ghost" id="cBack">← Інше фото</button><button class="ghost" id="cAuto" title="Розумний автоматичний кроп по центру уваги">⚡ Авто</button><button class="primary" id="cSave">✂ Обрізати так</button></div>'
+      +'<div id="cMsg" style="font-size:12px;color:var(--muted);margin-top:6px;min-height:16px"></div>';
+    card.querySelector('#ptX').onclick=close;
+    const img=card.querySelector('#cimg'), frame=card.querySelector('#cframe');
+    const dims={'1:1':[1,1],'4:5':[4,5],'16:9':[16,9]}; const d=dims[aspect]||[1,1]; const ratio=d[0]/d[1]; // ширина/висота рамки
+    let fx=0,fy=0,fw=0;
+    const layout=()=>{ const iw=img.clientWidth, ih=img.clientHeight; const fh=fw/ratio;
+      fx=Math.max(0,Math.min(iw-fw,fx)); fy=Math.max(0,Math.min(ih-fh,fy));
+      frame.style.left=(img.offsetLeft+fx)+'px'; frame.style.top=(img.offsetTop+fy)+'px'; frame.style.width=fw+'px'; frame.style.height=fh+'px'; };
+    const initFrame=()=>{ const iw=img.clientWidth, ih=img.clientHeight; if(!iw||!ih) return;
+      fw=Math.min(iw, ih*ratio); fx=(iw-fw)/2; fy=(ih-fw/ratio)/2; layout(); };
+    img.onload=initFrame; if(img.complete) setTimeout(initFrame,0);
+    card.querySelector('#csize').oninput=(e)=>{ const iw=img.clientWidth, ih=img.clientHeight; const maxW=Math.min(iw, ih*ratio);
+      const cx=fx+fw/2, cy=fy+(fw/ratio)/2; fw=Math.max(40,maxW*(+e.target.value/100)); fx=cx-fw/2; fy=cy-(fw/ratio)/2; layout(); };
+    let drag=null;
+    frame.addEventListener('pointerdown',e=>{ drag={sx:e.clientX,sy:e.clientY,fx,fy}; frame.setPointerCapture(e.pointerId); e.preventDefault(); });
+    frame.addEventListener('pointermove',e=>{ if(!drag) return; fx=drag.fx+(e.clientX-drag.sx); fy=drag.fy+(e.clientY-drag.sy); layout(); });
+    frame.addEventListener('pointerup',()=>{ drag=null; });
+    const doAttach=async(crop)=>{ const m=card.querySelector('#cMsg'); m.style.color='var(--muted)'; m.textContent='обтинаю…';
+      try{ const body={mediaId,aspect}; if(crop) body.crop=crop;
+        const r=await api('/posts/'+postId+'/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        fn=r.filename; hasBase=true; canRegen=false; headline=''; if(onDone)onDone(fn); step2(); }
+      catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
+    card.querySelector('#cAuto').onclick=()=>doAttach(null);
+    card.querySelector('#cSave').onclick=()=>{ const iw=img.clientWidth, ih=img.clientHeight; if(!iw||!ih||!fw){ doAttach(null); return; }
+      doAttach({x:fx/iw, y:fy/ih, w:fw/iw, h:(fw/ratio)/ih}); };
+    card.querySelector('#cBack').onclick=()=>step1();
   }
 
   function step2(){
@@ -1913,21 +1951,35 @@ function renderCal(){
   const cal=$('cal'); if(!cal) return; cal.innerHTML='';
   ['Пн','Вт','Ср','Чт','Пт','Сб','Нд'].forEach(d=>{const h=document.createElement('div');h.className='dow';h.textContent=d;cal.appendChild(h);});
   const byDay={}; Pub.slots.forEach(s=>{ if(!s.scheduled_at) return; const iso=locDate(s.scheduled_at); (byDay[iso]=byDay[iso]||[]).push(s); });
+  const todayIso=locDate(new Date());
   for(let off=0;off<28;off++){
     const iso=calISO(off); const cell=document.createElement('div'); cell.className='day'; cell.dataset.iso=iso;
-    const [,mmI,ddI]=iso.split('-'); cell.innerHTML='<div class="dn">'+(+ddI)+'.'+(+mmI)+'</div>';
+    if(iso===todayIso){ cell.style.borderColor='var(--brand)'; cell.style.boxShadow='inset 0 0 0 1px var(--brand)'; }
+    const [,mmI,ddI]=iso.split('-'); cell.innerHTML='<div class="dn">'+(+ddI)+'.'+(+mmI)+(iso===todayIso?' <span style="color:var(--brand);font-weight:700">сьогодні</span>':'')+'</div>';
     (byDay[iso]||[]).sort((a,b)=>String(a.scheduled_at).localeCompare(String(b.scheduled_at))).forEach(s=>{
       const time=locHM(s.scheduled_at); const st=s.status;
       const icon=st==='posted'?' ✅':(st==='failed'?' ⚠️':(st==='posting'?' ⏳':''));
+      const movable=(st==='planned'||st==='failed');
       const ch=document.createElement('div'); ch.className='pchip'+(st==='failed'?' failed':'')+(st==='posted'?' posted':'');
-      ch.title=s.result||(st==='planned'?'заплановано':st);
-      ch.innerHTML='<b>'+time+icon+'</b> '+chanIcons(s.channels)+' '+esc((s.content||'').replace(/\n+/g,' ').slice(0,18));
-      ch.onclick=(ev)=>{ ev.stopPropagation(); openComposer(s.post_id,{scheduledAt:s.scheduled_at,slotId:s.id}); }; cell.appendChild(ch);
+      ch.title=(s.result||(st==='planned'?'заплановано':st))+(movable?' · тягни на інший день':'');
+      ch.innerHTML='<b>'+time+icon+'</b> '+chanIcons(s.channels)+' '+esc((s.content||'').replace(/\n+/g,' ').slice(0,18))
+        +(st!=='posted'?'<span class="pchip-x" data-del="'+s.id+'" title="Прибрати з календаря" style="float:right;margin-left:4px;padding:0 4px;border-radius:4px;color:var(--faint);cursor:pointer">✕</span>':'');
+      // перетягування запланованого чіпа на інший день (час зберігається)
+      if(movable){ ch.draggable=true; ch.addEventListener('dragstart',ev=>{ ev.dataTransfer.setData('text/plain','slot:'+s.id+':'+time); }); }
+      ch.onclick=(ev)=>{ ev.stopPropagation();
+        if(ev.target.dataset&&ev.target.dataset.del){ if(!confirm('Прибрати пост з календаря? (сам пост лишиться в Студії)')) return;
+          api('/schedule/'+ev.target.dataset.del,{method:'DELETE'}).then(()=>loadPublish()).catch(e=>flash('⚠ '+e.message)); return; }
+        openComposer(s.post_id,{scheduledAt:s.scheduled_at,slotId:s.id}); };
+      cell.appendChild(ch);
     });
     cell.addEventListener('dragover',ev=>{ev.preventDefault();cell.classList.add('over');});
     cell.addEventListener('dragleave',()=>cell.classList.remove('over'));
-    cell.addEventListener('drop',async ev=>{ev.preventDefault();cell.classList.remove('over');const d=ev.dataTransfer.getData('text/plain'); if(d.indexOf('post:')!==0) return; const postId=d.slice(5);
-      try{ await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:zonedToUTCISO(iso,'09:00')})}); await loadPublish(); }catch(e){ flash(e.message); } });
+    cell.addEventListener('drop',async ev=>{ev.preventDefault();cell.classList.remove('over');const d=ev.dataTransfer.getData('text/plain');
+      try{
+        if(d.indexOf('post:')===0){ await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId:d.slice(5),scheduledAt:zonedToUTCISO(iso,'09:00')})}); await loadPublish(); return; }
+        if(d.indexOf('slot:')===0){ const rest=d.slice(5); const sep=rest.indexOf(':'); const slotId=sep>0?rest.slice(0,sep):rest; const time=sep>0?rest.slice(sep+1):'09:00';
+          await api('/schedule/'+slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:zonedToUTCISO(iso,time||'09:00')})}); await loadPublish(); return; }
+      }catch(e){ flash('⚠ '+e.message); } });
     cell.addEventListener('click',ev=>{ if(ev.target.closest('.pchip')) return; openDayScheduler(iso); });
     cal.appendChild(cell);
   }
