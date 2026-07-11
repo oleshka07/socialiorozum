@@ -57,8 +57,25 @@ export const GOAL_LABELS: Record<string, string> = {
 };
 const goalRule = (s: Record<string, string>): string =>
   s.primary_goal && GOAL_LABELS[s.primary_goal]
-    ? `\n\nГОЛОВНА БІЗНЕС-ЦІЛЬ контенту: ${GOAL_LABELS[s.primary_goal]}. Кожен пост має конкретно просувати до цієї цілі. Жодного «контенту заради контенту».`
+    ? `\n\nГОЛОВНА БІЗНЕС-ЦІЛЬ контенту: ${GOAL_LABELS[s.primary_goal]}.${(s.goal_metric || "").trim() ? ` Метрика і строк: ${s.goal_metric.trim().slice(0, 160)}.` : ""} Кожен пост має конкретно просувати до цієї цілі. Жодного «контенту заради контенту».`
     : "";
+
+// «Паспорт голосу» (брендбук): структуровані поля поверх вільного ToV - звертання, підпис, стоп-лист, емодзі.
+// Інʼєктується поруч із tone_of_voice у всі точки генерації.
+export function voicePassport(s: Record<string, string>): string {
+  const parts: string[] = [];
+  if (s.voice_address === "ty") parts.push("звертання до читача - на «ти»");
+  if (s.voice_address === "vy") parts.push("звертання до читача - на «ви»");
+  if (s.voice_emoji === "no") parts.push("емодзі НЕ вживати взагалі");
+  if (s.voice_emoji === "min") parts.push("емодзі - максимум 1-2 на пост, без емодзі-буллетів");
+  if ((s.voice_stoplist || "").trim()) parts.push(`СТОП-ЛИСТ (ці слова і фрази НІКОЛИ не вживати): ${s.voice_stoplist.trim().slice(0, 400)}`);
+  if ((s.voice_signature || "").trim()) parts.push(`фірмовий підпис наприкінці поста, точним формулюванням, коли доречно: «${s.voice_signature.trim().slice(0, 120)}»`);
+  return parts.length ? `\n\nПАСПОРТ ГОЛОСУ (обовʼязково): ${parts.join("; ")}.` : "";
+}
+// чи відкалібрований голос узагалі (для чесного бейджа в UI)
+export function voiceCalibrated(s: Record<string, string>): boolean {
+  return !!((s.tone_of_voice || "").trim() || (s.voice_examples || "").trim());
+}
 
 // ХАРДКОД (не редагується юзером): контекст бренду + контракт формату відповіді.
 const STEP_CONTEXT: Record<StepKey, (s: Record<string, string>) => string> = {
@@ -392,7 +409,7 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
   const v2 = s.prompt_engine !== "legacy";
-  const tone = s.tone_of_voice ? `\nГолос бренду (зберігай): ${s.tone_of_voice}` : "";
+  const tone = (s.tone_of_voice ? `\nГолос бренду (зберігай): ${s.tone_of_voice}` : "") + voicePassport(s);
   const deai = s.deai_rules ? `\nПравила «без AI» (зберігай): ${s.deai_rules}` : "";
   // V2: адаптація успадковує бриф і ПОВНІ плейбуки каналів (алгоритми 2025-26), не однорядкові правила
   const brief = v2 ? (s.strategy_brief || "").trim() : "";
@@ -412,7 +429,11 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
       : `заклич перейти за посиланням ${v}`;
     return `\n[${c}] ${mech}`;
   }).filter(Boolean).join("");
-  const ctaRule = ctaLines ? `\n\nКонверсійний заклик наприкінці кожної версії - ОДИН заклик = ОДНА дія, нативно вплетений:${ctaLines}` : "";
+  const ctaRule = ctaLines
+    ? `\n\nКонверсійний заклик наприкінці кожної версії - ОДИН заклик = ОДНА дія, нативно вплетений:${ctaLines}` +
+      "\nЕталон CTA. Погано: «Підписуйся, став лайк і пиши в дірект» (три прохання = нуль дій). Добре: «Напиши в коментарях слово ГАЙД - надішлю шаблон» (одна дія, одна механіка, вимірний результат)."
+    : "";
+  const structRules = "\n\nСтруктурні правила: telegram - ПЕРШИЙ рядок має чіпляти до згортання «…ще»; linkedin - скелет утримання: сильний перший рядок (видимий до «…more») → чому це важливо зараз (ставки) → 2-3 блоки, кожен закінчується власним висновком-пейофом → синтез → CTA.";
   // Формат постів під конкретну мережу (settings_block.channel_format): короткий/стандарт/довгий + нотатка стилю.
   // Закриває кейс «Threads під тренди на 50-100 символів» - юзер задає формат один раз у Налаштуваннях.
   let fmtCfg: Record<string, { len?: string; note?: string }> = {};
@@ -429,7 +450,7 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
   const fmtRule = fmtLines ? `\n\nФормат, який обрав користувач для конкретних мереж (ПРІОРИТЕТ над плейбуком):${fmtLines}` : "";
   const system = "Адаптуй пост під кожну вказану соцмережу, зберігаючи зміст, голос бренду й живу людську мову." +
     (brief ? `\n\n<strategy_brief>\n${brief}\n</strategy_brief>` : "") +
-    tone + deai + playbooks + critique + goalRule(s) + ctaRule + fmtRule +
+    tone + deai + playbooks + critique + goalRule(s) + ctaRule + structRules + fmtRule +
     "\n\nЖОРСТКІ ліміти довжини версій (НЕ перевищуй, це технічні ліміти мереж): telegram 1024, threads 500, instagram 2200, facebook 2000, linkedin 3000 символів." +
     NO_DASH_RULE + ANTI_AI_RULE + `\n\nПоверни ЛИШЕ валідний JSON-обʼєкт виду {${want.map((c) => `"${c}":"…"`).join(",")}}. Мова: ${lang}.`;
   const raw = await chat(v2 ? "openai/gpt-4o" : "openai/gpt-4o-mini", system, `Пост:\n---\n${content}`, { workspaceId, step: "format" });
@@ -478,7 +499,7 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
       (brief ? `\n\n<strategy_brief>\nДжерело правди - не суперечити:\n${brief}\n</strategy_brief>` : "") +
       "\n\n<brand>" +
       (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") +
-      (s.tone_of_voice ? `\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") +
+      (s.tone_of_voice ? `\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") + voicePassport(s) +
       (s.deai_rules ? `\nПравила «без AI»: ${s.deai_rules}` : "") +
       "\n</brand>" +
       (examples ? `\n\n<voice_examples>\nРЕАЛЬНІ пости автора - еталон голосу. Відтворюй ритм, лексику, звертання й розмір абзаців САМЕ як тут, але НЕ копіюй зміст:\n---\n${examples}\n---\n</voice_examples>` : "") +
@@ -503,7 +524,7 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
     "Ти досвідчений SMM-копірайтер. За вхідним матеріалом нижче згенеруй готові до публікації пости. " +
     "Кожен пост ОДРАЗУ фінальний: у голосі бренду, живою людською мовою без ознак AI (без канцеляризмів, без «варто зазначити/у сучасному світі», без шаблонних списків заради списків), з чітким гачком, користю та мʼяким закликом." +
     (s.marketing_context ? `\n\nБренд і аудиторія: ${s.marketing_context}` : "") +
-    (s.tone_of_voice ? `\n\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") +
+    (s.tone_of_voice ? `\n\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") + voicePassport(s) +
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
     rubricsText + ideasText + goalRule(s) + HOOK_RULE + ANTI_AI_RULE +
     NO_DASH_RULE + `\n\nЗгенеруй рівно ${n} різних постів. ${outputFormat}`;
@@ -660,22 +681,23 @@ export async function extractIdeasFromText(workspaceId: string, text: string, co
   const picked = (rubricsFilter || []).map((r) => String(r).trim()).filter(Boolean);
   const rubList = (picked.length ? rubs.filter((r) => picked.includes(r.name)) : rubs).map((r) => r.name).join(", ");
   const lead = mode === "signal"
-    ? "Це СТОРОННЯ новина/чужий матеріал («Сигнал»). Знайди, що бренд може сказати ВІД СЕБЕ з цього приводу: позиція, висновок, застосування для своєї аудиторії. Кожна ідея - ТЕЙК (власна думка), а не переказ новини."
+    ? "Це СТОРОННЯ новина/чужий матеріал («Сигнал»). Знайди, що бренд може сказати ВІД СЕБЕ з цього приводу: позиція, висновок, застосування для своєї аудиторії. Кожна ідея - ТЕЙК (власна думка), а не переказ. Еталон: «розповісти про нову модель ШІ» - шум; «нова модель вбиває відмовку „ШІ не вміє писати“ - ось що це означає для тих, хто досі не користується» - сигнал. ПЕРША ідея в списку = найшвидший виграш (що постити СЬОГОДНІ, поки гаряче)."
     : mode === "story"
-    ? "Це ВЛАСНИЙ кейс/думка автора («Історія»). Розклади на РІЗНІ кути подачі: історія як було, помилка і урок, контр-теза до загальноприйнятого, покрокова інструкція, спостереження-інсайт."
-    : "Знайди в матеріалі окремі контент-ідеї для соцмереж, кожна зі своїм кутом подачі.";
+    ? "Це ВЛАСНИЙ кейс/думка автора («Історія»). Розклади на кути за П'ЯТЬМА ТИПАМИ (бери лише ті, що РЕАЛЬНО є в матеріалі, не натягуй): «урок» (висновок напряму - найочевидніший, тому ніколи не єдиний), «контрхід» (частина історії, що сперечається із загальноприйнятим у ніші), «фреймворк» (повторювана система з того, що сталося), «доказ» (історія як пруф тези), «релейтбл» (людський вразливий момент, що будує зв'язок сильніше за інформацію). Контрхід і фреймворк - найцінніші, шукай їх першими. НЕ вигадуй подій і деталей, яких автор не називав."
+    : "Знайди в матеріалі окремі контент-ідеї для соцмереж, кожна зі своїм кутом подачі. Перша ідея = найсильніша.";
   const system =
-    "Ти контент-розвідник. " + lead +
+    "Ти контент-розвідник. Даєш ТЕЙК, а не тему. " + lead +
     (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") +
     goalRule(s) +
     (rubList ? `\nРубрики бренду: ${rubList}. Кожній ідеї признач НАЙБЛИЖЧУ рубрику з цього переліку.` : "") +
-    `\n\nЗнайди до ${Math.max(1, Math.min(10, count))} ідей. Для кожної: idea - суть одним реченням; angle - кут подачі 2-4 словами; hook - чорновий перший рядок поста (з кульмінації, без кліше «СТОП/99% не знають»). Поверни ЛИШЕ валідний JSON-масив: [{"idea":"…","angle":"…","hook":"…","rubric":"назва рубрики"}]. Мова: ${lang}.`;
+    `\n\nЗнайди до ${Math.max(1, Math.min(10, count))} ідей. Для кожної: idea - суть одним реченням; angle - кут 2-4 словами${mode === "story" ? " (почни з типу: урок/контрхід/фреймворк/доказ/релейтбл)" : ""}; format - якнайкращий формат: "пост" | "карусель" | "рілс"; hook - чорновий перший рядок (з кульмінації, без кліше «СТОП/99% не знають»). Ранжуй за релевантністю цілі й аудиторії, не за гучністю. Поверни ЛИШЕ валідний JSON-масив: [{"idea":"…","angle":"…","format":"…","hook":"…","rubric":"назва рубрики"}]. Мова: ${lang}.`;
   const raw = await chat(env.cheapModel, system, `Матеріал:\n---\n${(text || "").slice(0, 20000)}`, { workspaceId, step: "ideas" });
-  let out: { idea: string; angle: string; hook: string; rubric: string }[] = [];
+  let out: { idea: string; angle: string; hook: string; rubric: string; format?: string }[] = [];
   try {
     out = extractJsonArray<any>(raw).map((x) => ({
       idea: String(x?.idea || x || "").trim(), angle: String(x?.angle || "").trim(),
       hook: String(x?.hook || "").trim(), rubric: String(x?.rubric || "").trim(),
+      format: ["пост", "карусель", "рілс"].includes(String(x?.format || "")) ? String(x.format) : undefined,
     })).filter((x) => x.idea);
   } catch { out = []; }
   return out;
@@ -763,7 +785,7 @@ export async function rewritePost(workspaceId: string, text: string, instruction
     : "Перепиши цей пост іншими словами, зберігаючи зміст і структуру, у голосі бренду й живою людською мовою (без ознак AI).";
   const system = task +
     (brief ? `\n\nСТРАТЕГІЧНИЙ БРИФ (тримай бренд): ${brief}` : "") +
-    (s.tone_of_voice ? `\n\nГолос бренду: ${s.tone_of_voice}` : "") +
+    (s.tone_of_voice ? `\n\nГолос бренду: ${s.tone_of_voice}` : "") + voicePassport(s) +
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
     goalRule(s) + ANTI_AI_RULE +
     NO_DASH_RULE + `\n\nПоверни лише текст поста. Мова: ${lang}.`;
@@ -771,41 +793,91 @@ export async function rewritePost(workspaceId: string, text: string, instruction
 }
 
 // ---- «Директор»: вердикт, чи веде чернетка до головної бізнес-цілі ----
-export async function directorVerdict(workspaceId: string, content: string): Promise<{ verdict: string; reason: string; fix: string }> {
+export async function directorVerdict(workspaceId: string, content: string): Promise<{ verdict: string; reason: string; fix: string; sharper: string }> {
   const s = await loadSettings(workspaceId);
   const goal = GOAL_LABELS[s.primary_goal || ""];
   if (!goal) throw new Error("Спершу вибери головну ціль контенту (розділ Стратегія → 🎯 Головна ціль)");
-  const system = `Ти суворий контент-директор. Головна бізнес-ціль бренду: ${goal}.` +
+  const metric = (s.goal_metric || "").trim();
+  const system = `Ти суворий контент-директор. Головна бізнес-ціль бренду: ${goal}.${metric ? ` Метрика і строк: ${metric.slice(0, 160)}.` : ""}` +
     (s.marketing_context ? `\nНіша й аудиторія: ${s.marketing_context.slice(0, 400)}` : "") +
-    "\nОціни чернетку поста: реально веде до цілі, частково, чи це «контент заради контенту»." +
-    '\nПоверни ЛИШЕ валідний JSON: {"verdict":"yes"|"partial"|"no","reason":"одне речення чому","fix":"конкретна правка одним реченням, що наблизить пост до цілі"}. Мова: Українська.';
+    "\nОціни чернетку ЧЕСНО: реально веде до цілі, частково, чи це «контент заради контенту». Скіл марний, якщо штампує «одобрено» на все. Ніколи не просто суди - автор має піти з дією." +
+    '\nПоверни ЛИШЕ валідний JSON: {"verdict":"yes"|"partial"|"no","reason":"одне речення чому","fix":"конкретна правка одним реченням","sharper":"ГОСТРІША ВЕРСІЯ: перепиши перший абзац поста так, щоб та сама ідея тягла до цілі сильніше (2-3 речення, голос збережи)"}. Мова: Українська.';
   const raw = await chat(env.cheapModel, system, `Чернетка:\n---\n${(content || "").slice(0, 4000)}`, { workspaceId, step: "director" });
   const o = extractJsonObject<any>(raw) || {};
+  const verdict = ["yes", "partial", "no"].includes(o.verdict) ? o.verdict : "partial";
+  // лічильник промахів за сьогодні (для дайджеста: «третя ідея повз ціль - що відводить?»)
+  if (verdict === "no") {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const row = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='director_misses'`, [workspaceId]);
+      let d: any = {}; try { d = JSON.parse(row?.content || "{}"); } catch { d = {}; }
+      const count = (d.date === today ? Number(d.count) || 0 : 0) + 1;
+      await q(`insert into settings_block(workspace_id,key,content) values($1,'director_misses',$2)
+               on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`,
+        [workspaceId, JSON.stringify({ date: today, count })]);
+    } catch { /* лічильник не критичний */ }
+  }
   return {
-    verdict: ["yes", "partial", "no"].includes(o.verdict) ? o.verdict : "partial",
+    verdict,
     reason: String(o.reason || "").slice(0, 300),
     fix: String(o.fix || "").slice(0, 300),
+    sharper: String(o.sharper || "").slice(0, 600),
   };
 }
 
-// ---- «Антидетектор»: гібридний аудит AI-слідів ----
-// Детермінований сканер (код, 100% надійний: тире, кліше, канцелярит) + LLM лише для тонких патернів.
-const AI_TRACE_RX: [string, RegExp][] = [
-  ["широке тире «—»", /—/],
-  ["середнє тире «–»", /–/],
-  ["конструкція «не просто X, а Y»", /не просто[^.\n]{0,60}?,\s*а\s/i],
-  ["«варто зазначити»", /варто (зазначити|відзначити)/i],
-  ["«у сучасному світі»", /у сучасному світі/i],
-  ["«давайте розберемось»", /давайте розберемо/i],
-  // УВАГА: \b не працює з кирилицею в JS - межі слів через lookbehind/lookahead
-  ["«як відомо»", /(?<![а-щьюяіїєґ])як відомо(?![а-щьюяіїєґ])/i],
-  ["фінальний підсумок «отже…»", /(?<![а-щьюяіїєґ])отже,?\s+(підсумуємо|памʼятай|головне)/i],
-  ["слово-паразит «ключовий»", /(?<![а-щьюяіїєґ])ключов(ий|а|е|і|ого|ої)(?![а-щьюяіїєґ])/i],
-  ["«важливо розуміти»", /важливо (розуміти|памʼятати)/i],
-  ["«наразі»/«даний»", /(?<![а-щьюяіїєґ])(наразі|дан(ий|а|е))(?![а-щьюяіїєґ])/i],
-  ["канцелярит «здійснювати/забезпечувати»", /(здійсню(є|вати)|забезпечу(є|вати))/i],
-  ["кліше-гачок", /(СТОП[!.\s]|не гортай|99\s?%|ти не повіриш|шок(уюч)?)/i],
+// ---- «Антидетектор» 2.0: гібридний аудит AI-слідів ----
+// Каталог портовано з humanizer-ru (52 патерни, MIT) на українську: детермінований сканер (код,
+// 100% надійний) + LLM для тонких патернів (ритм, регістр, «фінгерпринти 2025-26»).
+// До кожного детермінованого патерна - ЗАМІНА для точкової правки (HARD BAN → чим замінити).
+const AI_TRACE_RX: [string, RegExp, string][] = [
+  // — тире й пунктуаційний ритм —
+  ["широке тире «—»", /—/, "заміни на « - », кому або крапку (тире максимум раз на 3-4 речення)"],
+  ["середнє тире «–»", /–/, "заміни на « - », кому або крапку"],
+  // — HARD BANS: фірмові формули ШІ —
+  ["«не просто X, а Y»", /не просто[^.\n]{0,60}?,\s*а\s/i, "скажи прямо «Y», без протиставлення"],
+  ["«не тільки X, а й Y»", /не (тільки|лише)[^.\n]{0,60}?,\s*(а й|але й)\s/i, "«X. І ще Y» або просто перелічи"],
+  ["«це не про X, це про Y»", /це не про [^.\n]{0,40}?[.,]\s*це про /i, "скажи прямо, про що це"],
+  ["«у сучасному світі»", /у сучасному світі/i, "видали, почни з факту або питання"],
+  ["«не секрет, що»", /не секрет,? що/i, "видали преамбулу, почни з суті"],
+  ["«варто зазначити»", /варто (зазначити|відзначити)/i, "скажи напряму, без преамбули"],
+  ["«важливо розуміти»", /важливо (розуміти|памʼятати|зазначити)/i, "видали або «Тут ось що:»"],
+  ["«давайте розберемось»", /давайте (розберемо|розглянемо)/i, "видали анонс, одразу роби"],
+  ["«розглянемо детальніше»", /розглянемо (детальніше|докладніше)/i, "видали (читач і так бачить новий абзац)"],
+  ["«як відомо»", /(?<![а-щьюяіїєґ])як відомо(?![а-щьюяіїєґ])/i, "видали або назви конкретне джерело"],
+  ["фінальний підсумок «отже…»", /(?<![а-щьюяіїєґ])(отже|таким чином),?\s+(підсумуємо|памʼятай|головне|можна зробити висновок)/i, "видали формульний висновок або почни з дії"],
+  ["«підводячи підсумок»", /підводячи підсумок/i, "видали або дай нову думку, а не переказ"],
+  ["«сподіваюсь, було корисно»", /сподіва(юсь|ємось),? (було|стане) корисно/i, "видали артефакт чат-бота"],
+  // — розмиті авторитети й роздування —
+  ["«на думку експертів»", /(на думку експертів|експерти (кажуть|вважають)|дослідження показують)/i, "назви конкретне джерело або утверджуй від себе"],
+  ["«грає ключову роль»", /(грає|відіграє) (важливу|ключову|велику) роль/i, "покажи ЧОМУ важливо, через факт чи цифру"],
+  ["«неможливо переоцінити»", /неможливо переоцінити/i, "скинь пафос, дай конкретику"],
+  // — маркетингові кліше-усилювачі —
+  ["«розкрити потенціал»", /розкри(ти|ває) потенціал/i, "конкретний результат у цифрах"],
+  ["«вийти на новий рівень»", /(вийти|вихід) на нов(ий|і) (рівень|рівні|горизонти)/i, "що конкретно зміниться - назви"],
+  ["«відкриває нові горизонти»", /відкриває нові (горизонти|можливості)/i, "що конкретно стає можливим"],
+  ["«інноваційне рішення»", /інноваційн(е|і|ий) (рішення|підхід|інструмент)/i, "що нового - по факту"],
+  ["«комплексний підхід»", /комплексн(ий|е) (підхід|рішення)/i, "перелічи, що саме входить"],
+  ["«ідеально підходить для»", /ідеально підходить (для|під)/i, "кому і навіщо - конкретно"],
+  ["«змінює правила гри»", /змінює правила гри/i, "конкретний результат замість кліше"],
+  // — канцелярит і кальки —
+  ["слово-паразит «ключовий»", /(?<![а-щьюяіїєґ])ключов(ий|а|е|і|ого|ої)(?![а-щьюяіїєґ])/i, "прибери або заміни конкретним словом"],
+  ["«наразі»/«даний»", /(?<![а-щьюяіїєґ])(наразі|дан(ий|а|е|ої|ого))(?![а-щьюяіїєґ])/i, "«зараз» / «цей»"],
+  ["канцелярит «здійснювати/забезпечувати»", /(здійсню(є|вати|ють)|забезпечу(є|вати|ють)|реалізаці(я|ю)|впровадження)/i, "верни дієслово: «здійснили впровадження» = «впровадили»"],
+  ["«в рамках»", /(?<![а-щьюяіїєґ])в рамках(?![а-щьюяіїєґ])/i, "«у», «під час», «всередині» - або перебудуй"],
+  ["«з метою»", /(?<![а-щьюяіїєґ])з метою(?![а-щьюяіїєґ])/i, "«щоб»"],
+  ["«відповідний/певний»", /(?<![а-щьюяіїєґ])(відповідн(ий|і|у)|певн(і|ий) (аспекти|моменти|кроки))(?![а-щьюяіїєґ])/i, "назви конкретно або прибери"],
+  // — артефакти чат-бота —
+  ["артефакт чат-бота", /(відмінне питання|чудове питання|радий допомогти|звісно[,!]\s)/i, "видали повністю"],
+  ["псевдо-емпатія-вступ", /(я розумію, як це (непросто|складно)|знайома ситуація, правда)/i, "видали, переходь до суті"],
+  // — кліше-гачки —
+  ["кліше-гачок", /(СТОП[!.\s]|не гортай|зупинись|99\s?%|ти не повіриш|шок(уюч)?|алгоритм (ховає|приховує)|додивись до кінця)/i, "відкрий з кульмінації - найсильнішого факту чи цифри"],
+  // — фінгерпринти 2025-26 —
+  ["симетрична тріада-резюме", /(?<=[.!?]\s|^)[А-ЯІЇЄҐ][а-яіїєґ'’]+\.\s[А-ЯІЇЄҐ][а-яіїєґ'’]+\.\s[А-ЯІЇЄҐ][а-яіїєґ'’]+\.(?=\s|$)/m, "збери в нормальну фразу або залиш одне слово"],
+  ["емодзі-декор (3+ поспіль)", /(\p{Extended_Pictographic}\s*){3,}/u, "залиш максимум один емодзі або прибери"],
+  ["заголовок-обіцянка трансформації", /(зміни(ть)? (мислення|життя|підхід) за \d+|переверне тв(ій|оє))/i, "конкретика: що саме зміниться"],
 ];
+// список для промта точкової правки: патерн → чим замінити
+const HARD_BAN_HINTS = new Map(AI_TRACE_RX.map(([name, , fix]) => [name, fix]));
 export function scanAiTraces(content: string): { pattern: string; quote: string }[] {
   const t = String(content || "");
   const out: { pattern: string; quote: string }[] = [];
@@ -822,26 +894,70 @@ export async function aiAudit(workspaceId: string, content: string): Promise<{ p
   const hard = scanAiTraces(content); // детермінована частина - завжди спрацьовує
   let soft: { pattern: string; quote: string }[] = [];
   try {
-    const system = "Ти редактор, що знаходить ТОНКІ сліди AI-тексту в українській (очевидні тире/кліше вже перевірені окремо, їх не шукай). Шукай: симетричні парні речення-близнюки; три однорідні прикметники поспіль; занадто рівні абзаци однакової довжини; порожні узагальнення без конкретики; неприродно гладкі переходи («крім того», «водночас» ланцюжком). " +
-      'Знайди лише РЕАЛЬНІ входження (нічого не вигадуй; якщо чисто - порожній масив). Поверни ЛИШЕ валідний JSON-масив: [{"pattern":"назва","quote":"точна цитата до 60 симв"}]. Мова: Українська.';
+    const system = "Ти редактор, що знаходить ТОНКІ сліди AI-тексту в українській (очевидні тире/кліше/канцелярит уже перевірені кодом - їх НЕ шукай). Принцип: ШІ вибирає статистично найтиповіше продовження; людський текст - навмисне відхилення. Шукай:" +
+      "\n- рвана медитативність: короткі рубані псевдоінсайти поспіль («Точно. Окремо. Глибоко.»)" +
+      "\n- псевдо-сократичні питання: сам спитав - сам відповів заради ритму («Навіщо? А ось навіщо.»)" +
+      "\n- псевдо-терапевтичний регістр: тепла пустота коуч-бота («і це нормально», «ти не помиляєшся, що так відчуваєш»)" +
+      "\n- рівномірна глибина: кожне речення претендує на інсайт, нема прохідних зв'язок" +
+      "\n- симетричні парні речення-близнюки; три однорідні прикметники поспіль" +
+      "\n- кардіограма ритму: всі речення однакової довжини, всі абзаци рівні (назви це одним знахідком)" +
+      "\n- шаблонні переходи ланцюжком («крім того», «водночас», «більше того»)" +
+      "\n- водянистість: порожні узагальнення без конкретики" +
+      '\nЗнайди лише РЕАЛЬНІ входження (нічого не вигадуй; якщо чисто - порожній масив). Поверни ЛИШЕ валідний JSON-масив: [{"pattern":"назва","quote":"точна цитата до 60 симв"}]. Мова: Українська.';
     const raw = await chat(env.cheapModel, system, `Текст:\n---\n${(content || "").slice(0, 4000)}`, { workspaceId, step: "ai_audit" });
     soft = extractJsonArray<any>(raw)
       .map((x) => ({ pattern: String(x?.pattern || "").slice(0, 80), quote: String(x?.quote || "").slice(0, 80) }))
       .filter((x) => x.pattern);
   } catch { /* детермінованих знахідок достатньо */ }
-  return [...hard, ...soft].slice(0, 15);
+  return [...hard, ...soft].slice(0, 20);
 }
 
-// ---- «Хук-майстер»: 3 варіанти відкриття поста з кульмінації (точкова заміна першого рядка) ----
-export async function suggestHooks(workspaceId: string, text: string): Promise<string[]> {
+// «Антидетектор» 2.0, режим ТОЧКОВОЇ правки: замінює ЛИШЕ знайдені фрагменти, решта тексту не рухається
+// (безпечно для вже вилизаних текстів). Quad-pass-цикл: правка → повторний скан → добивка (макс 2 проходи).
+export async function deAiFix(workspaceId: string, content: string): Promise<{ content: string; findings: { pattern: string; quote: string }[]; remaining: { pattern: string; quote: string }[] }> {
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
-  const system = "Ти майстер перших рядків. Знайди в пості КУЛЬМІНАЦІЮ (найсильніший факт, цифру, момент, висновок) і запропонуй 3 РІЗНІ варіанти відкриття прямо з неї: різкий факт/цифра; контр-теза; особистий момент. Кожен - 1-2 короткі речення, органічно веде в наявний текст." +
-    (s.tone_of_voice ? `\nГолос бренду: ${s.tone_of_voice.slice(0, 600)}` : "") +
+  const findings = await aiAudit(workspaceId, content);
+  if (!findings.length) return { content, findings: [], remaining: [] };
+  let text = content;
+  let toFix = findings;
+  for (let pass = 0; pass < 2 && toFix.length; pass++) {
+    const list = toFix.map((f, i) => `${i + 1}. [${f.pattern}] фрагмент: «${f.quote}»${HARD_BAN_HINTS.get(f.pattern) ? ` → ${HARD_BAN_HINTS.get(f.pattern)}` : ""}`).join("\n");
+    const system = "Ти редактор точкових правок. У тексті знайдено сліди AI - виправ ЛИШЕ перелічені фрагменти (мінімальна заміна за підказкою після «→»), а РЕШТУ тексту відтвори ДОСЛІВНО, символ у символ: не перефразовуй, не скорочуй, не «покращуй» нічого поза списком. Заміна має природно вписатись у речення." +
+      (s.tone_of_voice ? `\nГолос бренду (для замін): ${s.tone_of_voice.slice(0, 400)}` : "") +
+      NO_DASH_RULE + `\n\nСПИСОК ПРАВОК:\n${list}\n\nПоверни ЛИШЕ повний виправлений текст. Мова: ${lang}.`;
+    const fixed = (await chat("openai/gpt-4o", system, `---\n${text}`, { workspaceId, step: "deai_fix" })).trim();
+    // страховка: якщо модель переписала все (довжина попливла) - лишаємо попередню версію
+    if (fixed.length < text.length * 0.5 || fixed.length > text.length * 1.6) break;
+    text = fixed;
+    toFix = scanAiTraces(text); // другий прохід - лише детермінований скан (дешево і точно)
+  }
+  return { content: text, findings, remaining: scanAiTraces(text) };
+}
+
+// ---- «Хук-майстер» 2.0: кульмінація + 3 відкриття + м'який місток + список артефактів на видалення ----
+export type HookResult = { culmination: string; hooks: string[]; soft: string; remove: string[] };
+export async function suggestHooks(workspaceId: string, text: string): Promise<HookResult> {
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const system = "Ти майстер перших рядків. Хук - це не накручена інтрига, а найцікавіше, що є в матеріалі, сказане ПЕРШИМ. Зроби чотири речі:" +
+    "\n1) culmination: назви КУЛЬМІНАЦІЮ - єдиний найсильніший факт/цифру/момент/висновок усього тексту (це ПРАВДА з матеріалу, нічого не вигадуй);" +
+    "\n2) hooks: 3 РІЗНІ відкриття прямо з кульмінації (різкий факт/цифра; контр-теза; особистий момент) - кожне 1-2 короткі речення, органічно веде в наявний текст;" +
+    "\n3) soft: м'який варіант-місток - лагідніша версія, якщо різке відкриття чуже голосу, але цікаве все одно попереду;" +
+    "\n4) remove: хук-артефакти, ЗНАЙДЕНІ в поточному тексті, які треба видалити («СТОП, не гортай», «99% не знають», «алгоритм ховає», «додивись до кінця», накручена інтрига) - точними цитатами; якщо чисто, порожній масив." +
+    (s.tone_of_voice ? `\nГолос бренду: ${s.tone_of_voice.slice(0, 600)}` : "") + voicePassport(s) +
     HOOK_RULE + NO_DASH_RULE +
-    `\n\nПоверни ЛИШЕ валідний JSON-масив із 3 рядків: ["…","…","…"]. Мова: ${lang}.`;
+    `\n\nПоверни ЛИШЕ валідний JSON: {"culmination":"…","hooks":["…","…","…"],"soft":"…","remove":["точна цитата",…]}. Мова: ${lang}.`;
   const raw = await chat("openai/gpt-4o", system, `Пост:\n---\n${(text || "").slice(0, 4000)}`, { workspaceId, step: "hooks" });
-  try { return extractJsonArray<any>(raw).map((x) => String(x?.hook || x || "").trim()).filter(Boolean).slice(0, 3); } catch { return []; }
+  try {
+    const o = extractJsonObject<any>(raw);
+    return {
+      culmination: String(o?.culmination || "").slice(0, 300),
+      hooks: (Array.isArray(o?.hooks) ? o.hooks : []).map((x: any) => String(x || "").trim()).filter(Boolean).slice(0, 3),
+      soft: String(o?.soft || "").trim().slice(0, 400),
+      remove: (Array.isArray(o?.remove) ? o.remove : []).map((x: any) => String(x || "").trim()).filter(Boolean).slice(0, 6),
+    };
+  } catch { return { culmination: "", hooks: [], soft: "", remove: [] }; }
 }
 
 // ---- «Архітектор» (принцип непересічення): заголовок на картинку, що ДОПОВНЮЄ текст, а не дублює його ----
@@ -859,13 +975,15 @@ export async function reelsScript(workspaceId: string, text: string): Promise<st
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
   const brief = (s.strategy_brief || "").trim();
-  const system = "Ти сценарист коротких відео (Reels/Shorts/TikTok). За матеріалом напиши ГОТОВИЙ ДО ЗЙОМКИ сценарій:" +
+  const system = "Ти сценарист коротких відео (Reels/Shorts/TikTok), 30-60 секунд. За матеріалом напиши ГОТОВИЙ ДО ЗЙОМКИ сценарій:" +
     "\n- ХУК (0-2с): відкриття з кульмінації, без кліше." +
-    "\n- 4-5 БІТІВ: один біт = одна думка = один короткий рядок озвучки + [візуал: що в кадрі/на екрані]." +
+    "\n- 4-5 БІТІВ: один біт = ОДНА думка = ОДИН короткий рядок озвучки + [візуал: що в кадрі/на екрані]. Потрібно два рядки - значить це два біти." +
+    "\nЕталон біта. Погано: «Розкажи, що брендбук допомагає нейромережі писати у твоєму стилі і це дуже важливо для бренду» (дві думки, довго, нічого знімати). Добре: «Секрет не в промті, а в брендбуку» [візуал: файл брендбука на екрані] (одна думка, один рядок, зрозумілий кадр)." +
     "\n- CTA: один заклик = одна дія." +
-    "\nФормат виводу рівно такий:\n🎬 СЦЕНАРІЙ REELS: <назва 3-5 слів>\n\nХУК (0-2с): <рядок>\n[візуал: <що в кадрі>]\n\nБІТ 1: <рядок>\n[візуал: <…>]\n(і так далі)\n\nCTA: <рядок>" +
+    "\n- ТЕКСТ НА ЕКРАН: 3-5 ключових слів/фраз, які виносимо великими титрами в кадр (акценти, не субтитри)." +
+    "\nФормат виводу рівно такий:\n🎬 СЦЕНАРІЙ REELS: <назва 3-5 слів>\n\nХУК (0-2с): <рядок>\n[візуал: <що в кадрі>]\n\nБІТ 1: <рядок>\n[візуал: <…>]\n(і так далі)\n\nCTA: <рядок>\n[візуал: <…>]\n\nТЕКСТ НА ЕКРАН: <слова через ·>" +
     (brief ? `\n\nСТРАТЕГІЧНИЙ БРИФ: ${brief.slice(0, 1200)}` : (s.marketing_context ? `\n\nБренд і аудиторія: ${s.marketing_context}` : "")) +
-    (s.tone_of_voice ? `\nГолос бренду: ${s.tone_of_voice.slice(0, 600)}` : "") +
+    (s.tone_of_voice ? `\nГолос бренду: ${s.tone_of_voice.slice(0, 600)}` : "") + voicePassport(s) +
     goalRule(s) + HOOK_RULE + ANTI_AI_RULE + NO_DASH_RULE +
     `\n\nПоверни лише сценарій. Мова: ${lang}.`;
   return chat("openai/gpt-4o", system, `Матеріал:\n---\n${(text || "").slice(0, 12000)}`, { workspaceId, step: "reels" });
@@ -886,29 +1004,75 @@ export async function suggestDevelopment(workspaceId: string, content: string): 
   } catch { return []; }
 }
 
-// ---- «Магніт»: 3 конкретні лід-магніти з досвіду бренду + кодове слово (кешуються в settings_block) ----
-export async function suggestLeadMagnets(workspaceId: string): Promise<{ title: string; what: string; leadgen: string; effort: string; keyword: string }[]> {
+// ---- «Магніт» 2.0: конкретні лід-магніти з ПРИВ'ЯЗКОЮ до реальних постів + промо-хук + швидкий виграш ----
+export type Magnet = { title: string; what: string; attach: string; promo: string; leadgen: string; effort: string; keyword: string; quick?: boolean };
+export async function suggestLeadMagnets(workspaceId: string, topic?: string): Promise<Magnet[]> {
   const s = await loadSettings(workspaceId);
   const brief = (s.strategy_brief || "").trim();
-  const system = "Ти продюсер лід-магнітів. Запропонуй 3 КОНКРЕТНІ лід-магніти з наявного досвіду бренду - не «зроби PDF», а що саме всередині і чому цільова аудиторія захоче це забрати. Для кожного:" +
-    "\n- title: назва як її побачить аудиторія;\n- what: що всередині (1-2 речення) + формат (чекліст/шаблон/міні-гайд/розбір/таблиця);" +
-    "\n- leadgen: сила збору лідів (низька|середня|висока);\n- effort: витрати на збірку (низькі|середні|високі);" +
-    "\n- keyword: коротке КОДОВЕ СЛОВО ВЕЛИКИМИ літерами для коментаря/дірект." +
+  // контент-бібліотека юзера: магніт має рости з ГОТОВОГО досвіду (перепакування - найдешевший хід)
+  const posts = await q<{ content: string }>(
+    `select p.content from post p join pipeline_run r on r.id=p.run_id join source src on src.id=r.source_id
+     where src.workspace_id=$1 and p.stage='final' order by p.created_at desc limit 8`, [workspaceId]);
+  const library = posts.map((p, i) => `${i + 1}. ${(p.content || "").split("\n")[0].slice(0, 110)}`).join("\n");
+  const system = "Ти продюсер лід-магнітів. Запропонуй 3 КОНКРЕТНІ лід-магніти - не «зроби PDF», а що саме всередині і чому аудиторія захоче це забрати. Еталон: не «чекліст», а «12-пунктовий чекліст, який я проганяю перед кожним постом». Для кожного:" +
+    "\n- title: назва як її побачить аудиторія;\n- what: що всередині (1-2 речення) + формат (чекліст/шаблон/свайп-файл/міні-гайд/таблиця);" +
+    "\n- attach: з якого ГОТОВОГО поста/досвіду автора це росте (перепакування готового - найцінніший хід; якщо ні з чого - порожньо);" +
+    "\n- promo: промо-хук - як тизерити магніт у контенті (1 речення);" +
+    "\n- leadgen: сила збору лідів (низька|середня|висока);\n- effort: витрати на збірку (низькі|середні|високі; «зібрати за вечір» = низькі);" +
+    "\n- keyword: коротке КОДОВЕ СЛОВО ВЕЛИКИМИ літерами для коментаря/дірект;" +
+    "\n- quick: true РІВНО В ОДНОГО - швидкий виграш, найкраще співвідношення лідоген/зусилля (що зібрати першим, за один вечір)." +
+    (topic ? `\n\nМагніти мають бути САМЕ під цю тему/пост: ${topic.slice(0, 800)}` : "") +
+    (library ? `\n\nОстанні пости автора (прив'язуй attach до них, де можливо):\n${library}` : "") +
     (brief ? `\n\nСТРАТЕГІЧНИЙ БРИФ: ${brief.slice(0, 1200)}` : (s.marketing_context ? `\n\nНіша й аудиторія: ${s.marketing_context}` : "")) +
     goalRule(s) +
-    '\n\nПоверни ЛИШЕ валідний JSON-масив: [{"title":"…","what":"…","leadgen":"…","effort":"…","keyword":"…"}]. Мова: Українська.';
-  const raw = await chat("openai/gpt-4o", system, "Запропонуй 3 лід-магніти.", { workspaceId, step: "lead_magnets" });
-  let out: { title: string; what: string; leadgen: string; effort: string; keyword: string }[] = [];
+    '\n\nПоверни ЛИШЕ валідний JSON-масив: [{"title":"…","what":"…","attach":"…","promo":"…","leadgen":"…","effort":"…","keyword":"…","quick":false}]. Мова: Українська.';
+  const raw = await chat("openai/gpt-4o", system, topic ? "Магніти під тему вище." : "Запропонуй 3 лід-магніти.", { workspaceId, step: "lead_magnets" });
+  let out: Magnet[] = [];
   try {
     out = extractJsonArray<any>(raw).map((x) => ({
       title: String(x?.title || "").slice(0, 120), what: String(x?.what || "").slice(0, 400),
+      attach: String(x?.attach || "").slice(0, 200), promo: String(x?.promo || "").slice(0, 200),
       leadgen: String(x?.leadgen || "").slice(0, 20), effort: String(x?.effort || "").slice(0, 20),
       keyword: String(x?.keyword || "").toUpperCase().replace(/[^A-ZА-ЯІЇЄҐ0-9]/g, "").slice(0, 20),
+      quick: x?.quick === true,
     })).filter((x) => x.title).slice(0, 3);
   } catch { out = []; }
-  if (out.length) await q(`insert into settings_block(workspace_id, key, content) values($1,'lead_magnets',$2)
+  if (out.length && !out.some((m) => m.quick)) out[0].quick = true; // швидкий виграш завжди позначений
+  if (out.length && !topic) await q(`insert into settings_block(workspace_id, key, content) values($1,'lead_magnets',$2)
     on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`, [workspaceId, JSON.stringify(out)]);
   return out;
+}
+
+// «Магніт», крок 2: ЗІБРАТИ сам магніт - готовий текст чекліста/гайда як чернетка (від поради до продукту один клік)
+export async function buildLeadMagnet(workspaceId: string, magnet: { title: string; what: string; keyword?: string }): Promise<string> {
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const brief = (s.strategy_brief || "").trim();
+  const system = "Ти автор практичних матеріалів. Напиши ПОВНИЙ ГОТОВИЙ лід-магніт (не план і не опис - сам продукт): конкретні пункти, кроки чи шаблони, кожен пункт - дія або перевірка, без води і загальних порад. Обсяг 1500-3500 символів. Структура: назва → 1-2 речення для кого і що дасть → сам матеріал (нумеровані пункти/розділи) → короткий фінальний крок." +
+    (brief ? `\n\nСТРАТЕГІЧНИЙ БРИФ: ${brief.slice(0, 1000)}` : (s.marketing_context ? `\n\nНіша й аудиторія: ${s.marketing_context}` : "")) +
+    (s.tone_of_voice ? `\nГолос бренду: ${s.tone_of_voice.slice(0, 500)}` : "") + voicePassport(s) +
+    NO_DASH_RULE + ANTI_AI_RULE +
+    `\n\nПоверни лише текст магніта, першим рядком: 🧲 <назва>. Мова: ${lang}.`;
+  return chat("openai/gpt-4o", system, `Лід-магніт: «${magnet.title}»\nЩо всередині: ${magnet.what}`, { workspaceId, step: "lead_magnet_build" });
+}
+
+// ---- «Мультиплікатор», режим «Нарізка»: довгий транскрипт → 5-7 самостійних сценаріїв Reels + порядок на тиждень ----
+export async function sliceToReels(workspaceId: string, text: string): Promise<string[]> {
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const system = "Ти мультиплікатор контенту. З довгого матеріалу зроби 5-7 КОРОТКИХ сценаріїв Reels (30-60с). Правила:" +
+    "\n- кожен ролик СТОЇТЬ САМ ПО СОБІ - працює без перегляду довгого; слабкі моменти ріж, якість важливіша за кількість;" +
+    "\n- відкриття КОЖНОГО - з кульмінації саме цього моменту;" +
+    "\n- один біт = одна думка = один рядок озвучки + [візуал: …]; максимум 4-5 бітів; CTA наприкінці;" +
+    "\n- впорядкуй як ПОСЛІДОВНІСТЬ НА ТИЖДЕНЬ: перший - найсильніший самостійний, далі так, щоб ролики підсилювали одне одного." +
+    "\nФормат КОЖНОГО сценарію рівно такий (розділяй сценарії рядком ===):" +
+    "\n🎬 СЦЕНАРІЙ REELS: <назва 3-5 слів> (день N)\nЧому сам по собі: <1 речення>\n\nХУК (0-2с): <рядок>\n[візуал: <…>]\n\nБІТ 1: <рядок>\n[візуал: <…>]\n(…)\n\nCTA: <рядок>\n[візуал: <…>]\n\nТЕКСТ НА ЕКРАН: <слова через ·>" +
+    (s.marketing_context ? `\n\nБренд і аудиторія: ${s.marketing_context}` : "") +
+    (s.tone_of_voice ? `\nГолос бренду: ${s.tone_of_voice.slice(0, 500)}` : "") + voicePassport(s) +
+    goalRule(s) + HOOK_RULE + ANTI_AI_RULE + NO_DASH_RULE +
+    `\n\nПоверни лише сценарії, розділені рядком ===. Мова: ${lang}.`;
+  const raw = await chat("openai/gpt-4o", system, `Матеріал:\n---\n${(text || "").slice(0, 24000)}`, { workspaceId, step: "reel_slices" });
+  return raw.split(/\n=+\n/).map((x) => x.trim()).filter((x) => x.includes("🎬")).slice(0, 7);
 }
 
 // ---- «Розвідник», режим «Питання»: після публікації - що аудиторія мовчки питає далі → Банк ідей ----

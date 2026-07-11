@@ -530,6 +530,17 @@
             <div class="btnrow"><button class="primary" id="deriveVoiceBtn">✨ Вивести голос</button><span id="voiceMsg" style="font-size:12px;color:var(--muted)"></span></div>
             <div id="derivedVoice"></div>
           </div>
+          <div class="panel">
+            <div class="ph" style="margin:0 0 4px">🪪 Паспорт голосу <span id="voiceCalBadge" style="display:none;font-size:11.5px;font-weight:600;color:var(--amber)">⚠ голос не відкалібрований - заповни приклади або ToV</span></div>
+            <div class="hint" style="margin-bottom:10px">Структурні правила поверх Tone of Voice - їх читає КОЖНА генерація: звертання, підпис, заборонені слова, емодзі.</div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+              <label style="font-size:12px;color:var(--muted)">Звертання<br><select id="vAddr" class="txt" style="width:auto;padding:7px 9px;margin-top:2px"><option value="">не задано</option><option value="ty">на «ти»</option><option value="vy">на «ви»</option></select></label>
+              <label style="font-size:12px;color:var(--muted)">Емодзі<br><select id="vEmoji" class="txt" style="width:auto;padding:7px 9px;margin-top:2px"><option value="">помірно (за голосом)</option><option value="min">максимум 1-2</option><option value="no">без емодзі</option></select></label>
+              <label style="font-size:12px;color:var(--muted);flex:1;min-width:200px">Фірмовий підпис/прощання<br><input id="vSign" class="txt" placeholder="напр.: Перемагайте люблячи 🤍" style="margin-top:2px"></label>
+            </div>
+            <label class="fl" style="margin-top:10px">Стоп-лист: слова і фрази, які НІКОЛИ не вживати</label>
+            <textarea id="vStop" rows="2" placeholder="через кому: гуру, лайфхак, у сучасному світі, друзі…"></textarea>
+          </div>
           <div class="grid2">
             <div class="panel" style="margin:0"><label class="fl">🗣️ Голос бренду (Tone of Voice)</label><textarea id="tov"></textarea></div>
             <div class="panel" style="margin:0"><label class="fl">👥 Аудиторія / Marketing Context</label><textarea id="mkt"></textarea></div>
@@ -550,6 +561,8 @@
           <div class="ph" style="margin:0 0 6px">🎯 Головна ціль контенту</div>
           <div class="hint" style="margin-bottom:10px">Одна ціль, яка керує всією генерацією. Кнопка 🎯 на чернетці перевіряє: веде пост до цілі чи це «контент заради контенту».</div>
           <div id="goalChips" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+          <label class="fl" style="margin-top:10px">Метрика і строк цілі</label>
+          <input id="goalMetric" class="txt" placeholder="напр.: 300 заявок у воронку за квартал">
         </div>
         <div class="panel">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -778,7 +791,7 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const STEP  = {1:'extract_ideas',3:'drafts',4:'tone',5:'format',6:'deai',7:'strategy'};
 const ORDER = [1,3,4,5,6,7];
-const SET = {mkt:'marketing_context', tov:'tone_of_voice', deai:'deai_rules', strat:'content_strategy', voiceExamples:'voice_examples', imgStyle:'image_style'};
+const SET = {mkt:'marketing_context', tov:'tone_of_voice', deai:'deai_rules', strat:'content_strategy', voiceExamples:'voice_examples', imgStyle:'image_style', vSign:'voice_signature', vStop:'voice_stoplist', goalMetric:'goal_metric'};
 const AUTORUN_WARN='Авто-прогін запускатиме повну AI-генерацію постів на КОЖНУ нову статтю/зустріч - це витрачає кошти на AI. Увімкнути?';
 // час: усе планування рахуємо в поясі TZ (обирається в Налаштуваннях); у БД - UTC
 let TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Kyiv';
@@ -961,7 +974,7 @@ function renderMaterials(){
         +'<div style="font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+esc(m.preview||'')+'</div>'
       +'</div>'
       +(open?'<div id="matFull" style="margin-top:10px;background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:12px 14px;font-size:13px;line-height:1.6;color:var(--ink2);white-space:pre-wrap;max-height:300px;overflow:auto"><span class="spin"></span></div>'
-        +'<div class="btnrow" style="margin-top:10px;flex-wrap:wrap"><button class="primary" data-ma="post">✨ Створити пост</button><button class="ghost" data-ma="series">⚡ Серія (~6 постів)</button><button class="ghost" data-ma="ideas">💡 Витягнути ідеї</button><button class="ghost" data-ma="reels">🎬 Сценарій Reels</button><button class="ghost" data-ma="del" style="margin-left:auto;color:var(--danger)">🗑 Прибрати</button></div>':'')
+        +'<div class="btnrow" style="margin-top:10px;flex-wrap:wrap"><button class="primary" data-ma="post">✨ Створити пост</button><button class="ghost" data-ma="series">⚡ Серія (~6 постів)</button><button class="ghost" data-ma="ideas">💡 Витягнути ідеї</button><button class="ghost" data-ma="reels">🎬 Сценарій Reels</button>'+((m.chars||0)>800?'<button class="ghost" data-ma="slices" title="Довгий матеріал → 5-7 самостійних сценаріїв Reels, тиждень відео-контенту">🎞 Нарізка на рілси</button>':'')+'<button class="ghost" data-ma="del" style="margin-left:auto;color:var(--danger)">🗑 Прибрати</button></div>':'')
       +'</div>';
   }).join('');
   feed.querySelectorAll('[data-mat]').forEach(row=>{
@@ -976,6 +989,9 @@ function renderMaterials(){
         try{ const r=await api('/materials/'+id+'/series',{method:'POST'}); await loadStudioPosts(); flash('Серія готова - '+(r.count||0)+' постів у Чорновиках ✓'); }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } return; }
       if(a==='reels'){ aiBusy('🎬 Пишу сценарій Reels з матеріалу…'); setCTab('posts'); setLayout('studio');
         try{ await api('/materials/'+id+'/reels',{method:'POST'}); await loadStudioPosts(); flash('Сценарій Reels у Чорновиках ✓'); }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } return; }
+      if(a==='slices'){ if(!confirm('🎞 Нарізати матеріал на 5-7 самостійних сценаріїв Reels? Це тиждень відео-контенту одним викликом.')) return;
+        aiBusy('🎞 Нарізаю на сценарії Reels (порядок на тиждень)…'); setCTab('posts'); setLayout('studio');
+        try{ const r=await api('/materials/'+id+'/reel-slices',{method:'POST'}); await loadStudioPosts(); flash('Нарізка готова - '+(r.count||0)+' сценаріїв 🎬 у Чорновиках, у порядку на тиждень ✓'); }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } return; }
       if(a==='ideas'){ openMaterialIdeas(id); }
     });
   });
@@ -1050,7 +1066,7 @@ async function openMaterialIdeas(matId){
   if(ideas.length){
     list.innerHTML=ideas.map((it,i)=>'<label class="rchip on" style="display:flex;gap:8px;align-items:flex-start;width:100%;padding:9px 12px;margin-bottom:5px;text-align:left;font-weight:500;line-height:1.4"><input type="checkbox" class="miCb" data-i="'+i+'" checked><span style="flex:1">'+esc(it.idea)
       +(it.hook?'<span style="display:block;font-size:12px;color:var(--muted);font-weight:400;margin-top:3px">🪝 '+esc(it.hook)+'</span>':'')+'</span>'
-      +((it.angle||it.rubric)?'<span style="display:flex;flex-direction:column;gap:3px;align-items:flex-end">'+(it.rubric?'<span class="ptag">🏷 '+esc(it.rubric)+'</span>':'')+(it.angle?'<span class="ptag">🎯 '+esc(it.angle)+'</span>':'')+'</span>':'')+'</label>').join('');
+      +((it.angle||it.rubric||it.format)?'<span style="display:flex;flex-direction:column;gap:3px;align-items:flex-end">'+(it.rubric?'<span class="ptag">🏷 '+esc(it.rubric)+'</span>':'')+(it.angle?'<span class="ptag">🎯 '+esc(it.angle)+'</span>':'')+(it.format?'<span class="ptag">'+(it.format==='рілс'?'🎬':(it.format==='карусель'?'🖼':'📝'))+' '+esc(it.format)+'</span>':'')+'</span>':'')+'</label>').join('');
     list.querySelectorAll('.rchip').forEach(l=>{ const cb=l.querySelector('input'); cb.addEventListener('change',()=>l.classList.toggle('on',cb.checked)); });
     const go=card.querySelector('#miGo'); go.disabled=false;
     go.onclick=async()=>{ const picked=[...list.querySelectorAll('.miCb:checked')].map(c=>{ const it=ideas[+c.dataset.i]; return it.idea+(it.angle?' Кут: '+it.angle+'.':'')+(it.hook?' Гачок: '+it.hook:''); }); if(!picked.length){ flash('Обери хоча б одну ідею'); return; }
@@ -1205,6 +1221,10 @@ async function loadSettings(){
     TZ = map.timezone || TZ; buildTzSel();
     PRO = (map.pro==='1'); updateProUI();
     if(map.tone_of_voice_derived) renderDerived(map.tone_of_voice_derived);
+    if($('vAddr')) $('vAddr').value=map.voice_address||'';
+    if($('vEmoji')) $('vEmoji').value=map.voice_emoji||'';
+    // чесний бейдж: голос НЕ відкалібрований, поки нема ані ToV, ані прикладів постів
+    if($('voiceCalBadge')) $('voiceCalBadge').style.display=((map.tone_of_voice||'').trim()||(map.voice_examples||'').trim())?'none':'inline';
     window._v2 = (map.prompt_engine!=='legacy'); // v2 - дефолтний рушій
     if($('briefView')) renderBrief(map.strategy_brief||'');
     $('srvDot').style.background='var(--brand)';
@@ -1216,6 +1236,8 @@ function flashSaved(){ const s=$('saved'); if(!s) return; s.style.opacity='1'; c
 async function saveSetting(key,val){ try{ await api('/settings/'+key,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:val})}); flashSaved(); }catch(e){} }
 for(const tid of Object.keys(SET)){ const el=$(tid); if(el) el.addEventListener('input', ()=>{ clearTimeout(saveT); saveT=setTimeout(()=>saveSetting(SET[tid],el.value),700); }); }
 $('langSel').onchange=()=>saveSetting('output_language',$('langSel').value);
+if($('vAddr')) $('vAddr').onchange=()=>saveSetting('voice_address',$('vAddr').value);
+if($('vEmoji')) $('vEmoji').onchange=()=>saveSetting('voice_emoji',$('vEmoji').value);
 function ensureLangOption(lang){ const sel=$('langSel'); if(!sel||!lang) return; if(![].some.call(sel.options,o=>o.value===lang||o.text===lang)){ const o=document.createElement('option'); o.textContent=lang; sel.appendChild(o); } }
 buildTzSel(); if($('tzSel')) $('tzSel').onchange=()=>{ TZ=$('tzSel').value; saveSetting('timezone',TZ); buildTzSel(); try{ if(curView==='publish') loadPublish(); }catch(e){} };
 function renderDerived(text){
@@ -1300,10 +1322,20 @@ async function loadGoalCta(){ try{ const st=await api('/settings');
 // 🧲 лід-магніти («Магніт»): конкретика з досвіду + кодове слово → CTA Instagram
 function renderMagnets(list){ const box=$('lmList'); if(!box) return;
   if(!list||!list.length){ box.innerHTML='<div class="empty">Натисни «Запропонувати» - AI складе 3 конкретні магніти з твого досвіду.</div>'; return; }
-  box.innerHTML=list.map(m=>'<div class="card" style="margin-top:8px"><b>'+esc(m.title)+'</b><div style="font-size:13px;color:var(--ink2);margin:5px 0;line-height:1.5">'+esc(m.what)+'</div>'
-    +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="ptag">🧲 лідоген: '+esc(m.leadgen||'?')+'</span><span class="ptag">🔧 витрати: '+esc(m.effort||'?')+'</span>'
-    +(m.keyword?'<span class="ptag">🔑 '+esc(m.keyword)+'</span><button class="ghost lmKey" data-kw="'+esc(m.keyword)+'" style="padding:4px 10px;font-size:12px;margin-left:auto">→ CTA для Instagram</button>':'')+'</div></div>').join('');
-  box.querySelectorAll('.lmKey').forEach(b=>b.onclick=async()=>{ CtaCfg.instagram={type:'keyword',value:b.dataset.kw}; await saveSetting('cta_config',JSON.stringify(CtaCfg)); renderCta(); flash('Кодове слово «'+b.dataset.kw+'» тепер CTA для Instagram ✓'); }); }
+  box.innerHTML=list.map((m,i)=>'<div class="card" style="margin-top:8px'+(m.quick?';border-color:var(--brand)':'')+'">'
+    +(m.quick?'<span class="ptag" style="color:var(--brand);border-color:var(--brand);font-weight:700;margin-bottom:6px;display:inline-block">⚡ швидкий виграш - зібрати першим</span>':'')
+    +'<b style="display:block">'+esc(m.title)+'</b><div style="font-size:13px;color:var(--ink2);margin:5px 0;line-height:1.5">'+esc(m.what)+'</div>'
+    +(m.attach?'<div style="font-size:12px;color:var(--muted)">📎 росте з: '+esc(m.attach)+'</div>':'')
+    +(m.promo?'<div style="font-size:12px;color:var(--muted)">📣 як тизерити: '+esc(m.promo)+'</div>':'')
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px"><span class="ptag">🧲 лідоген: '+esc(m.leadgen||'?')+'</span><span class="ptag">🔧 витрати: '+esc(m.effort||'?')+'</span>'
+    +(m.keyword?'<span class="ptag">🔑 '+esc(m.keyword)+'</span>':'')
+    +'<span style="margin-left:auto;display:flex;gap:6px"><button class="ghost lmBuild" data-i="'+i+'" style="padding:4px 10px;font-size:12px">✍ Зібрати</button>'
+    +(m.keyword?'<button class="ghost lmKey" data-kw="'+esc(m.keyword)+'" style="padding:4px 10px;font-size:12px">→ CTA для Instagram</button>':'')+'</span></div></div>').join('');
+  box.querySelectorAll('.lmKey').forEach(b=>b.onclick=async()=>{ CtaCfg.instagram={type:'keyword',value:b.dataset.kw}; await saveSetting('cta_config',JSON.stringify(CtaCfg)); renderCta(); flash('Кодове слово «'+b.dataset.kw+'» тепер CTA для Instagram ✓'); });
+  box.querySelectorAll('.lmBuild').forEach(b=>b.onclick=async()=>{ const m=list[+b.dataset.i]; if(!confirm('✍ Зібрати «'+m.title+'» повністю? Готовий текст магніта зʼявиться чернеткою в Студії.')) return;
+    b.disabled=true; aiBusy('🧲 Збираю лід-магніт повністю…');
+    try{ await api('/lead-magnets/build',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:m.title,what:m.what,keyword:m.keyword})}); flash('Магніт зібрано - шукай 🧲-чернетку в Студії ✓'); try{await loadStudioPosts();}catch(_){} }
+    catch(e){ flash('⚠ '+e.message); } finally{ b.disabled=false; aiDone(); } }); }
 async function loadMagnets(){ try{ const r=await api('/lead-magnets'); renderMagnets(r.magnets||[]); }catch(e){} }
 if($('lmGen')) $('lmGen').onclick=async()=>{ const m=$('lmMsg'); m.textContent='думаю…'; aiBusy('🧲 Складаю лід-магніти з твого досвіду…');
   try{ const r=await api('/lead-magnets',{method:'POST'}); renderMagnets(r.magnets||[]); m.textContent=''; }catch(e){ m.textContent='⚠ '+e.message; } finally{ aiDone(); } };
@@ -1331,12 +1363,37 @@ async function developPost(id){ aiBusy('🔥 Шукаю кути розвитк�
     try{ await loadMaterials(); }catch(_){}
   }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } }
 // 🎯 вердикт Директора на чернетці: веде до цілі / частково / ні + правка в 1 клік
+// 🧲 «Магніт під ТЕМУ»: магніти саме під цей пост + вплетення CTA в текст
+async function postMagnet(id){ aiBusy('🧲 Складаю лід-магніти під тему поста…');
+  let mags=[]; try{ const r=await api('/posts/'+id+'/lead-magnet',{method:'POST'}); mags=r.magnets||[]; }catch(e){ flash('⚠ '+e.message); aiDone(); return; } finally{ aiDone(); }
+  if(!mags.length){ flash('Не вдалося скласти магніти'); return; }
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
+  ov.innerHTML='<div class="modal-card" style="max-width:560px;padding:20px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">🧲 Магніти під цю тему</b><button class="icon" id="pmX" style="margin-left:auto">✕</button></div>'
+    +mags.map((m,i)=>'<div class="card" style="margin-bottom:8px'+(m.quick?';border-color:var(--brand)':'')+'">'+(m.quick?'<span class="ptag" style="color:var(--brand);border-color:var(--brand);font-weight:700">⚡ швидкий виграш</span> ':'')+'<b>'+esc(m.title)+'</b>'
+      +'<div style="font-size:12.5px;color:var(--ink2);margin:4px 0;line-height:1.45">'+esc(m.what)+'</div>'
+      +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="ptag">🧲 '+esc(m.leadgen||'?')+'</span><span class="ptag">🔧 '+esc(m.effort||'?')+'</span>'+(m.keyword?'<span class="ptag">🔑 '+esc(m.keyword)+'</span>':'')
+      +'<span style="margin-left:auto;display:flex;gap:6px"><button class="ghost pmBuild" data-i="'+i+'" style="padding:4px 10px;font-size:12px">✍ Зібрати</button>'+(m.keyword?'<button class="ghost pmCta" data-i="'+i+'" style="padding:4px 10px;font-size:12px">→ вплести CTA в пост</button>':'')+'</span></div></div>').join('')
+    +'</div>';
+  document.body.appendChild(ov); const close=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#pmX').onclick=close;
+  ov.querySelectorAll('.pmBuild').forEach(b=>b.onclick=async()=>{ const m=mags[+b.dataset.i]; b.disabled=true; aiBusy('🧲 Збираю магніт повністю…');
+    try{ await api('/lead-magnets/build',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:m.title,what:m.what,keyword:m.keyword})}); close(); flash('Магніт зібрано - 🧲-чернетка в Студії ✓'); try{await loadStudioPosts();}catch(_){} }
+    catch(e){ flash('⚠ '+e.message); b.disabled=false; } finally{ aiDone(); } });
+  ov.querySelectorAll('.pmCta').forEach(b=>b.onclick=async()=>{ const m=mags[+b.dataset.i]; b.disabled=true; aiBusy('📮 Вплітаю CTA магніта в пост…');
+    try{ await api('/posts/'+id+'/regenerate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instruction:'Допиши наприкінці поста ОДИН органічний CTA: запропонуй безкоштовний матеріал «'+m.title+'» за кодове слово '+(m.keyword||'')+' у коментарях/дірект. Один заклик = одна дія. Решту поста не змінюй.'})}); close(); flash('CTA вплетено в пост ✓'); try{await loadStudioPosts();}catch(_){} }
+    catch(e){ flash('⚠ '+e.message); b.disabled=false; } finally{ aiDone(); } });
+}
 async function directorCheck(id){ aiBusy('🎯 Директор перевіряє пост на відповідність цілі…');
   try{ const r=await api('/posts/'+id+'/director',{method:'POST'});
     const E={yes:'✅ ВЕДЕ ДО ЦІЛІ',partial:'⚠ ЧАСТКОВО ВЕДЕ',no:'✖ НЕ ВЕДЕ ДО ЦІЛІ'};
     const msg=(E[r.verdict]||r.verdict)+'\n\n'+(r.reason||'');
-    if(r.verdict!=='yes'&&r.fix){ aiDone();
-      if(confirm(msg+'\n\nПравка Директора: '+r.fix+'\n\nЗастосувати (перепише пост)?')){
+    if(r.verdict!=='yes'&&(r.fix||r.sharper)){ aiDone();
+      // спершу пропонуємо ГОСТРІШУ версію (готовий переписаний початок), потім - правку-інструкцію
+      if(r.sharper&&confirm(msg+'\n\n⚡ ВЕРСІЯ ГОСТРІША (новий початок поста):\n«'+r.sharper+'»\n\nЗамінити перший абзац цією версією?')){
+        const full=await api('/posts/'+id+'/full'); const parts=(full.content||'').split('\n\n'); parts[0]=r.sharper;
+        await api('/posts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:parts.join('\n\n')})});
+        await loadStudioPosts(); flash('Початок загострено під ціль ✓'); }
+      else if(r.fix&&confirm('Правка Директора: '+r.fix+'\n\nЗастосувати (перепише пост)?')){
         aiBusy('⚡ Загострюю пост під ціль…');
         await api('/posts/'+id+'/regenerate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instruction:r.fix})});
         await loadStudioPosts(); flash('Пост загострено під ціль ✓'); } }
@@ -1382,7 +1439,7 @@ function renderStudio(){
   renderBulkBar();
   if(!show.length){ grid.innerHTML='<div class="empty" style="grid-column:1/-1">Поки порожньо. Додай джерело у «Джерела» і натисни «Згенерувати».</div>'; return; }
   grid.innerHTML=show.map(p=>{ const sp=statusPill(p.review); const ap=p.review==='approved'; const sel=SelPosts.has(p.id);
-    const tags=(p.rubric?'<span class="ptag">🏷 '+esc(p.rubric)+'</span>':'')+(p.source_origin&&p.source_origin!=='manual'?'<span class="ptag">'+(ORIGIN_LABEL[p.source_origin]||esc(p.source_origin))+'</span>':'');
+    const tags=(p.format==='reel'?'<span class="ptag" style="color:var(--brand);border-color:var(--brand)">🎬 рілс</span>':'')+(p.rubric?'<span class="ptag">🏷 '+esc(p.rubric)+'</span>':'')+(p.source_origin&&p.source_origin!=='manual'?'<span class="ptag">'+(ORIGIN_LABEL[p.source_origin]||esc(p.source_origin))+'</span>':'');
     return '<div class="pcard'+(ap?' appr':'')+(sel?' selc':'')+'" data-post="'+p.id+'">'
       +'<div class="pcard-h"><input type="checkbox" class="psel" '+(sel?'checked':'')+' title="Обрати для масових дій">'+chanDots(p.channels)+'<span class="statuspill '+sp[1]+'" style="margin-left:auto">'+sp[0]+'</span></div>'
       +(p.media_filename?'<div class="pcard-img" data-a="image" style="cursor:pointer" title="Редагувати зображення"><img loading="lazy" src="/thumb/'+esc(p.media_filename)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(p.media_filename)+'\'"></div>':'')
@@ -1394,6 +1451,7 @@ function renderStudio(){
         +'<button class="icon" data-a="archive" title="В архів">🗄</button>'
         +'<button class="icon" data-a="director" title="🎯 Директор: чи веде пост до цілі">🎯</button>'
         +'<button class="icon" data-a="develop" title="🔥 Розвинути тему: 5 кутів-продовжень у Банк ідей">🔥</button>'
+        +'<button class="icon" data-a="magnet" title="🧲 Лід-магніт під тему цього поста">🧲</button>'
         +(String(p.content||'').startsWith('🎬')?'<button class="icon" data-a="reelvideo" title="🎞 Зібрати відео з цього сценарію (бета, 1-3 хв)">🎞</button>':'')
         +(p.reel_video?'<button class="icon" data-a="reelplay" data-rv="'+esc(p.reel_video)+'" title="▶ Дивитися зібраний рілс">▶️</button>':'')
         +'<button class="icon" data-a="image" title="Згенерувати зображення">🎨</button>'
@@ -1405,7 +1463,7 @@ function renderStudio(){
   grid.querySelectorAll('.pcard').forEach(card=>{ const id=card.dataset.post; const cont=card.querySelector('.pcontent');
     cont.addEventListener('blur',()=>saveContent(id,cont.textContent));
     const cb=card.querySelector('.psel'); if(cb) cb.onchange=()=>{ cb.checked?SelPosts.add(id):SelPosts.delete(id); card.classList.toggle('selc',cb.checked); renderBulkBar(); };
-    card.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(id); return; } if(a==='image'){ openImageEditor(id); return; } if(a==='atomize'){ openAtomize(id); return; } if(a==='director'){ directorCheck(id); return; } if(a==='develop'){ developPost(id); return; } if(a==='reelvideo'){ reelVideoRun(id); return; } if(a==='reelplay'){ openVideoModal(b.dataset.rv); return; } postAction(card,id,a); });
+    card.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(id); return; } if(a==='image'){ openImageEditor(id); return; } if(a==='atomize'){ openAtomize(id); return; } if(a==='director'){ directorCheck(id); return; } if(a==='develop'){ developPost(id); return; } if(a==='magnet'){ postMagnet(id); return; } if(a==='reelvideo'){ reelVideoRun(id); return; } if(a==='reelplay'){ openVideoModal(b.dataset.rv); return; } postAction(card,id,a); });
   });
 }
 // панель масових дій (зʼявляється коли є обрані пости)
@@ -1624,11 +1682,14 @@ async function openComposer(postId, opts){
   ov.querySelector('#cmpHash').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('# добираю хештеги…'); aiBusy('# Добираю хештеги…'); try{ const r=await api('/posts/'+postId+'/hashtags',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:master})}); const tags=(r.hashtags||[]).join(' '); if(tags){ master=(master.trimEnd()+'\n\n'+tags); txt.value=master; renderPrev(); setMsg('готово ✓','var(--brand)'); } else setMsg('не знайшлося тегів'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpRewrite').onclick=async(e)=>{ const instruction=prompt('Що змінити? (порожньо = переписати іншими словами, голос збережеться)'); if(instruction===null) return; const b=e.target; b.disabled=true; setMsg('✍ переписую…'); aiBusy('✍ Переписую пост…'); try{ await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master})}); const r=await api('/posts/'+postId+'/regenerate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instruction})}); master=r.content||master; txt.value=master; renderPrev(); setMsg('готово ✓','var(--brand)'); rememberVoiceRule(instruction); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpHook').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('🪝 шукаю кульмінацію…'); aiBusy('🪝 Складаю 3 варіанти відкриття з кульмінації…');
-    try{ const r=await api('/posts/'+postId+'/hooks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:master})}); const hooks=r.hooks||[];
+    try{ const r=await api('/posts/'+postId+'/hooks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:master})});
+      const hooks=[...(r.hooks||[])]; if(r.soft) hooks.push(r.soft);
       if(!hooks.length){ setMsg('не вдалося скласти варіанти','var(--danger)'); return; }
       const hv=document.createElement('div'); hv.className='modal'; hv.style.zIndex='90'; // понад композером (.cmp-ov z-index:80)
-      hv.innerHTML='<div class="modal-card" style="max-width:520px;padding:20px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><b style="font-size:16px">🪝 Обери відкриття</b><button class="icon" id="hkX" style="margin-left:auto">✕</button></div>'
-        +hooks.map((h,i)=>'<div class="card" data-h="'+i+'" style="cursor:pointer;margin-bottom:8px;padding:12px 14px;font-size:13.5px;line-height:1.5">'+esc(h)+'</div>').join('')
+      hv.innerHTML='<div class="modal-card" style="max-width:540px;padding:20px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">🪝 Обери відкриття</b><button class="icon" id="hkX" style="margin-left:auto">✕</button></div>'
+        +(r.culmination?'<div style="font-size:12.5px;color:var(--muted);margin-bottom:10px">💎 Кульмінація матеріалу: <b style="color:var(--ink2)">'+esc(r.culmination)+'</b></div>':'')
+        +hooks.map((h,i)=>'<div class="card" data-h="'+i+'" style="cursor:pointer;margin-bottom:8px;padding:12px 14px;font-size:13.5px;line-height:1.5">'+(r.soft&&i===hooks.length-1?'<span class="ptag" style="margin-right:6px">🕊 м\'який місток</span>':'')+esc(h)+'</div>').join('')
+        +((r.remove&&r.remove.length)?'<div style="font-size:12px;color:var(--danger);margin-top:8px">✂ Видалити з тексту (хук-артефакти): '+r.remove.map(x=>'«'+esc(x)+'»').join(', ')+'</div>':'')
         +'<div class="hint">Клік замінює перший абзац поста. Поточний перший рядок зникне.</div></div>';
       document.body.appendChild(hv); const hclose=()=>hv.remove();
       hv.addEventListener('click',ev=>{ if(ev.target===hv) hclose(); }); hv.querySelector('#hkX').onclick=hclose;
@@ -1639,13 +1700,12 @@ async function openComposer(postId, opts){
     try{ const r=await api('/posts/'+postId+'/ai-audit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:master})}); const f=r.findings||[];
       if(!f.length){ setMsg('чисто - слідів AI не знайдено ✓','var(--brand)'); return; }
       aiDone();
-      const doFix=confirm('🔍 Знайдено AI-слідів: '+f.length+'\n\n'+f.map(x=>'• '+x.pattern+': «'+x.quote+'»').join('\n')+'\n\n🧹 Виправити автоматично? (зміст і структура збережуться)');
+      const doFix=confirm('🔍 Знайдено AI-слідів: '+f.length+'\n\n'+f.map(x=>'• '+x.pattern+': «'+x.quote+'»').join('\n')+'\n\n🧹 Виправити точково? (замінюються ЛИШЕ знайдені фрагменти, решта тексту не рухається)');
       if(!doFix){ setMsg('знайдено слідів: '+f.length+' (не виправлено)','var(--danger)'); return; }
-      setMsg('🧹 прибираю сліди…'); aiBusy('🧹 Прибираю AI-сліди, зберігаючи зміст і голос…');
-      const instruction='Прибери ЛИШЕ ці сліди AI, НЕ змінюючи зміст, структуру, довжину і голос поста: '+f.map(x=>x.pattern).join('; ')+'. Проблемні місця: '+f.map(x=>'«'+x.quote+'»').join(' | ');
-      await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master})});
-      const rr=await api('/posts/'+postId+'/regenerate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instruction})});
-      master=rr.content||master; txt.value=master; renderPrev(); setMsg('сліди прибрано ✓','var(--brand)');
+      setMsg('🧹 точкова правка (до 2 проходів)…'); aiBusy('🧹 Точково прибираю AI-сліди…');
+      const rr=await api('/posts/'+postId+'/deai-fix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:master})});
+      master=rr.content||master; txt.value=master; renderPrev();
+      setMsg((rr.remaining&&rr.remaining.length)?('прибрано; лишилось слідів: '+rr.remaining.length+' (запусти ще раз)'):'сліди прибрано, текст чистий ✓','var(--brand)');
     }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpPhoto').onclick=()=>openPhotoTool(postId, full.image_prompt||'', (f)=>{ mediaFilename=f; renderMedia(); renderPrev(); });
   // ----- зберегти / адаптувати / публікувати / планувати -----
@@ -1661,7 +1721,7 @@ async function openComposer(postId, opts){
         const ra=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:missing})});
         Object.keys(ra.channels||{}).forEach(k=>{ if(!sentSet.has(k)) C[k]=ra.channels[k]; }); renderPrev(); }
     }catch(_){ /* адаптація не критична - публікуємо майстер-текстом */ }
-    setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const r=await api('/posts/'+postId+'/publish-all',{method:'POST'}); const res=r.results||[]; const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); ok.forEach(k=>sentSet.add(k)); renderChips(); renderPrev(); setMsg((ok.length?'✓ '+ok.join(', '):'')+(err.length?' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; '):''), err.length?'var(--danger)':'var(--brand)'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
+    setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const r=await api('/posts/'+postId+'/publish-all',{method:'POST'}); const res=r.results||[]; const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); ok.forEach(k=>sentSet.add(k)); renderChips(); renderPrev(); setMsg((ok.length?'✓ '+ok.join(', '):'')+(err.length?' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; '):''), err.length?'var(--danger)':'var(--brand)'); if(ok.length&&!err.length) flash('Опубліковано ✓ Якщо пост залетить - 🔥 на картці дасть 5 кутів продовження'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ setMsg('вкажи дату й час','var(--danger)'); return; } const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('немає каналів для планування (усі вже опубліковано)','var(--danger)'); return; } const b=e.target; b.disabled=true; setMsg('🗓 зберігаю…'); const at=zonedToUTCISO(d,t); try{ await saveDraft(); if(opts.slotId){ await api('/schedule/'+opts.slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:at})}); } else { await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:at})}); } setMsg('заплановано ✓ ('+todo.join(', ')+')','var(--brand)'); try{await loadPublish();}catch(_){} try{await loadStudioPosts();}catch(_){} setTimeout(close,1000); }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); b.disabled=false; } };
 }
 // двокроковий редактор фото поста: крок 1 - джерело (галерея/завантаження/генерація) + формат (кроп),

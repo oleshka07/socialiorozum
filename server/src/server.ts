@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, suggestHooks, suggestHeadline, reelsScript, publishQuestions, suggestDevelopment, suggestLeadMagnets } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet } from "./pipeline.js";
 import { startReelJob, reelJobs, parseReelScript } from "./reelvideo.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
@@ -677,8 +677,11 @@ app.post("/api/materials/:id/series", async (req: any, reply) => {
     const takes = await extractIdeasFromText(ws, m.transcript, 6, undefined, mode);
     if (!takes.length) return reply.code(500).send({ error: "не вдалося витягнути тейки з матеріалу" });
     const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [m.id]);
-    const count = await generatePostsOnePass(run!.id, takes.length,
-      takes.map((t) => t.idea + (t.angle ? ` Кут: ${t.angle}.` : "") + (t.hook ? ` Гачок: ${t.hook}` : "")));
+    // серія з АРКОМ: частини пов'язані і ведуть до пейофу, а не розсип постів на тему
+    const n = takes.length;
+    const count = await generatePostsOnePass(run!.id, n,
+      takes.map((t, i) => t.idea + (t.angle ? ` Кут: ${t.angle}.` : "") + (t.hook ? ` Гачок: ${t.hook}` : "") +
+        ` [Це частина ${i + 1} з ${n} звʼязаної серії: кожен пост самостійний, але наприкінці - місток-інтрига до наступної частини${i === n - 1 ? "; ЦЕ ФІНАЛ серії - пейофф: сильний висновок усього арка + головний CTA" : ""}.]`));
     return { ok: true, count };
   } catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
@@ -686,6 +689,31 @@ app.post("/api/materials/:id/series", async (req: any, reply) => {
 // «Магніт»: лід-магніти (генерація + збережений список)
 app.post("/api/lead-magnets", async (req: any, reply) => {
   try { return { ok: true, magnets: await suggestLeadMagnets(req.user.workspace_id) }; }
+  catch (e: any) { return reply.code(500).send({ error: e.message }); }
+});
+// «Магніт» крок 2: зібрати САМ магніт - готовий чекліст/гайд як чернетка в Студії
+app.post("/api/lead-magnets/build", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const title = String(req.body?.title ?? "").trim();
+  const what = String(req.body?.what ?? "").trim();
+  if (!title) return reply.code(400).send({ error: "нема назви магніта" });
+  try {
+    const text = await buildLeadMagnet(ws, { title, what, keyword: String(req.body?.keyword ?? "") });
+    const src = await one<{ id: string }>(`insert into source(workspace_id, origin, title, transcript) values($1,'idea',$2,$3) returning id`,
+      [ws, `🧲 ${title}`.slice(0, 200), `Лід-магніт: ${title}. ${what}`.slice(0, 2000)]);
+    const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
+    const post = await one<{ id: string }>(`insert into post(run_id, stage, content) values($1,'final',$2) returning id`, [run!.id, text]);
+    return { ok: true, postId: post!.id };
+  } catch (e: any) { return reply.code(500).send({ error: e.message }); }
+});
+// «Магніт під ТЕМУ»: 🧲 на картці поста - магніти саме під цю тему (кеш не чіпає)
+app.post("/api/posts/:postId/lead-magnet", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const post = await one<{ content: string }>(
+    `select p.content from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where p.id=$1 and s.workspace_id=$2`,
+    [req.params.postId, ws]);
+  if (!post) return reply.code(404).send({ error: "пост не знайдено" });
+  try { return { ok: true, magnets: await suggestLeadMagnets(ws, post.content.slice(0, 800)) }; }
   catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
 app.get("/api/lead-magnets", async (req: any) => {
@@ -714,7 +742,7 @@ app.post("/api/posts/:postId/hooks", async (req: any, reply) => {
     `select p.content from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where p.id=$1 and s.workspace_id=$2`,
     [req.params.postId, ws]);
   if (!post) return reply.code(404).send({ error: "пост не знайдено" });
-  try { return { ok: true, hooks: await suggestHooks(ws, String(req.body?.text || post.content || "")) }; }
+  try { return { ok: true, ...(await suggestHooks(ws, String(req.body?.text || post.content || ""))) }; }
   catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
 
@@ -937,6 +965,16 @@ app.post("/api/posts/:postId/image", async (req: any, reply) => {
   if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
   try { const filename = await generateImageForPost(ws, req.params.postId, { headline: req.body?.headline, aspect: req.body?.aspect, provider: req.body?.provider, prompt: req.body?.prompt }); return { ok: true, filename }; }
   catch (e: any) { await logEvent("error", "image", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
+});
+
+// «Антидетектор» 2.0: точкове виправлення AI-слідів (2 проходи; решта тексту не рухається). НЕ зберігає - UI сам PUT-ає.
+app.post("/api/posts/:postId/deai-fix", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  const text = String(req.body?.text ?? "");
+  if (!text.trim()) return reply.code(400).send({ error: "порожній текст" });
+  try { return { ok: true, ...(await deAiFix(ws, text)) }; }
+  catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
 
 // перенакласти текст на вже згенероване БАЗОВЕ зображення (дешево, без нової генерації)
@@ -1581,8 +1619,23 @@ app.post("/api/materials/:id/reels", async (req: any, reply) => {
   try {
     const script = await reelsScript(ws, m.transcript);
     const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [m.id]);
-    const post = await one<{ id: string }>(`insert into post(run_id, stage, content) values($1,'final',$2) returning id`, [run!.id, script]);
+    const post = await one<{ id: string }>(`insert into post(run_id, stage, content, format) values($1,'final',$2,'reel') returning id`, [run!.id, script]);
     return { ok: true, postId: post!.id };
+  } catch (e: any) { return reply.code(500).send({ error: e.message }); }
+});
+
+// «Мультиплікатор», режим «Нарізка»: довгий транскрипт → 5-7 самостійних сценаріїв Reels (тиждень відео-контенту)
+app.post("/api/materials/:id/reel-slices", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const m = await one<{ id: string; transcript: string }>(`select id, transcript from source where id=$1 and workspace_id=$2`, [req.params.id, ws]);
+  if (!m) return reply.code(404).send({ error: "матеріал не знайдено" });
+  if ((m.transcript || "").length < 800) return reply.code(400).send({ error: "Матеріал закороткий для нарізки - потрібен довгий транскрипт чи стаття" });
+  try {
+    const scripts = await sliceToReels(ws, m.transcript);
+    if (!scripts.length) return reply.code(500).send({ error: "не вдалося нарізати сценарії" });
+    const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [m.id]);
+    for (const sc of scripts) await q(`insert into post(run_id, stage, content, format) values($1,'final',$2,'reel')`, [run!.id, sc]);
+    return { ok: true, count: scripts.length };
   } catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
 
@@ -1740,7 +1793,7 @@ app.get("/api/bank", async (req: any) => {
 
 // усі фінальні пости воркспейсу (Студія/Інбокс - глобальний список, НЕ привʼязаний до активного джерела)
 app.get("/api/posts/studio", async (req: any) => {
-  return q(`select p.id, p.content, p.review, p.channels, p.rubric, p.reel_video, src.origin as source_origin, ma.filename as media_filename, p.created_at, src.title as source_title
+  return q(`select p.id, p.content, p.review, p.channels, p.rubric, p.reel_video, p.format, src.origin as source_origin, ma.filename as media_filename, p.created_at, src.title as source_title
             from post p join pipeline_run r on r.id=p.run_id join source src on src.id=r.source_id
             left join media_asset ma on ma.id=p.media_id
             where src.workspace_id=$1 and p.stage='final' and (p.review is null or p.review <> 'archived')

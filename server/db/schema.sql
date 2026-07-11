@@ -394,6 +394,8 @@ alter table source add column if not exists feed_id uuid references content_sour
 -- AI-оцінка цікавості матеріалу для аудиторії бренду (1-10, безкоштовний Gemini) + пояснення
 alter table source add column if not exists ai_score int;
 alter table source add column if not exists ai_score_why text;
+-- формат контент-одиниці: 'post' (текстовий) чи 'reel' (сценарій/відео) - фундамент рілс-треку (IG/FB/TikTok/YT)
+alter table post add column if not exists format text not null default 'post';
 
 -- LinkedIn-автопостинг (5-та мережа, шаблон Threads): підключення профілю + журнал публікацій
 create table if not exists linkedin_config (

@@ -55,6 +55,7 @@ export function parseReelScript(content: string): Seg[] {
     if (head) { if (cur && cur.text) segs.push(cur); cur = { label: head[1], text: head[2].trim(), visual: "" }; continue; }
     const vis = l.match(/^\[?\s*візуал\s*:\s*(.+?)\]?$/i);
     if (vis && cur) { cur.visual = vis[1].trim(); continue; }
+    if (/^ТЕКСТ НА ЕКРАН/i.test(l)) { if (cur && cur.text) segs.push(cur); cur = null; continue; } // метадані титрів - не озвучка
     if (cur && l && !l.startsWith("🎬")) cur.text += " " + l; // перенесення рядка всередині біта
   }
   if (cur && cur.text) segs.push(cur);

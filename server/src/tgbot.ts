@@ -6,7 +6,7 @@ import { env } from "./env.js";
 import { q, one } from "./db.js";
 import * as tg from "./telegram.js";
 import { logEvent } from "./log.js";
-import { generatePostsOnePass, buildLiteSkeleton, rewritePost } from "./pipeline.js";
+import { generatePostsOnePass, buildLiteSkeleton, rewritePost, suggestDevelopment } from "./pipeline.js";
 import { publishPostToChannels } from "./publisher.js";
 import { sendDigestNow } from "./digest.js";
 
@@ -241,6 +241,22 @@ async function handleCallback(cbq: any): Promise<void> {
       await tg.answerCallbackQuery(token, cbq.id, "Генерую пост…");
       const p = await ideaToPost(ws, data.slice("idea_post:".length));
       await tg.sendMessage(token, chatId, `✅ Чернетка готова:\n\n${p.content.slice(0, 3500)}\n\nОпублікувати, переробити чи докрутити в застосунку (фото, час)?`, p.id ? draftButtons(p.id) : undefined);
+      return;
+    }
+    if (data.startsWith("dev:")) {
+      // «Продовження» з дайджеста: пост вистрілив → 5 кутів розвитку в Банк ідей
+      const postId = data.slice("dev:".length);
+      await tg.answerCallbackQuery(token, cbq.id, "Шукаю кути розвитку…");
+      const post = await one<{ content: string }>(
+        `select p.content from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
+      if (!post) { await tg.sendMessage(token, chatId, "Пост не знайдено."); return; }
+      const angles = await suggestDevelopment(ws, post.content);
+      if (!angles.length) { await tg.sendMessage(token, chatId, "Не вдалося скласти кути. Спробуй 🔥 на картці в застосунку."); return; }
+      for (const a of angles)
+        await q(`insert into idea_bank(workspace_id, text, angle, origin) values($1,$2,$3,'ai')`, [ws, a.idea.slice(0, 500), (a.angle || "").slice(0, 300) || null]);
+      await tg.sendMessage(token, chatId,
+        `🔥 5 кутів продовження (уже в Банку ідей):\n\n${angles.map((a, i) => `${i + 1}. ${a.idea}${a.angle ? ` (${a.angle})` : ""}`).join("\n")}`,
+        [[{ text: "💡 Зробити пост з ідеї", data: "idea_list" }]]);
       return;
     }
     if (data.startsWith("rw:")) {
