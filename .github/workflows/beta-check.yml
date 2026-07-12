@@ -75,3 +75,10 @@ jobs:
             echo "== rsshub контейнер =="
             docker compose ps rsshub 2>/dev/null | tail -1 || echo "rsshub: контейнера ще нема (старий compose?)"
             free -h | head -2
+            echo "== диск: скільки вільно + скільки їдять медіа =="
+            df -h / | tail -1
+            for d in /opt/socialio /opt/socialio-beta; do
+              v=$(docker volume ls -q | grep -E "$(basename $d).*media" | head -1)
+              [ -n "$v" ] && echo "$d media: $(docker run --rm -v $v:/m alpine du -sh /m 2>/dev/null | cut -f1)" || echo "$d media: том не знайдено"
+            done
+            docker system df | head -5
