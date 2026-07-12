@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
 import { saveMedia, MEDIA_DIR } from "./media.js";
+import { chat, extractJsonArray } from "./openrouter.js";
 
 export type ImgProvider = "openai" | "fal" | "gemini";
 export type Aspect = "1:1" | "4:5" | "16:9";
@@ -308,4 +309,45 @@ export async function ensureIgSafeImage(ws: string, filename: string): Promise<s
   const out = await img.jpeg({ quality: 90 }).toBuffer();
   const saved = await saveMedia(ws, { buffer: out, mime: "image/jpeg", name: "ig-safe.jpg", source: "ig-safe" });
   return saved.filename;
+}
+
+// ---- Стокові фото Pexels: 2-3 варіанти під тему поста (безкоштовна альтернатива AI-генерації) ----
+export type StockPhoto = { url: string; thumb: string; photographer: string; alt: string };
+export async function stockPhotoOptions(ws: string, postText: string, aspect?: string): Promise<StockPhoto[]> {
+  if (!env.pexels.apiKey) throw new Error("Стокові фото недоступні (нема PEXELS_API_KEY)");
+  // 1 дешевий виклик: тема поста → 2-3 англ. пошукові слова (конкретні візуальні обʼєкти, не абстракції)
+  let query = "modern workspace";
+  try {
+    const raw = await chat(env.cheapModel,
+      'Підбери пошуковий запит для стокового ФОТО під пост. 2-4 АНГЛІЙСЬКІ слова: конкретні візуальні обʼєкти/сцени (не абстракції на кшталт success чи growth). Поверни ЛИШЕ валідний JSON-масив з одним рядком.',
+      (postText || "").slice(0, 1500), { workspaceId: ws, step: "stock_photo_query" });
+    const arr = extractJsonArray<any>(raw);
+    if (arr[0]) query = String(arr[0]).trim().slice(0, 80);
+  } catch { /* фолбек-запит вище */ }
+  const orient = aspect === "16:9" ? "landscape" : aspect === "1:1" ? "square" : "portrait";
+  const res = await fetch(`https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&orientation=${orient}&per_page=6`,
+    { headers: { Authorization: env.pexels.apiKey } });
+  if (!res.ok) throw new Error(`Pexels HTTP ${res.status}`);
+  const j: any = await res.json();
+  return (j.photos || []).slice(0, 3).map((p: any) => ({
+    url: p.src?.large2x || p.src?.large || p.src?.original,
+    thumb: p.src?.medium || p.src?.small,
+    photographer: p.photographer || "",
+    alt: p.alt || query,
+  })).filter((p: StockPhoto) => p.url);
+}
+
+// обране стокове фото → медіатека (source='pexels') → кроп під формат → база поста (текст-оверлей працює)
+export async function attachStockPhoto(ws: string, postId: string, url: string, aspect?: string): Promise<{ id: string; filename: string }> {
+  if (!/^https:\/\/images\.pexels\.com\//.test(url)) throw new Error("дозволені лише фото з Pexels");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  let buf: Buffer;
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) throw new Error(`Pexels download ${res.status}`);
+    buf = Buffer.from(await res.arrayBuffer());
+  } finally { clearTimeout(timer); }
+  const saved = await saveMedia(ws, { buffer: buf, mime: "image/jpeg", name: "pexels.jpg", source: "pexels" });
+  return attachCroppedImage(ws, postId, saved.id, aspect);
 }

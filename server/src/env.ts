@@ -36,6 +36,10 @@ export const env = {
     clientId: process.env.LINKEDIN_CLIENT_ID ?? "",
     clientSecret: process.env.LINKEDIN_CLIENT_SECRET ?? "",
   },
+  tiktok: {                                       // TikTok Content Posting API (рілси; потрібен апрув застосунку в TikTok for Developers)
+    clientKey: process.env.TIKTOK_CLIENT_KEY ?? "",
+    clientSecret: process.env.TIKTOK_CLIENT_SECRET ?? "",
+  },
   telegram: {                                     // СПІЛЬНИЙ бот (користувач не створює свій)
     botToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
     botUsername: process.env.TELEGRAM_BOT_USERNAME ?? "",

@@ -13,6 +13,8 @@ import { startReelJob, reelJobs, parseReelScript } from "./reelvideo.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
 import * as linkedin from "./linkedin.js";
+import * as youtube from "./youtube.js";
+import * as tiktok from "./tiktok.js";
 import * as meta from "./meta.js";
 import * as fireflies from "./fireflies.js";
 import * as grain from "./grain.js";
@@ -28,10 +30,10 @@ import { resolveSource } from "./rss-resolver.js";
 import { MEDIA_DIR, saveMedia, deleteMediaFile, convertAllHeif, getThumb } from "./media.js";
 import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
 import * as gdrive from "./gdrive.js";
-import { publishPostToChannels, alreadySentNetworks } from "./publisher.js";
+import { publishPostToChannels, alreadySentNetworks, startReelPublishJob, reelPubJobs, reelSentNetworks } from "./publisher.js";
 import { startLifecycleWorker } from "./lifecycle.js";
 import { startDigest } from "./digest.js";
-import { generateImageForPost, imageProviders, overlayForPost, attachCroppedImage } from "./images.js";
+import { generateImageForPost, imageProviders, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto } from "./images.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername } from "./tgbot.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -41,7 +43,7 @@ await app.register(cookie, { secret: env.sessionSecret });
 await app.register(fstatic, { root: join(__dirname, "..", "public"), prefix: "/" });
 
 // медіа-сховище: файли на диску (Docker-volume), віддаємо публічно за /media/<uuid>.<ext>
-await app.register(multipart, { limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
+await app.register(multipart, { limits: { fileSize: 60 * 1024 * 1024, files: 10 } }); // 60МБ: b-roll відео для рілсів (фото й так менші)
 await app.register(fstatic, { root: MEDIA_DIR, prefix: "/media/", decorateReply: false });
 // мініатюри (sharp + диск-кеш) - щоб сітки не вантажили повні зображення; публічно, як і /media
 app.get("/thumb/:name", async (req: any, reply) => {
@@ -493,10 +495,13 @@ app.get("/api/sources/recent", async (req: any) =>
 // ===================== МЕДІА-БІБЛІОТЕКА =====================
 app.post("/api/media", async (req: any, reply) => {
   const saved: any[] = [];
+  // ?source=broll - персональна відео-бібліотека для рілсів (вставки з автором у кадрі)
+  const source = String(req.query?.source || "") === "broll" ? "broll" : "upload";
   try {
     for await (const part of req.files()) {
       const buf = await part.toBuffer();
-      const m = await saveMedia(req.user.workspace_id, { buffer: buf, mime: part.mimetype || "application/octet-stream", name: part.filename });
+      const m = await saveMedia(req.user.workspace_id, { buffer: buf, mime: part.mimetype || "application/octet-stream", name: part.filename, source });
+      if (source === "broll" && m.kind !== "video") { await q(`delete from media_asset where id=$1`, [m.id]); await deleteMediaFile(m.filename); throw new Error("для b-roll потрібне відео (mp4/mov)"); }
       saved.push({ id: m.id, kind: m.kind, url: `/media/${m.filename}` });
     }
   } catch (e: any) { return reply.code(400).send({ error: e.message }); }
@@ -538,11 +543,13 @@ app.post("/api/posts/:postId/media", async (req: any, reply) => {
 // які мережі взагалі підключені (для чипів у композері)
 app.get("/api/channels/status", async (req: any) => {
   const ws = req.user.workspace_id;
-  const [tgc, th, mt, li] = await Promise.all([
+  const [tgc, th, mt, li, yt, tt] = await Promise.all([
     one<{ bot_token: string | null; channel_chat_id: string | null; group_chat_id: string | null }>(`select bot_token, channel_chat_id, group_chat_id from telegram_config where workspace_id=$1`, [ws]),
     one<{ access_token: string | null }>(`select access_token from threads_config where workspace_id=$1`, [ws]),
     one<{ page_token: string | null; ig_user_id: string | null }>(`select page_token, ig_user_id from meta_config where workspace_id=$1`, [ws]),
     one<{ access_token: string | null }>(`select access_token from linkedin_config where workspace_id=$1`, [ws]),
+    one<{ access_token: string | null }>(`select access_token from youtube_config where workspace_id=$1`, [ws]),
+    one<{ access_token: string | null }>(`select access_token from tiktok_config where workspace_id=$1`, [ws]),
   ]);
   return {
     telegram: !!(tgc && tgc.bot_token && (tgc.channel_chat_id || tgc.group_chat_id)),
@@ -550,6 +557,8 @@ app.get("/api/channels/status", async (req: any) => {
     facebook: !!(mt && mt.page_token),
     instagram: !!(mt && mt.page_token && mt.ig_user_id),
     linkedin: !!(li && li.access_token),
+    youtube: !!(yt && yt.access_token),
+    tiktok: !!(tt && tt.access_token),
   };
 });
 
@@ -654,6 +663,44 @@ app.get("/api/posts/:postId/reel-video", async (req: any, reply) => {
   // після рестарту/для іншої вкладки: готовий рілс лежить на пості
   const p = await one<{ reel_video: string | null }>(`select reel_video from post where id=$1`, [req.params.postId]);
   return p?.reel_video ? { status: "done", filename: p.reel_video } : { status: "none" };
+});
+
+// Публікація готового рілса: IG Reels / FB відео / YouTube Shorts / TikTok (чернетка).
+// Фонова джоба (IG обробляє відео до ~3 хв): POST стартує, GET полить.
+app.post("/api/posts/:postId/reel-publish", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  const nets = (Array.isArray(req.body?.nets) ? req.body.nets : []).filter((n: any) => ["instagram", "facebook", "youtube", "tiktok"].includes(n));
+  if (!nets.length) return reply.code(400).send({ error: "обери хоча б одну мережу" });
+  const j = reelPubJobs.get(req.params.postId);
+  if (j?.status === "running") return { ok: true, status: "running" };
+  startReelPublishJob(ws, req.params.postId, nets);
+  return { ok: true, status: "running" };
+});
+app.get("/api/posts/:postId/reel-publish", async (req: any, reply) => {
+  if (!(await postOwned(req.params.postId, req.user.workspace_id))) return reply.code(404).send({ error: "пост не знайдено" });
+  const j = reelPubJobs.get(req.params.postId);
+  const sent = await reelSentNetworks(req.params.postId);
+  return j ? { ...j, sent } : { status: "none", sent };
+});
+
+// Стокові фото Pexels: 2-3 варіанти під тему поста → юзер обирає → кроп під формат + база для тексту
+app.post("/api/posts/:postId/stock-photos", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const post = await one<{ content: string }>(
+    `select p.content from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+     where p.id=$1 and s.workspace_id=$2`, [req.params.postId, ws]);
+  if (!post) return reply.code(404).send({ error: "пост не знайдено" });
+  try { const photos = await stockPhotoOptions(ws, post.content, String(req.body?.aspect || "")); return { ok: true, photos }; }
+  catch (e: any) { return reply.code(500).send({ error: e.message }); }
+});
+app.post("/api/posts/:postId/stock-photo", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  const url = String(req.body?.url || "");
+  if (!url) return reply.code(400).send({ error: "нема url фото" });
+  try { const r = await attachStockPhoto(ws, req.params.postId, url, String(req.body?.aspect || "")); return { ok: true, filename: r.filename }; }
+  catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
 
 // «Мультиплікатор», Продовження: 5 кутів розвитку теми поста → Банк ідей
@@ -1250,6 +1297,90 @@ app.post("/api/integrations/linkedin/disconnect", async (req: any) => {
   return { ok: true };
 });
 
+// ===================== YOUTUBE SHORTS (рілси; той самий Google-застосунок, що й логін/Drive) =====================
+const YOUTUBE_REDIRECT = `${env.appBaseUrl}/api/integrations/youtube/callback`;
+
+app.get("/api/integrations/youtube", async (req: any) => {
+  const c = await one<{ channel_title: string | null }>(`select channel_title from youtube_config where workspace_id=$1`, [req.user.workspace_id]);
+  return { configured: !!env.google.clientId, hasToken: !!c, name: c?.channel_title ?? "" };
+});
+
+app.get("/api/integrations/youtube/connect", async (req: any, reply) => {
+  if (!env.google.clientId) return reply.code(400).send({ error: "Підключення YouTube тимчасово недоступне" });
+  const state = auth.newToken();
+  reply.setCookie("youtube_state", state, stateCookie);
+  return reply.redirect(youtube.authUrl(env.google.clientId, YOUTUBE_REDIRECT, state));
+});
+
+app.get("/api/integrations/youtube/callback", async (req: any, reply) => {
+  const code = String(req.query?.code ?? ""); const state = String(req.query?.state ?? "");
+  if (String(req.query?.error ?? "")) { await logEvent("error", "youtube", `Google відмовив: ${req.query.error}`, null, req.user.id); return reply.redirect("/app?youtube=error"); }
+  if (!code || !state || state !== req.cookies?.youtube_state) return reply.redirect("/app?youtube=error");
+  reply.clearCookie("youtube_state", { path: "/" });
+  try {
+    const tok = await youtube.exchangeCode(env.google.clientId, env.google.clientSecret, YOUTUBE_REDIRECT, code);
+    const title = await youtube.myChannelTitle(tok.access_token).catch(() => "YouTube");
+    const exp = new Date(Date.now() + (tok.expires_in || 3600) * 1000).toISOString();
+    await q(`insert into youtube_config(workspace_id, channel_title, access_token, refresh_token, token_expires_at, updated_at)
+             values($1,$2,$3,$4,$5,now())
+             on conflict (workspace_id) do update set channel_title=excluded.channel_title, access_token=excluded.access_token,
+               refresh_token=coalesce(excluded.refresh_token, youtube_config.refresh_token), token_expires_at=excluded.token_expires_at, updated_at=now()`,
+      [req.user.workspace_id, title, tok.access_token, tok.refresh_token ?? null, exp]);
+    await logEvent("info", "youtube", `підключено канал ${title}`, null, req.user.id);
+    return reply.redirect("/app?youtube=ok");
+  } catch (e: any) {
+    await logEvent("error", "youtube", "OAuth callback: " + e.message, null, req.user.id);
+    return reply.redirect("/app?youtube=error");
+  }
+});
+
+app.post("/api/integrations/youtube/disconnect", async (req: any) => {
+  await q(`delete from youtube_config where workspace_id=$1`, [req.user.workspace_id]);
+  return { ok: true };
+});
+
+// ===================== TIKTOK (рілси; до аудиту застосунку - відео їде юзеру в чернетки) =====================
+const TIKTOK_REDIRECT = `${env.appBaseUrl}/api/integrations/tiktok/callback`;
+
+app.get("/api/integrations/tiktok", async (req: any) => {
+  const c = await one<{ display_name: string | null }>(`select display_name from tiktok_config where workspace_id=$1`, [req.user.workspace_id]);
+  return { configured: !!env.tiktok.clientKey, hasToken: !!c, name: c?.display_name ?? "" };
+});
+
+app.get("/api/integrations/tiktok/connect", async (req: any, reply) => {
+  if (!env.tiktok.clientKey) return reply.code(400).send({ error: "Підключення TikTok тимчасово недоступне" });
+  const state = auth.newToken();
+  reply.setCookie("tiktok_state", state, stateCookie);
+  return reply.redirect(tiktok.authUrl(env.tiktok.clientKey, TIKTOK_REDIRECT, state));
+});
+
+app.get("/api/integrations/tiktok/callback", async (req: any, reply) => {
+  const code = String(req.query?.code ?? ""); const state = String(req.query?.state ?? "");
+  if (String(req.query?.error ?? "")) { await logEvent("error", "tiktok", `TikTok відмовив: ${req.query.error}`, null, req.user.id); return reply.redirect("/app?tiktok=error"); }
+  if (!code || !state || state !== req.cookies?.tiktok_state) return reply.redirect("/app?tiktok=error");
+  reply.clearCookie("tiktok_state", { path: "/" });
+  try {
+    const tok = await tiktok.exchangeCode(env.tiktok.clientKey, env.tiktok.clientSecret, TIKTOK_REDIRECT, code);
+    const info = await tiktok.userInfo(tok.access_token).catch(() => ({ displayName: "TikTok" }));
+    const exp = new Date(Date.now() + (tok.expires_in || 86400) * 1000).toISOString();
+    await q(`insert into tiktok_config(workspace_id, open_id, display_name, access_token, refresh_token, token_expires_at, updated_at)
+             values($1,$2,$3,$4,$5,$6,now())
+             on conflict (workspace_id) do update set open_id=excluded.open_id, display_name=excluded.display_name,
+               access_token=excluded.access_token, refresh_token=excluded.refresh_token, token_expires_at=excluded.token_expires_at, updated_at=now()`,
+      [req.user.workspace_id, tok.open_id, info.displayName, tok.access_token, tok.refresh_token ?? null, exp]);
+    await logEvent("info", "tiktok", `підключено ${info.displayName}`, null, req.user.id);
+    return reply.redirect("/app?tiktok=ok");
+  } catch (e: any) {
+    await logEvent("error", "tiktok", "OAuth callback: " + e.message, null, req.user.id);
+    return reply.redirect("/app?tiktok=error");
+  }
+});
+
+app.post("/api/integrations/tiktok/disconnect", async (req: any) => {
+  await q(`delete from tiktok_config where workspace_id=$1`, [req.user.workspace_id]);
+  return { ok: true };
+});
+
 
 app.get("/api/posts/:postId/threads-insights", async (req: any, reply) => {
   const ws = req.user.workspace_id;
@@ -1620,7 +1751,7 @@ app.post("/api/materials/:id/reels", async (req: any, reply) => {
   const m = await one<{ id: string; transcript: string }>(`select id, transcript from source where id=$1 and workspace_id=$2`, [req.params.id, ws]);
   if (!m) return reply.code(404).send({ error: "матеріал не знайдено" });
   try {
-    const script = await reelsScript(ws, m.transcript);
+    const script = await reelsScript(ws, m.transcript, Number(req.body?.targetSec) || undefined);
     const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [m.id]);
     const post = await one<{ id: string }>(`insert into post(run_id, stage, content, format) values($1,'final',$2,'reel') returning id`, [run!.id, script]);
     return { ok: true, postId: post!.id };
@@ -1634,7 +1765,7 @@ app.post("/api/materials/:id/reel-slices", async (req: any, reply) => {
   if (!m) return reply.code(404).send({ error: "матеріал не знайдено" });
   if ((m.transcript || "").length < 800) return reply.code(400).send({ error: "Матеріал закороткий для нарізки - потрібен довгий транскрипт чи стаття" });
   try {
-    const scripts = await sliceToReels(ws, m.transcript);
+    const scripts = await sliceToReels(ws, m.transcript, Number(req.body?.targetSec) || undefined);
     if (!scripts.length) return reply.code(500).send({ error: "не вдалося нарізати сценарії" });
     const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [m.id]);
     for (const sc of scripts) await q(`insert into post(run_id, stage, content, format) values($1,'final',$2,'reel')`, [run!.id, sc]);
