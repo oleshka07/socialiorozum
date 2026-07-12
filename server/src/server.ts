@@ -984,7 +984,7 @@ app.post("/api/posts/:postId/deai-fix", async (req: any, reply) => {
 app.post("/api/posts/:postId/image-text", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
-  try { const filename = await overlayForPost(ws, req.params.postId, String(req.body?.headline ?? ""), req.body?.overlay !== false, { position: req.body?.position, font: req.body?.font, bg: req.body?.bg }); return { ok: true, filename }; }
+  try { const filename = await overlayForPost(ws, req.params.postId, String(req.body?.headline ?? ""), req.body?.overlay !== false, { position: req.body?.position, font: req.body?.font, bg: req.body?.bg, align: req.body?.align, upper: req.body?.upper === true, accent: req.body?.accent, kicker: req.body?.kicker, subtitle: req.body?.subtitle, size: req.body?.size }); return { ok: true, filename }; }
   catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
 

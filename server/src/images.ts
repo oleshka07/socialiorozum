@@ -101,52 +101,113 @@ function deriveHeadline(content: string): string {
   if (h.length > 48) h = h.slice(0, 46).trim() + "…";
   return h;
 }
-// стилі накладання тексту (міні-редактор «як в Instagram»): місце, шрифт, фон за текстом
-export type OverlayStyle = { position?: "top" | "center" | "bottom"; font?: "sans" | "serif" | "mono"; bg?: "gradient" | "plate" | "none" };
+// Оверлей 2.0 - «редакторська обкладинка»: місце, шрифт, фон (градієнт/плашка/затемнення всього
+// фото/без), вирівнювання, ВЕРХНІЙ РЕГІСТР, акцентний колір ключового слова (останнє слово або
+// фрагмент у *зірочках*), надзаголовок-кікер і підзаголовок. Все - sharp + SVG, без залежностей.
+export type OverlayStyle = {
+  position?: "top" | "center" | "bottom";
+  font?: "sans" | "serif" | "mono";
+  bg?: "gradient" | "plate" | "none" | "tint";
+  align?: "left" | "center";
+  upper?: boolean;
+  accent?: string;   // hex-колір акценту ('' = без акценту)
+  kicker?: string;   // короткий надзаголовок («ЕСЕ · 5 ХВИЛИН»)
+  subtitle?: string; // підзаголовок під головним текстом
+  size?: "sm" | "md" | "lg";
+};
 const OVERLAY_FONTS: Record<string, string> = {
   sans: "'DejaVu Sans','Segoe UI',Arial,sans-serif",
   serif: "'DejaVu Serif',Georgia,serif",
   mono: "'DejaVu Sans Mono','Courier New',monospace",
 };
-async function overlayHeadline(buf: Buffer, headline: string, style?: OverlayStyle): Promise<{ buffer: Buffer; mime: string }> {
-  // беремо реальні розміри зображення (щоб не кропити 4:5 / 16:9 до квадрата)
+// перенос слів у рядки за приблизною шириною символа
+function wrapWords(words: { t: string; a: boolean }[], maxChars: number): { t: string; a: boolean }[][] {
+  const lines: { t: string; a: boolean }[][] = []; let cur: { t: string; a: boolean }[] = []; let len = 0;
+  for (const w of words) {
+    if (len && len + 1 + w.t.length > maxChars) { lines.push(cur); cur = []; len = 0; }
+    cur.push(w); len += (len ? 1 : 0) + w.t.length;
+  }
+  if (cur.length) lines.push(cur);
+  return lines;
+}
+export async function overlayHeadline(buf: Buffer, headline: string, style?: OverlayStyle): Promise<{ buffer: Buffer; mime: string }> {
   let W = 1024, H = 1024;
   try { const meta = await sharp(buf).metadata(); if (meta.width && meta.height) { W = meta.width; H = meta.height; } } catch { /* дефолт 1024² */ }
   const pos = style?.position === "top" || style?.position === "center" ? style.position : "bottom";
-  const fontFam = OVERLAY_FONTS[style?.font || "sans"] || OVERLAY_FONTS.sans;
-  const bg = style?.bg === "plate" || style?.bg === "none" ? style.bg : "gradient";
-  const base = sharp(buf);
-  const scale = W / 1024; // масштабуємо типографіку відносно ширини
-  const words = headline.split(/\s+/); const lines: string[] = []; let cur = "";
-  const maxChars = Math.max(10, Math.round(16 * (W / 1024)));
-  for (const w of words) { if ((cur + " " + w).trim().length > maxChars) { if (cur) lines.push(cur.trim()); cur = w; } else cur = (cur + " " + w).trim(); }
-  if (cur) lines.push(cur);
-  const fs = Math.round(66 * scale), lh = Math.round(80 * scale), pad = Math.round(56 * scale); const blockH = lines.length * lh + pad;
-  // базова лінія КОЖНОГО рядка залежно від позиції блоку
-  const yOf = (i: number): number => {
-    if (pos === "top") return pad + fs + i * lh;
-    if (pos === "center") return Math.round((H - lines.length * lh) / 2) + fs + i * lh;
-    return H - pad - (lines.length - 1 - i) * lh; // bottom
-  };
-  // фон за текстом
-  let bgSvg = "";
-  if (bg === "gradient") {
-    // затемнення від краю; для «по центру» градієнт не має сенсу - малюємо м'яку плашку на всю ширину
-    if (pos === "bottom") bgSvg = `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.78"/></linearGradient></defs><rect x="0" y="${H - blockH - 40}" width="${W}" height="${blockH + 40}" fill="url(#g)"/>`;
-    else if (pos === "top") bgSvg = `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0.78"/><stop offset="1" stop-color="#000" stop-opacity="0"/></linearGradient></defs><rect x="0" y="0" width="${W}" height="${blockH + 40}" fill="url(#g)"/>`;
-    else bgSvg = `<rect x="0" y="${yOf(0) - fs - Math.round(20 * scale)}" width="${W}" height="${lines.length * lh + Math.round(40 * scale)}" fill="#000" fill-opacity="0.5"/>`;
-  } else if (bg === "plate") {
-    const chW = fs * (style?.font === "mono" ? 0.62 : 0.58); // приблизна ширина символа для розміру плашки
-    const maxLn = Math.max(...lines.map((l) => l.length), 1);
-    const plW = Math.min(W - pad, Math.round(maxLn * chW) + Math.round(48 * scale));
-    bgSvg = `<rect x="${pad - Math.round(24 * scale)}" y="${yOf(0) - fs - Math.round(16 * scale)}" width="${plW}" height="${lines.length * lh + Math.round(30 * scale)}" rx="${Math.round(18 * scale)}" fill="#000" fill-opacity="0.55"/>`;
+  const fontKey = style?.font || "sans";
+  const fontFam = OVERLAY_FONTS[fontKey] || OVERLAY_FONTS.sans;
+  const bg = ["plate", "none", "tint"].includes(style?.bg || "") ? style!.bg! : "gradient";
+  const align = style?.align === "center" ? "center" : "left";
+  const accent = /^#[0-9a-f]{6}$/i.test(style?.accent || "") ? style!.accent! : "";
+  const scale = W / 1024;
+  const sizeMul = style?.size === "lg" ? 1.28 : style?.size === "sm" ? 0.8 : 1;
+  const fs = Math.round(66 * scale * sizeMul), lh = Math.round(fs * 1.22), pad = Math.round(56 * scale);
+  const chW = fs * (fontKey === "mono" ? 0.64 : 0.6); // ширина символа bold DejaVu: краще недокласти слово, ніж обрізати край
+  // акцент: фрагмент у *зірочках*, інакше останнє слово (якщо заданий колір акценту)
+  let text = (headline || "").trim(); if (style?.upper) text = text.toUpperCase();
+  let accentSet = new Set<number>();
+  const starM = text.match(/\*(.+?)\*/);
+  const rawWords = text.replace(/\*/g, "").split(/\s+/).filter(Boolean);
+  if (accent) {
+    if (starM) {
+      const accWords = starM[1].trim().split(/\s+/).map((w) => (style?.upper ? w.toUpperCase() : w));
+      // позначаємо ПЕРШЕ входження послідовності
+      for (let i = 0; i <= rawWords.length - accWords.length; i++)
+        if (accWords.every((w, k) => rawWords[i + k] === w)) { accWords.forEach((_, k) => accentSet.add(i + k)); break; }
+    } else if (rawWords.length) accentSet.add(rawWords.length - 1);
   }
-  // «без фону» = тінь під текстом, щоб лишався читабельним на світлому фото
-  const shadow = bg === "none"
-    ? lines.map((ln, i) => `<text x="${pad + Math.round(3 * scale)}" y="${yOf(i) + Math.round(3 * scale)}" font-family="${fontFam}" font-size="${fs}" font-weight="800" fill="#000" fill-opacity="0.6">${escXml(ln)}</text>`).join("")
-    : "";
-  const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${bgSvg}${shadow}${lines.map((ln, i) => `<text x="${pad}" y="${yOf(i)}" font-family="${fontFam}" font-size="${fs}" font-weight="800" fill="#fff">${escXml(ln)}</text>`).join("")}</svg>`;
-  const out = await base.composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).jpeg({ quality: 88 }).toBuffer();
+  const words = rawWords.map((t, i) => ({ t, a: accentSet.has(i) }));
+  const usableW = (align === "center" ? W * 0.86 : W - 2 * pad) - Math.round(30 * scale); // запас: реальний bold ширший за оцінку
+  const lines = wrapWords(words, Math.max(8, Math.floor(usableW / chW)));
+  // кікер і підзаголовок
+  const kicker = (style?.kicker || "").trim().toUpperCase().slice(0, 60);
+  const kfs = Math.round(fs * 0.34), klh = kicker ? Math.round(kfs * 2.1) : 0;
+  const sfs = Math.round(fs * 0.42), slh = Math.round(sfs * 1.5);
+  const subWords = (style?.subtitle || "").trim().slice(0, 200).split(/\s+/).filter(Boolean).map((t) => ({ t, a: false }));
+  const subLines = subWords.length ? wrapWords(subWords, Math.max(12, Math.floor(usableW / (sfs * 0.52)))) : [];
+  const gapSub = subLines.length ? Math.round(14 * scale) : 0;
+  const blockH = klh + lines.length * lh + gapSub + subLines.length * slh;
+  const yStart = pos === "top" ? Math.round(64 * scale)
+    : pos === "center" ? Math.max(Math.round(40 * scale), Math.round((H - blockH) / 2))
+    : H - blockH - Math.round(56 * scale);
+  const xOf = align === "center" ? Math.round(W / 2) : pad;
+  const anchor = align === "center" ? ' text-anchor="middle"' : "";
+  const yHead = (i: number) => yStart + klh + fs + i * lh;         // базова лінія рядка заголовка
+  const ySub = (i: number) => yStart + klh + lines.length * lh + gapSub + sfs + i * slh;
+  // SVG колапсує пробіли МІЖ tspan-ами → групуємо сусідні слова одного кольору в один tspan
+  // (пробіли всередині текстового вузла живуть), а на <text> ставимо xml:space="preserve"
+  const lineTs = (ws: { t: string; a: boolean }[]) => {
+    const runs: { t: string; a: boolean }[] = [];
+    for (const w of ws) {
+      const last = runs[runs.length - 1];
+      if (last && last.a === w.a) last.t += " " + w.t; else runs.push({ ...w });
+    }
+    return runs.map((r, k) => `<tspan${r.a && accent ? ` fill="${accent}"` : ""}>${k ? " " : ""}${escXml(r.t)}</tspan>`).join("");
+  };
+  // фон
+  let bgSvg = "";
+  if (bg === "tint") {
+    bgSvg = `<rect x="0" y="0" width="${W}" height="${H}" fill="#0b0e13" fill-opacity="0.45"/>`;
+  } else if (bg === "gradient") {
+    if (pos === "bottom") bgSvg = `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.78"/></linearGradient></defs><rect x="0" y="${Math.max(0, yStart - Math.round(40 * scale))}" width="${W}" height="${H - yStart + Math.round(40 * scale)}" fill="url(#g)"/>`;
+    else if (pos === "top") bgSvg = `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0.78"/><stop offset="1" stop-color="#000" stop-opacity="0"/></linearGradient></defs><rect x="0" y="0" width="${W}" height="${yStart + blockH + Math.round(40 * scale)}" fill="url(#g)"/>`;
+    else bgSvg = `<rect x="0" y="${yStart - Math.round(24 * scale)}" width="${W}" height="${blockH + Math.round(48 * scale)}" fill="#000" fill-opacity="0.5"/>`;
+  } else if (bg === "plate") {
+    const maxLn = Math.max(...lines.map((l) => l.reduce((s, w) => s + w.t.length + 1, -1)), 1);
+    const plW = Math.min(W - Math.round(16 * scale), Math.round(maxLn * chW) + Math.round(52 * scale));
+    const plX = align === "center" ? Math.round((W - plW) / 2) : pad - Math.round(24 * scale);
+    bgSvg = `<rect x="${plX}" y="${yStart - Math.round(18 * scale)}" width="${plW}" height="${blockH + Math.round(34 * scale)}" rx="${Math.round(18 * scale)}" fill="#000" fill-opacity="0.55"/>`;
+  }
+  // «без фону»/затемнення - тінь під текстом для читабельності
+  const sh = Math.round(3 * scale);
+  const needShadow = bg === "none" || bg === "tint";
+  const shadow = needShadow ? lines.map((ws, i) =>
+    `<text x="${xOf + sh}" y="${yHead(i) + sh}"${anchor} font-family="${fontFam}" font-size="${fs}" font-weight="800" fill="#000" fill-opacity="0.55">${escXml(ws.map((w) => w.t).join(" "))}</text>`).join("") : "";
+  const kickerSvg = kicker ? `<text x="${xOf}" y="${yStart + kfs}"${anchor} font-family="${fontFam}" font-size="${kfs}" font-weight="700" letter-spacing="${Math.round(3 * scale)}" fill="${accent || "#ffffff"}" fill-opacity="0.95">${escXml(kicker)}</text>` : "";
+  const headSvg = lines.map((ws, i) => `<text x="${xOf}" y="${yHead(i)}"${anchor} xml:space="preserve" font-family="${fontFam}" font-size="${fs}" font-weight="800" fill="#fff">${lineTs(ws)}</text>`).join("");
+  const subSvg = subLines.map((ws, i) => `<text x="${xOf}" y="${ySub(i)}"${anchor} font-family="${fontFam}" font-size="${sfs}" font-weight="500" fill="#ffffff" fill-opacity="0.86">${escXml(ws.map((w) => w.t).join(" "))}</text>`).join("");
+  const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${bgSvg}${shadow}${kickerSvg}${headSvg}${subSvg}</svg>`;
+  const out = await sharp(buf).composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).jpeg({ quality: 88 }).toBuffer();
   return { buffer: out, mime: "image/jpeg" };
 }
 

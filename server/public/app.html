@@ -210,6 +210,11 @@
   /* calendar */
   /* minmax(0,1fr): без нього 1fr=minmax(auto,1fr) і чіп з довгим словом РОЗТЯГУЄ свою колонку - календар «з'їжджає» */
   .cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px;margin-top:7px}
+  .calhead{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px}
+  .calhead b{font-size:14px;min-width:150px;text-align:center}
+  .cal.week .day{min-height:240px}
+  .cal.week .pchip{font-size:12px;line-height:1.45;padding:6px 8px;white-space:normal}
+  .day.dim{opacity:.45}
   .dow{text-align:center;font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.04em;padding-bottom:2px}
   .day{min-height:96px;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:7px 8px;display:flex;flex-direction:column;gap:5px}
   .day.over{border-color:var(--brand);background:var(--brand-soft)}
@@ -512,7 +517,7 @@
         </div>
         <div class="panel">
           <div class="ph">📅 Календар</div>
-          <div class="cal" id="cal"></div>
+          <div id="cal"></div>
         </div>
       </section>
 
@@ -1808,12 +1813,17 @@ async function openPhotoTool(postId, initPrompt, onDone){
     card.innerHTML=header('🖼 Фото · крок 2: текст')
       +'<div id="ptPrev">'+prevHtml()+'</div>'
       +(canRegen?'<div style="display:flex;gap:8px;margin-top:10px"><input class="txt" id="ptRegenNote" placeholder="Що змінити? (напр.: світліше, без людей)" style="flex:1"><button class="ghost" id="ptRegen">🔁 Перегенерувати</button></div>':'')
-      +'<label class="fl" style="margin-top:12px">Текст на фото</label>'
+      +'<label class="fl" style="margin-top:12px">Текст на фото <span style="font-weight:400;color:var(--faint)">(ключове слово можна виділити *зірочками* - воно стане акцентним)</span></label>'
       +'<div style="display:flex;gap:8px"><input class="txt" id="ptHead" placeholder="Короткий заголовок" value="'+esc(headline||firstLine.slice(0,48))+'" style="flex:1"><button class="ghost" id="ptSuggest" title="Заголовок, що ДОПОВНЮЄ пост, а не повторює його">✨ Підказати</button></div>'
-      +'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">'
+      +'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;align-items:flex-end">'
+        +'<label style="font-size:12px;color:var(--muted)">Стиль<br><select id="ptPreset" class="txt" style="width:auto;padding:6px 9px;margin-top:2px">'+[['minimal','Мінімал (низ + градієнт)'],['quote','Цитата (центр, великими)'],['cover','Обкладинка (затемнення + акцент)'],['plate','Плашка']].map(o=>'<option value="'+o[0]+'">'+o[1]+'</option>').join('')+'</select></label>'
         +'<label style="font-size:12px;color:var(--muted)">Шрифт<br><select id="ptFont" class="txt" style="width:auto;padding:6px 9px;margin-top:2px">'+[['sans','Звичайний'],['serif','Із засічками'],['mono','Моно']].map(o=>'<option value="'+o[0]+'">'+o[1]+'</option>').join('')+'</select></label>'
         +'<label style="font-size:12px;color:var(--muted)">Місце<br><select id="ptPos" class="txt" style="width:auto;padding:6px 9px;margin-top:2px">'+[['bottom','Внизу'],['center','По центру'],['top','Вгорі']].map(o=>'<option value="'+o[0]+'">'+o[1]+'</option>').join('')+'</select></label>'
-        +'<label style="font-size:12px;color:var(--muted)">Фон за текстом<br><select id="ptBg" class="txt" style="width:auto;padding:6px 9px;margin-top:2px">'+[['gradient','Затемнення'],['plate','Плашка'],['none','Без фону']].map(o=>'<option value="'+o[0]+'">'+o[1]+'</option>').join('')+'</select></label>'
+        +'<label style="font-size:12px;color:var(--muted)">Акцент<br><select id="ptAccent" class="txt" style="width:auto;padding:6px 9px;margin-top:2px">'+[['','без акценту'],['#F6C444','🟡 жовтий'],['#7FD1FF','🔵 блакитний'],['#FF8FA3','🩷 рожевий'],['#9BE58B','🟢 зелений']].map(o=>'<option value="'+o[0]+'">'+o[1]+'</option>').join('')+'</select></label>'
+      +'</div>'
+      +'<div id="ptCoverExtra" style="display:none;gap:8px;margin-top:8px;flex-wrap:wrap">'
+        +'<input class="txt" id="ptKick" placeholder="надзаголовок (напр.: ЕСЕ · 5 ХВИЛИН)" style="flex:1;min-width:150px">'
+        +'<input class="txt" id="ptSub" placeholder="підзаголовок одним реченням" style="flex:2;min-width:200px">'
       +'</div>'
       +'<div id="ptMsg2" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px"></div>'
       +'<div class="btnrow" style="margin-top:12px;flex-wrap:wrap"><button class="ghost" id="ptBack">← Інше фото</button><button id="ptApply">✍ Накласти текст</button><button class="ghost" id="ptClear"'+(headline?'':' style="display:none"')+'>Прибрати текст</button><button class="primary" id="ptDone">Готово</button></div>'
@@ -1827,10 +1837,26 @@ async function openPhotoTool(postId, initPrompt, onDone){
     card.querySelector('#ptSuggest').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='✨ добираю заголовок…';
       try{ const r=await api('/posts/'+postId+'/headline',{method:'POST'}); if(r.headline){ card.querySelector('#ptHead').value=r.headline; msg.style.color='var(--brand)'; msg.textContent='заголовок доповнює пост, не дублює ✓'; } else msg.textContent=''; }
       catch(e2){ err(e2); } finally{ b.disabled=false; } };
+    // пресети стилю: обираєш «як має виглядати» - решта параметрів підлаштовується (можна докрутити вручну)
+    const PRESETS={minimal:{pos:'bottom',bg:'gradient',align:'left',upper:false,size:'md',extra:false},
+      quote:{pos:'center',bg:'none',align:'center',upper:true,size:'lg',extra:false},
+      cover:{pos:'top',bg:'tint',align:'left',upper:true,size:'lg',extra:true,defAccent:'#F6C444'},
+      plate:{pos:'bottom',bg:'plate',align:'left',upper:false,size:'md',extra:false}};
+    let preset='minimal';
+    card.querySelector('#ptPreset').onchange=(e)=>{ preset=e.target.value; const p=PRESETS[preset];
+      card.querySelector('#ptPos').value=p.pos;
+      card.querySelector('#ptCoverExtra').style.display=p.extra?'flex':'none';
+      if(p.defAccent&&!card.querySelector('#ptAccent').value) card.querySelector('#ptAccent').value=p.defAccent; };
     card.querySelector('#ptApply').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='накладаю текст…'; aiBusy('✍ Накладаю текст на фото…');
-      try{ const body={headline:card.querySelector('#ptHead').value,overlay:true,position:card.querySelector('#ptPos').value,font:card.querySelector('#ptFont').value,bg:card.querySelector('#ptBg').value};
+      try{ const p=PRESETS[preset]||PRESETS.minimal;
+        const body={headline:card.querySelector('#ptHead').value,overlay:true,
+          position:card.querySelector('#ptPos').value,font:card.querySelector('#ptFont').value,
+          bg:p.bg,align:p.align,upper:p.upper,size:p.size,
+          accent:card.querySelector('#ptAccent').value||'',
+          kicker:p.extra?(card.querySelector('#ptKick').value||''):'',
+          subtitle:p.extra?(card.querySelector('#ptSub').value||''):''};
         const r=await api('/posts/'+postId+'/image-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-        fn=r.filename; headline=body.headline; setPrev(); card.querySelector('#ptClear').style.display=''; if(onDone)onDone(fn); msg.style.color='var(--brand)'; msg.textContent='готово ✓'; }
+        fn=r.filename; headline=body.headline; setPrev(); card.querySelector('#ptClear').style.display=''; if(onDone)onDone(fn); msg.style.color='var(--brand)'; msg.textContent='готово ✓ (спробуй інший стиль - це безкоштовно)'; }
       catch(e2){ err(e2); } finally{ b.disabled=false; aiDone(); } };
     card.querySelector('#ptClear').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='прибираю текст…';
       try{ const r=await api('/posts/'+postId+'/image-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headline:'',overlay:false})}); fn=r.filename; headline=''; setPrev(); b.style.display='none'; if(onDone)onDone(fn); msg.style.color='var(--brand)'; msg.textContent='текст прибрано ✓'; }
@@ -1946,14 +1972,48 @@ function calMonday(){ // «сьогодні» за поясом воркспей
   const d=new Date(Date.UTC(Y,M-1,D,12,0,0));
   const day=(d.getUTCDay()+6)%7; d.setUTCDate(d.getUTCDate()-day); return d;
 }
-function calISO(off){const d=new Date(calMonday());d.setUTCDate(d.getUTCDate()+off);return d.toISOString().slice(0,10);}
+// режими календаря: «тиждень» (7 високих колонок, повний контент дня) і «місяць» (класична сітка); CalOff - зсув ‹›
+let CalMode=localStorage.getItem('kg_calmode')||'week', CalOff=0;
+const MONTHS_UK=['Січень','Лютий','Березень','Квітень','Травень','Червень','Липень','Серпень','Вересень','Жовтень','Листопад','Грудень'];
+function addDaysISO(d,n){ const x=new Date(d); x.setUTCDate(x.getUTCDate()+n); return x; }
+function isoOf(d){ return d.toISOString().slice(0,10); }
 function renderCal(){
-  const cal=$('cal'); if(!cal) return; cal.innerHTML='';
-  ['Пн','Вт','Ср','Чт','Пт','Сб','Нд'].forEach(d=>{const h=document.createElement('div');h.className='dow';h.textContent=d;cal.appendChild(h);});
+  const wrap=$('cal'); if(!wrap) return; wrap.innerHTML='';
   const byDay={}; Pub.slots.forEach(s=>{ if(!s.scheduled_at) return; const iso=locDate(s.scheduled_at); (byDay[iso]=byDay[iso]||[]).push(s); });
   const todayIso=locDate(new Date());
-  for(let off=0;off<28;off++){
-    const iso=calISO(off); const cell=document.createElement('div'); cell.className='day'; cell.dataset.iso=iso;
+  // діапазон днів за режимом
+  let days=[], label='', dims=new Set();
+  if(CalMode==='month'){
+    const [Y,M]=locDate(new Date()).split('-').map(Number);
+    const first=new Date(Date.UTC(Y, M-1+CalOff, 1, 12));
+    label=MONTHS_UK[first.getUTCMonth()]+' '+first.getUTCFullYear();
+    const start=addDaysISO(first, -((first.getUTCDay()+6)%7)); // понеділок тижня з 1-м числом
+    const last=new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth()+1, 0, 12));
+    const end=addDaysISO(last, 6-((last.getUTCDay()+6)%7));    // неділя тижня з останнім числом
+    for(let d=new Date(start); d<=end; d=addDaysISO(d,1)){ const iso=isoOf(d); days.push(iso); if(d.getUTCMonth()!==first.getUTCMonth()) dims.add(iso); }
+  } else {
+    const start=addDaysISO(calMonday(), CalOff*7);
+    for(let i=0;i<7;i++) days.push(isoOf(addDaysISO(start,i)));
+    const f=days[0].split('-'), l=days[6].split('-');
+    label=(+f[2])+'.'+(+f[1])+' – '+(+l[2])+'.'+(+l[1])+'.'+l[0];
+  }
+  // панель навігації
+  const head=document.createElement('div'); head.className='calhead';
+  head.innerHTML='<button class="ghost" id="calPrev" style="padding:5px 12px">‹</button><b>'+esc(label)+'</b><button class="ghost" id="calNext" style="padding:5px 12px">›</button>'
+    +'<button class="ghost" id="calToday" style="padding:5px 12px">Сьогодні</button><span style="flex:1"></span>'
+    +'<div style="display:flex;gap:4px"><button class="'+(CalMode==='week'?'primary':'ghost')+'" id="calWeekB" style="padding:5px 12px">Тиждень</button><button class="'+(CalMode==='month'?'primary':'ghost')+'" id="calMonthB" style="padding:5px 12px">Місяць</button></div>';
+  wrap.appendChild(head);
+  head.querySelector('#calPrev').onclick=()=>{ CalOff--; renderCal(); };
+  head.querySelector('#calNext').onclick=()=>{ CalOff++; renderCal(); };
+  head.querySelector('#calToday').onclick=()=>{ CalOff=0; renderCal(); };
+  head.querySelector('#calWeekB').onclick=()=>{ CalMode='week'; CalOff=0; localStorage.setItem('kg_calmode','week'); renderCal(); };
+  head.querySelector('#calMonthB').onclick=()=>{ CalMode='month'; CalOff=0; localStorage.setItem('kg_calmode','month'); renderCal(); };
+  // сітка
+  const cal=document.createElement('div'); cal.className='cal'+(CalMode==='week'?' week':''); wrap.appendChild(cal);
+  ['Пн','Вт','Ср','Чт','Пт','Сб','Нд'].forEach(d=>{const h=document.createElement('div');h.className='dow';h.textContent=d;cal.appendChild(h);});
+  const maxTxt=CalMode==='week'?70:18; // тиждень показує повний контент дня, місяць - компактні чіпи
+  for(const iso of days){
+    const cell=document.createElement('div'); cell.className='day'+(dims.has(iso)?' dim':''); cell.dataset.iso=iso;
     if(iso===todayIso){ cell.style.borderColor='var(--brand)'; cell.style.boxShadow='inset 0 0 0 1px var(--brand)'; }
     const [,mmI,ddI]=iso.split('-'); cell.innerHTML='<div class="dn">'+(+ddI)+'.'+(+mmI)+(iso===todayIso?' <span style="color:var(--brand);font-weight:700">сьогодні</span>':'')+'</div>';
     (byDay[iso]||[]).sort((a,b)=>String(a.scheduled_at).localeCompare(String(b.scheduled_at))).forEach(s=>{
@@ -1962,7 +2022,7 @@ function renderCal(){
       const movable=(st==='planned'||st==='failed');
       const ch=document.createElement('div'); ch.className='pchip'+(st==='failed'?' failed':'')+(st==='posted'?' posted':'');
       ch.title=(s.result||(st==='planned'?'заплановано':st))+(movable?' · тягни на інший день':'');
-      ch.innerHTML='<b>'+time+icon+'</b> '+chanIcons(s.channels)+' '+esc((s.content||'').replace(/\n+/g,' ').slice(0,18))
+      ch.innerHTML='<b>'+time+icon+'</b> '+chanIcons(s.channels)+' '+esc((s.content||'').replace(/\n+/g,' ').slice(0,maxTxt))
         +(st!=='posted'?'<span class="pchip-x" data-del="'+s.id+'" title="Прибрати з календаря" style="float:right;margin-left:4px;padding:0 4px;border-radius:4px;color:var(--faint);cursor:pointer">✕</span>':'');
       // перетягування запланованого чіпа на інший день (час зберігається)
       if(movable){ ch.draggable=true; ch.addEventListener('dragstart',ev=>{ ev.dataTransfer.setData('text/plain','slot:'+s.id+':'+time); }); }
