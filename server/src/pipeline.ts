@@ -970,14 +970,23 @@ export async function suggestHeadline(workspaceId: string, text: string): Promis
   return raw.replace(/^["«»']+|["«»'.]+$/g, "").trim().slice(0, 60);
 }
 
+// цільова довжина рілса → скільки бітів писати (біт ≈ 8-10с озвучки разом з паузою)
+function reelLenRule(targetSec?: number): { label: string; bits: string } {
+  const t = Number(targetSec) || 45;
+  if (t <= 20) return { label: "до 15-20 секунд", bits: "РІВНО 2 БІТИ" };
+  if (t <= 35) return { label: "до 30 секунд", bits: "РІВНО 3 БІТИ" };
+  return { label: "45-60 секунд", bits: "4-5 БІТІВ" };
+}
+
 // ---- «Сценарист»: повний сценарій Reels/Shorts (текстовий деліверабл - юзер знімає сам) ----
-export async function reelsScript(workspaceId: string, text: string): Promise<string> {
+export async function reelsScript(workspaceId: string, text: string, targetSec?: number): Promise<string> {
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
   const brief = (s.strategy_brief || "").trim();
-  const system = "Ти сценарист коротких відео (Reels/Shorts/TikTok), 30-60 секунд. За матеріалом напиши ГОТОВИЙ ДО ЗЙОМКИ сценарій:" +
+  const len = reelLenRule(targetSec);
+  const system = `Ти сценарист коротких відео (Reels/Shorts/TikTok). Цільова тривалість ролика: ${len.label} - НЕ перевищуй її. За матеріалом напиши ГОТОВИЙ ДО ЗЙОМКИ сценарій:` +
     "\n- ХУК (0-2с): відкриття з кульмінації, без кліше." +
-    "\n- 4-5 БІТІВ: один біт = ОДНА думка = ОДИН короткий рядок озвучки + [візуал: що в кадрі/на екрані]. Потрібно два рядки - значить це два біти." +
+    `\n- ${len.bits}: один біт = ОДНА думка = ОДИН короткий рядок озвучки + [візуал: що в кадрі/на екрані]. Потрібно два рядки - значить це два біти.` +
     "\nЕталон біта. Погано: «Розкажи, що брендбук допомагає нейромережі писати у твоєму стилі і це дуже важливо для бренду» (дві думки, довго, нічого знімати). Добре: «Секрет не в промті, а в брендбуку» [візуал: файл брендбука на екрані] (одна думка, один рядок, зрозумілий кадр)." +
     "\n- CTA: один заклик = одна дія." +
     "\n- ТЕКСТ НА ЕКРАН: 3-5 ключових слів/фраз, які виносимо великими титрами в кадр (акценти, не субтитри)." +
@@ -987,6 +996,17 @@ export async function reelsScript(workspaceId: string, text: string): Promise<st
     goalRule(s) + HOOK_RULE + ANTI_AI_RULE + NO_DASH_RULE +
     `\n\nПоверни лише сценарій. Мова: ${lang}.`;
   return chat("openai/gpt-4o", system, `Матеріал:\n---\n${(text || "").slice(0, 12000)}`, { workspaceId, step: "reels" });
+}
+
+// ---- підпис до готового відео-рілса (для IG/FB/YouTube: не переказ сценарію, а чіпкий підпис) ----
+export async function reelCaption(workspaceId: string, script: string): Promise<string> {
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const system = "Із сценарію короткого відео зроби ПІДПИС до опублікованого рілса: 1-2 чіпкі речення (інтрига чи головна користь, БЕЗ переказу всього ролика) + 3-5 релевантних хештегів останнім рядком." +
+    voicePassport(s) + HOOK_RULE + ANTI_AI_RULE + NO_DASH_RULE +
+    `\n\nПоверни лише підпис. Мова: ${lang}.`;
+  const raw = await chat(env.cheapModel, system, (script || "").slice(0, 3000), { workspaceId, step: "reel_caption" });
+  return raw.trim().slice(0, 1800);
 }
 
 // ---- «Мультиплікатор», режим «Продовження»: пост зайшов → 5 кутів розвитку теми ----
@@ -1057,13 +1077,14 @@ export async function buildLeadMagnet(workspaceId: string, magnet: { title: stri
 }
 
 // ---- «Мультиплікатор», режим «Нарізка»: довгий транскрипт → 5-7 самостійних сценаріїв Reels + порядок на тиждень ----
-export async function sliceToReels(workspaceId: string, text: string): Promise<string[]> {
+export async function sliceToReels(workspaceId: string, text: string, targetSec?: number): Promise<string[]> {
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
-  const system = "Ти мультиплікатор контенту. З довгого матеріалу зроби 5-7 КОРОТКИХ сценаріїв Reels (30-60с). Правила:" +
+  const len = reelLenRule(targetSec);
+  const system = `Ти мультиплікатор контенту. З довгого матеріалу зроби 5-7 КОРОТКИХ сценаріїв Reels (кожен ${len.label}). Правила:` +
     "\n- кожен ролик СТОЇТЬ САМ ПО СОБІ - працює без перегляду довгого; слабкі моменти ріж, якість важливіша за кількість;" +
     "\n- відкриття КОЖНОГО - з кульмінації саме цього моменту;" +
-    "\n- один біт = одна думка = один рядок озвучки + [візуал: …]; максимум 4-5 бітів; CTA наприкінці;" +
+    `\n- один біт = одна думка = один рядок озвучки + [візуал: …]; ${len.bits} максимум; CTA наприкінці;` +
     "\n- впорядкуй як ПОСЛІДОВНІСТЬ НА ТИЖДЕНЬ: перший - найсильніший самостійний, далі так, щоб ролики підсилювали одне одного." +
     "\nФормат КОЖНОГО сценарію рівно такий (розділяй сценарії рядком ===):" +
     "\n🎬 СЦЕНАРІЙ REELS: <назва 3-5 слів> (день N)\nЧому сам по собі: <1 речення>\n\nХУК (0-2с): <рядок>\n[візуал: <…>]\n\nБІТ 1: <рядок>\n[візуал: <…>]\n(…)\n\nCTA: <рядок>\n[візуал: <…>]\n\nТЕКСТ НА ЕКРАН: <слова через ·>" +

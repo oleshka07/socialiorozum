@@ -91,6 +91,21 @@ async function stockKeywords(ws: string, segs: Seg[]): Promise<string[]> {
   } catch { return segs.map((s) => "abstract background"); }
 }
 
+// ---- 3b. Персональна b-roll бібліотека: власні відео юзера (source='broll') ----
+// 1-3 вставки з обличчям автора на ролик = персональність. Куди ставимо: ХУК (перший кадр - людина),
+// середина, CTA. Кліп під сегмент обираємо випадково з бібліотеки без повторів.
+async function brollPlan(ws: string, segCount: number): Promise<Map<number, string>> {
+  const plan = new Map<number, string>();
+  try {
+    const rows = await q<{ filename: string }>(
+      `select filename from media_asset where workspace_id=$1 and source='broll' and kind='video' order by random() limit 3`, [ws]);
+    if (!rows.length) return plan;
+    const slots = segCount <= 2 ? [0] : segCount <= 4 ? [0, segCount - 1] : [0, Math.floor(segCount / 2), segCount - 1];
+    slots.slice(0, rows.length).forEach((slot, i) => plan.set(slot, rows[i].filename));
+  } catch { /* без b-roll */ }
+  return plan;
+}
+
 // ---- 4. Pexels: вертикальний кліп під сегмент ----
 async function pexelsClip(query: string, dest: string): Promise<boolean> {
   if (!env.pexels.apiKey) return false;
@@ -132,13 +147,17 @@ export async function buildReelVideo(ws: string, postId: string, content: string
       await azureTts(segs[i].text, join(dir, `a${i}.mp3`));
       durs.push(Math.max(1.2, await probeDuration(join(dir, `a${i}.mp3`)) + 0.25)); // невелика пауза між бітами
     }
-    // 6.2 відео-сегменти: сток → фолбек картинка поста → фолбек градієнт
+    // 6.2 відео-сегменти: власний b-roll (1-3 вставки з автором) → сток → фолбек картинка поста → градієнт
     const kws = await stockKeywords(ws, segs);
+    const broll = await brollPlan(ws, segs.length);
     for (let i = 0; i < segs.length; i++) {
       const seg = join(dir, `v${i}.mp4`), clip = join(dir, `c${i}.mp4`);
       const d = durs[i].toFixed(2);
       const vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,format=yuv420p";
-      if (await pexelsClip(kws[i], clip)) {
+      const personal = broll.get(i);
+      if (personal) {
+        await run("ffmpeg", ["-y", "-stream_loop", "-1", "-i", join(MEDIA_DIR, personal), "-t", d, "-an", "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", seg], 180000);
+      } else if (await pexelsClip(kws[i], clip)) {
         await run("ffmpeg", ["-y", "-stream_loop", "-1", "-i", clip, "-t", d, "-an", "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", seg], 180000);
       } else if (bgImage) {
         await run("ffmpeg", ["-y", "-loop", "1", "-i", join(MEDIA_DIR, bgImage), "-t", d, "-an",

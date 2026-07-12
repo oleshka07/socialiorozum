@@ -141,6 +141,36 @@ export async function businessDiscovery(igUserId: string, pageToken: string, tar
   };
 }
 
+// Instagram Reels: контейнер media_type=REELS з video_url → чекаємо обробки відео → media_publish.
+// IG вимагає MP4 H.264+AAC, 9:16 — саме такий наш рілс із збірки.
+export async function publishReelToInstagram(igUserId: string, pageToken: string, videoUrl: string, caption: string) {
+  const cbody = new URLSearchParams({ media_type: "REELS", video_url: videoUrl, caption, access_token: pageToken });
+  const c = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: cbody,
+  });
+  // відео обробляється асинхронно: публікувати можна лише після status_code=FINISHED
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 5000));
+    const st = await fbFetch<{ status_code?: string }>(`${GRAPH}/${c.id}?fields=status_code&access_token=${encodeURIComponent(pageToken)}`);
+    if (st.status_code === "FINISHED") break;
+    if (st.status_code === "ERROR") throw new Error("Instagram не зміг обробити відео (перевір формат MP4 9:16)");
+    if (i === 39) throw new Error("Instagram довго обробляє відео - спробуй ще раз за кілька хвилин");
+  }
+  const pbody = new URLSearchParams({ creation_id: c.id, access_token: pageToken });
+  const p = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media_publish`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: pbody,
+  });
+  return { mediaId: p.id };
+}
+
+// відео-пост у FB-Сторінку (file_url — Meta сама тягне з нашого /media)
+export async function publishVideoToPage(pageId: string, pageToken: string, description: string, videoUrl: string) {
+  const body = new URLSearchParams({ file_url: videoUrl, description, access_token: pageToken });
+  return fbFetch<{ id: string }>(`${GRAPH}/${pageId}/videos`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body,
+  });
+}
+
 // Instagram: двокроковий публіш (контейнер із image_url+caption -> media_publish)
 export async function publishToInstagram(igUserId: string, pageToken: string, imageUrl: string, caption: string) {
   const cbody = new URLSearchParams({ image_url: imageUrl, caption, access_token: pageToken });

@@ -416,6 +416,45 @@ create table if not exists linkedin_publish (
 );
 create index if not exists idx_lipub_post on linkedin_publish(post_id);
 
+-- YouTube Shorts (рілси): Google OAuth (scope youtube.upload) + журнал завантажень
+create table if not exists youtube_config (
+  workspace_id     uuid primary key references workspace(id) on delete cascade,
+  channel_title    text,
+  access_token     text not null,
+  refresh_token    text,                       -- offline-доступ: оновлюємо access_token самі
+  token_expires_at timestamptz,
+  updated_at       timestamptz not null default now()
+);
+create table if not exists youtube_publish (
+  id          uuid primary key default gen_random_uuid(),
+  post_id     uuid not null references post(id) on delete cascade,
+  external_id text,                            -- videoId на YouTube
+  status      text not null default 'sent',
+  error       text,
+  created_at  timestamptz not null default now()
+);
+create index if not exists idx_ytpub_post on youtube_publish(post_id);
+
+-- TikTok (рілси): Content Posting API; до аудиту застосунку відео їде в «чернетки» юзера (inbox upload)
+create table if not exists tiktok_config (
+  workspace_id     uuid primary key references workspace(id) on delete cascade,
+  open_id          text not null,
+  display_name     text,
+  access_token     text not null,
+  refresh_token    text,
+  token_expires_at timestamptz,
+  updated_at       timestamptz not null default now()
+);
+create table if not exists tiktok_publish (
+  id          uuid primary key default gen_random_uuid(),
+  post_id     uuid not null references post(id) on delete cascade,
+  external_id text,                            -- publish_id джоби TikTok
+  status      text not null default 'sent',
+  error       text,
+  created_at  timestamptz not null default now()
+);
+create index if not exists idx_ttpub_post on tiktok_publish(post_id);
+
 -- підключення каналу до СПІЛЬНОГО Telegram-бота: код deep-link -> воркспейс, + хто почав діалог
 create table if not exists tg_connect (
   code         text primary key,
