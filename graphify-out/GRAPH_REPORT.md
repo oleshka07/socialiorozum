@@ -1,16 +1,16 @@
 # Graph Report - socialiorozum  (2026-07-13)
 
 ## Corpus Check
-- 49 files · ~102,572 words
+- 50 files · ~105,933 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 736 nodes · 1346 edges · 103 communities (43 shown, 60 thin omitted)
+- 759 nodes · 1441 edges · 98 communities (39 shown, 59 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 10 edges (avg confidence: 0.89)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `afb2fb23`
+- Built from commit: `7a2a8b3a`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -51,10 +51,7 @@
 - [[_COMMUNITY_Community 37|Community 37]]
 - [[_COMMUNITY_Community 38|Community 38]]
 - [[_COMMUNITY_Community 39|Community 39]]
-- [[_COMMUNITY_Community 40|Community 40]]
 - [[_COMMUNITY_Community 41|Community 41]]
-- [[_COMMUNITY_Community 42|Community 42]]
-- [[_COMMUNITY_Community 43|Community 43]]
 - [[_COMMUNITY_Community 44|Community 44]]
 - [[_COMMUNITY_Community 45|Community 45]]
 - [[_COMMUNITY_Community 46|Community 46]]
@@ -107,37 +104,35 @@
 - [[_COMMUNITY_Community 93|Community 93]]
 - [[_COMMUNITY_Community 94|Community 94]]
 - [[_COMMUNITY_Community 95|Community 95]]
-- [[_COMMUNITY_Community 96|Community 96]]
 - [[_COMMUNITY_Community 97|Community 97]]
 - [[_COMMUNITY_Community 98|Community 98]]
 - [[_COMMUNITY_Community 99|Community 99]]
 - [[_COMMUNITY_Community 100|Community 100]]
 - [[_COMMUNITY_Community 101|Community 101]]
-- [[_COMMUNITY_Community 102|Community 102]]
 
 ## God Nodes (most connected - your core abstractions)
-1. `q()` - 79 edges
+1. `q()` - 83 edges
 2. `chat()` - 39 edges
-3. `one()` - 28 edges
-4. `loadSettings()` - 27 edges
-5. `logEvent()` - 26 edges
+3. `one()` - 29 edges
+4. `logEvent()` - 28 edges
+5. `loadSettings()` - 27 edges
 6. `workspace` - 24 edges
 7. `extractJsonArray()` - 19 edges
-8. `Деплой: GitHub → Hetzner → домен (повний ранбук)` - 15 edges
-9. `Eng review — КонтентГров backend (v1+v2 skeleton)` - 15 edges
-10. `env` - 14 edges
+8. `handleCallback()` - 19 edges
+9. `handleUpdate()` - 16 edges
+10. `env` - 15 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `КонтентГров v2 HTML Prototype — pipeline UI with calendar drag-and-drop` --visualizes--> `Content Pipeline — «Кишка» (Transcript → Ideas → Drafts → ToV → De-AI → Posts)`  [INFERRED]
   kontentgrov-v2.html → architecture-content-engine.md
-- `userByEmail()` --calls--> `one()`  [EXTRACTED]
-  server/src/auth.ts → server/src/db.ts
-- `markVerified()` --calls--> `q()`  [EXTRACTED]
-  server/src/auth.ts → server/src/db.ts
-- `deleteSession()` --calls--> `q()`  [EXTRACTED]
-  server/src/auth.ts → server/src/db.ts
-- `touchActive()` --calls--> `q()`  [EXTRACTED]
-  server/src/auth.ts → server/src/db.ts
+- `saveRubrics()` --calls--> `q()`  [EXTRACTED]
+  server/src/server.ts → server/src/db.ts
+- `topPatterns()` --calls--> `networkBenchmarks()`  [INFERRED]
+  server/src/pipeline.ts → server/src/metrics.ts
+- `PRO Mode Toggle (Lite vs PRO pipeline gate)` --semantically_similar_to--> `Pricing Section (Test/Pro/Business tiers)`  [INFERRED] [semantically similar]
+  server/public/app.html → server/public/b.html
+- `b.html — Marketing Landing Page (dark-theme)` --semantically_similar_to--> `index.html — Primary Landing Page (dark-theme, Ukrainian)`  [INFERRED] [semantically similar]
+  server/public/b.html → server/public/index.html
 
 ## Import Cycles
 - None detected.
@@ -150,11 +145,11 @@
 - **Legal Compliance Cluster: Privacy + Data Deletion + Terms** — server_public_privacy_html_privacy_policy, server_public_data_deletion_html_gdpr_page, server_public_terms_html_terms_of_service [EXTRACTED 1.00]
 - **Onboarding → Brand Derive → Post Generation Flow** — server_public_app_html_onboarding_flow, server_public_app_html_brand_derive_voice, server_public_app_html_api_generate_from_brand, server_public_app_html_studio_section [EXTRACTED 1.00]
 
-## Communities (103 total, 60 thin omitted)
+## Communities (98 total, 59 thin omitted)
 
 ### Community 0 - "Auth, Session & Workers"
-Cohesion: 0.10
-Nodes (21): createEmailToken(), createSession(), createUser(), createWorkspaceWithDefaults(), deleteSession(), findOrCreateGoogleUser(), hashPassword(), markVerified() (+13 more)
+Cohesion: 0.17
+Nodes (19): createEmailToken(), createSession(), createUser(), createWorkspaceWithDefaults(), deleteSession(), findOrCreateGoogleUser(), hashPassword(), markVerified() (+11 more)
 
 ### Community 2 - "Studio & API Layer"
 Cohesion: 0.07
@@ -169,8 +164,8 @@ Cohesion: 0.12
 Nodes (26): Aspect, ASPECT_DIM, attachCroppedImage(), attachStockPhoto(), COSTS, CropRect, escXml(), FAL_SIZE (+18 more)
 
 ### Community 5 - "LLM Routing & AI"
-Cohesion: 0.10
-Nodes (58): stockPhotoOptions(), chat(), extractJsonArray(), extractJsonObject(), adaptForChannels(), AI_TRACE_RX, aiAudit(), atomizePost() (+50 more)
+Cohesion: 0.09
+Nodes (63): stockPhotoOptions(), chat(), ChatCtx, extractJsonArray(), extractJsonObject(), GEMINI_PRICES, geminiChat(), OPENAI_PRICES (+55 more)
 
 ### Community 6 - "Authentication & Users"
 Cohesion: 0.14
@@ -181,8 +176,8 @@ Cohesion: 0.08
 Nodes (25): dependencies, fastify, @fastify/cookie, @fastify/cors, @fastify/multipart, @fastify/static, heic-convert, pg (+17 more)
 
 ### Community 8 - "Community 8"
-Cohesion: 0.33
-Nodes (5): exchangeCode(), exchangeLongLived(), getMe(), refreshToken(), thFetch()
+Cohesion: 0.22
+Nodes (9): userByEmail(), userBySession(), one(), metaCfg(), postOwned(), runOwned(), slotOwned(), tgConfig() (+1 more)
 
 ### Community 9 - "Community 9"
 Cohesion: 0.22
@@ -197,7 +192,7 @@ Cohesion: 0.67
 Nodes (3): Docker Compose App Service, Docker Compose PostgreSQL 16 DB Service, Docker Media Volume (persistent uploads)
 
 ### Community 13 - "Telegram Integration"
-Cohesion: 0.30
+Cohesion: 0.27
 Nodes (13): answerCallbackQuery(), deleteMessage(), editMessageText(), getChat(), getChatMember(), getMe(), kb(), sendMessage() (+5 more)
 
 ### Community 14 - "CI/CD & Deployment"
@@ -205,8 +200,8 @@ Cohesion: 0.67
 Nodes (3): appleboy/ssh-action (CI/CD SSH step), GitHub Actions Deploy Workflow, Hetzner Production Server (178.105.185.67)
 
 ### Community 15 - "Community 15"
-Cohesion: 0.23
-Nodes (12): env, hardPurgeWorkspace(), purgeWorkspaceContent(), startLifecycleWorker(), sweepOrphanMedia(), tick(), convertAllHeif(), deleteMediaFile() (+4 more)
+Cohesion: 0.06
+Nodes (45): pool, button(), send(), sendDeletionScheduledEmail(), sendEmailChangedNotice(), sendInactivityWarningEmail(), sendResetEmail(), sendVerifyEmail() (+37 more)
 
 ### Community 16 - "Public Pages & Landing"
 Cohesion: 0.50
@@ -265,24 +260,12 @@ Cohesion: 0.25
 Nodes (7): 03 — Конкурентний аналіз: Echo by ROZUM, Головний висновок, Застереження щодо точності, Категорія 1 — All-in-one AI-контент + планувальники, Категорія 2 — Репурпос / на основі запису (наш вузький сусід), Категорія 3 — Локальні / україномовні + статус-кво, Прогалини й можливості для Echo by ROZUM
 
 ### Community 39 - "Community 39"
-Cohesion: 0.35
-Nodes (14): q(), attachChannel(), buildPlan(), captureIdea(), createConnectLink(), draftButtons(), handleCallback(), handleUpdate() (+6 more)
-
-### Community 40 - "Community 40"
 Cohesion: 0.14
-Nodes (19): ChatCtx, GEMINI_PRICES, geminiChat(), OPENAI_PRICES, stripDashes(), azureTts(), brollPlan(), buildAss() (+11 more)
+Nodes (36): appendDiaryText(), attachDiaryMedia(), buildQuestion(), diaryButtons(), DiaryState, ensureDiary(), EVENING_Q, getState() (+28 more)
 
 ### Community 41 - "Community 41"
-Cohesion: 0.08
-Nodes (28): userBySession(), one(), DEFAULT_PROMPTS, STEP_ORDER, StepKey, app, cancelRun, cookieOpts (+20 more)
-
-### Community 42 - "Community 42"
-Cohesion: 0.61
-Nodes (8): button(), send(), sendDeletionScheduledEmail(), sendEmailChangedNotice(), sendInactivityWarningEmail(), sendResetEmail(), sendVerifyEmail(), wrap()
-
-### Community 96 - "Community 96"
-Cohesion: 0.33
-Nodes (8): Folder, pullFolder(), pullGdriveFolder(), startGdrivePoller(), tick(), validToken(), logEvent(), LogLevel
+Cohesion: 0.10
+Nodes (17): DEFAULT_PROMPTS, STEP_ORDER, StepKey, app, cancelRun, cookieOpts, __dirname, META_SCOPES (+9 more)
 
 ### Community 97 - "Community 97"
 Cohesion: 0.42
@@ -301,32 +284,28 @@ Cohesion: 0.16
 Nodes (9): exchangeCode(), exchangeLongLived(), fbFetch(), FbPage, igStats(), pageStats(), publishPhotoToPage(), publishToPage() (+1 more)
 
 ### Community 101 - "Community 101"
-Cohesion: 0.38
-Nodes (9): findBreakout(), localParts(), plusDay(), sendDigest(), sendDigestNow(), startDigest(), tick(), networkBenchmarks() (+1 more)
-
-### Community 102 - "Community 102"
-Cohesion: 0.43
-Nodes (6): BenchPost, collectWorkspace(), saveMetric(), stalePosts(), startMetrics(), tick()
+Cohesion: 0.13
+Nodes (21): weekDiary(), findBreakout(), localParts(), plusDay(), sendDigest(), sendDigestNow(), startDigest(), tick() (+13 more)
 
 ## Knowledge Gaps
-- **284 isolated node(s):** `app_log`, `name`, `version`, `private`, `type` (+279 more)
+- **287 isolated node(s):** `app_log`, `name`, `version`, `private`, `type` (+282 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **60 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **59 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `q()` connect `Community 39` to `Auth, Session & Workers`, `Community 96`, `Google Drive Integration`, `Community 101`, `Community 102`, `LLM Routing & AI`, `Community 40`, `Community 9`, `Authentication & Users`, `Community 41`, `Community 15`?**
-  _High betweenness centrality (0.039) - this node is a cross-community bridge._
-- **Why does `one()` connect `Community 41` to `Auth, Session & Workers`, `Community 96`, `Google Drive Integration`, `Community 101`, `LLM Routing & AI`, `Authentication & Users`, `Community 39`, `Community 9`, `Community 15`?**
+- **Why does `q()` connect `Auth, Session & Workers` to `Google Drive Integration`, `Community 101`, `LLM Routing & AI`, `Community 39`, `Authentication & Users`, `Community 9`, `Community 41`, `Community 15`?**
+  _High betweenness centrality (0.043) - this node is a cross-community bridge._
+- **Why does `one()` connect `Community 8` to `Auth, Session & Workers`, `Google Drive Integration`, `Community 101`, `LLM Routing & AI`, `Community 39`, `Authentication & Users`, `Community 9`, `Community 41`, `Community 15`?**
   _High betweenness centrality (0.008) - this node is a cross-community bridge._
-- **Why does `logEvent()` connect `Community 96` to `Community 101`, `Community 102`, `Community 39`, `Community 40`, `Community 9`, `Authentication & Users`, `Community 41`, `Community 15`?**
-  _High betweenness centrality (0.006) - this node is a cross-community bridge._
+- **Why does `logEvent()` connect `Community 15` to `Auth, Session & Workers`, `Community 101`, `Authentication & Users`, `Community 39`, `Community 9`, `Community 41`?**
+  _High betweenness centrality (0.007) - this node is a cross-community bridge._
 - **What connects `app_log`, `name`, `version` to the rest of the system?**
-  _301 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `Auth, Session & Workers` be split into smaller, more focused modules?**
-  _Cohesion score 0.10256410256410256 - nodes in this community are weakly interconnected._
+  _304 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Studio & API Layer` be split into smaller, more focused modules?**
   _Cohesion score 0.06543385490753911 - nodes in this community are weakly interconnected._
 - **Should `Database Schema` be split into smaller, more focused modules?**
   _Cohesion score 0.09872241579558652 - nodes in this community are weakly interconnected._
+- **Should `Google Drive Integration` be split into smaller, more focused modules?**
+  _Cohesion score 0.12169312169312169 - nodes in this community are weakly interconnected._

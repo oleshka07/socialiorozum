@@ -1,7 +1,7 @@
 {
   "server/db/schema.sql": {
-    "mtime": 1783869809.8075151,
-    "ast_hash": "42ce1b1d37704b8528f3be9cf1250623",
+    "mtime": 1783915349.1313307,
+    "ast_hash": "37a94ebe3b4c21163a25162776276c17",
     "semantic_hash": ""
   },
   "server/package.json": {
@@ -35,7 +35,7 @@
     "semantic_hash": ""
   },
   "server/src/env.ts": {
-    "mtime": 1783869789.9995153,
+    "mtime": 1783870779.7395127,
     "ast_hash": "ac19e80f04a47a402fd886c7c46e18ea",
     "semantic_hash": ""
   },
@@ -65,7 +65,7 @@
     "semantic_hash": "6c2ff85822659e4bfac582a0db70ce2e"
   },
   "server/src/images.ts": {
-    "mtime": 1783869920.343515,
+    "mtime": 1783870779.7395127,
     "ast_hash": "6c32ddddc2991adce81af699cdb6405e",
     "semantic_hash": ""
   },
@@ -90,8 +90,8 @@
     "semantic_hash": "aa83db9ebc1b63b149e1e8cc3e294419"
   },
   "server/src/meta.ts": {
-    "mtime": 1783869870.519515,
-    "ast_hash": "945b293138e67b658dee5f6d12db137f",
+    "mtime": 1783915352.9433308,
+    "ast_hash": "5fd55ae2e93f668a715a5d1dcfb11dcd",
     "semantic_hash": ""
   },
   "server/src/migrate.ts": {
@@ -105,12 +105,12 @@
     "semantic_hash": ""
   },
   "server/src/pipeline.ts": {
-    "mtime": 1783870003.4435146,
-    "ast_hash": "0f2192eff2647a8a45e2540db27e1b65",
+    "mtime": 1783915718.4673326,
+    "ast_hash": "6e93e6e0998b8d2be1ae9abfa615d77b",
     "semantic_hash": ""
   },
   "server/src/publisher.ts": {
-    "mtime": 1783870044.1515145,
+    "mtime": 1783870779.7395127,
     "ast_hash": "0cf34d2f8dd979c4c9f2e0c89e74d068",
     "semantic_hash": ""
   },
@@ -125,8 +125,8 @@
     "semantic_hash": ""
   },
   "server/src/server.ts": {
-    "mtime": 1783870171.9995143,
-    "ast_hash": "dc109656484e9d0b498e29e72ced06d0",
+    "mtime": 1783915669.0513322,
+    "ast_hash": "e40b5abed3e88fe8b2aaae5c99dd0514",
     "semantic_hash": ""
   },
   "server/src/telegram.ts": {
@@ -135,8 +135,8 @@
     "semantic_hash": ""
   },
   "server/src/tgbot.ts": {
-    "mtime": 1783793618.0911837,
-    "ast_hash": "91e736ea12925e1becb9c0462ef403b4",
+    "mtime": 1783915507.0793314,
+    "ast_hash": "110b7e83b6a30958600ffd3198c4afe8",
     "semantic_hash": ""
   },
   "server/src/threads.ts": {
@@ -155,8 +155,8 @@
     "semantic_hash": "352df4b84f4af2922ccd9adaf8e4608f"
   },
   "CLAUDE.md": {
-    "mtime": 1783868389.5799234,
-    "ast_hash": "4a2cadd4cc464208b0a5cc58bd5188e1",
+    "mtime": 1783870779.7315128,
+    "ast_hash": "ec38cf9c31bcbdb04405409a236a6990",
     "semantic_hash": ""
   },
   "DEPLOY.md": {
@@ -225,8 +225,8 @@
     "semantic_hash": ""
   },
   "server/public/app.html": {
-    "mtime": 1783870524.8075135,
-    "ast_hash": "391b10591740c8c62f886747ff636be9",
+    "mtime": 1783915746.1193328,
+    "ast_hash": "856bc6981a9144fdeec2fc38e636f8cd",
     "semantic_hash": ""
   },
   "server/public/auth.html": {
@@ -275,8 +275,8 @@
     "semantic_hash": ""
   },
   "server/src/digest.ts": {
-    "mtime": 1783793530.4831843,
-    "ast_hash": "e96cb42a2c94813ecac9b4d0b50a3f40",
+    "mtime": 1783915462.5153313,
+    "ast_hash": "677cca0b8030d2f2af037c2de912ec5e",
     "semantic_hash": ""
   },
   ".github/workflows/deploy-beta.yml": {
@@ -295,13 +295,13 @@
     "semantic_hash": ""
   },
   "server/src/reelvideo.ts": {
-    "mtime": 1783869976.9195147,
+    "mtime": 1783870779.7395127,
     "ast_hash": "a4b4d8524298d8ccf81425956191506c",
     "semantic_hash": ""
   },
   ".github/workflows/beta-check.yml": {
-    "mtime": 1783787216.7350066,
-    "ast_hash": "1bdc498e1ff31e80eb32a64be103f2e7",
+    "mtime": 1783871714.9667158,
+    "ast_hash": "d10eca54893b01b0ede34f2debd8798c",
     "semantic_hash": ""
   },
   "server/src/rss-resolver.ts": {
@@ -315,13 +315,18 @@
     "semantic_hash": ""
   },
   "server/src/tiktok.ts": {
-    "mtime": 1783869855.539515,
+    "mtime": 1783870779.7435129,
     "ast_hash": "4b32c33e3c00c834f56554dd77aeb5d1",
     "semantic_hash": ""
   },
   "server/src/youtube.ts": {
-    "mtime": 1783869834.351515,
+    "mtime": 1783870779.7435129,
     "ast_hash": "3b455dec07ac0d5a37f390d0766fac25",
+    "semantic_hash": ""
+  },
+  "server/src/metrics.ts": {
+    "mtime": 1783915386.331331,
+    "ast_hash": "5c7fa451228c4873df16ce3c066440ba",
     "semantic_hash": ""
   }
 }
