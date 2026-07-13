@@ -34,6 +34,7 @@ import { publishPostToChannels, alreadySentNetworks, startReelPublishJob, reelPu
 import { startLifecycleWorker } from "./lifecycle.js";
 import { startDigest } from "./digest.js";
 import { startMetrics, networkBenchmarks } from "./metrics.js";
+import { startDiary } from "./diary.js";
 import { generateImageForPost, imageProviders, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto } from "./images.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername } from "./tgbot.js";
 
@@ -724,7 +725,7 @@ app.post("/api/materials/:id/series", async (req: any, reply) => {
   const m = await one<{ id: string; transcript: string; origin: string }>(`select id, transcript, origin from source where id=$1 and workspace_id=$2`, [req.params.id, ws]);
   if (!m) return reply.code(404).send({ error: "матеріал не знайдено" });
   try {
-    const mode = m.origin === "rss" ? "signal" as const : (m.origin === "manual" || m.origin === "idea") ? "story" as const : undefined;
+    const mode = m.origin === "rss" ? "signal" as const : (m.origin === "manual" || m.origin === "idea" || m.origin === "diary") ? "story" as const : undefined;
     const takes = await extractIdeasFromText(ws, m.transcript, 6, undefined, mode);
     if (!takes.length) return reply.code(500).send({ error: "не вдалося витягнути тейки з матеріалу" });
     const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [m.id]);
@@ -1752,7 +1753,7 @@ app.post("/api/materials/:id/archive", async (req: any, reply) => {
 app.post("/api/materials/:id/ideas", async (req: any, reply) => {
   const m = await one<{ transcript: string; origin: string }>(`select transcript, origin from source where id=$1 and workspace_id=$2`, [req.params.id, req.user.workspace_id]);
   if (!m) return reply.code(404).send({ error: "матеріал не знайдено" });
-  const mode = m.origin === "rss" ? "signal" as const : (m.origin === "manual" || m.origin === "idea") ? "story" as const : undefined;
+  const mode = m.origin === "rss" ? "signal" as const : (m.origin === "manual" || m.origin === "idea" || m.origin === "diary") ? "story" as const : undefined;
   try { const ideas = await extractIdeasFromText(req.user.workspace_id, m.transcript, Number(req.body?.count) || 6, Array.isArray(req.body?.rubrics) ? req.body.rubrics : undefined, mode); return { ok: true, ideas }; }
   catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
@@ -2236,6 +2237,7 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
   startLifecycleWorker();
   startDigest();
   startMetrics();
+  startDiary();
   initTelegramBot();
   // одноразово полагодити залишкові iPhone HEIF -> JPEG (у фоні; ідемпотентно)
   convertAllHeif().then((n) => { if (n) app.log.info(`HEIF→JPEG конвертовано: ${n}`); }).catch((e: any) => app.log.error("convertAllHeif: " + e.message));

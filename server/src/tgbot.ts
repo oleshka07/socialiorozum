@@ -6,9 +6,10 @@ import { env } from "./env.js";
 import { q, one } from "./db.js";
 import * as tg from "./telegram.js";
 import { logEvent } from "./log.js";
-import { generatePostsOnePass, buildLiteSkeleton, rewritePost, suggestDevelopment, reelsScript } from "./pipeline.js";
+import { generatePostsOnePass, buildLiteSkeleton, rewritePost, suggestDevelopment, reelsScript, sliceToReels, extractIdeasFromText } from "./pipeline.js";
 import { publishPostToChannels } from "./publisher.js";
 import { sendDigestNow } from "./digest.js";
+import { isDiaryPending, appendDiaryText, attachDiaryMedia, transcribeVoice, skipDiaryToday, sendDiaryNow, weekDiaryText } from "./diary.js";
 
 let BOT_ID = 0;
 let BOT_USERNAME = env.telegram.botUsername;
@@ -164,7 +165,7 @@ export async function handleUpdate(update: any): Promise<void> {
         if (row) {
           await q(`update tg_connect set tg_user_id=$2 where code=$1`, [code, fromId]);
           await setOwner(fromId, row.workspace_id, chatId);
-          await tg.sendMessage(token, chatId, "Вітаю! 🤝 Я тепер твій контент-помічник.\n\n• Надішли будь-яку думку — збережу як ідею в Банк.\n• /idea — твої ідеї, зробити з них пост у 1 тап.\n\nЩоб публікувати у свій канал: додай мене АДМІНОМ у канал і перешли сюди будь-який пост із нього.");
+          await tg.sendMessage(token, chatId, "Вітаю! 🤝 Я тепер твій контент-помічник.\n\n• Надішли будь-яку думку — збережу як ідею в Банк.\n• /idea — твої ідеї, зробити з них пост у 1 тап.\n• 📔 Двічі на день спитаю, що відбувалося: відповідай текстом, ГОЛОСОМ, фото чи відео — усе ляже в щоденник і стане живим джерелом постів. /diary — спитати зараз.\n\nЩоб публікувати у свій канал: додай мене АДМІНОМ у канал і перешли сюди будь-який пост із нього.");
           return;
         }
       }
@@ -188,6 +189,43 @@ export async function handleUpdate(update: any): Promise<void> {
       return;
     }
 
+    // /diary — питання щоденника негайно (перевірка без очікування 13:00/20:00)
+    if (text.toLowerCase().startsWith("/diary")) {
+      const ws = await ownerWorkspace(fromId);
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio."); return; }
+      await sendDiaryNow(ws, chatId);
+      return;
+    }
+
+    // 🎙 голосове → Whisper → запис у щоденник (голос = завжди щоденник: надиктовані історії дня)
+    if (msg.voice?.file_id) {
+      const ws = await ownerWorkspace(fromId);
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio."); return; }
+      try {
+        const f = await tg.getFileBuffer(token, msg.voice.file_id);
+        const heard = await transcribeVoice(f.buffer, "voice.ogg");
+        await appendDiaryText(ws, chatId, heard, true);
+      } catch (e: any) { await tg.sendMessage(token, chatId, "⚠️ " + String(e.message).slice(0, 200)); }
+      return;
+    }
+
+    // 📎 фото/відео → галерея з міткою «щоденник» + привʼязка до запису дня
+    const media = msg.photo?.length ? { fileId: msg.photo[msg.photo.length - 1].file_id, mime: "image/jpeg", name: "diary.jpg", size: msg.photo[msg.photo.length - 1].file_size }
+      : msg.video?.file_id ? { fileId: msg.video.file_id, mime: msg.video.mime_type || "video/mp4", name: "diary.mp4", size: msg.video.file_size }
+      : msg.video_note?.file_id ? { fileId: msg.video_note.file_id, mime: "video/mp4", name: "diary-note.mp4", size: msg.video_note.file_size }
+      : null;
+    if (media) {
+      const ws = await ownerWorkspace(fromId);
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio."); return; }
+      if ((media.size || 0) > 19.5 * 1024 * 1024) { await tg.sendMessage(token, chatId, "⚠️ Telegram віддає ботам файли лише до 20 МБ. Закороти відео або завантаж його через застосунок (Матеріали → медіа)."); return; }
+      try { await attachDiaryMedia(ws, chatId, (await tg.getFileBuffer(token, media.fileId)).buffer, media.mime, media.name, msg.caption); }
+      catch (e: any) {
+        const friendly = /too big/i.test(String(e.message)) ? "файл понад 20 МБ - Telegram не віддає його ботам. Закороти відео або завантаж через застосунок." : String(e.message).slice(0, 200);
+        await tg.sendMessage(token, chatId, "⚠️ " + friendly);
+      }
+      return;
+    }
+
     // переслали пост із каналу -> підключення каналу (як було)
     if (msg.forward_from_chat && msg.forward_from_chat.type === "channel") {
       await tg.sendMessage(token, chatId, await attachChannel(fromId, msg.forward_from_chat.id, msg.forward_from_chat.title));
@@ -198,15 +236,16 @@ export async function handleUpdate(update: any): Promise<void> {
       try { const chat = await tg.getChat(token, text); if (chat.type === "channel") { await tg.sendMessage(token, chatId, await attachChannel(fromId, chat.id, chat.title || text)); return; } } catch { /* не канал */ }
     }
 
-    // будь-який інший текст -> ідея в Банк
+    // будь-який інший текст: відповідь на відкрите питання щоденника → запис дня; інакше → ідея в Банк
     if (text && !text.startsWith("/")) {
       const ws = await ownerWorkspace(fromId);
       if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio (кнопка «Підключити наш бот»), тоді я збережу твої ідеї."); return; }
+      if (await isDiaryPending(ws)) { await appendDiaryText(ws, chatId, text); return; }
       await captureIdea(ws, chatId, text);
       return;
     }
 
-    await tg.sendMessage(token, chatId, "Надішли думку — збережу як ідею 💡. /idea — твої ідеї.");
+    await tg.sendMessage(token, chatId, "Надішли думку — збережу як ідею 💡. /idea — твої ідеї, /diary — запис у щоденник.");
   } catch (e: any) { await logEvent("error", "tgbot", "update: " + e.message); }
 }
 
@@ -241,6 +280,82 @@ async function handleCallback(cbq: any): Promise<void> {
       await tg.answerCallbackQuery(token, cbq.id, "Генерую пост…");
       const p = await ideaToPost(ws, data.slice("idea_post:".length));
       await tg.sendMessage(token, chatId, `✅ Чернетка готова:\n\n${p.content.slice(0, 3500)}\n\nОпублікувати, переробити чи докрутити в застосунку (фото, час)?`, p.id ? draftButtons(p.id) : undefined);
+      return;
+    }
+    // ---- 📔 щоденник ----
+    if (data === "dnone") {
+      await skipDiaryToday(ws);
+      await tg.answerCallbackQuery(token, cbq.id, "Ок, сьогодні пропускаємо 🙌");
+      const mid = cbq.message?.message_id;
+      if (mid) await tg.editMessageText(token, chatId, mid, "📔 Сьогодні без запису 🙌 Побачимось завтра.");
+      return;
+    }
+    if (data.startsWith("dpost:")) {
+      // запис дня → готова чернетка поста (той самий Lite-шлях, що й у матеріалів)
+      await tg.answerCallbackQuery(token, cbq.id, "Генерую пост із щоденника…");
+      const src = await one<{ id: string; transcript: string }>(`select id, transcript from source where id=$1 and workspace_id=$2 and origin='diary'`, [data.slice("dpost:".length), ws]);
+      if (!src || !(src.transcript || "").trim()) { await tg.sendMessage(token, chatId, "Запис порожній або не знайдений."); return; }
+      const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src.id]);
+      await generatePostsOnePass(run!.id, 1);
+      const post = await one<{ id: string; content: string }>(`select id, content from post where run_id=$1 and stage='final' limit 1`, [run!.id]);
+      if (!post) { await tg.sendMessage(token, chatId, "Не вдалося згенерувати - спробуй у застосунку (Матеріали → 📔)."); return; }
+      await tg.sendMessage(token, chatId, `✅ Чернетка з твого дня:\n\n${post.content.slice(0, 3500)}`, draftButtons(post.id));
+      return;
+    }
+    if (data.startsWith("dideas:")) {
+      // запис дня → тейки Розвідника (story-режим: 7 типів кутів) → Банк ідей
+      await tg.answerCallbackQuery(token, cbq.id, "Витягую ідеї з запису…");
+      const src = await one<{ transcript: string }>(`select transcript from source where id=$1 and workspace_id=$2 and origin='diary'`, [data.slice("dideas:".length), ws]);
+      if (!src || !(src.transcript || "").trim()) { await tg.sendMessage(token, chatId, "Запис порожній або не знайдений."); return; }
+      const ideas = await extractIdeasFromText(ws, src.transcript, 5, undefined, "story");
+      if (!ideas.length) { await tg.sendMessage(token, chatId, "Не знайшов виразних кутів - докинь у запис ще деталей."); return; }
+      for (const a of ideas)
+        await q(`insert into idea_bank(workspace_id, text, angle, origin) values($1,$2,$3,'ai')`, [ws, a.idea.slice(0, 500), (a.angle || "").slice(0, 300) || null]);
+      await tg.sendMessage(token, chatId,
+        `💡 З твого дня (уже в Банку ідей):\n\n${ideas.map((a, i) => `${i + 1}. ${a.idea}${a.angle ? ` (${a.angle})` : ""}`).join("\n")}`,
+        [[{ text: "✨ Зробити пост з ідеї", data: "idea_list" }]]);
+      return;
+    }
+    if (data.startsWith("dreel:")) {
+      await tg.answerCallbackQuery(token, cbq.id, "Пишу сценарій рілса з запису…");
+      const src = await one<{ id: string; transcript: string }>(`select id, transcript from source where id=$1 and workspace_id=$2 and origin='diary'`, [data.slice("dreel:".length), ws]);
+      if (!src || !(src.transcript || "").trim()) { await tg.sendMessage(token, chatId, "Запис порожній або не знайдений."); return; }
+      try {
+        const script = await reelsScript(ws, src.transcript, 30);
+        const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src.id]);
+        await q(`insert into post(run_id, stage, content, format) values($1,'final',$2,'reel')`, [run!.id, script]);
+        await tg.sendMessage(token, chatId, "🎬 Сценарій рілса з твого дня в Чорновиках. Зібрати відео - кнопка 🎞 на картці.", [[{ text: "🌐 Відкрити застосунок", url: env.appBaseUrl + "/app" }]]);
+      } catch (e: any) { await tg.sendMessage(token, chatId, "Не вдалося: " + String(e.message).slice(0, 200)); }
+      return;
+    }
+    if (data.startsWith("dbroll:")) {
+      // відео дня → персональна b-roll бібліотека (вставки з автором у зібраних рілсах)
+      const r = await q(`update media_asset set source='broll' where id=$1 and workspace_id=$2 and kind='video' returning id`, [data.slice("dbroll:".length), ws]);
+      await tg.answerCallbackQuery(token, cbq.id, r.length ? "Додано у вставки для рілсів ✓" : "Відео не знайдено");
+      return;
+    }
+    if (data === "dweek_ideas" || data === "dweek_reels") {
+      // недільна петля: весь тиждень щоденника → серія ідей або нарізка на рілси
+      await tg.answerCallbackQuery(token, cbq.id, data === "dweek_ideas" ? "Розбираю тиждень на ідеї…" : "Нарізаю тиждень на рілси…");
+      const weekText = await weekDiaryText(ws);
+      if (weekText.length < 200) { await tg.sendMessage(token, chatId, "Записів за тиждень замало - продовжуй вести щоденник 📔"); return; }
+      const anchor = await one<{ id: string }>(`select id from source where workspace_id=$1 and origin='diary' order by created_at desc limit 1`, [ws]);
+      if (data === "dweek_ideas") {
+        const ideas = await extractIdeasFromText(ws, weekText, 6, undefined, "story");
+        for (const a of ideas)
+          await q(`insert into idea_bank(workspace_id, text, angle, origin) values($1,$2,$3,'ai')`, [ws, a.idea.slice(0, 500), (a.angle || "").slice(0, 300) || null]);
+        await tg.sendMessage(token, chatId, ideas.length
+          ? `💡 Тиждень розібрано на ${ideas.length} ідей (уже в Банку):\n\n${ideas.map((a, i) => `${i + 1}. ${a.idea}`).join("\n")}`
+          : "Не знайшов виразних кутів у тижні.", [[{ text: "✨ Зробити пост з ідеї", data: "idea_list" }]]);
+      } else {
+        try {
+          const scripts = await sliceToReels(ws, weekText, 30);
+          if (!scripts.length || !anchor) { await tg.sendMessage(token, chatId, "Не вдалося нарізати - спробуй у застосунку."); return; }
+          const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [anchor.id]);
+          for (const sc of scripts) await q(`insert into post(run_id, stage, content, format) values($1,'final',$2,'reel')`, [run!.id, sc]);
+          await tg.sendMessage(token, chatId, `🎞 Тиждень нарізано: ${scripts.length} сценаріїв рілсів у Чорновиках, у порядку публікації.`, [[{ text: "🌐 Відкрити застосунок", url: env.appBaseUrl + "/app" }]]);
+        } catch (e: any) { await tg.sendMessage(token, chatId, "Не вдалося: " + String(e.message).slice(0, 200)); }
+      }
       return;
     }
     if (data.startsWith("dev:")) {

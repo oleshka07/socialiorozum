@@ -86,5 +86,18 @@ export async function sendPhoto(token: string, chatId: string, photoUrl: string,
     throw e;
   }
 }
+// завантажити файл, надісланий боту (голос/фото/відео щоденника). Bot API віддає файли до 20 МБ -
+// на більших getFile повертає "file is too big" (обробляється у викликача дружнім повідомленням).
+export async function getFileBuffer(token: string, fileId: string): Promise<{ buffer: Buffer; path: string }> {
+  const f = await tg<{ file_path?: string }>(token, "getFile", { file_id: fileId });
+  if (!f.file_path) throw new Error("файл недоступний");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  try {
+    const res = await fetch(`${BASE}/file/bot${token}/${f.file_path}`, { signal: controller.signal });
+    if (!res.ok) throw new Error(`download ${res.status}`);
+    return { buffer: Buffer.from(await res.arrayBuffer()), path: f.file_path };
+  } finally { clearTimeout(timer); }
+}
 export const setWebhook = (token: string, url: string, secretToken?: string) =>
   tg(token, "setWebhook", { url, allowed_updates: ["message", "channel_post", "my_chat_member", "callback_query"], ...(secretToken ? { secret_token: secretToken } : {}) });

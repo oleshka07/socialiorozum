@@ -6,6 +6,7 @@ import { logEvent } from "./log.js";
 import { nextInsight } from "./pipeline.js";
 import { liveSend } from "./tgbot.js";
 import { networkBenchmarks } from "./metrics.js";
+import { weekDiary } from "./diary.js";
 import * as threads from "./threads.js";
 
 // «Мультиплікатор ← аналітика»: чи вистрілив хтось із нещодавніх Threads-постів (перегляди ≥1.5× середнього решти).
@@ -82,7 +83,21 @@ async function sendDigest(ws: string, chatId: string, localDate: string): Promis
       lines.push(`\n🎯 ${d.count} чернетки поспіль не вели до цілі. Що відводить від фокуса?`);
   } catch { /* не критично */ }
 
+  // 📔 недільна петля: тиждень щоденника → серія ідей / нарізка на рілси
+  let weekD: { count: number; chars: number } | null = null;
+  if (new Date(localDate + "T12:00:00Z").getUTCDay() === 0) {
+    try { const w = await weekDiary(ws); if (w.count > 0) { weekD = w; lines.push(`\n📔 За тиждень ${w.count} запис(ів) щоденника. Перетворимо на контент?`); } }
+    catch { /* не критично */ }
+  }
   const buttons: { text: string; data?: string; url?: string }[][] = [];
+  if (weekD) {
+    const row: { text: string; data: string }[] = [{ text: "💡 Ідеї з тижня", data: "dweek_ideas" }];
+    try {
+      const pro = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='pro'`, [ws]);
+      if (pro?.content === "1" && weekD.chars > 800) row.push({ text: "🎞 Нарізка на рілси", data: "dweek_reels" });
+    } catch { /* без другої кнопки */ }
+    buttons.push(row);
+  }
   if (breakout) {
     const row: { text: string; data: string }[] = [{ text: "🔥 5 кутів продовження", data: `dev:${breakout.postId}` }];
     // перепакування хіта в інший формат - рілс (ПРО-трек)
