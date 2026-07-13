@@ -455,6 +455,17 @@ create table if not exists tiktok_publish (
 );
 create index if not exists idx_ttpub_post on tiktok_publish(post_id);
 
+-- Метрики опублікованих постів (останній знімок по мережі) - фундамент бенчмарків «×N до власної норми»:
+-- медіана переглядів за 75-90 днів = норма мережі, кожен пост звітується множником до неї.
+create table if not exists post_metric (
+  post_id    uuid not null references post(id) on delete cascade,
+  network    text not null,                  -- threads / facebook / instagram
+  views      int  not null default 0,        -- перегляди/охоплення (по мережі: views | post_impressions | reach)
+  likes      int  not null default 0,
+  fetched_at timestamptz not null default now(),
+  primary key (post_id, network)
+);
+
 -- підключення каналу до СПІЛЬНОГО Telegram-бота: код deep-link -> воркспейс, + хто почав діалог
 create table if not exists tg_connect (
   code         text primary key,

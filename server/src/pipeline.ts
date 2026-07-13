@@ -47,6 +47,21 @@ const HOOK_RULE = "\n\nГачки-кліше ЗАБОРОНЕНІ (штучна 
 // Компактний каталог AI-слідів для української («Антидетектор»): детерміновані заборони поверх deai_rules юзера.
 const ANTI_AI_RULE = "\n\nAI-сліди, які ЗАБОРОНЕНО вживати: конструкція «не просто X, а Y»; канцелярит («здійснювати», «забезпечувати», «варто зазначити», «наразі», «даний»); пусті вступи («у сучасному світі», «давайте розберемось», «як відомо»); фінальні підсумки («отже, підсумуємо», «сподіваюсь, було корисно»); симетричні парні речення; слова-паразити «ключовий», «важливо розуміти», «варто памʼятати»; три однорідні прикметники поспіль.";
 
+// «Сходи офферів» + принцип «знання безкоштовно - продаємо виконання»: CTA обирається за теплотою
+// поста і веде на відповідну сходинку, а продає історія клієнта з результатом, не пряме «купи».
+export function offerLadder(s: Record<string, string>): string {
+  const rungs: string[] = [];
+  if ((s.offer_low || "").trim()) rungs.push(`низький поріг: ${s.offer_low.trim().slice(0, 150)}`);
+  if ((s.offer_mid || "").trim()) rungs.push(`середній: ${s.offer_mid.trim().slice(0, 150)}`);
+  if ((s.offer_high || "").trim()) rungs.push(`преміум: ${s.offer_high.trim().slice(0, 150)}`);
+  if (!rungs.length) return "";
+  return `\n\nСХОДИ ОФФЕРІВ бренду: ${rungs.join(" → ")}. Правила продажу: заклик відповідає теплоті поста (холодний освітній → лід-магніт чи підписка; теплий → нижча сходинка; гарячий кейс → вища); знання віддаємо безкоштовно ПОВНІСТЮ - продаємо виконання, супровід і глибину; продає конкретна історія клієнта з результатом і цифрами + мʼякий заклик («як Х отримав Y - повна система в …»), НІКОЛИ не голе «купуй». Продажний пуш без цінності витрачає довіру.`;
+}
+
+// Зняття заперечень (VSL-принцип): читач весь час скептичний («чому вірити? а в моєму випадку?»)
+// - хороший пост знімає головний скепсис у самому тексті, а не лишає його на коментарі.
+const OBJECTION_RULE = "\n\nСкепсис читача: подумки назви ГОЛОВНЕ заперечення аудиторії до цієї тези («чому цьому вірити?», «а в моєму випадку спрацює?», «що мені з цього?») і зніми його прямо в тексті - фактом, прикладом чи цифрою. Без фраз на кшталт «ви можете подумати» чи «багато хто скаже».";
+
 // «Директор»: головна бізнес-ціль контенту - фільтр «веде до цілі чи контент заради контенту».
 export const GOAL_LABELS: Record<string, string> = {
   money: "продажі та гроші (контент має підводити до покупки)",
@@ -75,6 +90,24 @@ export function voicePassport(s: Record<string, string>): string {
 // чи відкалібрований голос узагалі (для чесного бейджа в UI)
 export function voiceCalibrated(s: Record<string, string>): boolean {
   return !!((s.tone_of_voice || "").trim() || (s.voice_examples || "").trim());
+}
+
+// «ДНК бренду»: бренд = навмисне парування асоціацій. Юзер задає, з чим бренд МАЄ асоціюватись
+// і з чим НІКОЛИ (анти-список - головний захист бренду), + історію бренду (каталіст / переконання /
+// доказ / переломні моменти) як ЄДИНЕ джерело особистих фактів - щоб AI не вигадував біографію.
+// Інʼєктується поруч із voicePassport у точки генерації.
+export function brandDna(s: Record<string, string>): string {
+  const parts: string[] = [];
+  if ((s.brand_assoc || "").trim())
+    parts.push(`бренд навмисно асоціюємо з: ${s.brand_assoc.trim().slice(0, 300)} - кожен пост має підсилювати ці асоціації`);
+  if ((s.brand_antiassoc || "").trim())
+    parts.push(`бренд НІКОЛИ не асоціюємо з: ${s.brand_antiassoc.trim().slice(0, 300)} - жодних таких тем, прикладів, порівнянь, жартів чи тону`);
+  const dna = parts.length ? `\n\nДНК БРЕНДУ: ${parts.join("; ")}.` : "";
+  const story = (s.brand_story || "").trim();
+  const st = story
+    ? `\n\nІСТОРІЯ БРЕНДУ (єдине джерело особистих фактів автора - шлях, невдачі, переломні моменти; НІКОЛИ не вигадуй подій, яких нема тут чи у вхідному матеріалі):\n${story.slice(0, 1200)}`
+    : "";
+  return dna + st;
 }
 
 // ХАРДКОД (не редагується юзером): контекст бренду + контракт формату відповіді.
@@ -450,7 +483,7 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
   const fmtRule = fmtLines ? `\n\nФормат, який обрав користувач для конкретних мереж (ПРІОРИТЕТ над плейбуком):${fmtLines}` : "";
   const system = "Адаптуй пост під кожну вказану соцмережу, зберігаючи зміст, голос бренду й живу людську мову." +
     (brief ? `\n\n<strategy_brief>\n${brief}\n</strategy_brief>` : "") +
-    tone + deai + playbooks + critique + goalRule(s) + ctaRule + structRules + fmtRule +
+    tone + deai + playbooks + critique + goalRule(s) + ctaRule + offerLadder(s) + structRules + fmtRule +
     "\n\nЖОРСТКІ ліміти довжини версій (НЕ перевищуй, це технічні ліміти мереж): telegram 1024, threads 500, instagram 2200, facebook 2000, linkedin 3000 символів." +
     NO_DASH_RULE + ANTI_AI_RULE + `\n\nПоверни ЛИШЕ валідний JSON-обʼєкт виду {${want.map((c) => `"${c}":"…"`).join(",")}}. Мова: ${lang}.`;
   const raw = await chat(v2 ? "openai/gpt-4o" : "openai/gpt-4o-mini", system, `Пост:\n---\n${content}`, { workspaceId, step: "format" });
@@ -499,20 +532,22 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
       (brief ? `\n\n<strategy_brief>\nДжерело правди - не суперечити:\n${brief}\n</strategy_brief>` : "") +
       "\n\n<brand>" +
       (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") +
-      (s.tone_of_voice ? `\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") + voicePassport(s) +
+      (s.tone_of_voice ? `\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) +
       (s.deai_rules ? `\nПравила «без AI»: ${s.deai_rules}` : "") +
       "\n</brand>" +
       (examples ? `\n\n<voice_examples>\nРЕАЛЬНІ пости автора - еталон голосу. Відтворюй ритм, лексику, звертання й розмір абзаців САМЕ як тут, але НЕ копіюй зміст:\n---\n${examples}\n---\n</voice_examples>` : "") +
-      (s.primary_goal && GOAL_LABELS[s.primary_goal] ? `\n\n<business_goal>\nГоловна бізнес-ціль контенту: ${GOAL_LABELS[s.primary_goal]}. Кожен пост має конкретно просувати до неї - жодного контенту заради контенту.\n</business_goal>` : "") +
+      (s.primary_goal && GOAL_LABELS[s.primary_goal] ? `\n\n<business_goal>\nГоловна бізнес-ціль контенту: ${GOAL_LABELS[s.primary_goal]}. Кожен пост має конкретно просувати до неї - жодного контенту заради контенту.${offerLadder(s)}\n</business_goal>` : offerLadder(s)) +
       "\n\n<rules>" +
       "\n- Кожен пост ОДРАЗУ фінальний: жива людська мова, без канцеляризмів, без «варто зазначити/у сучасному світі», без шаблонних списків заради списків." +
-      "\n- Фреймворк під стадію воронки поста: AIDA або PAS - холодна аудиторія (awareness); BAB - короткі залучальні пости; FAB/4P - тепла аудиторія (consideration/conversion)." +
+      "\n- Фреймворк під стадію воронки поста: AIDA або PAS - холодна аудиторія (awareness); BAB - короткі залучальні пости; FAB/4P - тепла аудиторія (consideration/conversion); СТОРІ - для постів-історій: гачок з кульмінації → проблема зі ставками (читач бачить у ній себе) → шлях з «брудною серединою» (реальні сумніви, помилки, невизначеність - НЕ суцільні перемоги) → урок з конкретними кроками → мʼякий CTA." +
+      "\n- Конкретика замість епітетів: не «я працьовитий», а історія чи цифра, що це ДОВОДИТЬ (не «винахідливий», а «стіл зробив із дверей»). Прогрес резонує сильніше за перфектність; невдачі будують довіру сильніше за перемоги - але бери їх ЛИШЕ з матеріалу чи історії бренду, не вигадуй." +
       "\n- Гачок (перший рядок вирішує все): подумки склади 3 варіанти різних типів (цікавісний розрив, патерн-перебій, контр-теза, попередження про помилку, число/список, пряма обіцянка) і залиш у пості НАЙСИЛЬНІШИЙ." +
       "\n- Один чіткий мʼякий заклик на пост, не більше." +
       rubricsText +
       NO_DASH_RULE.replace(/^\n+/, "\n- ") +
       HOOK_RULE.replace(/^\n+/, "\n- ") +
       ANTI_AI_RULE.replace(/^\n+/, "\n- ") +
+      OBJECTION_RULE.replace(/^\n+/, "\n- ") +
       "\n</rules>" +
       `\n\n<task>\nЗгенеруй рівно ${n} різних постів за вхідним матеріалом.${ideasText}\nПеред видачею САМО-КРИТИКА кожного поста за 5 критеріями: (а) гачок зупиняє скрол; (б) голос як у зразках; (в) один чіткий CTA; (г) нативний формат; (д) реальна користь для читача. Усе, що слабке, перепиши до видачі.\n</task>` +
       `\n\n<output_format>\n${outputFormat}\n</output_format>`;
@@ -524,9 +559,9 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
     "Ти досвідчений SMM-копірайтер. За вхідним матеріалом нижче згенеруй готові до публікації пости. " +
     "Кожен пост ОДРАЗУ фінальний: у голосі бренду, живою людською мовою без ознак AI (без канцеляризмів, без «варто зазначити/у сучасному світі», без шаблонних списків заради списків), з чітким гачком, користю та мʼяким закликом." +
     (s.marketing_context ? `\n\nБренд і аудиторія: ${s.marketing_context}` : "") +
-    (s.tone_of_voice ? `\n\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") + voicePassport(s) +
+    (s.tone_of_voice ? `\n\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) +
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
-    rubricsText + ideasText + goalRule(s) + HOOK_RULE + ANTI_AI_RULE +
+    rubricsText + ideasText + goalRule(s) + offerLadder(s) + HOOK_RULE + ANTI_AI_RULE + OBJECTION_RULE +
     NO_DASH_RULE + `\n\nЗгенеруй рівно ${n} різних постів. ${outputFormat}`;
   return { system, model: "openai/gpt-4o" };
 }
@@ -629,23 +664,32 @@ export async function buildLiteSkeleton(workspaceId: string, horizonDays: number
   }
   days.sort((a, b) => a - b);
   const slots: { day: number; rubric: string; theme: string; hook: string }[] = [];
+  const s = await loadSettings(workspaceId);
+  // Контент-мікс (курс-фреймворки 80/20 і 70/20/10):
+  //  - ~20% слотів «Особисте» (interest stacking): інтереси автора поза нішею - точки дотику з аудиторією;
+  //  - ~10% слотів «🧪 експеримент»: формат/тема, яких бренд ще не робив (без експериментів - плато).
+  const interests = (s.brand_interests || "").trim();
   let bi = 0;
   for (const day of days) slots.push({ day, rubric: bag[bi++ % bag.length], theme: "", hook: "" });
+  const isInterest = (i: number) => !!interests && slots.length >= 5 && i % 5 === 2;
+  const isExperiment = (i: number) => slots.length >= 8 && i % 10 === 6 && !isInterest(i);
+  slots.forEach((x, i) => { if (isInterest(i)) x.rubric = "Особисте"; });
   // теми: ОДИН дешевий виклик; фолбек - рубрика (щоб ніколи не порожньо)
   if (slots.length) {
     try {
-      const s = await loadSettings(workspaceId);
       const lang = (s.output_language || "Українська").trim();
       const themes = Array.isArray(data.monthly_themes) ? data.monthly_themes.filter(Boolean).map(String) : [];
       const system = "Ти контент-стратег. Для кожного слота (рубрика задана) придумай коротку конкретну тему поста (до 12 слів) у ніші бренду." +
         (s.strategy_brief ? `\nБриф: ${s.strategy_brief.slice(0, 1500)}` : (s.marketing_context ? `\nНіша: ${s.marketing_context}` : "")) +
         (themes.length ? `\nОрієнтир тем: ${themes.slice(0, 10).join("; ")}` : "") +
+        (interests ? `\nСлоти з позначкою [ОСОБИСТЕ] - НЕ про нішу, а «людські» теми з інтересів автора (${interests.slice(0, 300)}): особистий погляд, історія чи спостереження, що робить автора живою людиною.` : "") +
+        "\nСлоти з позначкою [ЕКСПЕРИМЕНТ] - тема чи формат, яких бренд ще НЕ робив: незвичний кут, інший жанр подачі, сміливіша теза." +
         `\n\nПоверни ЛИШЕ валідний JSON-масив рівно з ${slots.length} рядків-тем, у тому ж порядку, що рубрики нижче. Мова: ${lang}.`;
-      const user = slots.map((x, i) => `${i + 1}. [${x.rubric}]`).join("\n");
+      const user = slots.map((x, i) => `${i + 1}. [${x.rubric}]${isInterest(i) ? " [ОСОБИСТЕ]" : ""}${isExperiment(i) ? " [ЕКСПЕРИМЕНТ]" : ""}`).join("\n");
       const raw = await chat(env.cheapModel, system, user, { workspaceId, step: "plan_themes" });
       const arr = extractJsonArray<any>(raw).map((x: any) => String(x?.theme || x || "").trim());
-      slots.forEach((x, i) => { x.theme = (arr[i] || "").slice(0, 300) || `${x.rubric}: ідея дня`; });
-    } catch { slots.forEach((x) => { x.theme = x.theme || `${x.rubric}: ідея дня`; }); }
+      slots.forEach((x, i) => { x.theme = ((isExperiment(i) ? "🧪 " : "") + ((arr[i] || "").slice(0, 300) || `${x.rubric}: ідея дня`)).slice(0, 300); });
+    } catch { slots.forEach((x, i) => { x.theme = x.theme || `${(isExperiment(i) ? "🧪 " : "")}${x.rubric}: ідея дня`; }); }
   }
   return slots;
 }
@@ -683,14 +727,14 @@ export async function extractIdeasFromText(workspaceId: string, text: string, co
   const lead = mode === "signal"
     ? "Це СТОРОННЯ новина/чужий матеріал («Сигнал»). Знайди, що бренд може сказати ВІД СЕБЕ з цього приводу: позиція, висновок, застосування для своєї аудиторії. Кожна ідея - ТЕЙК (власна думка), а не переказ. Еталон: «розповісти про нову модель ШІ» - шум; «нова модель вбиває відмовку „ШІ не вміє писати“ - ось що це означає для тих, хто досі не користується» - сигнал. ПЕРША ідея в списку = найшвидший виграш (що постити СЬОГОДНІ, поки гаряче)."
     : mode === "story"
-    ? "Це ВЛАСНИЙ кейс/думка автора («Історія»). Розклади на кути за П'ЯТЬМА ТИПАМИ (бери лише ті, що РЕАЛЬНО є в матеріалі, не натягуй): «урок» (висновок напряму - найочевидніший, тому ніколи не єдиний), «контрхід» (частина історії, що сперечається із загальноприйнятим у ніші), «фреймворк» (повторювана система з того, що сталося), «доказ» (історія як пруф тези), «релейтбл» (людський вразливий момент, що будує зв'язок сильніше за інформацію). Контрхід і фреймворк - найцінніші, шукай їх першими. НЕ вигадуй подій і деталей, яких автор не називав."
+    ? "Це ВЛАСНИЙ кейс/думка автора («Історія»). Розклади на кути за СІМОМА ТИПАМИ (бери лише ті, що РЕАЛЬНО є в матеріалі, не натягуй): «урок» (висновок напряму - найочевидніший, тому ніколи не єдиний), «контрхід» (частина історії, що сперечається із загальноприйнятим у ніші), «фреймворк» (повторювана система з того, що сталося), «доказ» (історія як пруф тези), «релейтбл» (людський вразливий момент, що будує зв'язок сильніше за інформацію), «шлях» (origin story: як автор до цього дійшов - найрелейтебельніший тип для холодної аудиторії, бо теперішній рівень автора не релейтбл, а шлях до нього - так), «провал» (реальна помилка + що вона коштувала + урок: вразливості довіряють більше, ніж перемогам; не соррі-сторі - обовʼязково з уроком, який читач забере собі). Контрхід і фреймворк - найцінніші, шукай їх першими. НЕ вигадуй подій і деталей, яких автор не називав."
     : "Знайди в матеріалі окремі контент-ідеї для соцмереж, кожна зі своїм кутом подачі. Перша ідея = найсильніша.";
   const system =
     "Ти контент-розвідник. Даєш ТЕЙК, а не тему. " + lead +
-    (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") +
+    (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") + brandDna(s) +
     goalRule(s) +
     (rubList ? `\nРубрики бренду: ${rubList}. Кожній ідеї признач НАЙБЛИЖЧУ рубрику з цього переліку.` : "") +
-    `\n\nЗнайди до ${Math.max(1, Math.min(10, count))} ідей. Для кожної: idea - суть одним реченням; angle - кут 2-4 словами${mode === "story" ? " (почни з типу: урок/контрхід/фреймворк/доказ/релейтбл)" : ""}; format - якнайкращий формат: "пост" | "карусель" | "рілс"; hook - чорновий перший рядок (з кульмінації, без кліше «СТОП/99% не знають»). Ранжуй за релевантністю цілі й аудиторії, не за гучністю. Поверни ЛИШЕ валідний JSON-масив: [{"idea":"…","angle":"…","format":"…","hook":"…","rubric":"назва рубрики"}]. Мова: ${lang}.`;
+    `\n\nЗнайди до ${Math.max(1, Math.min(10, count))} ідей. Для кожної: idea - суть одним реченням; angle - кут 2-4 словами${mode === "story" ? " (почни з типу: урок/контрхід/фреймворк/доказ/релейтбл/шлях/провал)" : ""}; format - якнайкращий формат: "пост" | "карусель" | "рілс"; hook - чорновий перший рядок (з кульмінації, без кліше «СТОП/99% не знають»). Ранжуй за релевантністю цілі й аудиторії, не за гучністю. Поверни ЛИШЕ валідний JSON-масив: [{"idea":"…","angle":"…","format":"…","hook":"…","rubric":"назва рубрики"}]. Мова: ${lang}.`;
   const raw = await chat(env.cheapModel, system, `Матеріал:\n---\n${(text || "").slice(0, 20000)}`, { workspaceId, step: "ideas" });
   let out: { idea: string; angle: string; hook: string; rubric: string; format?: string }[] = [];
   try {
@@ -785,7 +829,7 @@ export async function rewritePost(workspaceId: string, text: string, instruction
     : "Перепиши цей пост іншими словами, зберігаючи зміст і структуру, у голосі бренду й живою людською мовою (без ознак AI).";
   const system = task +
     (brief ? `\n\nСТРАТЕГІЧНИЙ БРИФ (тримай бренд): ${brief}` : "") +
-    (s.tone_of_voice ? `\n\nГолос бренду: ${s.tone_of_voice}` : "") + voicePassport(s) +
+    (s.tone_of_voice ? `\n\nГолос бренду: ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) +
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
     goalRule(s) + ANTI_AI_RULE +
     NO_DASH_RULE + `\n\nПоверни лише текст поста. Мова: ${lang}.`;
@@ -793,15 +837,18 @@ export async function rewritePost(workspaceId: string, text: string, instruction
 }
 
 // ---- «Директор»: вердикт, чи веде чернетка до головної бізнес-цілі ----
-export async function directorVerdict(workspaceId: string, content: string): Promise<{ verdict: string; reason: string; fix: string; sharper: string }> {
+export async function directorVerdict(workspaceId: string, content: string): Promise<{ verdict: string; reason: string; fix: string; sharper: string; trust: string; trustWhy: string }> {
   const s = await loadSettings(workspaceId);
   const goal = GOAL_LABELS[s.primary_goal || ""];
   if (!goal) throw new Error("Спершу вибери головну ціль контенту (розділ Стратегія → 🎯 Головна ціль)");
   const metric = (s.goal_metric || "").trim();
+  const anti = (s.brand_antiassoc || "").trim();
   const system = `Ти суворий контент-директор. Головна бізнес-ціль бренду: ${goal}.${metric ? ` Метрика і строк: ${metric.slice(0, 160)}.` : ""}` +
     (s.marketing_context ? `\nНіша й аудиторія: ${s.marketing_context.slice(0, 400)}` : "") +
+    (anti ? `\nЗАБОРОНЕНІ асоціації бренду: ${anti.slice(0, 300)}. Якщо пост зачіпає щось із цього (тема, приклад, порівняння, тон) - verdict "no" і назви, що саме.` : "") +
     "\nОціни чернетку ЧЕСНО: реально веде до цілі, частково, чи це «контент заради контенту». Скіл марний, якщо штампує «одобрено» на все. Ніколи не просто суди - автор має піти з дією." +
-    '\nПоверни ЛИШЕ валідний JSON: {"verdict":"yes"|"partial"|"no","reason":"одне речення чому","fix":"конкретна правка одним реченням","sharper":"ГОСТРІША ВЕРСІЯ: перепиши перший абзац поста так, щоб та сама ідея тягла до цілі сильніше (2-3 речення, голос збережи)"}. Мова: Українська.';
+    "\nДруга вісь - ДОВІРА: пост ДАЄ читачу цінність (будує довіру) чи лише ПРОСИТЬ і продає (витрачає довіру)? Довіра - валюта, що передує транзакції: продажний пуш без цінності шкодить бренду, навіть коли формально веде до цілі." +
+    '\nПоверни ЛИШЕ валідний JSON: {"verdict":"yes"|"partial"|"no","reason":"одне речення чому","fix":"конкретна правка одним реченням","sharper":"ГОСТРІША ВЕРСІЯ: перепиши перший абзац поста так, щоб та сама ідея тягла до цілі сильніше (2-3 речення, голос збережи)","trust":"builds"|"spends","trust_why":"одне речення: що пост дає читачу або чого просить, не давши"}. Мова: Українська.';
   const raw = await chat(env.cheapModel, system, `Чернетка:\n---\n${(content || "").slice(0, 4000)}`, { workspaceId, step: "director" });
   const o = extractJsonObject<any>(raw) || {};
   const verdict = ["yes", "partial", "no"].includes(o.verdict) ? o.verdict : "partial";
@@ -822,6 +869,8 @@ export async function directorVerdict(workspaceId: string, content: string): Pro
     reason: String(o.reason || "").slice(0, 300),
     fix: String(o.fix || "").slice(0, 300),
     sharper: String(o.sharper || "").slice(0, 600),
+    trust: o.trust === "spends" ? "spends" : "builds",
+    trustWhy: String(o.trust_why || "").slice(0, 300),
   };
 }
 
@@ -992,7 +1041,7 @@ export async function reelsScript(workspaceId: string, text: string, targetSec?:
     "\n- ТЕКСТ НА ЕКРАН: 3-5 ключових слів/фраз, які виносимо великими титрами в кадр (акценти, не субтитри)." +
     "\nФормат виводу рівно такий:\n🎬 СЦЕНАРІЙ REELS: <назва 3-5 слів>\n\nХУК (0-2с): <рядок>\n[візуал: <що в кадрі>]\n\nБІТ 1: <рядок>\n[візуал: <…>]\n(і так далі)\n\nCTA: <рядок>\n[візуал: <…>]\n\nТЕКСТ НА ЕКРАН: <слова через ·>" +
     (brief ? `\n\nСТРАТЕГІЧНИЙ БРИФ: ${brief.slice(0, 1200)}` : (s.marketing_context ? `\n\nБренд і аудиторія: ${s.marketing_context}` : "")) +
-    (s.tone_of_voice ? `\nГолос бренду: ${s.tone_of_voice.slice(0, 600)}` : "") + voicePassport(s) +
+    (s.tone_of_voice ? `\nГолос бренду: ${s.tone_of_voice.slice(0, 600)}` : "") + voicePassport(s) + brandDna(s) +
     goalRule(s) + HOOK_RULE + ANTI_AI_RULE + NO_DASH_RULE +
     `\n\nПоверни лише сценарій. Мова: ${lang}.`;
   return chat("openai/gpt-4o", system, `Матеріал:\n---\n${(text || "").slice(0, 12000)}`, { workspaceId, step: "reels" });
@@ -1007,6 +1056,29 @@ export async function reelCaption(workspaceId: string, script: string): Promise<
     `\n\nПоверни лише підпис. Мова: ${lang}.`;
   const raw = await chat(env.cheapModel, system, (script || "").slice(0, 3000), { workspaceId, step: "reel_caption" });
   return raw.trim().slice(0, 1800);
+}
+
+// ---- «Що спрацювало»: розбір топ-постів за ×N → 1-2 повторювані патерни → готове правило голосу ----
+// Принцип: вчимось ЛИШЕ на топ-контенті і беремо тільки те, що повторюється у ВСІХ хітах (решта - шум).
+export async function topPatterns(workspaceId: string): Promise<{ patterns: { pattern: string; evidence: string }[]; rule: string; sample: number }> {
+  const { networkBenchmarks } = await import("./metrics.js");
+  const { posts } = await networkBenchmarks(workspaceId);
+  const top = posts.filter((p) => p.mult >= 1.2).slice(0, 8);
+  if (top.length < 3) throw new Error("Замало даних: потрібно щонайменше 3 пости з переглядами вище норми. Статистика збирається автоматично - зазирни за кілька днів.");
+  const s = await loadSettings(workspaceId);
+  const system = "Ти аналітик контенту. Нижче - ТОП-пости бренду за переглядами відносно ВЛАСНОЇ норми (×N до медіани мережі). " +
+    "Знайди 1-2 патерни, що повторюються у ВСІХ або майже всіх цих постах: тип гачка, структура, тема, тон, довжина, формат подачі. " +
+    "Те, що трапляється лише в одному пості - шум, ігноруй. Не хвали і не переказуй - тільки повторювані причини успіху." +
+    (s.marketing_context ? `\nНіша бренду: ${s.marketing_context.slice(0, 300)}` : "") +
+    '\n\nПоверни ЛИШЕ валідний JSON: {"patterns":[{"pattern":"патерн одним реченням","evidence":"як саме він проявляється в цих постах"}],"rule":"готова інструкція копірайтеру одним рядком (до 25 слів), щоб відтворювати цей патерн у майбутніх постах"}. Мова: Українська.';
+  const user = top.map((p, i) => `${i + 1}. ×${p.mult} (${p.network}, ${p.views} переглядів):\n${p.content}`).join("\n\n---\n\n");
+  const raw = await chat("openai/gpt-4o", system, user.slice(0, 14000), { workspaceId, step: "top_patterns" });
+  const o = extractJsonObject<any>(raw) || {};
+  const patterns = (Array.isArray(o.patterns) ? o.patterns : []).slice(0, 3).map((x: any) => ({
+    pattern: String(x?.pattern || "").slice(0, 300), evidence: String(x?.evidence || "").slice(0, 400),
+  })).filter((x: any) => x.pattern);
+  if (!patterns.length) throw new Error("не вдалося виділити патерни - спробуй пізніше");
+  return { patterns, rule: String(o.rule || "").slice(0, 200), sample: top.length };
 }
 
 // ---- «Мультиплікатор», режим «Продовження»: пост зайшов → 5 кутів розвитку теми ----
@@ -1089,7 +1161,7 @@ export async function sliceToReels(workspaceId: string, text: string, targetSec?
     "\nФормат КОЖНОГО сценарію рівно такий (розділяй сценарії рядком ===):" +
     "\n🎬 СЦЕНАРІЙ REELS: <назва 3-5 слів> (день N)\nЧому сам по собі: <1 речення>\n\nХУК (0-2с): <рядок>\n[візуал: <…>]\n\nБІТ 1: <рядок>\n[візуал: <…>]\n(…)\n\nCTA: <рядок>\n[візуал: <…>]\n\nТЕКСТ НА ЕКРАН: <слова через ·>" +
     (s.marketing_context ? `\n\nБренд і аудиторія: ${s.marketing_context}` : "") +
-    (s.tone_of_voice ? `\nГолос бренду: ${s.tone_of_voice.slice(0, 500)}` : "") + voicePassport(s) +
+    (s.tone_of_voice ? `\nГолос бренду: ${s.tone_of_voice.slice(0, 500)}` : "") + voicePassport(s) + brandDna(s) +
     goalRule(s) + HOOK_RULE + ANTI_AI_RULE + NO_DASH_RULE +
     `\n\nПоверни лише сценарії, розділені рядком ===. Мова: ${lang}.`;
   const raw = await chat("openai/gpt-4o", system, `Матеріал:\n---\n${(text || "").slice(0, 24000)}`, { workspaceId, step: "reel_slices" });

@@ -546,6 +546,19 @@
             <label class="fl" style="margin-top:10px">Стоп-лист: слова і фрази, які НІКОЛИ не вживати</label>
             <textarea id="vStop" rows="2" placeholder="через кому: гуру, лайфхак, у сучасному світі, друзі…"></textarea>
           </div>
+          <div class="panel">
+            <div class="ph" style="margin:0 0 4px">🧬 ДНК бренду</div>
+            <div class="hint" style="margin-bottom:10px">Бренд - це асоціації, які аудиторія робить, коли чує твоє імʼя. Задай їх свідомо: з чим паруємо бренд у кожному пості, а з чим НЕ асоціюємось ніколи (це захищає репутацію). Історія - єдине джерело особистих фактів для AI: без неї він не має права вигадувати твій шлях чи невдачі.</div>
+            <div class="grid2" style="margin-bottom:10px">
+              <label style="font-size:12px;color:var(--muted)">З чим маємо асоціюватись<br><input id="bAssoc" class="txt" placeholder="напр.: системність, довгі результати, чесні цифри" style="margin-top:2px"></label>
+              <label style="font-size:12px;color:var(--muted)">З чим НІКОЛИ не асоціюємось<br><input id="bAntiAssoc" class="txt" placeholder="напр.: хайп, «швидкі гроші», політика, агресивні продажі" style="margin-top:2px"></label>
+            </div>
+            <label class="fl">📖 Історія бренду (для сторі-постів)</label>
+            <textarea id="bStory" rows="5" placeholder="1) Чому почав: що побачив, чого не бачили інші?&#10;2) У що вірю всупереч ринку?&#10;3) Чим це доводжу (результати, кейси)?&#10;4) Переломні моменти шляху: злети, провали, уроки (з деталями і цифрами - «стіл із дверей», а не «я винахідливий»)"></textarea>
+            <label class="fl" style="margin-top:10px">🧑 Інтереси поза нішею (80/20)</label>
+            <input id="bInterests" class="txt" placeholder="через кому: мотоцикли, хардкор-музика, кава, подорожі…">
+            <div class="hint">80% контенту - твоя тема, 20% - те, що робить тебе людиною. Заповниш - план сам резервуватиме ~кожен пʼятий слот під «Особисте»: більше точок дотику = більше «я теж це люблю» від аудиторії.</div>
+          </div>
           <div class="grid2">
             <div class="panel" style="margin:0"><label class="fl">🗣️ Голос бренду (Tone of Voice)</label><textarea id="tov"></textarea></div>
             <div class="panel" style="margin:0"><label class="fl">👥 Аудиторія / Marketing Context</label><textarea id="mkt"></textarea></div>
@@ -582,6 +595,15 @@
           </div>
           <div class="hint">Що віддати аудиторії за контакт - конкретика з твого досвіду, з оцінкою лідогену/витрат. Кодове слово одним кліком стає CTA для Instagram.</div>
           <div id="lmList"></div>
+        </div>
+        <div class="panel">
+          <div class="ph" style="margin:0 0 6px">🪜 Сходи офферів</div>
+          <div class="hint" style="margin-bottom:10px">Довіра передує транзакції: безкоштовний контент → лід-магніт → далі сходинки нижче. Заповниш - AI підбиратиме заклик під теплоту поста і продаватиме історією клієнта з результатом, а не «купи». Знання віддаємо безкоштовно - продаємо виконання.</div>
+          <div class="grid2" style="grid-template-columns:1fr 1fr 1fr">
+            <label style="font-size:12px;color:var(--muted)">Низький поріг (~до $100)<br><input id="offerLow" class="txt" placeholder="ебук, шаблон, міні-курс" style="margin-top:2px"></label>
+            <label style="font-size:12px;color:var(--muted)">Середній ($100-5000)<br><input id="offerMid" class="txt" placeholder="курс, група, спільнота" style="margin-top:2px"></label>
+            <label style="font-size:12px;color:var(--muted)">Преміум ($5000+)<br><input id="offerHigh" class="txt" placeholder="консалтинг, done-for-you" style="margin-top:2px"></label>
+          </div>
         </div>
         <div class="panel">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -814,7 +836,7 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const STEP  = {1:'extract_ideas',3:'drafts',4:'tone',5:'format',6:'deai',7:'strategy'};
 const ORDER = [1,3,4,5,6,7];
-const SET = {mkt:'marketing_context', tov:'tone_of_voice', deai:'deai_rules', strat:'content_strategy', voiceExamples:'voice_examples', imgStyle:'image_style', vSign:'voice_signature', vStop:'voice_stoplist', goalMetric:'goal_metric'};
+const SET = {mkt:'marketing_context', tov:'tone_of_voice', deai:'deai_rules', strat:'content_strategy', voiceExamples:'voice_examples', imgStyle:'image_style', vSign:'voice_signature', vStop:'voice_stoplist', goalMetric:'goal_metric', bAssoc:'brand_assoc', bAntiAssoc:'brand_antiassoc', bStory:'brand_story', bInterests:'brand_interests', offerLow:'offer_low', offerMid:'offer_mid', offerHigh:'offer_high'};
 const AUTORUN_WARN='Авто-прогін запускатиме повну AI-генерацію постів на КОЖНУ нову статтю/зустріч - це витрачає кошти на AI. Увімкнути?';
 // час: усе планування рахуємо в поясі TZ (обирається в Налаштуваннях); у БД - UTC
 let TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Kyiv';
@@ -1227,7 +1249,18 @@ async function loadAnalytics(){
       +(chTot?Object.keys(CHN).map(k=>{ const pct=Math.round(chCount[k]/chTot*100); return '<div style="margin-bottom:14px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="width:11px;height:11px;border-radius:4px;background:var('+CHN[k][1]+')"></span><span style="font-size:13px;font-weight:600;flex:1">'+CHN[k][0]+'</span><span style="font-size:13px;font-weight:700">'+pct+'%</span></div><div style="height:7px;border-radius:5px;background:var(--surface2);overflow:hidden"><div style="width:'+pct+'%;height:100%;background:var('+CHN[k][1]+')"></div></div></div>'; }).join(''):'<div class="empty">Ще немає опублікованих постів.</div>')
       +igHtml+'</div>'
     +'</div>'
+    +'<div class="panel" style="margin:18px 0 0"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><div style="font-weight:700;font-size:14px">📊 Пости відносно твоєї норми</div><button class="ghost" id="topPatBtn" style="margin-left:auto;padding:5px 12px;font-size:12.5px" title="AI розбирає топ-пости і знаходить 1-2 патерни, що повторюються в усіх хітах">🔍 Що спрацювало</button></div><div class="hint" style="margin-bottom:8px">Норма = медіана переглядів твоїх постів у мережі за 90 днів. ×2.0 = удвічі краще за твій звичайний пост. Статистика збирається автоматично раз на добу.</div><div id="bmLive"><span class="spin"></span></div></div>'
     +'<div class="panel" style="margin:18px 0 0"><div style="font-weight:700;font-size:14px;margin-bottom:6px">Останні публікації</div>'+(rec.length?rec.slice(0,12).map(r=>'<div style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--line)"><span style="font-size:15px">'+({telegram:"✈️",instagram:"📸",facebook:"📘",threads:"🧵"}[r.net]||"•")+'</span><div style="flex:1;min-width:0"><div style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc((r.content||"").replace(/\n+/g," ").slice(0,80))+'</div><div style="font-size:11px;color:var(--muted)">'+(CHN[r.net]?CHN[r.net][0]:r.net)+" · "+new Date(r.created_at).toLocaleString("uk")+'</div></div></div>').join(""):'<div class="empty">Ще нічого не опубліковано. Опублікуй пост - і він зʼявиться тут.</div>')+'</div>';
+  if($('topPatBtn')) $('topPatBtn').onclick=topPatterns;
+  api('/analytics/benchmarks').then(b=>{
+    const el=$('bmLive'); if(!el) return;
+    const nets=Object.keys(b.networks||{});
+    if(!nets.length){ el.innerHTML='<div class="empty" style="padding:10px 0">Ще збираю статистику опублікованих постів (Threads / Instagram / Facebook). Потрібно ≥3 пости з метриками на мережу - зазирни за день-два.</div>'; return; }
+    const NICO={threads:'🧵',instagram:'📸',facebook:'📘'};
+    el.innerHTML='<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px">'+nets.map(n=>'<span style="font-size:12.5px;color:var(--muted)">'+(NICO[n]||'')+' норма '+n+': <b style="color:var(--ink)">'+b.networks[n].median.toLocaleString('uk')+'</b> переглядів ('+b.networks[n].count+' постів)</span>').join('')+'</div>'
+      +(b.posts||[]).slice(0,10).map(p=>{ const c=p.mult>=1.5?'var(--ok,#22a06b)':(p.mult<0.7?'var(--danger)':'var(--muted)');
+        return '<div style="display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px solid var(--line)"><b style="min-width:48px;color:'+c+'">×'+p.mult+'</b><span style="font-size:14px">'+(NICO[p.network]||'')+'</span><div style="flex:1;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(p.title)+'</div><span style="font-size:11.5px;color:var(--muted)">'+p.views.toLocaleString('uk')+'</span></div>'; }).join('');
+  }).catch(()=>{ const el=$('bmLive'); if(el) el.innerHTML='<div class="empty" style="padding:10px 0">Не вдалося завантажити бенчмарки.</div>'; });
   // мережева статистика довантажується ПІСЛЯ рендера сторінки (Graph API повільний - не блокуємо аналітику)
   api('/integrations/meta/stats').then(m=>{
     const el=$('igLive'); if(!el) return;
@@ -1237,6 +1270,22 @@ async function loadAnalytics(){
         +(fb?'<div style="font-size:12.5px;font-weight:700;color:var(--brand);margin-top:'+(ig?'8px':'0')+'">📘 Facebook '+esc(fb.name||'')+'</div><div style="font-size:12.5px;color:var(--ink2);margin-top:3px">'+(fb.followers_count||fb.fan_count||0)+' підписників</div>':'')
       : 'Підключи Instagram/Facebook у Налаштуваннях, щоб бачити охоплення й підписників.';
   }).catch(()=>{ const el=$('igLive'); if(el) el.textContent='Підключи Instagram/Facebook у Налаштуваннях, щоб бачити охоплення й підписників.'; });
+}
+
+// 🔍 «Що спрацювало»: AI-розбір топ-постів (за ×N) → повторювані патерни → правило голосу в 1 клік
+async function topPatterns(){ aiBusy('🔍 Розбираю топ-пости: шукаю, що повторюється в усіх хітах…');
+  let r; try{ r=await api('/analytics/top-patterns',{method:'POST'}); }catch(e){ aiDone(); flash('⚠ '+e.message); return; } finally{ aiDone(); }
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='80';
+  ov.innerHTML='<div class="modal-card" style="max-width:560px;padding:20px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">🔍 Що спрацювало (розбір '+(r.sample||0)+' топ-постів)</b><button class="icon" id="tpX" style="margin-left:auto">✕</button></div>'
+    +'<div class="hint" style="margin-bottom:10px">Патерни, що повторюються у ВСІХ твоїх найкращих постах. Те, що було лише в одному хіті - шум, його тут нема.</div>'
+    +(r.patterns||[]).map(p=>'<div class="card" style="margin-bottom:8px"><b>'+esc(p.pattern)+'</b><div style="font-size:12.5px;color:var(--ink2);margin-top:4px;line-height:1.45">'+esc(p.evidence||'')+'</div></div>').join('')
+    +(r.rule?'<div style="margin-top:12px;padding:12px;border-radius:10px;background:var(--brand-soft)"><div style="font-size:12px;color:var(--brand);font-weight:700;margin-bottom:4px">Готове правило для генерації:</div><div style="font-size:13px">'+esc(r.rule)+'</div><div class="btnrow" style="margin-top:10px"><button class="primary" id="tpSave">✍ Запамʼятати як правило голосу</button><span id="tpMsg" style="font-size:12px;color:var(--muted)"></span></div></div>':'')
+    +'</div>';
+  document.body.appendChild(ov); const close=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#tpX').onclick=close;
+  const sv=ov.querySelector('#tpSave'); if(sv) sv.onclick=async()=>{ sv.disabled=true;
+    try{ await api('/voice-rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rule:r.rule})}); ov.querySelector('#tpMsg').textContent='✓ тепер кожна генерація враховує це'; try{loadSettings();}catch(e){} }
+    catch(e){ ov.querySelector('#tpMsg').textContent='⚠ '+e.message; sv.disabled=false; } };
 }
 
 // ---------- база бренду (settings) ----------
@@ -1459,7 +1508,8 @@ async function postMagnet(id){ aiBusy('🧲 Складаю лід-магніти
 async function directorCheck(id){ aiBusy('🎯 Директор перевіряє пост на відповідність цілі…');
   try{ const r=await api('/posts/'+id+'/director',{method:'POST'});
     const E={yes:'✅ ВЕДЕ ДО ЦІЛІ',partial:'⚠ ЧАСТКОВО ВЕДЕ',no:'✖ НЕ ВЕДЕ ДО ЦІЛІ'};
-    const msg=(E[r.verdict]||r.verdict)+'\n\n'+(r.reason||'');
+    const trustLine=r.trust?('\n'+(r.trust==='builds'?'🤝 Будує довіру':'💸 Витрачає довіру (просить, не давши цінності)')+(r.trustWhy?': '+r.trustWhy:'')):'';
+    const msg=(E[r.verdict]||r.verdict)+trustLine+'\n\n'+(r.reason||'');
     if(r.verdict!=='yes'&&(r.fix||r.sharper)){ aiDone();
       // спершу пропонуємо ГОСТРІШУ версію (готовий переписаний початок), потім - правку-інструкцію
       if(r.sharper&&confirm(msg+'\n\n⚡ ВЕРСІЯ ГОСТРІША (новий початок поста):\n«'+r.sharper+'»\n\nЗамінити перший абзац цією версією?')){

@@ -81,6 +81,17 @@ export async function postInsights(postId: string, pageToken: string): Promise<R
   return out;
 }
 
+// інсайти опублікованого IG-поста (media-level): охоплення + лайки (для бенчмарків ×N)
+export async function igMediaInsights(mediaId: string, pageToken: string): Promise<{ reach: number; likes: number }> {
+  const u = new URL(`${GRAPH}/${mediaId}/insights`);
+  u.searchParams.set("metric", "reach,likes");
+  u.searchParams.set("access_token", pageToken);
+  const j = await fbFetch<{ data: Array<{ name: string; values?: Array<{ value: number }>; total_value?: { value: number } }> }>(u.toString());
+  const out: Record<string, number> = {};
+  for (const m of j.data || []) out[m.name] = m.total_value?.value ?? m.values?.[0]?.value ?? 0;
+  return { reach: out.reach || 0, likes: out.likes || 0 };
+}
+
 // базова аналітика акаунтів (надійні поля): FB-Сторінка + IG-акаунт
 export async function pageStats(pageId: string, pageToken: string) {
   const u = new URL(`${GRAPH}/${pageId}`);
