@@ -5,6 +5,7 @@ import { env } from "./env.js";
 import { logEvent } from "./log.js";
 import { nextInsight } from "./pipeline.js";
 import { liveSend } from "./tgbot.js";
+import { networkBenchmarks } from "./metrics.js";
 import * as threads from "./threads.js";
 
 // «Мультиплікатор ← аналітика»: чи вистрілив хтось із нещодавніх Threads-постів (перегляди ≥1.5× середнього решти).
@@ -28,9 +29,17 @@ async function findBreakout(ws: string): Promise<{ postId: string; views: number
   }
   if (stats.length < 3) return null;
   const top = stats.reduce((a, b) => (b.views > a.views ? b : a));
-  const rest = stats.filter((x) => x !== top);
-  const avg = rest.reduce((s2, x) => s2 + x.views, 0) / rest.length;
-  return top.views >= 30 && top.views >= avg * 1.5 ? top : null;
+  // норма = медіана з накопичених метрик (post_metric, ≥5 знімків); фолбек - середнє решти свіжих постів
+  let baseline = 0;
+  try {
+    const { networks } = await networkBenchmarks(ws);
+    if (networks.threads && networks.threads.count >= 5) baseline = networks.threads.median;
+  } catch { /* бенчмарки ще не зібрані */ }
+  if (!baseline) {
+    const rest = stats.filter((x) => x !== top);
+    baseline = rest.reduce((s2, x) => s2 + x.views, 0) / rest.length;
+  }
+  return top.views >= 30 && top.views >= baseline * 1.5 ? top : null;
 }
 
 const DIGEST_HOUR = 9; // ранок за таймзоною воркспейсу
@@ -74,7 +83,15 @@ async function sendDigest(ws: string, chatId: string, localDate: string): Promis
   } catch { /* не критично */ }
 
   const buttons: { text: string; data?: string; url?: string }[][] = [];
-  if (breakout) buttons.push([{ text: "🔥 5 кутів продовження", data: `dev:${breakout.postId}` }]);
+  if (breakout) {
+    const row: { text: string; data: string }[] = [{ text: "🔥 5 кутів продовження", data: `dev:${breakout.postId}` }];
+    // перепакування хіта в інший формат - рілс (ПРО-трек)
+    try {
+      const pro = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='pro'`, [ws]);
+      if (pro?.content === "1") row.push({ text: "🎬 Рілс із цього", data: `reel:${breakout.postId}` });
+    } catch { /* без кнопки */ }
+    buttons.push(row);
+  }
   if (nextSlot?.id) buttons.push([{ text: "✍️ Зробити пост зараз", data: `slot_post:${nextSlot.id}` }]); // 1 тап: тема слота → чернетка в DM
   if (ideasCount?.n) buttons.push([{ text: "💡 Показати ідеї", data: "idea_list" }]);
   if (!(anyPlan?.n)) buttons.push([{ text: "⚡ Сформувати план", data: "plan_gen" }]);

@@ -6,7 +6,7 @@ import { env } from "./env.js";
 import { q, one } from "./db.js";
 import * as tg from "./telegram.js";
 import { logEvent } from "./log.js";
-import { generatePostsOnePass, buildLiteSkeleton, rewritePost, suggestDevelopment } from "./pipeline.js";
+import { generatePostsOnePass, buildLiteSkeleton, rewritePost, suggestDevelopment, reelsScript } from "./pipeline.js";
 import { publishPostToChannels } from "./publisher.js";
 import { sendDigestNow } from "./digest.js";
 
@@ -257,6 +257,21 @@ async function handleCallback(cbq: any): Promise<void> {
       await tg.sendMessage(token, chatId,
         `🔥 5 кутів продовження (уже в Банку ідей):\n\n${angles.map((a, i) => `${i + 1}. ${a.idea}${a.angle ? ` (${a.angle})` : ""}`).join("\n")}`,
         [[{ text: "💡 Зробити пост з ідеї", data: "idea_list" }]]);
+      return;
+    }
+    if (data.startsWith("reel:")) {
+      // перепакування хіта: пост залетів → сценарій рілса на ту саму тему (реюзаємо run поста)
+      const postId = data.slice("reel:".length);
+      await tg.answerCallbackQuery(token, cbq.id, "Пишу сценарій рілса…");
+      const post = await one<{ content: string; run_id: string }>(
+        `select p.content, p.run_id from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
+      if (!post) { await tg.sendMessage(token, chatId, "Пост не знайдено."); return; }
+      try {
+        const script = await reelsScript(ws, post.content, 30);
+        await q(`insert into post(run_id, stage, content, format) values($1,'final',$2,'reel')`, [post.run_id, script]);
+        await tg.sendMessage(token, chatId, "🎬 Сценарій рілса за темою хіта готовий - шукай у Чорновиках (бейдж «🎬 рілс»). Зібрати відео - кнопка 🎞 на картці.",
+          [[{ text: "🌐 Відкрити застосунок", url: env.appBaseUrl + "/app" }]]);
+      } catch (e: any) { await tg.sendMessage(token, chatId, "Не вдалося скласти сценарій: " + e.message); }
       return;
     }
     if (data.startsWith("rw:")) {

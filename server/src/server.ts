@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet, topPatterns } from "./pipeline.js";
 import { startReelJob, reelJobs, parseReelScript } from "./reelvideo.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
@@ -33,6 +33,7 @@ import * as gdrive from "./gdrive.js";
 import { publishPostToChannels, alreadySentNetworks, startReelPublishJob, reelPubJobs, reelSentNetworks } from "./publisher.js";
 import { startLifecycleWorker } from "./lifecycle.js";
 import { startDigest } from "./digest.js";
+import { startMetrics, networkBenchmarks } from "./metrics.js";
 import { generateImageForPost, imageProviders, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto } from "./images.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername } from "./tgbot.js";
 
@@ -773,6 +774,15 @@ app.get("/api/lead-magnets", async (req: any) => {
 });
 
 // «Коваль» (самонавчання голосу): правка юзера → постійне правило в tone_of_voice
+// Бенчмарки ×N: медіана переглядів по мережі (норма) + множник кожного поста до неї
+app.get("/api/analytics/benchmarks", async (req: any) => networkBenchmarks(req.user.workspace_id));
+
+// «Що спрацювало»: розбір топ-постів (×N ≥ 1.2) → повторювані патерни + готове правило голосу
+app.post("/api/analytics/top-patterns", async (req: any, reply) => {
+  try { return { ok: true, ...(await topPatterns(req.user.workspace_id)) }; }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+
 app.post("/api/voice-rules", async (req: any, reply) => {
   const rule = String(req.body?.rule ?? "").trim().slice(0, 200);
   if (!rule) return reply.code(400).send({ error: "порожнє правило" });
@@ -1698,7 +1708,9 @@ app.post("/api/plan/slots/:id/generate", async (req: any, reply) => {
       sourceId = src!.id;
     }
     const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [sourceId]);
-    const idea = `${slot.theme}${slot.hook ? `. Гачок: ${slot.hook}` : ""}${slot.cta ? `. Заклик: ${slot.cta}` : ""}`;
+    // 🧪-слот (10% плану): експериментальний пост - подача, якої бренд ще не робив
+    const expNote = slot.theme.startsWith("🧪") ? ". ЕКСПЕРИМЕНТ: зроби подачу, якої бренд ще не робив (інший ритм, структура, жанр чи сміливіший кут) - але голос і ДНК бренду збережи" : "";
+    const idea = `${slot.theme.replace(/^🧪\s*/, "")}${slot.hook ? `. Гачок: ${slot.hook}` : ""}${slot.cta ? `. Заклик: ${slot.cta}` : ""}${expNote}`;
     await generatePostsOnePass(run!.id, 1, [idea]);
     const post = await one<{ id: string }>(`select id from post where run_id=$1 and stage='final' limit 1`, [run!.id]);
     if (!post) throw new Error("пост не згенерувався");
@@ -2223,6 +2235,7 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
   startGdrivePoller();
   startLifecycleWorker();
   startDigest();
+  startMetrics();
   initTelegramBot();
   // одноразово полагодити залишкові iPhone HEIF -> JPEG (у фоні; ідемпотентно)
   convertAllHeif().then((n) => { if (n) app.log.info(`HEIF→JPEG конвертовано: ${n}`); }).catch((e: any) => app.log.error("convertAllHeif: " + e.message));
