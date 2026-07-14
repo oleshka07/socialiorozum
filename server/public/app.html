@@ -585,6 +585,11 @@
             <div class="fld" style="margin-top:12px"><label class="fl">Стиль зображень бренду</label><textarea class="txt" id="imgStyle" rows="3" placeholder="Напр.: тепла пастельна палітра, мінімалізм, живі фото людей замість ілюстрацій, без стокового вигляду…"></textarea><div class="hint">Як tone of voice, тільки для картинок: AI дотримується цього стилю в кожному згенерованому зображенні.</div></div>
             <div class="hint">Недоступні провайдери підключає адміністратор сервісу.</div></div>
           <div class="panel proonly" style="display:none">
+            <label class="fl">🎬 Рендер відео-рілсів</label>
+            <select id="reelRend"><option value="classic">Класичний - швидкий, субтитри знизу</option><option value="motion">Motion (бета) - анімований заголовок і «караоке»-титри</option></select>
+            <div class="hint">Motion збирає рілс як у відео-редакторі: хук вистрибує великими літерами, слово, що звучить, підсвічується, зверху прогрес-бар. Рендер довший (2-5 хв) і йде на сервері; якщо щось піде не так - автоматично збереться класичний варіант.</div>
+          </div>
+          <div class="panel proonly" style="display:none">
             <div class="ph" style="margin:0 0 6px">🎥 Мої відео-вставки для рілсів</div>
             <div class="hint" style="margin-bottom:10px">Завантаж короткі відео, де ти в кадрі (говориш у мікрофон, працюєш, жестикулюєш) - сервіс сам вставлятиме 1-3 такі фрагменти в кожен зібраний рілс. Це додає відео персональності. Найкраще: вертикальні (9:16) кліпи по 5-20 секунд, MP4, до 60 МБ.</div>
             <div class="btnrow"><input type="file" id="brollFile" accept="video/mp4,video/quicktime,video/webm" multiple style="font-size:13px"><button class="primary" id="brollUpload">Завантажити</button><span id="brollMsg" style="font-size:12px;color:var(--muted)"></span></div>
@@ -1363,6 +1368,7 @@ async function loadSettings(){
     PRO = (map.pro==='1'); updateProUI();
     if(map.tone_of_voice_derived) renderDerived(map.tone_of_voice_derived);
     if($('vAddr')) $('vAddr').value=map.voice_address||'';
+    if($('reelRend')) $('reelRend').value=map.reel_renderer||'classic';
     if($('vEmoji')) $('vEmoji').value=map.voice_emoji||'';
     // чесний бейдж: голос НЕ відкалібрований, поки нема ані ToV, ані прикладів постів
     if($('voiceCalBadge')) $('voiceCalBadge').style.display=((map.tone_of_voice||'').trim()||(map.voice_examples||'').trim())?'none':'inline';
@@ -1378,6 +1384,7 @@ async function saveSetting(key,val){ try{ await api('/settings/'+key,{method:'PU
 for(const tid of Object.keys(SET)){ const el=$(tid); if(el) el.addEventListener('input', ()=>{ clearTimeout(saveT); saveT=setTimeout(()=>saveSetting(SET[tid],el.value),700); }); }
 $('langSel').onchange=()=>saveSetting('output_language',$('langSel').value);
 if($('vAddr')) $('vAddr').onchange=()=>saveSetting('voice_address',$('vAddr').value);
+if($('reelRend')) $('reelRend').onchange=()=>saveSetting('reel_renderer',$('reelRend').value);
 if($('vEmoji')) $('vEmoji').onchange=()=>saveSetting('voice_emoji',$('vEmoji').value);
 function ensureLangOption(lang){ const sel=$('langSel'); if(!sel||!lang) return; if(![].some.call(sel.options,o=>o.value===lang||o.text===lang)){ const o=document.createElement('option'); o.textContent=lang; sel.appendChild(o); } }
 buildTzSel(); if($('tzSel')) $('tzSel').onchange=()=>{ TZ=$('tzSel').value; saveSetting('timezone',TZ); buildTzSel(); try{ if(curView==='publish') loadPublish(); }catch(e){} };
