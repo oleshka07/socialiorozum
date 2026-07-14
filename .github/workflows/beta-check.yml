@@ -75,6 +75,8 @@ jobs:
             echo "== rsshub контейнер =="
             docker compose ps rsshub 2>/dev/null | tail -1 || echo "rsshub: контейнера ще нема (старий compose?)"
             free -h | head -2
+            echo "== chromium напряму (діагностика запуску) =="
+            docker compose exec -T app sh -c '/usr/bin/chromium-browser --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --dump-dom about:blank 2>&1 | head -4; echo "chromium exit: $?"'
             echo "== Motion-рендер (Remotion): бандл + короткий тестовий рендер у контейнері =="
             docker compose exec -T app node - <<'RMNODE'
             (async () => {
