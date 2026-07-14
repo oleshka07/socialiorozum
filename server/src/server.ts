@@ -1939,12 +1939,41 @@ app.get("/api/bank", async (req: any) => {
 });
 
 // усі фінальні пости воркспейсу (Студія/Інбокс - глобальний список, НЕ привʼязаний до активного джерела)
+// + sent: у які мережі пост УЖЕ опубліковано (іконки на картці + фільтр «Опубліковані»)
 app.get("/api/posts/studio", async (req: any) => {
-  return q(`select p.id, p.content, p.review, p.channels, p.rubric, p.reel_video, p.format, src.origin as source_origin, ma.filename as media_filename, p.created_at, src.title as source_title
+  const rows = await q<any>(`select p.id, p.content, p.review, p.channels, p.rubric, p.reel_video, p.format, src.origin as source_origin, ma.filename as media_filename, p.created_at, src.title as source_title
             from post p join pipeline_run r on r.id=p.run_id join source src on src.id=r.source_id
             left join media_asset ma on ma.id=p.media_id
             where src.workspace_id=$1 and p.stage='final' and (p.review is null or p.review <> 'archived')
             order by p.created_at desc`, [req.user.workspace_id]);
+  const ids = rows.map((r: any) => r.id);
+  const sentMap = new Map<string, string[]>();
+  const add = (pid: string, net: string) => { const a = sentMap.get(pid) || []; if (!a.includes(net)) a.push(net); sentMap.set(pid, a); };
+  if (ids.length) {
+    const [tg, th, mt, li, yt, tt] = await Promise.all([
+      q<{ post_id: string }>(`select distinct post_id from telegram_publish where status='sent' and post_id=any($1)`, [ids]),
+      q<{ post_id: string }>(`select distinct post_id from threads_publish where status='sent' and post_id=any($1)`, [ids]),
+      q<{ post_id: string; channel: string }>(`select distinct post_id, channel from meta_publish where status='sent' and post_id=any($1)`, [ids]),
+      q<{ post_id: string }>(`select distinct post_id from linkedin_publish where status='sent' and post_id=any($1)`, [ids]),
+      q<{ post_id: string }>(`select distinct post_id from youtube_publish where status='sent' and post_id=any($1)`, [ids]),
+      q<{ post_id: string }>(`select distinct post_id from tiktok_publish where status='sent' and post_id=any($1)`, [ids]),
+    ]);
+    tg.forEach((r) => add(r.post_id, "telegram")); th.forEach((r) => add(r.post_id, "threads"));
+    mt.forEach((r) => r.channel && add(r.post_id, r.channel)); li.forEach((r) => add(r.post_id, "linkedin"));
+    yt.forEach((r) => add(r.post_id, "youtube")); tt.forEach((r) => add(r.post_id, "tiktok"));
+  }
+  return rows.map((r: any) => ({ ...r, sent: sentMap.get(r.id) || [] }));
+});
+
+// видалення поста (замінило архів у UI): опублікованим - відмова, інакше зникла б історія
+// публікацій і метрики аналітики (усі *_publish та post_metric каскадяться від post)
+app.delete("/api/posts/:postId", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  const sent = new Set([...(await alreadySentNetworks(req.params.postId)), ...(await reelSentNetworks(req.params.postId))]);
+  if (sent.size) return reply.code(409).send({ error: "Пост уже опубліковано (" + [...sent].join(", ") + ") - видалення стерло б історію публікацій і аналітику. Він живе у фільтрі «Опубліковані»." });
+  await q(`delete from post where id=$1`, [req.params.postId]);
+  return { ok: true };
 });
 
 app.get("/api/schedule", async (req: any) => {
