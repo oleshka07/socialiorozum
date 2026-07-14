@@ -753,6 +753,31 @@ export async function threadsStarterPack(workspaceId: string): Promise<{ bio: st
   return { bio, intro, pinned };
 }
 
+// 💬 Реплай-коуч: драфти відповідей на коменти під власними Threads-постами.
+// Мосері: «відповідай більше, ніж постиш» - відповідь автора повертає людину в гілку (нотифікація)
+// і дає алгоритму сигнал живої розмови. Один виклик на всі коменти.
+export async function suggestThreadReplies(
+  workspaceId: string,
+  items: { commentId: string; postText: string; comment: string; username: string }[]
+): Promise<Record<string, string>> {
+  if (!items.length) return {};
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const material = items.slice(0, 15).map((it, i) =>
+    `[${i}] Пост: ${it.postText.replace(/\s+/g, " ").slice(0, 200)}\nКомент від @${it.username}: ${it.comment.replace(/\s+/g, " ").slice(0, 300)}`).join("\n---\n");
+  const system =
+    "Ти автор Threads. Напиши коротку живу відповідь на КОЖЕН комент під своїми постами." +
+    (s.tone_of_voice ? `\nГолос бренду: ${s.tone_of_voice}` : "") + voicePassport(s) +
+    "\n\nПравила відповіді: ≤200 символів; продовжуй РОЗМОВУ (подякуй/погодься/уточни/докинь думку), а де доречно - закінчи зустрічним питанням; звертайся на «ти», без офіціозу і без «дякуємо за ваш коментар»-канцеляриту; НЕ повторюй текст поста; на критику - спокійно і по суті, без виправдовувань." +
+    NO_DASH_RULE + ANTI_AI_RULE +
+    `\n\nПоверни ЛИШЕ валідний JSON-обʼєкт {"0":"відповідь на комент [0]","1":"…"} за індексами. Мова: ${lang}.`;
+  const raw = await chat("openai/gpt-4o", system, material, { workspaceId, step: "thread_replies" });
+  const obj = extractJsonObject(raw) as Record<string, string>;
+  const out: Record<string, string> = {};
+  items.slice(0, 15).forEach((it, i) => { const t = String(obj?.[String(i)] || "").trim(); if (t) out[it.commentId] = t.slice(0, 480); });
+  return out;
+}
+
 // 🔍 Розбір ніші: хіти Threads-джерел (чужі топ-автори) + власні топ-пости → формули, що повторюються.
 export async function threadsNicheReview(workspaceId: string): Promise<{ patterns: { name: string; formula: string; example: string }[]; ideasAdded: number }> {
   const s = await loadSettings(workspaceId);

@@ -788,7 +788,7 @@
                 <label>💬 Щоденні тейки <select id="thStTakes" class="txt" style="width:auto;padding:6px 8px;display:inline-block;margin-left:4px"><option value="0">вимкнено</option><option value="3">3 на день</option><option value="5">5 на день</option></select></label>
               </div>
               <div class="hint" style="margin-top:8px">CTA-гілка бере заклик Threads з «📮 Конверсійні заклики» вище (заповни там значення). Тейки - короткі думки з Банку ідей і щоденника: щоранку о 8:00 падають чернетками в Студію, публікуєш у 1 тап.</div>
-              <div class="btnrow" style="margin-top:8px"><button class="ghost" id="thStarter">🚀 Стартовий пакет</button><button class="ghost" id="thNiche">🔍 Розбір ніші</button></div>
+              <div class="btnrow" style="margin-top:8px"><button class="ghost" id="thStarter">🚀 Стартовий пакет</button><button class="ghost" id="thNiche">🔍 Розбір ніші</button><button class="ghost" id="thReplies">💬 Коменти</button></div>
               <div class="hint">Стартовий пакет: 3 варіанти біо + пост-знайомство + закріп-пост (для нового чи «сплячого» акаунта). Розбір ніші: AI шукає формули у хітах топ-авторів твоєї ніші (спершу додай їх Threads-профілі в Джерела).</div>
               <div id="thStMsg" style="font-size:12px;color:var(--brand);min-height:16px"></div>
             </div>
@@ -1582,6 +1582,30 @@ if($('thStarter')) $('thStarter').onclick=async()=>{ const b=$('thStarter'); b.d
     ov.querySelector('#spIntro').onclick=()=>{ close(); openComposer(r.introId); };
     ov.querySelector('#spPin').onclick=()=>{ close(); openComposer(r.pinnedId); };
     try{ await loadStudioPosts(); }catch(_){ }
+  }catch(e){ flash('⚠ '+e.message); } finally{ b.disabled=false; aiDone(); } };
+// 💬 реплай-коуч: свіжі коменти під нашими постами + AI-драфт відповіді (Мосері: «відповідай більше, ніж постиш»)
+if($('thReplies')) $('thReplies').onclick=async()=>{ const b=$('thReplies'); b.disabled=true; aiBusy('💬 Збираю коментарі і пишу драфти відповідей…');
+  try{ const r=await api('/threads/comments');
+    const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
+    const items=r.items||[];
+    ov.innerHTML='<div class="modal-card" style="max-width:620px;padding:20px;max-height:85vh;overflow:auto">'
+      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:16px">💬 Коментарі під твоїми постами</b><button class="icon" id="tcmX" style="margin-left:auto">✕</button></div>'
+      +'<div class="hint" style="margin-bottom:10px">Відповідь автора повертає людину в гілку і розганяє пост («відповідай більше, ніж постиш»). Драфт можна правити перед відправкою.</div>'
+      +(items.length?items.map((it,i)=>'<div class="card" style="margin-bottom:10px;padding:12px 14px" data-ci="'+i+'">'
+        +'<div style="font-size:11px;color:var(--faint);margin-bottom:4px">під постом: '+esc(it.postTitle||'')+'</div>'
+        +'<div style="font-size:13px;line-height:1.5"><b>@'+esc(it.username)+':</b> '+esc(it.comment)+'</div>'
+        +'<textarea class="txt tcmTxt" rows="2" style="margin-top:8px;font-size:13px">'+esc(it.draft||'')+'</textarea>'
+        +'<div class="btnrow" style="margin-top:6px"><button class="primary tcmSend" style="padding:6px 12px;font-size:12.5px">↩ Відповісти</button><span class="tcmMsg" style="font-size:12px;color:var(--muted)"></span></div>'
+        +'</div>').join(''):'<div class="empty">'+esc(r.hint||'Свіжих коментарів без відповіді нема. Зазирни після наступної публікації.')+'</div>')
+      +'</div>';
+    document.body.appendChild(ov); const close=()=>ov.remove();
+    ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#tcmX').onclick=close;
+    ov.querySelectorAll('[data-ci]').forEach(card=>{ const it=items[+card.dataset.ci];
+      card.querySelector('.tcmSend').onclick=async(ev)=>{ const sb=ev.target, m=card.querySelector('.tcmMsg'); const text=card.querySelector('.tcmTxt').value.trim();
+        if(!text){ m.textContent='порожньо'; return; } sb.disabled=true; m.textContent='надсилаю…';
+        try{ await api('/threads/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({commentId:it.commentId,text})});
+          m.style.color='var(--brand)'; m.textContent='✓ відповідь у гілці'; card.style.opacity='.55'; }
+        catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; sb.disabled=false; } }; });
   }catch(e){ flash('⚠ '+e.message); } finally{ b.disabled=false; aiDone(); } };
 // 🔍 розбір ніші: формули з хітів топ-авторів → правила голосу + ідеї в Банк
 if($('thNiche')) $('thNiche').onclick=async()=>{ const b=$('thNiche'); b.disabled=true; aiBusy('🔍 Аналізую хіти твоєї ніші в Threads…');
