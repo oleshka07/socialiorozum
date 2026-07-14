@@ -83,7 +83,7 @@ jobs:
                 const t0 = Date.now();
                 await m.renderReelRemotion({ segments: [{ text: 'Тест Motion-рендера', dur: 2, label: 'ХУК' }], accent: '#F6C444' }, '/tmp/rm-test.mp4');
                 console.log('REMOTION: OK', Math.round((Date.now() - t0) / 1000) + 's');
-              } catch (e) { console.log('REMOTION: ERR', String(e.message).slice(0, 300)); }
+              } catch (e) { console.log('REMOTION: ERR', String(e.stack || e.message).slice(0, 1600)); }
               process.exit(0);
             })();
             RMNODE
