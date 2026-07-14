@@ -223,6 +223,17 @@
   .pchip b{font-size:10.5px;color:var(--muted);font-weight:700}
   .pchip.ghost{background:transparent;border:1.5px dashed var(--line);border-left:1.5px dashed var(--line);color:var(--muted);opacity:.85}
   .pchip.ghost:hover{border-color:var(--brand);color:var(--ink)}
+  /* ⋯-меню картки поста: підписані AI-інструменти групами; на мобільному - шторка знизу */
+  .cardmenu-bg{position:fixed;inset:0;z-index:94;background:transparent}
+  .cardmenu{position:fixed;z-index:95;background:var(--surface);border:1px solid var(--line);border-radius:13px;box-shadow:0 14px 44px rgba(0,0,0,.22);padding:6px;min-width:262px;max-width:320px;max-height:70vh;overflow:auto}
+  .cardmenu .cm-h{font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint);padding:9px 10px 3px;text-transform:uppercase}
+  .cardmenu .cm-i{display:flex;gap:9px;align-items:center;width:100%;padding:8px 10px;border:none;background:none;border-radius:9px;font-size:13.5px;cursor:pointer;color:var(--ink);text-align:left;line-height:1.3}
+  .cardmenu .cm-i:hover{background:var(--surface2)}
+  @media(max-width:700px){
+    .cardmenu-bg{background:rgba(0,0,0,.35)}
+    .cardmenu{left:8px !important;right:8px;top:auto !important;bottom:calc(8px + env(safe-area-inset-bottom));max-width:none;border-radius:16px}
+    .cardmenu .cm-i{padding:12px 10px;font-size:15px}
+  }
   /* stat cards / charts */
   .stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
   .stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:16px 17px}
@@ -1598,6 +1609,12 @@ let ChanStatus={};
 async function loadChanStatus(){ try{ ChanStatus=await api('/channels/status'); }catch(e){ ChanStatus={}; } }
 function chanDots(ch){ if(!ch) return ''; return NETS.filter(n=>ch[n[0]]&&ch[n[0]].on).map(n=>'<span class="cdot" title="'+n[1]+'" style="background:var('+NETVAR[n[0]]+')"><svg width="11" height="11" viewBox="0 0 24 24" fill="#fff"><path d="'+NETICON[n[0]]+'"></path></svg></span>').join(''); }
 function chanIcons(ch){ if(!ch) return ''; const I={telegram:'✈️',instagram:'📸',facebook:'📘',threads:'🧵',linkedin:'💼'}; return Object.keys(I).filter(k=>ch[k]&&ch[k].on).map(k=>I[k]).join(''); }
+// мережі, куди пост УЖЕ опубліковано: ті самі кольорові кружечки + ✓ (youtube/tiktok - для рілсів)
+function sentDots(sent){ const EXTRA={youtube:['YouTube','#FF0000','M12 4c7 0 9 1 9 8s-2 8-9 8-9-1-9-8 2-8 9-8zm-2 4.5v7l6-3.5-6-3.5z'],tiktok:['TikTok','#010101','M16 3c.4 2.6 2 4.2 4.6 4.5v3c-1.8 0-3.4-.6-4.6-1.5v6.8c0 3.9-2.8 6.2-6.1 6.2A5.9 5.9 0 013 16.2c0-3.5 2.7-6 6.4-5.8v3.1c-1.8-.3-3.3.8-3.3 2.6 0 1.7 1.3 2.9 2.9 2.9 1.8 0 3-1.3 3-3.3V3h4z']};
+  return (sent||[]).map(k=>{ const n=NETS.find(x=>x[0]===k); const name=n?n[1]:(EXTRA[k]?EXTRA[k][0]:k); const bg=n?('var('+NETVAR[k]+')'):(EXTRA[k]?EXTRA[k][1]:'var(--muted)'); const path=NETICON[k]||(EXTRA[k]&&EXTRA[k][2])||'';
+    return '<span class="cdot" title="Опубліковано: '+esc(name)+'" style="background:'+bg+'"><svg width="11" height="11" viewBox="0 0 24 24" fill="#fff"><path d="'+path+'"></path></svg></span>'; }).join('')
+    +((sent||[]).length?'<span style="font-size:11px;color:var(--ok,#22a06b);font-weight:700;margin-left:2px">✓</span>':'');
+}
 function statusPill(rv){ if(rv==='approved') return ['Затверджено','sp-ok']; if(rv==='needs_work') return ['Доопрацювати','sp-warn']; return ['Готово до перегляду','sp-soft']; }
 
 // ---------- фінальні пости: Конвеєр (компактно) / Студія / Інбокс ----------
@@ -1615,8 +1632,9 @@ async function loadStudioPosts(){ try{ Finals=(await api('/posts/studio'))||[]; 
 function renderStudio(){
   const grid=$('studioGrid'); if(!grid) return;
   const all=Finals; const appr=all.filter(p=>p.review==='approved').length; const rev=all.length-appr;
+  const pub=all.filter(p=>p.sent&&p.sent.length).length;
   const tc=$('toCalendar'); if(tc){ tc.style.display=appr>0?'':'none'; tc.textContent='До календаря ('+appr+') →'; }
-  const ft=$('studioFilters'); if(ft){ ft.innerHTML=[['all','Усі',all.length],['review','На перегляд',rev],['approved','Затверджені',appr]].map(f=>'<div class="ftab'+(StudioFilter===f[0]?' on':'')+'" data-sf="'+f[0]+'">'+f[1]+' <span style="opacity:.6">'+f[2]+'</span></div>').join(''); ft.querySelectorAll('[data-sf]').forEach(t=>t.onclick=()=>{ StudioFilter=t.dataset.sf; renderStudio(); }); }
+  const ft=$('studioFilters'); if(ft){ ft.innerHTML=[['all','Усі',all.length],['review','На перегляд',rev],['approved','Затверджені',appr],['published','✈️ Опубліковані',pub]].map(f=>'<div class="ftab'+(StudioFilter===f[0]?' on':'')+'" data-sf="'+f[0]+'">'+f[1]+' <span style="opacity:.6">'+f[2]+'</span></div>').join(''); ft.querySelectorAll('[data-sf]').forEach(t=>t.onclick=()=>{ StudioFilter=t.dataset.sf; renderStudio(); }); }
   // теги: рубрики й джерела, що реально є в постах (композитний фільтр, як у Publer: статус × рубрика × джерело)
   const tf=$('studioTagFilters');
   if(tf){
@@ -1628,37 +1646,36 @@ function renderStudio(){
     tf.querySelectorAll('[data-og]').forEach(t=>t.onclick=()=>{ StudioOrigin=StudioOrigin===t.dataset.og?'':t.dataset.og; renderStudio(); });
   }
   let show=all; if(StudioFilter==='review') show=all.filter(p=>p.review!=='approved'); if(StudioFilter==='approved') show=all.filter(p=>p.review==='approved');
+  if(StudioFilter==='published') show=all.filter(p=>p.sent&&p.sent.length);
   if(StudioRubric) show=show.filter(p=>p.rubric===StudioRubric);
   if(StudioOrigin) show=show.filter(p=>p.source_origin===StudioOrigin);
   renderBulkBar();
   if(!show.length){ grid.innerHTML='<div class="empty" style="grid-column:1/-1">Поки порожньо. Додай джерело у «Джерела» і натисни «Згенерувати».</div>'; return; }
-  grid.innerHTML=show.map(p=>{ const sp=statusPill(p.review); const ap=p.review==='approved'; const sel=SelPosts.has(p.id);
+  grid.innerHTML=show.map(p=>{ const isPub=!!(p.sent&&p.sent.length);
+    const sp=isPub?['✈️ Опубліковано','sp-ok']:statusPill(p.review); const ap=p.review==='approved'; const sel=SelPosts.has(p.id);
+    // шапка: опублікований пост показує мережі, КУДИ реально поїхав (✓); інші - обрані канали
+    const dots=isPub?sentDots(p.sent):chanDots(p.channels);
     const tags=(p.format==='reel'?'<span class="ptag" style="color:var(--brand);border-color:var(--brand)">🎬 рілс</span>':'')+(p.rubric?'<span class="ptag">🏷 '+esc(p.rubric)+'</span>':'')+(p.source_origin&&p.source_origin!=='manual'?'<span class="ptag">'+(ORIGIN_LABEL[p.source_origin]||esc(p.source_origin))+'</span>':'');
     return '<div class="pcard'+(ap?' appr':'')+(sel?' selc':'')+'" data-post="'+p.id+'">'
-      +'<div class="pcard-h"><input type="checkbox" class="psel" '+(sel?'checked':'')+' title="Обрати для масових дій">'+chanDots(p.channels)+'<span class="statuspill '+sp[1]+'" style="margin-left:auto">'+sp[0]+'</span></div>'
+      +'<div class="pcard-h"><input type="checkbox" class="psel" '+(sel?'checked':'')+' title="Обрати для масових дій">'+dots+'<span class="statuspill '+sp[1]+'" style="margin-left:auto">'+sp[0]+'</span></div>'
       +(p.media_filename?'<div class="pcard-img" data-a="image" style="cursor:pointer" title="Редагувати зображення"><img loading="lazy" src="/thumb/'+esc(p.media_filename)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(p.media_filename)+'\'"></div>':'')
       +'<div class="pcard-text pcontent" contenteditable="true">'+esc(p.content)+'</div>'
       +(tags?'<div style="display:flex;gap:5px;flex-wrap:wrap;padding:0 14px 4px">'+tags+'</div>':'')
-      +'<div class="pcard-f"><span class="chars">'+(p.content||'').replace(/\n/g,'').length+' симв.</span>'
-        +'<button class="icon" data-a="regen" title="Переробити (можна вказати, що саме змінити)">↻</button>'
-        +'<button class="icon" data-a="copy" title="Копіювати">⧉</button>'
-        +'<button class="icon" data-a="archive" title="В архів">🗄</button>'
-        +'<button class="icon" data-a="director" title="🎯 Директор: чи веде пост до цілі">🎯</button>'
-        +'<button class="icon" data-a="develop" title="🔥 Розвинути тему: 5 кутів-продовжень у Банк ідей">🔥</button>'
-        +'<button class="icon" data-a="magnet" title="🧲 Лід-магніт під тему цього поста">🧲</button>'
-        +(PRO&&String(p.content||'').startsWith('🎬')?'<button class="icon" data-a="reelvideo" title="🎞 Зібрати відео з цього сценарію (бета, 1-3 хв)">🎞</button>':'')
+      +'<div class="pcard-f"><span class="chars">'+(p.content||'').replace(/\n/g,'').length+' симв.</span><span style="flex:1"></span>'
         +(PRO&&p.reel_video?'<button class="icon" data-a="reelplay" data-rv="'+esc(p.reel_video)+'" title="▶ Дивитися зібраний рілс">▶️</button>':'')
-        +(PRO&&p.reel_video?'<button class="icon" data-a="reelpub" title="📤 Опублікувати рілс: Instagram / Facebook / YouTube / TikTok">📤</button>':'')
-        +'<button class="icon" data-a="image" title="Згенерувати зображення">🎨</button>'
-        +(PRO?'<button class="icon" data-a="atomize" title="Розтиражувати під усі канали">♻️</button>':'')
-        +'<button class="icon" data-a="composer" title="Опублікувати / запланувати">📣</button>'
+        +(!isPub?'<button class="icon" data-a="del" title="Видалити пост" style="color:var(--danger)">🗑</button>':'')
+        +'<button class="icon" data-a="menu" title="Ще: AI-інструменти й дії">⋯</button>'
+        +'<button class="icon" data-a="composer" title="Редагувати, запланувати чи опублікувати">📣</button>'
         +'<button class="approve'+(ap?' on':'')+'" data-a="approve"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg>'+(ap?'Затверджено':'Затвердити')+'</button>'
       +'</div></div>';
   }).join('');
   grid.querySelectorAll('.pcard').forEach(card=>{ const id=card.dataset.post; const cont=card.querySelector('.pcontent');
     cont.addEventListener('blur',()=>saveContent(id,cont.textContent));
     const cb=card.querySelector('.psel'); if(cb) cb.onchange=()=>{ cb.checked?SelPosts.add(id):SelPosts.delete(id); card.classList.toggle('selc',cb.checked); renderBulkBar(); };
-    card.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(id); return; } if(a==='image'){ openImageEditor(id); return; } if(a==='atomize'){ openAtomize(id); return; } if(a==='director'){ directorCheck(id); return; } if(a==='develop'){ developPost(id); return; } if(a==='magnet'){ postMagnet(id); return; } if(a==='reelvideo'){ reelVideoRun(id); return; } if(a==='reelplay'){ openVideoModal(b.dataset.rv); return; } if(a==='reelpub'){ openReelPublish(id); return; } postAction(card,id,a); });
+    card.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(id); return; } if(a==='image'){ openImageEditor(id); return; } if(a==='atomize'){ openAtomize(id); return; } if(a==='director'){ directorCheck(id); return; } if(a==='develop'){ developPost(id); return; } if(a==='magnet'){ postMagnet(id); return; } if(a==='reelvideo'){ reelVideoRun(id); return; } if(a==='reelplay'){ openVideoModal(b.dataset.rv); return; } if(a==='reelpub'){ openReelPublish(id); return; }
+      if(a==='menu'){ const p=Finals.find(x=>x.id===id); if(p) openCardMenu(p,b,card); return; }
+      if(a==='del'){ deletePost(id); return; }
+      postAction(card,id,a); });
   });
 }
 // панель масових дій (зʼявляється коли є обрані пости)
@@ -1670,11 +1687,21 @@ function renderBulkBar(){
     document.body.appendChild(bar); }
   bar.innerHTML='<b style="font-size:13px">Обрано: '+SelPosts.size+'</b>'
     +'<button class="primary" id="bulkApprove" style="padding:7px 12px">✓ Затвердити всі</button>'
-    +'<button class="ghost" id="bulkArchive" style="padding:7px 12px">🗄 В архів</button>'
+    +'<button class="ghost" id="bulkDelete" style="padding:7px 12px;color:var(--danger)">🗑 Видалити</button>'
     +'<button class="icon" id="bulkClear" title="Зняти вибір">✕</button>';
   $('bulkApprove').onclick=()=>bulkReview('approved');
-  $('bulkArchive').onclick=()=>bulkReview('archived');
+  $('bulkDelete').onclick=bulkDelete;
   $('bulkClear').onclick=()=>{ SelPosts.clear(); renderStudio(); };
+}
+// масове видалення: опублікованим сервер відмовляє (409) - вони пропускаються з поясненням
+async function bulkDelete(){
+  const ids=[...SelPosts]; if(!ids.length) return;
+  if(!confirm('Видалити '+ids.length+' постів назавжди? Опубліковані пропущу - вони лишаються як історія.')) return;
+  aiBusy('🗑 Видаляю '+ids.length+' постів…');
+  let ok=0, skipped=0;
+  for(const id of ids){ try{ await api('/posts/'+id,{method:'DELETE'}); ok++; }catch(e){ skipped++; } }
+  SelPosts.clear(); await loadStudioPosts(); aiDone();
+  flash('Видалено: '+ok+(skipped?(' · пропущено опублікованих: '+skipped):''));
 }
 async function bulkReview(status){
   const ids=[...SelPosts]; if(!ids.length) return;
@@ -1727,6 +1754,43 @@ function renderSourceCard(src){
 function renderCountChips(){ const o=$('countChips'); if(!o) return; const cur=+($('ideaCount').value)||6;
   o.innerHTML=[3,6,9,12].map(n=>'<div class="cchip'+(n===cur?' on':'')+'" data-n="'+n+'">'+n+'</div>').join('');
   o.querySelectorAll('[data-n]').forEach(c=>c.onclick=()=>{ $('ideaCount').value=c.dataset.n; renderCountChips(); });
+}
+// видалення поста (замінило архів): опублікованим сервер відмовить - вони історія й аналітика
+async function deletePost(id, after){ if(!confirm('Видалити пост назавжди? Це не архів - повернути буде неможливо.')) return;
+  try{ await api('/posts/'+id,{method:'DELETE'}); flash('Пост видалено'); if(after)after(); await loadStudioPosts(); try{await loadPublish();}catch(e){} }
+  catch(e){ alert('⚠ '+e.message); } }
+// ⋯-меню картки: всі AI-інструменти з ПІДПИСАМИ, згруповані за питанням; на мобільному - шторка знизу
+function openCardMenu(p, btn, card){
+  document.querySelectorAll('.cardmenu,.cardmenu-bg').forEach(x=>x.remove());
+  const id=p.id, isReelScript=String(p.content||'').startsWith('🎬');
+  const G=[];
+  G.push(['Покращити',[
+    ['↻','Переробити…','вкажи, що саме змінити - голос збережеться',()=>postAction(card,id,'regen')],
+    ['🎯','Перевірка Директора','чи веде пост до твоєї цілі',()=>directorCheck(id)],
+  ]]);
+  const dev=[['🔥','5 кутів продовження','ідеї-продовження теми → Банк ідей',()=>developPost(id)],
+             ['🧲','Лід-магніт під тему','що віддати аудиторії за контакт',()=>postMagnet(id)]];
+  if(PRO) dev.push(['♻️','Розтиражувати під канали','варіанти під кожну мережу (COPE)',()=>openAtomize(id)]);
+  G.push(['Розвинути',dev]);
+  if(PRO&&(isReelScript||p.reel_video)){ const reel=[];
+    if(isReelScript) reel.push(['🎞','Зібрати відео','озвучка + кліпи + монтаж, 1-3 хв',()=>reelVideoRun(id)]);
+    if(p.reel_video) reel.push(['▶️','Дивитися рілс','',()=>openVideoModal(p.reel_video)],['📤','Опублікувати рілс','Instagram / Facebook / YouTube / TikTok',()=>openReelPublish(id)]);
+    G.push(['Рілс',reel]); }
+  G.push(['Інше',[
+    ['🎨','Зображення до поста','згенерувати чи замінити фото',()=>openImageEditor(id)],
+    ['⧉','Копіювати текст','',()=>postAction(card,id,'copy')],
+  ]]);
+  const bg=document.createElement('div'); bg.className='cardmenu-bg';
+  const m=document.createElement('div'); m.className='cardmenu';
+  m.innerHTML=G.map(g=>'<div class="cm-h">'+g[0]+'</div>'+g[1].map((it,i)=>'<button class="cm-i" data-g="'+esc(g[0])+'" data-i="'+i+'"><span style="width:22px;text-align:center">'+it[0]+'</span><span style="flex:1"><span style="display:block">'+it[1]+'</span>'+(it[2]?'<span style="display:block;font-size:11px;color:var(--faint)">'+it[2]+'</span>':'')+'</span></button>').join('')).join('');
+  document.body.appendChild(bg); document.body.appendChild(m);
+  // позиція: під кнопкою на десктопі (мобільний перекриє CSS-шторкою)
+  const r=btn.getBoundingClientRect();
+  m.style.top=Math.min(window.innerHeight-Math.min(m.offsetHeight,window.innerHeight*0.7)-12, r.bottom+6)+'px';
+  m.style.left=Math.max(10, Math.min(window.innerWidth-m.offsetWidth-10, r.right-m.offsetWidth))+'px';
+  const close=()=>{ m.remove(); bg.remove(); };
+  bg.onclick=close;
+  m.querySelectorAll('.cm-i').forEach(b=>b.onclick=()=>{ const g=G.find(x=>x[0]===b.dataset.g); close(); if(g) g[1][+b.dataset.i][3](); });
 }
 async function postAction(card,id,a){
   const cont=card.querySelector('.pcontent');
@@ -1808,6 +1872,9 @@ async function openComposer(postId, opts){
   let full; try{ full=await api('/posts/'+postId+'/full'); }catch(e){ flash('Не вдалося відкрити: '+e.message); return; }
   let ps={sent:[]}; try{ ps=await api('/posts/'+postId+'/publish-state'); }catch(e){}
   const sentSet=new Set(ps.sent||[]);
+  // 🗑 видалення доступне лише НЕопублікованим (опубліковані - історія й аналітика)
+  const delBtn=ov.querySelector('#cmpDel');
+  if(delBtn){ delBtn.style.display=sentSet.size?'none':''; delBtn.onclick=()=>deletePost(postId, close); }
   const C=JSON.parse(JSON.stringify(full.channels||{}));
   // якщо жодна мережа не обрана - вмикаємо всі підключені й ще не надіслані
   if(!Object.keys(C).some(k=>C[k]&&C[k].on)) NETS.forEach(n=>{ if(ChanStatus[n[0]]&&!sentSet.has(n[0])){ C[n[0]]=C[n[0]]||{text:''}; C[n[0]].on=true; } });
@@ -1825,13 +1892,16 @@ async function openComposer(postId, opts){
         +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Канали</div><div id="cmpChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px"></div>'
         +'<label style="font-size:12px;color:var(--muted);display:inline-block;margin-bottom:12px">Рубрика <select id="cmpRubric" class="txt" style="width:auto;padding:6px 9px;display:inline-block;margin-left:4px">'+rubOpts+'</select></label>'
         +'<textarea id="cmpText" class="txt" style="min-height:240px;font-size:14px;line-height:1.55;resize:vertical"></textarea>'
-        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="dashbtn" id="cmpHash"># Хештеги</button><button class="dashbtn" id="cmpPhoto">⚡ AI фото</button><button class="dashbtn" id="cmpRewrite">✍ Переписати</button><button class="dashbtn" id="cmpHook">🪝 Гачок</button><button class="dashbtn" id="cmpAudit">🔍 AI-сліди</button></div>'
-        +'<div id="cmpMediaWrap" style="margin-top:14px"></div>'
+        +'<div style="font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint);margin-top:12px">🤖 ПОМІЧНИКИ ТЕКСТУ</div>'
+        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="dashbtn" id="cmpRewrite" title="Перепише текст; можна вказати, що саме змінити">✍ Переписати</button><button class="dashbtn" id="cmpHook" title="3 варіанти сильнішого відкриття з кульмінації">🪝 Гачок</button><button class="dashbtn" id="cmpAudit" title="Знайти і точково прибрати сліди AI">🔍 AI-сліди</button><button class="dashbtn" id="cmpHash" title="5-8 релевантних хештегів у кінець тексту"># Хештеги</button></div>'
+        +'<div style="font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint);margin-top:14px">🖼 МЕДІА</div>'
+        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="dashbtn" id="cmpPhoto" title="Фото: з галереї, з компʼютера, зі стоку чи AI-генерація">🎨 Зображення</button></div>'
+        +'<div id="cmpMediaWrap" style="margin-top:10px"></div>'
         +'<div id="cmpMsg" style="font-size:12.5px;margin-top:10px;min-height:18px"></div>'
       +'</div>'
       +'<div class="cmp-right"><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:14px;text-align:center">Прев\'ю · мобільний</div><div id="cmpPrev"></div></div>'
     +'</div>'
-    +'<div class="cmp-foot"><button class="ghost" id="cmpSave">💾 Зберегти чернетку</button><button id="cmpAdapt">✨ Підлаштувати під канали</button><span style="flex:1"></span>'
+    +'<div class="cmp-foot"><button class="icon" id="cmpDel" title="Видалити пост назавжди" style="color:var(--danger);display:none">🗑</button><span style="font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--faint)">ЧЕРНЕТКА</span><button class="ghost" id="cmpSave">💾 Зберегти</button><button id="cmpAdapt">✨ Підлаштувати під канали</button><span style="flex:1"></span><span style="font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--faint);border-left:1px solid var(--line);padding-left:12px">ПУБЛІКАЦІЯ</span>'
       +'<label style="font-size:12px;color:var(--muted)">Дата <input type="date" id="cmpDate" class="txt" value="'+initDate+'" style="width:auto;padding:6px 8px;display:inline-block"></label>'
       +'<label style="font-size:12px;color:var(--muted)">Час <input type="time" id="cmpTime" class="txt" value="'+initTime+'" style="width:auto;padding:6px 8px;display:inline-block"></label>'
       +'<button class="ok" id="cmpSched">🗓 Запланувати</button><button class="primary" id="cmpNow">📣 Опублікувати зараз</button></div>';
