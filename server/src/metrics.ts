@@ -21,11 +21,13 @@ async function stalePosts(ws: string, table: string, network: string, extId: str
      order by tp.created_at desc limit ${PER_TICK}`, [ws, network]);
 }
 
-async function saveMetric(postId: string, network: string, views: number, likes: number): Promise<void> {
+async function saveMetric(postId: string, network: string, views: number, likes: number, extra?: { replies?: number; reposts?: number; quotes?: number }): Promise<void> {
+  const nz = (x: any) => Math.max(0, Math.round(Number(x)) || 0);
   await q(
-    `insert into post_metric(post_id, network, views, likes, fetched_at) values($1,$2,$3,$4,now())
-     on conflict (post_id, network) do update set views=excluded.views, likes=excluded.likes, fetched_at=now()`,
-    [postId, network, Math.max(0, Math.round(views) || 0), Math.max(0, Math.round(likes) || 0)]);
+    `insert into post_metric(post_id, network, views, likes, replies, reposts, quotes, fetched_at) values($1,$2,$3,$4,$5,$6,$7,now())
+     on conflict (post_id, network) do update set views=excluded.views, likes=excluded.likes,
+       replies=excluded.replies, reposts=excluded.reposts, quotes=excluded.quotes, fetched_at=now()`,
+    [postId, network, nz(views), nz(likes), nz(extra?.replies), nz(extra?.reposts), nz(extra?.quotes)]);
 }
 
 async function collectWorkspace(ws: string): Promise<number> {
@@ -35,7 +37,7 @@ async function collectWorkspace(ws: string): Promise<number> {
     `select access_token, threads_user_id from threads_config where workspace_id=$1 and access_token is not null`, [ws]);
   if (th.length) {
     for (const r of await stalePosts(ws, "threads_publish", "threads", "media_id")) {
-      try { const ins = await threads.mediaInsights(th[0].access_token, r.ext); await saveMetric(r.post_id, "threads", ins.views || 0, ins.likes || 0); n++; }
+      try { const ins = await threads.mediaInsights(th[0].access_token, r.ext); await saveMetric(r.post_id, "threads", ins.views || 0, ins.likes || 0, { replies: ins.replies, reposts: ins.reposts, quotes: ins.quotes }); n++; }
       catch { /* один недоступний інсайт не валить збір */ }
     }
   }

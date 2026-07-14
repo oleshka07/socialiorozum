@@ -6,7 +6,7 @@ import { env } from "./env.js";
 import { q, one } from "./db.js";
 import * as tg from "./telegram.js";
 import { logEvent } from "./log.js";
-import { generatePostsOnePass, buildLiteSkeleton, rewritePost, suggestDevelopment, reelsScript, sliceToReels, extractIdeasFromText } from "./pipeline.js";
+import { generatePostsOnePass, buildLiteSkeleton, rewritePost, suggestDevelopment, reelsScript, sliceToReels, extractIdeasFromText, repeatVariant, generateThreadsTakes } from "./pipeline.js";
 import { publishPostToChannels } from "./publisher.js";
 import { sendDigestNow } from "./digest.js";
 import { isDiaryPending, appendDiaryText, attachDiaryMedia, transcribeVoice, skipDiaryToday, sendDiaryNow, weekDiaryText } from "./diary.js";
@@ -280,6 +280,31 @@ async function handleCallback(cbq: any): Promise<void> {
       await tg.answerCallbackQuery(token, cbq.id, "Генерую пост…");
       const p = await ideaToPost(ws, data.slice("idea_post:".length));
       await tg.sendMessage(token, chatId, `✅ Чернетка готова:\n\n${p.content.slice(0, 3500)}\n\nОпублікувати, переробити чи докрутити в застосунку (фото, час)?`, p.id ? draftButtons(p.id) : undefined);
+      return;
+    }
+    // ---- 🧵 Threads: повтор хіта + тейки-порятунок ----
+    if (data.startsWith("rep:")) {
+      await tg.answerCallbackQuery(token, cbq.id, "Готую повтор…");
+      const postId = data.slice("rep:".length);
+      const post = await one<{ run_id: string; content: string; image_prompt: string | null; rubric: string | null; media_id: string | null }>(
+        `select p.run_id, p.content, p.image_prompt, p.rubric, p.media_id from post p
+           join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+         where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
+      if (!post) { await tg.sendMessage(token, chatId, "Пост не знайдено."); return; }
+      const fresh = await repeatVariant(ws, post.content);
+      const np = await one<{ id: string }>(
+        `insert into post(run_id, stage, content, image_prompt, rubric, media_id, channels)
+         values($1,'final',$2,$3,$4,$5,$6::jsonb) returning id`,
+        [post.run_id, fresh, post.image_prompt, post.rubric, post.media_id, JSON.stringify({ threads: { on: true } })]);
+      const when = new Date(Date.now() + 48 * 3600e3);
+      await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [np!.id, when.toISOString()]);
+      await tg.sendMessage(token, chatId, `🔁 Повтор заплановано на ${when.toLocaleString("uk", { timeZone: "Europe/Kyiv" })} (свіжий гачок, та сама суть - покажеться іншій аудиторії).`);
+      return;
+    }
+    if (data === "takes_gen") {
+      await tg.answerCallbackQuery(token, cbq.id, "Пишу тейки…");
+      try { const n = await generateThreadsTakes(ws, 3); await tg.sendMessage(token, chatId, `🧵 +${n} тейки в чернетках Студії - обери найживіший і опублікуй. Стрік урятовано, якщо встигнеш сьогодні 😉`); }
+      catch (e: any) { await tg.sendMessage(token, chatId, "⚠️ " + String(e.message).slice(0, 200)); }
       return;
     }
     // ---- 📔 щоденник ----

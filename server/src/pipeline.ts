@@ -696,6 +696,100 @@ export async function generateThreadsTakes(workspaceId: string, count: number): 
   return takes.length;
 }
 
+// 🔁 «Повторити хіт»: та сама суть, СВІЖИЙ гачок (перший рядок). Практика: дубль вдалого поста
+// через 24-72 год показується іншій аудиторії; міняємо перший рядок, щоб не бути дослівним дублем.
+export async function repeatVariant(workspaceId: string, content: string): Promise<string> {
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const out = await chat(env.cheapModel,
+    "Перепиши ЛИШЕ перший рядок/абзац поста (гачок) - іншими словами, інший кут заходу, та сама суть. Решту тексту поверни ДОСЛІВНО без змін." +
+    (s.tone_of_voice ? `\nГолос бренду: ${s.tone_of_voice}` : "") + NO_DASH_RULE +
+    `\nПоверни лише повний текст поста. Мова: ${lang}.`,
+    content, { workspaceId, step: "repeat" });
+  const t = (out || "").trim();
+  // guard: модель могла повернути сміття - тоді краще дослівний повтор, ніж зіпсований
+  return t && t.length > content.length * 0.5 && t.length < content.length * 1.6 ? t : content;
+}
+
+// 🧵 «Розгорнути в гілку»: короткий тейк-хіт → повний пост під гілку (root-гачок + тези).
+export async function expandTake(workspaceId: string, content: string): Promise<string> {
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const out = await chat("openai/gpt-4o",
+    "Тейк автора «залетів» у Threads - розгорни його в повний пост (700-1200 символів) для публікації гілкою: перший абзац = той самий гачок (можна загострити), далі 3-4 конкретні тези/кроки/приклади, що РОЗКРИВАЮТЬ думку, наприкінці висновок + мʼяке питання. Пиши від першої особи, без води." +
+    (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") +
+    (s.tone_of_voice ? `\nГолос бренду (суворо): ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) +
+    goalRule(s) + NO_DASH_RULE + ANTI_AI_RULE +
+    `\nПоверни лише текст поста. Мова: ${lang}.`,
+    content, { workspaceId, step: "expand_take" });
+  const t = (out || "").trim();
+  if (!t) throw new Error("Не вдалося розгорнути тейк");
+  return t;
+}
+
+// 🚀 Стартовий пакет Threads: 3 варіанти біо + пост-знайомство + закріп-пост.
+// Практика: чітке біо «у тебе проблема - я даю рішення», пост-візитка залітає на 0 підписників,
+// закріп із лід-магнітом безпечний для лінка (закріп не йде в рекомендації).
+export async function threadsStarterPack(workspaceId: string): Promise<{ bio: string[]; intro: string; pinned: string }> {
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  let magnet = "";
+  try { const m = JSON.parse(s.lead_magnets || "[]"); if (Array.isArray(m) && m[0]?.title) magnet = `\nГотовий лід-магніт бренду: ${m[0].title} - ${m[0].what || ""}`; } catch { /* без магніта */ }
+  const system =
+    "Склади стартовий пакет для Threads-акаунта бренду." +
+    (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") +
+    (s.tone_of_voice ? `\nГолос: ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) + offerLadder(s) + magnet +
+    "\n\nЩо потрібно:" +
+    "\n1. bio - 3 РІЗНІ варіанти біо ≤150 символів кожен: формула «у тебе проблема - я даю рішення» (не «я такий-то», а яку болячку закриваю), можна 2-3 короткі булети через ·." +
+    "\n2. intro - пост-знайомство/візитка ≤450 символів: хто я БЕЗ регалій - через конкретику й історію, кого шукаю тут («відгукнись, якщо…»), наприкінці питання до аудиторії. Живо, як розмова." +
+    "\n3. pinned - закріп-пост ≤450 символів: за 2 секунди зрозуміло, кому я допомагаю і з чим; яку користь людина знайде в акаунті; заклик забрати лід-магніт (кодовим словом чи за лінком - якщо магніт відомий)." +
+    NO_DASH_RULE + ANTI_AI_RULE +
+    `\n\nПоверни ЛИШЕ валідний JSON: {"bio":["…","…","…"],"intro":"…","pinned":"…"}. Мова: ${lang}.`;
+  const raw = await chat("openai/gpt-4o", system, "Склади пакет.", { workspaceId, step: "threads_starter" });
+  const obj = extractJsonObject(raw) as any;
+  const bio = (Array.isArray(obj?.bio) ? obj.bio : []).map((x: any) => String(x || "").trim()).filter(Boolean).slice(0, 3);
+  const intro = String(obj?.intro || "").trim(), pinned = String(obj?.pinned || "").trim();
+  if (!bio.length || !intro || !pinned) throw new Error("Не вдалося скласти стартовий пакет");
+  return { bio, intro, pinned };
+}
+
+// 🔍 Розбір ніші: хіти Threads-джерел (чужі топ-автори) + власні топ-пости → формули, що повторюються.
+export async function threadsNicheReview(workspaceId: string): Promise<{ patterns: { name: string; formula: string; example: string }[]; ideasAdded: number }> {
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  // матеріали зі стрічок-джерел Threads (RSSHub /threads/:user) - свіжі пости топ-авторів ніші
+  const mats = await q<{ title: string; transcript: string }>(
+    `select src.title, src.transcript from source src join content_source cs on cs.id=src.feed_id
+     where src.workspace_id=$1 and cs.url like '%/threads/%'
+     order by src.created_at desc limit 30`, [workspaceId]);
+  if (!mats.length) throw new Error("Спершу додай Threads-профілі сильних авторів твоєї ніші як джерела (Створення → Матеріали → «＋ Додати джерело» → 🧵 Threads-профіль) і дай поллеру їх стягнути.");
+  // власні топи (post_metric threads, найкращі за переглядами)
+  const own = await q<{ content: string; views: number }>(
+    `select p.content, pm.views from post_metric pm join post p on p.id=pm.post_id
+       join pipeline_run r on r.id=p.run_id join source s2 on s2.id=r.source_id
+     where s2.workspace_id=$1 and pm.network='threads' order by pm.views desc limit 5`, [workspaceId]);
+  const material =
+    "ПОСТИ ТОП-АВТОРІВ НІШІ:\n" + mats.map((m) => "- " + (m.transcript || m.title || "").replace(/\s+/g, " ").slice(0, 400)).join("\n") +
+    (own.length ? "\n\nВЛАСНІ ТОП-ПОСТИ БРЕНДУ (перегляди):\n" + own.map((o) => `- [${o.views}] ` + (o.content || "").replace(/\s+/g, " ").slice(0, 300)).join("\n") : "");
+  const system =
+    "Ти аналітик віральності Threads. Проаналізуй пости й знайди 3-5 ПАТЕРНІВ, що повторюються в найсильніших (тип гачка, структура, тема-тригер, формат CTA, довжина/ритм). Патерн = те, що можна ВІДТВОРИТИ, не скопіювавши зміст." +
+    (s.marketing_context ? `\nНаш бренд і аудиторія (під це адаптуй): ${s.marketing_context}` : "") +
+    `\n\nПоверни ЛИШЕ валідний JSON: {"patterns":[{"name":"коротка назва","formula":"правило-формула, яку можна вшити в генерацію (1-2 речення)","example":"приклад застосування ПІД НАШ бренд"}],"ideas":["5 конкретних ідей постів для нашого бренду за цими патернами"]}. Мова: ${lang}.` + NO_DASH_RULE;
+  const raw = await chat("openai/gpt-4o", system, material, { workspaceId, step: "niche_review" });
+  const obj = extractJsonObject(raw) as any;
+  const patterns = (Array.isArray(obj?.patterns) ? obj.patterns : []).map((p: any) => ({
+    name: String(p?.name || "").trim().slice(0, 80), formula: String(p?.formula || "").trim().slice(0, 400), example: String(p?.example || "").trim().slice(0, 400),
+  })).filter((p: any) => p.name && p.formula).slice(0, 5);
+  if (!patterns.length) throw new Error("Патернів не знайдено - спробуй пізніше, коли назбирається більше матеріалів");
+  const ideas = (Array.isArray(obj?.ideas) ? obj.ideas : []).map((x: any) => String(x || "").trim()).filter(Boolean).slice(0, 5);
+  let ideasAdded = 0;
+  for (const idea of ideas) {
+    await q(`insert into idea_bank(workspace_id, text, origin) values($1,$2,'ai')`, [workspaceId, idea.slice(0, 500)]);
+    ideasAdded++;
+  }
+  return { patterns, ideasAdded };
+}
+
 // ---- Lite-скелет плану: ДЕТЕРМІНОВАНО зі стратегії (рубрики × best_days × теми) ----
 // Канало-незалежний, не залежить від крихкого LLM-плану → порожнім не буде, якщо є стратегія.
 export async function buildLiteSkeleton(workspaceId: string, horizonDays: number, postsPerWeek = 4): Promise<{ day: number; rubric: string; theme: string; hook: string }[]> {

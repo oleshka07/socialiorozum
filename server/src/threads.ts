@@ -89,6 +89,33 @@ export async function publish(token: string, userId: string, text: string, image
   return { mediaId: p.id };
 }
 
+// інсайти ПРОФІЛЮ за період (views - часовий ряд, решта - total_value за since..until;
+// followers_count - лише поточне значення, без періоду)
+export async function userInsights(token: string, userId: string, metrics: string[], sinceUnix?: number, untilUnix?: number): Promise<Record<string, number>> {
+  const u = new URL(`${GRAPH}/v1.0/${userId}/threads_insights`);
+  u.searchParams.set("metric", metrics.join(","));
+  if (sinceUnix) u.searchParams.set("since", String(sinceUnix));
+  if (untilUnix) u.searchParams.set("until", String(untilUnix));
+  u.searchParams.set("access_token", token);
+  const j = await thFetch<{ data: Array<{ name: string; values?: Array<{ value: number }>; total_value?: { value: number } }> }>(u.toString());
+  const out: Record<string, number> = {};
+  for (const m of j.data || [])
+    out[m.name] = m.total_value?.value ?? (m.values || []).reduce((s, v) => s + (Number(v.value) || 0), 0);
+  return out;
+}
+
+// демографія підписників (потрібен threads_manage_insights і ≥100 підписників; інакше API поверне помилку)
+export async function followerDemographics(token: string, userId: string, breakdown: "age" | "gender" | "country" | "city"): Promise<Array<{ key: string; value: number }>> {
+  const u = new URL(`${GRAPH}/v1.0/${userId}/threads_insights`);
+  u.searchParams.set("metric", "follower_demographics");
+  u.searchParams.set("breakdown", breakdown);
+  u.searchParams.set("access_token", token);
+  const j = await thFetch<any>(u.toString());
+  const res = j?.data?.[0]?.total_value?.breakdowns?.[0]?.results || [];
+  return res.map((r: any) => ({ key: String((r.dimension_values || []).join(", ")), value: Number(r.value) || 0 }))
+    .sort((a: any, b: any) => b.value - a.value);
+}
+
 // інсайти по опублікованому посту
 export async function mediaInsights(token: string, mediaId: string): Promise<Record<string, number>> {
   const u = new URL(`${GRAPH}/v1.0/${mediaId}/insights`);

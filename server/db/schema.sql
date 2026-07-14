@@ -474,6 +474,11 @@ create index if not exists idx_ttpub_post on tiktok_publish(post_id);
 -- Один пост їде в різні мережі в різний час за їхніми ритмами; дедуп «раз на мережу» вже захищає від дублів.
 alter table schedule_slot add column if not exists channels jsonb;
 
+-- 🧵 повні метрики Threads-постів для розширеної аналітики (для FB/IG лишаються 0)
+alter table post_metric add column if not exists replies int not null default 0;
+alter table post_metric add column if not exists reposts int not null default 0;
+alter table post_metric add column if not exists quotes  int not null default 0;
+
 -- Метрики опублікованих постів (останній знімок по мережі) - фундамент бенчмарків «×N до власної норми»:
 -- медіана переглядів за 75-90 днів = норма мережі, кожен пост звітується множником до неї.
 create table if not exists post_metric (

@@ -782,6 +782,8 @@
                 <label>💬 Щоденні тейки <select id="thStTakes" class="txt" style="width:auto;padding:6px 8px;display:inline-block;margin-left:4px"><option value="0">вимкнено</option><option value="3">3 на день</option><option value="5">5 на день</option></select></label>
               </div>
               <div class="hint" style="margin-top:8px">CTA-гілка бере заклик Threads з «📮 Конверсійні заклики» вище (заповни там значення). Тейки - короткі думки з Банку ідей і щоденника: щоранку о 8:00 падають чернетками в Студію, публікуєш у 1 тап.</div>
+              <div class="btnrow" style="margin-top:8px"><button class="ghost" id="thStarter">🚀 Стартовий пакет</button><button class="ghost" id="thNiche">🔍 Розбір ніші</button></div>
+              <div class="hint">Стартовий пакет: 3 варіанти біо + пост-знайомство + закріп-пост (для нового чи «сплячого» акаунта). Розбір ніші: AI шукає формули у хітах топ-авторів твоєї ніші (спершу додай їх Threads-профілі в Джерела).</div>
               <div id="thStMsg" style="font-size:12px;color:var(--brand);min-height:16px"></div>
             </div>
           </div>
@@ -1346,6 +1348,7 @@ async function loadAnalytics(){
       +igHtml+'</div>'
     +'</div>'
     +'<div class="panel" style="margin:18px 0 0"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><div style="font-weight:700;font-size:14px">📊 Пости відносно твоєї норми</div><button class="ghost" id="topPatBtn" style="margin-left:auto;padding:5px 12px;font-size:12.5px" title="AI розбирає топ-пости і знаходить 1-2 патерни, що повторюються в усіх хітах">🔍 Що спрацювало</button></div><div class="hint" style="margin-bottom:8px">Норма = медіана переглядів твоїх постів у мережі за 90 днів. ×2.0 = удвічі краще за твій звичайний пост. Статистика збирається автоматично раз на добу.</div><div id="bmLive"><span class="spin"></span></div></div>'
+    +'<div class="panel" id="thAnPanel" style="margin:18px 0 0;display:none"></div>'
     +'<div class="panel" style="margin:18px 0 0"><div style="font-weight:700;font-size:14px;margin-bottom:6px">Останні публікації</div>'+(rec.length?rec.slice(0,12).map(r=>'<div style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--line)"><span style="font-size:15px">'+({telegram:"✈️",instagram:"📸",facebook:"📘",threads:"🧵"}[r.net]||"•")+'</span><div style="flex:1;min-width:0"><div style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc((r.content||"").replace(/\n+/g," ").slice(0,80))+'</div><div style="font-size:11px;color:var(--muted)">'+(CHN[r.net]?CHN[r.net][0]:r.net)+" · "+new Date(r.created_at).toLocaleString("uk")+'</div></div></div>').join(""):'<div class="empty">Ще нічого не опубліковано. Опублікуй пост - і він зʼявиться тут.</div>')+'</div>';
   if($('topPatBtn')) $('topPatBtn').onclick=topPatterns;
   api('/analytics/benchmarks').then(b=>{
@@ -1357,6 +1360,43 @@ async function loadAnalytics(){
       +(b.posts||[]).slice(0,10).map(p=>{ const c=p.mult>=1.5?'var(--ok,#22a06b)':(p.mult<0.7?'var(--danger)':'var(--muted)');
         return '<div style="display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px solid var(--line)"><b style="min-width:48px;color:'+c+'">×'+p.mult+'</b><span style="font-size:14px">'+(NICO[p.network]||'')+'</span><div style="flex:1;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(p.title)+'</div><span style="font-size:11.5px;color:var(--muted)">'+p.views.toLocaleString('uk')+'</span></div>'; }).join('');
   }).catch(()=>{ const el=$('bmLive'); if(el) el.innerHTML='<div class="empty" style="padding:10px 0">Не вдалося завантажити бенчмарки.</div>'; });
+  // 🧵 розширена аналітика Threads (живі інсайти профілю + таблиця постів; кеш 15 хв на сервері)
+  api('/analytics/threads').then(t=>{
+    const el=$('thAnPanel'); if(!el) return; el.style.display='';
+    const dlt=(k)=>{ if(!t.now||!t.prev||!(k in t.prev)) return '';
+      const a=Number(t.now[k])||0, b=Number(t.prev[k])||0; if(!b) return '';
+      const p=Math.round((a-b)/b*100); return '<span style="font-size:11px;font-weight:700;color:'+(p>=0?'var(--ok,#22a06b)':'var(--danger)')+'">'+(p>=0?'+':'')+p+'%</span>'; };
+    const fmt=(v)=>v==null?'—':Number(v).toLocaleString('uk');
+    const tiles=[
+      ['Перегляди', t.now?fmt(t.now.views):'—', dlt('views')],
+      ['Лайки', t.now?fmt(t.now.likes):'—', dlt('likes')],
+      ['Відповіді', t.now?fmt(t.now.replies):'—', dlt('replies')],
+      ['Репости', t.now?fmt(t.now.reposts):'—', dlt('reposts')],
+      ['Цитати', t.now?fmt(t.now.quotes):'—', dlt('quotes')],
+      ['Пости', fmt(t.postsCount), ''],
+      ['Інтервал', t.intervalH!=null?(t.intervalH+' год'):'—', ''],
+      ['🔥 Стрік', t.streak+' дн.', t.postedToday?'':'<span style="font-size:11px;color:var(--danger)">сьогодні ще пусто</span>'],
+    ];
+    const posts=(t.posts||[]).length
+      ? '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:560px"><tr style="color:var(--muted);text-align:right"><th style="text-align:left;padding:6px 4px;font-weight:600">Пост</th><th style="padding:6px 4px">👁</th><th style="padding:6px 4px">❤️</th><th style="padding:6px 4px">💬</th><th style="padding:6px 4px">🔁</th><th style="padding:6px 4px">❝</th></tr>'
+        +t.posts.map(p=>'<tr style="border-top:1px solid var(--line);text-align:right"><td style="text-align:left;padding:7px 4px;max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(p.title||'')+'<div style="font-size:10.5px;color:var(--faint)">'+new Date(p.created_at).toLocaleDateString('uk')+'</div></td><td style="padding:7px 4px">'+fmt(p.views)+'</td><td style="padding:7px 4px">'+fmt(p.likes)+'</td><td style="padding:7px 4px">'+fmt(p.replies)+'</td><td style="padding:7px 4px">'+fmt(p.reposts)+'</td><td style="padding:7px 4px">'+fmt(p.quotes)+'</td></tr>').join('')+'</table></div>'
+      : '<div class="empty">Ще нема опублікованих Threads-постів.</div>';
+    let demo='';
+    const dg=(t.demographics&&t.demographics.gender)||[], da=(t.demographics&&t.demographics.age)||[], dc=(t.demographics&&t.demographics.country)||[];
+    if(dg.length||da.length||dc.length){
+      const bar=(rows)=>{ const mx2=Math.max(1,...rows.map(r=>r.value)); return rows.slice(0,6).map(r=>'<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px"><span style="min-width:64px;font-size:11.5px;color:var(--muted)">'+esc(r.key)+'</span><div style="flex:1;height:8px;border-radius:5px;background:var(--surface2);overflow:hidden"><div style="width:'+(r.value/mx2*100)+'%;height:100%;background:var(--th)"></div></div><b style="font-size:11.5px;min-width:30px;text-align:right">'+r.value+'</b></div>').join(''); };
+      demo='<div style="font-weight:700;font-size:13px;margin:16px 0 8px">Хто підписаний</div><div class="grid2">'
+        +(dg.length?'<div><div style="font-size:12px;color:var(--muted);margin-bottom:6px">Стать</div>'+bar(dg)+'</div>':'')
+        +(da.length?'<div><div style="font-size:12px;color:var(--muted);margin-bottom:6px">Вік</div>'+bar(da)+'</div>':'')
+        +(dc.length?'<div><div style="font-size:12px;color:var(--muted);margin-bottom:6px">Країни</div>'+bar(dc)+'</div>':'')+'</div>';
+    }
+    el.innerHTML='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px"><div style="font-weight:700;font-size:14px">🧵 Threads'+(t.username?(' · @'+esc(t.username)):'')+'</div>'
+      +(t.followers!=null?'<span style="font-size:12.5px;color:var(--muted)">підписників: <b style="color:var(--ink)">'+fmt(t.followers)+'</b></span>':'')
+      +'<span style="margin-left:auto;font-size:11px;color:var(--faint)">останні 7 днів vs попередні 7</span></div>'
+      +(t.insightsError?'<div class="hint" style="margin:4px 0 8px">⚠ Інсайти профілю недоступні: '+esc(t.insightsError)+' (можливо, чекаємо схвалення threads_manage_insights)</div>':'')
+      +'<div class="stat-grid" style="margin:10px 0 14px">'+tiles.map(s=>'<div class="stat"><div class="l">'+s[0]+'</div><div class="v" style="font-size:19px">'+s[1]+'</div><div class="d">'+(s[2]||'&nbsp;')+'</div></div>').join('')+'</div>'
+      +'<div style="font-weight:700;font-size:13px;margin-bottom:6px">Останні пости</div>'+posts+demo;
+  }).catch(()=>{ /* Threads не підключено - панель лишається схованою */ });
   // мережева статистика довантажується ПІСЛЯ рендера сторінки (Graph API повільний - не блокуємо аналітику)
   api('/integrations/meta/stats').then(m=>{
     const el=$('igLive'); if(!el) return;
@@ -1504,6 +1544,41 @@ async function saveThStrat(){ try{ await saveSetting('threads_strategy',JSON.str
 if($('thStThread')) $('thStThread').onchange=(e)=>{ ThStrat.thread=e.target.checked?'auto':'off'; saveThStrat(); };
 if($('thStCta')) $('thStCta').onchange=(e)=>{ ThStrat.cta_min=Number(e.target.value)||0; saveThStrat(); };
 if($('thStTakes')) $('thStTakes').onchange=(e)=>{ ThStrat.takes=Number(e.target.value)||0; saveThStrat(); };
+// 🚀 стартовий пакет Threads: біо-варіанти для копіювання + 2 готові чернетки
+if($('thStarter')) $('thStarter').onclick=async()=>{ const b=$('thStarter'); b.disabled=true; aiBusy('🚀 Складаю стартовий пакет Threads…');
+  try{ const r=await api('/threads/starter-pack',{method:'POST'});
+    const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
+    ov.innerHTML='<div class="modal-card" style="max-width:560px;padding:20px;max-height:85vh;overflow:auto">'
+      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">🚀 Стартовий пакет Threads</b><button class="icon" id="spX" style="margin-left:auto">✕</button></div>'
+      +'<div style="font-weight:700;font-size:13px;margin-bottom:6px">1. Біо (встав у threads.net → редагувати профіль)</div>'
+      +(r.bio||[]).map((t,i)=>'<div class="card" style="margin-bottom:8px;padding:10px 12px;font-size:13px;display:flex;gap:8px;align-items:center"><span style="flex:1">'+esc(t)+'</span><button class="ghost spCopy" data-i="'+i+'" style="flex-shrink:0">⧉</button></div>').join('')
+      +'<div style="font-weight:700;font-size:13px;margin:12px 0 6px">2. Пост-знайомство і закріп - уже в чернетках Студії</div>'
+      +'<div class="hint">Опублікуй «знайомство» одразу (такі пости залітають і на 0 підписників). «Закріп» опублікуй і закріпи в застосунку Threads (⋯ на пості → «Закріпити в профілі») - у закріпі посилання безпечне.</div>'
+      +'<div class="btnrow" style="margin-top:10px"><button class="primary" id="spIntro">✍ Відкрити «знайомство»</button><button class="ghost" id="spPin">📌 Відкрити «закріп»</button></div></div>';
+    document.body.appendChild(ov); const close=()=>ov.remove();
+    ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#spX').onclick=close;
+    ov.querySelectorAll('.spCopy').forEach(c=>c.onclick=()=>{ navigator.clipboard.writeText(r.bio[+c.dataset.i]); c.textContent='✓'; setTimeout(()=>c.textContent='⧉',1500); });
+    ov.querySelector('#spIntro').onclick=()=>{ close(); openComposer(r.introId); };
+    ov.querySelector('#spPin').onclick=()=>{ close(); openComposer(r.pinnedId); };
+    try{ await loadStudioPosts(); }catch(_){ }
+  }catch(e){ flash('⚠ '+e.message); } finally{ b.disabled=false; aiDone(); } };
+// 🔍 розбір ніші: формули з хітів топ-авторів → правила голосу + ідеї в Банк
+if($('thNiche')) $('thNiche').onclick=async()=>{ const b=$('thNiche'); b.disabled=true; aiBusy('🔍 Аналізую хіти твоєї ніші в Threads…');
+  try{ const r=await api('/threads/niche-review',{method:'POST'});
+    const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
+    ov.innerHTML='<div class="modal-card" style="max-width:600px;padding:20px;max-height:85vh;overflow:auto">'
+      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">🔍 Формули твоєї ніші</b><button class="icon" id="nrX" style="margin-left:auto">✕</button></div>'
+      +(r.patterns||[]).map((p,i)=>'<div class="card" style="margin-bottom:10px;padding:12px 14px"><b style="font-size:13.5px">'+esc(p.name)+'</b>'
+        +'<div style="font-size:13px;color:var(--ink2);margin:5px 0;line-height:1.5">'+esc(p.formula)+'</div>'
+        +(p.example?'<div style="font-size:12px;color:var(--muted);line-height:1.5">💡 '+esc(p.example)+'</div>':'')
+        +'<div class="btnrow" style="margin-top:8px"><button class="ghost nrRule" data-i="'+i+'" style="font-size:12px">💾 Запамʼятати як правило голосу</button></div></div>').join('')
+      +(r.ideasAdded?'<div class="hint" style="margin-top:6px">💡 +'+r.ideasAdded+' ідей за цими формулами вже в Банку ідей (Матеріали → 💡 Банк ідей).</div>':'')+'</div>';
+    document.body.appendChild(ov); const close=()=>ov.remove();
+    ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#nrX').onclick=close;
+    ov.querySelectorAll('.nrRule').forEach(c=>c.onclick=async()=>{ const p=r.patterns[+c.dataset.i]; c.disabled=true;
+      try{ await api('/voice-rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rule:p.name+': '+p.formula})}); c.textContent='✓ враховано в генерації'; }
+      catch(e){ c.textContent='⚠ '+e.message; } });
+  }catch(e){ flash('⚠ '+e.message); } finally{ b.disabled=false; aiDone(); } };
 // 🧲 лід-магніти («Магніт»): конкретика з досвіду + кодове слово → CTA Instagram
 function renderMagnets(list){ const box=$('lmList'); if(!box) return;
   if(!list||!list.length){ box.innerHTML='<div class="empty">Натисни «Запропонувати» - AI складе 3 конкретні магніти з твого досвіду.</div>'; return; }
@@ -1796,6 +1871,10 @@ function openCardMenu(p, btn, card){
   ]]);
   const dev=[['🔥','5 кутів продовження','ідеї-продовження теми → Банк ідей',()=>developPost(id)],
              ['🧲','Лід-магніт під тему','що віддати аудиторії за контакт',()=>postMagnet(id)]];
+  if((p.sent||[]).includes('threads')){
+    dev.push(['🔁','Повторити хіт (через 48 год)','дубль зі свіжим гачком - покажеться іншій аудиторії',()=>repeatHit(id)]);
+    dev.push(['🧵','Розгорнути в гілку','тейк → повний пост, поїде гілкою в Threads',()=>expandToThread(id)]);
+  }
   if(PRO) dev.push(['♻️','Розтиражувати під канали','варіанти під кожну мережу (COPE)',()=>openAtomize(id)]);
   G.push(['Розвинути',dev]);
   if(PRO&&(isReelScript||p.reel_video)){ const reel=[];
@@ -1818,6 +1897,16 @@ function openCardMenu(p, btn, card){
   bg.onclick=close;
   m.querySelectorAll('.cm-i').forEach(b=>b.onclick=()=>{ const g=G.find(x=>x[0]===b.dataset.g); close(); if(g) g[1][+b.dataset.i][3](); });
 }
+// 🔁 «тест → масштаб»: повтор хіта зі свіжим гачком через 48 год (тільки Threads)
+async function repeatHit(id){ if(!confirm('🔁 Створити копію зі свіжим гачком і запланувати в Threads через 48 годин?\n\nПрактика: вдалий пост через 2 доби показується вже іншій аудиторії.')) return;
+  aiBusy('🔁 Переписую гачок і планую повтор…');
+  try{ const r=await api('/posts/'+id+'/repeat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hours:48})});
+    flash('🔁 Повтор заплановано на '+new Date(r.scheduledAt).toLocaleString('uk')); try{ await loadStudioPosts(); }catch(_){ } }
+  catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } }
+// 🧵 тейк-хіт → повний пост-чернетка з увімкненою гілкою (відкривається в композері на рев'ю)
+async function expandToThread(id){ aiBusy('🧵 Розгортаю тейк у повний пост під гілку…');
+  try{ const r=await api('/posts/'+id+'/expand-thread',{method:'POST'}); try{ await loadStudioPosts(); }catch(_){ } openComposer(r.id); }
+  catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } }
 async function postAction(card,id,a){
   const cont=card.querySelector('.pcontent');
   if(a==='copy'){ navigator.clipboard.writeText(cont?cont.textContent:''); flash('Скопійовано'); return; }
