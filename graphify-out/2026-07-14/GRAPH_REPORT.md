@@ -1,7 +1,7 @@
 # Graph Report - socialiorozum  (2026-07-14)
 
 ## Corpus Check
-- 54 files · ~118,482 words
+- 54 files · ~118,686 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `8667308d`
+- Built from commit: `0bd5d46f`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -186,8 +186,8 @@ Cohesion: 0.33
 Nodes (5): convertAllHeif(), __dirname, getThumb(), MEDIA_DIR, THUMB_DIR
 
 ### Community 9 - "Community 9"
-Cohesion: 0.23
-Nodes (11): startAutopost(), tick(), alreadySentNetworks(), publishPostToChannels(), publishReelToChannels(), PubResult, ReelPubJob, reelPubJobs (+3 more)
+Cohesion: 0.20
+Nodes (12): startAutopost(), tick(), LogLevel, alreadySentNetworks(), publishPostToChannels(), publishReelToChannels(), PubResult, ReelPubJob (+4 more)
 
 ### Community 10 - "TypeScript Config"
 Cohesion: 0.15
@@ -310,8 +310,8 @@ Cohesion: 0.12
 Nodes (22): weekDiary(), findBreakout(), localParts(), plusDay(), sendDigest(), sendDigestNow(), startDigest(), tick() (+14 more)
 
 ### Community 102 - "Community 102"
-Cohesion: 0.32
-Nodes (6): LogLevel, thValidToken(), localParts(), processDailyTakes(), processReplyJobs(), startThreadsAuto()
+Cohesion: 0.47
+Nodes (5): thValidToken(), localParts(), processDailyTakes(), processReplyJobs(), startThreadsAuto()
 
 ## Knowledge Gaps
 - **296 isolated node(s):** `app_log`, `name`, `version`, `private`, `type` (+291 more)
@@ -321,7 +321,7 @@ Nodes (6): LogLevel, thValidToken(), localParts(), processDailyTakes(), processR
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `q()` connect `Auth, Session & Workers` to `Community 96`, `Google Drive Integration`, `Community 101`, `Community 102`, `Community 39`, `Authentication & Users`, `Community 9`, `Community 8`, `Community 43`, `LLM Routing & AI`, `Community 41`, `Community 15`?**
+- **Why does `q()` connect `Auth, Session & Workers` to `Community 96`, `Google Drive Integration`, `Community 101`, `Authentication & Users`, `Community 39`, `Community 8`, `Community 9`, `LLM Routing & AI`, `Community 43`, `Community 102`, `Community 41`, `Community 15`?**
   _High betweenness centrality (0.043) - this node is a cross-community bridge._
 - **Why does `one()` connect `Community 40` to `Auth, Session & Workers`, `Community 96`, `Google Drive Integration`, `Community 101`, `LLM Routing & AI`, `Community 39`, `Authentication & Users`, `Community 9`, `Community 41`, `Community 102`, `Community 15`?**
   _High betweenness centrality (0.009) - this node is a cross-community bridge._

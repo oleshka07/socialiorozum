@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet, topPatterns, generateThreadsTakes, repeatVariant, expandTake, threadsStarterPack, threadsNicheReview } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet, topPatterns, generateThreadsTakes, repeatVariant, expandTake, threadsStarterPack, threadsNicheReview, suggestThreadReplies } from "./pipeline.js";
 import { startReelJob, reelJobs, parseReelScript } from "./reelvideo.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
@@ -720,6 +720,64 @@ app.post("/api/threads/niche-review", async (req: any, reply) => {
   catch (e: any) { await logEvent("error", "niche-review", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
 });
 
+// 💬 Реплай-коуч: свіжі коментарі під нашими Threads-постами + AI-драфт відповіді на кожен.
+// Потребує threads_manage_replies у токені (перепідключення після апруву пермішена).
+app.get("/api/threads/comments", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const cfg = await one<{ access_token: string | null; threads_user_id: string | null; username: string | null }>(
+    `select access_token, threads_user_id, username from threads_config where workspace_id=$1`, [ws]);
+  if (!cfg?.access_token) return reply.code(400).send({ error: "Threads не підключено" });
+  const posts = await q<{ media_id: string; content: string }>(
+    `select tp.media_id, p.content from threads_publish tp join post p on p.id=tp.post_id
+       join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+     where s.workspace_id=$1 and tp.status='sent' and tp.media_id is not null
+       and tp.created_at > now() - interval '7 days' order by tp.created_at desc limit 6`, [ws]);
+  if (!posts.length) return { items: [], hint: "За останній тиждень нема опублікованих Threads-постів." };
+  let replied: string[] = [];
+  try { const rr = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='th_replied'`, [ws]); replied = JSON.parse(rr?.content || "[]") || []; } catch { replied = []; }
+  const repliedSet = new Set(replied);
+  const items: { commentId: string; username: string; comment: string; postTitle: string; postText: string; timestamp: string }[] = [];
+  let permErr = "";
+  for (const p of posts) {
+    try {
+      for (const r of await threads.mediaReplies(cfg.access_token, p.media_id)) {
+        if (cfg.username && r.username.toLowerCase() === cfg.username.toLowerCase()) continue; // власні ветки/відповіді
+        if (repliedSet.has(r.id)) continue;
+        items.push({ commentId: r.id, username: r.username, comment: r.text, postTitle: (p.content || "").split("\n")[0].slice(0, 70), postText: p.content || "", timestamp: r.timestamp });
+      }
+    } catch (e: any) { permErr = String(e.message).slice(0, 200); }
+  }
+  if (!items.length && permErr)
+    return reply.code(400).send({ error: "Не вдалося прочитати коментарі: " + permErr + ". Якщо пермішен threads_manage_replies щойно увімкнено - перепідключи Threads у Налаштування → Канали (токен отримує нові дозволи лише при повторному підключенні)." });
+  items.sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
+  let drafts: Record<string, string> = {};
+  try { drafts = await suggestThreadReplies(ws, items.map((it) => ({ commentId: it.commentId, postText: it.postText, comment: it.comment, username: it.username }))); }
+  catch { /* без драфтів теж корисно - користувач напише сам */ }
+  return { items: items.slice(0, 15).map((it) => ({ commentId: it.commentId, username: it.username, comment: it.comment, postTitle: it.postTitle, timestamp: it.timestamp, draft: drafts[it.commentId] || "" })) };
+});
+
+// відповісти на конкретний комент (reply_to_id = id комента; фіксуємо, щоб не показувати вдруге)
+app.post("/api/threads/reply", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const commentId = String(req.body?.commentId || ""), text = String(req.body?.text || "").trim().slice(0, 490);
+  if (!commentId || !text) return reply.code(400).send({ error: "порожня відповідь" });
+  const tok = await thValidToken(ws);
+  if (!tok) return reply.code(400).send({ error: "Threads не підключено" });
+  try {
+    await threads.publish(tok.token, tok.userId, text, undefined, commentId);
+    let replied: string[] = [];
+    try { const rr = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='th_replied'`, [ws]); replied = JSON.parse(rr?.content || "[]") || []; } catch { replied = []; }
+    replied.push(commentId);
+    await q(`insert into settings_block(workspace_id, key, content) values($1,'th_replied',$2)
+             on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`,
+      [ws, JSON.stringify(replied.slice(-200))]);
+    return { ok: true };
+  } catch (e: any) {
+    await logEvent("error", "threads-reply", e.message, null, req.user.id);
+    return reply.code(500).send({ error: e.message + (/permission|not authorized|OAuth/i.test(e.message) ? " (перепідключи Threads - нові дозволи діють після повторного підключення)" : "") });
+  }
+});
+
 // AI-хештеги для поста (кнопка «# Хештеги» у композері)
 app.post("/api/posts/:postId/hashtags", async (req: any, reply) => {
   const ws = req.user.workspace_id;
@@ -1349,7 +1407,9 @@ app.post("/api/integrations/telegram/test", async (req: any, reply) => {
 
 // ===================== THREADS (Meta) =====================
 const THREADS_REDIRECT = `${env.appBaseUrl}/api/integrations/threads/callback`;
-const THREADS_SCOPES = ["threads_basic", "threads_content_publish", "threads_manage_insights"];
+// threads_manage_replies: читання коментарів під власними постами + відповіді на них (реплай-коуч);
+// пермішен апрувнуто в App Review - у токен потрапляє після (пере)підключення акаунта
+const THREADS_SCOPES = ["threads_basic", "threads_content_publish", "threads_manage_insights", "threads_manage_replies"];
 
 async function thConfig(ws: string) {
   return one<{ threads_user_id: string | null; username: string | null; access_token: string | null; token_expires_at: string | null }>(

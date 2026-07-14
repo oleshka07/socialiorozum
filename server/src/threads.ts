@@ -142,6 +142,18 @@ export async function followerDemographics(token: string, userId: string, breakd
     .sort((a: any, b: any) => b.value - a.value);
 }
 
+// коментарі (відповіді інших людей) під власним постом - потребує threads_manage_replies
+export type ThreadReply = { id: string; text: string; username: string; timestamp: string };
+export async function mediaReplies(token: string, mediaId: string): Promise<ThreadReply[]> {
+  const u = new URL(`${GRAPH}/v1.0/${mediaId}/replies`);
+  u.searchParams.set("fields", "id,text,username,timestamp");
+  u.searchParams.set("access_token", token);
+  const j = await thFetch<{ data: any[] }>(u.toString());
+  return (j.data || []).map((r) => ({
+    id: String(r.id || ""), text: String(r.text || ""), username: String(r.username || ""), timestamp: String(r.timestamp || ""),
+  })).filter((r) => r.id && r.text);
+}
+
 // інсайти по опублікованому посту
 export async function mediaInsights(token: string, mediaId: string): Promise<Record<string, number>> {
   const u = new URL(`${GRAPH}/v1.0/${mediaId}/insights`);
