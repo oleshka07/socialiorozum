@@ -511,9 +511,11 @@ app.post("/api/media", async (req: any, reply) => {
   return { ok: true, saved };
 });
 
+// технічні копії (ig-safe: JPEG-версія для Instagram API) в бібліотеці не показуємо -
+// вони дублювали кожне опубліковане фото і засмічували медіатеку
 app.get("/api/media", async (req: any) =>
   q(`select id, kind, mime, original_name, filename, size, source, created_at from media_asset
-     where workspace_id=$1 order by created_at desc limit 200`, [req.user.workspace_id]));
+     where workspace_id=$1 and source <> 'ig-safe' order by created_at desc limit 200`, [req.user.workspace_id]));
 
 app.delete("/api/media/:id", async (req: any, reply) => {
   const m = await one<{ filename: string }>(`select filename from media_asset where id=$1 and workspace_id=$2`, [req.params.id, req.user.workspace_id]);
@@ -521,6 +523,20 @@ app.delete("/api/media/:id", async (req: any, reply) => {
   await q(`delete from media_asset where id=$1`, [req.params.id]);
   await deleteMediaFile(m.filename);
   return { ok: true };
+});
+
+// масове видалення з медіатеки (виділення чекбоксами в UI); пости не ламаються - post.media_id
+// має on delete set null (фото просто відкріпиться)
+app.post("/api/media/bulk-delete", async (req: any, reply) => {
+  const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(String).slice(0, 300);
+  if (!ids.length) return reply.code(400).send({ error: "нема що видаляти" });
+  const rows = await q<{ id: string; filename: string }>(
+    `select id, filename from media_asset where workspace_id=$1 and id = any($2::uuid[])`, [req.user.workspace_id, ids]);
+  for (const m of rows) {
+    await q(`delete from media_asset where id=$1`, [m.id]);
+    await deleteMediaFile(m.filename);
+  }
+  return { ok: true, deleted: rows.length };
 });
 
 // прикріпити/відкріпити медіа до поста; з aspect — обітнути під формат (кроп-копія стає image_base)
@@ -2232,12 +2248,13 @@ app.post("/api/schedule/auto", async (req: any) => {
   const tz = tzRow?.content || "Europe/Kyiv";
   // 3.4) ритм каналів (спадкування «як у бренду»): мережа з власним ритмом отримує ОКРЕМИЙ слот
   // на свій день/час (+фільтр рубрик); решта мереж їдуть спільним слотом, як раніше.
-  let rhythm: Record<string, { days?: number[]; time?: string; rubrics?: string[] }> = {};
+  let rhythm: Record<string, { days?: number[]; time?: string; times?: string[]; rubrics?: string[] }> = {};
   try {
     const rr = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='channel_rhythm'`, [ws]);
     rhythm = JSON.parse(rr?.content || "{}") || {};
   } catch { rhythm = {}; }
-  const hasCustom = (n: string) => { const r = rhythm[n]; return !!(r && ((r.days && r.days.length) || r.time || (r.rubrics && r.rubrics.length))); };
+  const hasCustom = (n: string) => { const r = rhythm[n]; return !!(r && ((r.days && r.days.length) || r.time || (r.times && r.times.length) || (r.rubrics && r.rubrics.length))); };
+  const rhIdx: Record<string, number> = {}; // кілька часів мережі → ротація між ПОСТАМИ (2-3 слоти/день у Threads)
   let count = 0;
   // розкласти один пост від базової дати (Y,Mo,D): спільний слот для мереж-спадкоємців + окремі за ритмами
   const placePost = async (u: { id: string; channels: any; rubric: string | null }, Y: number, Mo: number, D: number, baseTime: string): Promise<void> => {
@@ -2264,7 +2281,11 @@ app.post("/api/schedule/auto", async (req: any) => {
       if (r.days && r.days.length) {
         for (let off = 0; off < 7; off++) { const c = new Date(base); c.setUTCDate(c.getUTCDate() + off); if (r.days.includes(c.getUTCDay())) { dTgt = c; break; } }
       }
-      const t = /^\d{1,2}:\d{2}$/.test(String(r.time || "")) ? String(r.time) : baseTime;
+      const okT = (x: any) => /^\d{1,2}:\d{2}$/.test(String(x || ""));
+      const listT = (Array.isArray(r.times) ? r.times.filter(okT).map(String) : []);
+      if (!listT.length && okT(r.time)) listT.push(String(r.time));
+      const t = listT.length ? listT[(rhIdx[n] || 0) % listT.length] : baseTime;
+      rhIdx[n] = (rhIdx[n] || 0) + 1;
       const [h, m] = t.split(":").map(Number);
       const dd = futureOr10m(zonedToUTC(dTgt.getUTCFullYear(), dTgt.getUTCMonth() + 1, dTgt.getUTCDate(), h, m, tz));
       await q(`insert into schedule_slot(post_id, scheduled_at, status, channels) values($1,$2,'planned',$3)`,
