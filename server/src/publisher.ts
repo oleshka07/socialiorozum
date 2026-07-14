@@ -49,10 +49,11 @@ export async function alreadySentNetworks(postId: string): Promise<string[]> {
 }
 
 // Публікує пост у кожну ввімкнену в post.channels мережу (своїм текстом + медіа).
-// Мережі, куди вже публікували (status='sent'), ПРОПУСКАЮТЬСЯ (публікація один раз на мережу) —
-// це стосується і ручної публікації, і планового автопостера (schedule на ІНШІ мережі).
+// onlyNets (опційно, «ритм каналів»): слот розкладу може цілити ПІДМНОЖИНУ мереж - публікуємо
+// лише перетин увімкнених із нею. Мережі, куди вже публікували (status='sent'), ПРОПУСКАЮТЬСЯ
+// (публікація один раз на мережу) — і при ручній публікації, і в автопостері.
 // Якщо жодної мережі не обрано — нічого не публікує (порожній результат), без тихого fallback.
-export async function publishPostToChannels(ws: string, postId: string): Promise<PubResult[]> {
+export async function publishPostToChannels(ws: string, postId: string, onlyNets?: string[]): Promise<PubResult[]> {
   const post = await one<{ content: string; channels: any; filename: string | null }>(
     `select p.content, p.channels, ma.filename from post p
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
@@ -60,7 +61,8 @@ export async function publishPostToChannels(ws: string, postId: string): Promise
      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
   if (!post) throw new Error("пост не знайдено");
   const ch = post.channels || {};
-  const enabled = Object.keys(ch).filter((k) => ch[k] && ch[k].on);
+  const enabled = Object.keys(ch).filter((k) => ch[k] && ch[k].on)
+    .filter((k) => !onlyNets || onlyNets.includes(k));
   const sentSet = new Set(await alreadySentNetworks(postId));
   // «Створи один раз - сервіс сам перепакує»: мережі без власної версії тексту адаптуються
   // автоматично перед відправкою (один LLM-виклик на всі відсутні; при збої - майстер-текст як раніше).

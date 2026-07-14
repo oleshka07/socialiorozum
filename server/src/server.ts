@@ -1948,7 +1948,7 @@ app.get("/api/posts/studio", async (req: any) => {
 });
 
 app.get("/api/schedule", async (req: any) => {
-  return q(`select ss.id, ss.scheduled_at, ss.status, ss.result, p.id as post_id, p.content, p.channels
+  return q(`select ss.id, ss.scheduled_at, ss.status, ss.result, p.id as post_id, p.content, coalesce(ss.channels, p.channels) as channels
             from schedule_slot ss
               left join plan_item pi on pi.id=ss.plan_item_id
               join post p on p.id = coalesce(ss.post_id, pi.post_id)
@@ -2045,8 +2045,8 @@ app.post("/api/schedule/auto", async (req: any) => {
          join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
        where s.workspace_id=$1)`, [ws]);
   // 2) затверджені фінальні пости, які ще не запощені й не в процесі
-  const units = await q<{ id: string }>(
-    `select p.id from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+  const units = await q<{ id: string; channels: any; rubric: string | null }>(
+    `select p.id, p.channels, p.rubric from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where s.workspace_id=$1 and p.stage='final' and p.review='approved'
        and not exists(select 1 from schedule_slot ss where ss.post_id=p.id and ss.status in ('posting','posted'))
      order by p.created_at`, [ws]);
@@ -2064,8 +2064,49 @@ app.post("/api/schedule/auto", async (req: any) => {
   // часовий пояс воркспейсу - щоб час публікацій був «стінним» у поясі користувача
   const tzRow = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='timezone'`, [ws]);
   const tz = tzRow?.content || "Europe/Kyiv";
-  // 3.5) пости, привʼязані до слотів ПЛАНУ, стають САМЕ на дату свого слота (перший час зі стратегії)
+  // 3.4) ритм каналів (спадкування «як у бренду»): мережа з власним ритмом отримує ОКРЕМИЙ слот
+  // на свій день/час (+фільтр рубрик); решта мереж їдуть спільним слотом, як раніше.
+  let rhythm: Record<string, { days?: number[]; time?: string; rubrics?: string[] }> = {};
+  try {
+    const rr = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='channel_rhythm'`, [ws]);
+    rhythm = JSON.parse(rr?.content || "{}") || {};
+  } catch { rhythm = {}; }
+  const hasCustom = (n: string) => { const r = rhythm[n]; return !!(r && ((r.days && r.days.length) || r.time || (r.rubrics && r.rubrics.length))); };
   let count = 0;
+  // розкласти один пост від базової дати (Y,Mo,D): спільний слот для мереж-спадкоємців + окремі за ритмами
+  const placePost = async (u: { id: string; channels: any; rubric: string | null }, Y: number, Mo: number, D: number, baseTime: string): Promise<void> => {
+    const ch = u.channels && Object.keys(u.channels).length ? u.channels : { telegram: { on: true } };
+    const nets = Object.keys(ch).filter((k) => ch[k] && ch[k].on);
+    const custom = nets.filter(hasCustom);
+    const inherit = nets.filter((n) => !custom.includes(n));
+    const futureOr10m = (d: Date) => (d.getTime() > Date.now() ? d : new Date(Date.now() + 10 * 60 * 1000));
+    const [bh, bm] = baseTime.split(":").map(Number);
+    if (inherit.length || !custom.length) {
+      // channels=null коли підмножина = всі мережі поста (легасі-поведінка, нічого не змінюється)
+      const subset = custom.length ? JSON.stringify(Object.fromEntries(inherit.map((n) => [n, { on: true }]))) : null;
+      const dd = futureOr10m(zonedToUTC(Y, Mo, D, bh, bm, tz));
+      await q(`insert into schedule_slot(post_id, scheduled_at, status, channels) values($1,$2,'planned',$3)`, [u.id, dd.toISOString(), subset]);
+      count++;
+    }
+    for (const n of custom) {
+      const r = rhythm[n] || {};
+      // фільтр рубрик: ця мережа бере лише свої рубрики (пост без рубрики проходить завжди)
+      if (r.rubrics && r.rubrics.length && u.rubric && !r.rubrics.map((x) => String(x).toLowerCase()).includes(String(u.rubric).toLowerCase())) continue;
+      // найближчий дозволений день ритму, починаючи з базової дати
+      const base = new Date(Date.UTC(Y, Mo - 1, D, 12));
+      let dTgt = base;
+      if (r.days && r.days.length) {
+        for (let off = 0; off < 7; off++) { const c = new Date(base); c.setUTCDate(c.getUTCDate() + off); if (r.days.includes(c.getUTCDay())) { dTgt = c; break; } }
+      }
+      const t = /^\d{1,2}:\d{2}$/.test(String(r.time || "")) ? String(r.time) : baseTime;
+      const [h, m] = t.split(":").map(Number);
+      const dd = futureOr10m(zonedToUTC(dTgt.getUTCFullYear(), dTgt.getUTCMonth() + 1, dTgt.getUTCDate(), h, m, tz));
+      await q(`insert into schedule_slot(post_id, scheduled_at, status, channels) values($1,$2,'planned',$3)`,
+        [u.id, dd.toISOString(), JSON.stringify({ [n]: { on: true } })]);
+      count++;
+    }
+  };
+  // 3.5) пости, привʼязані до слотів ПЛАНУ, стають САМЕ на дату свого слота (перший час зі стратегії)
   let rest = units;
   if (units.length) {
     const withSlot = await q<{ post_id: string; slot_date: string }>(
@@ -2073,14 +2114,10 @@ app.post("/api/schedule/auto", async (req: any) => {
        where workspace_id=$1 and post_id = any($2) and status in ('drafted','approved','scheduled')`,
       [ws, units.map((u) => u.id)]);
     const slotByPost = new Map(withSlot.map((r) => [r.post_id, r.slot_date]));
-    const [h0, m0] = times[0].split(":").map(Number);
     for (const u of units.filter((x) => slotByPost.has(x.id))) {
       const [Y, Mo, D] = String(slotByPost.get(u.id)).slice(0, 10).split("-").map(Number);
-      const dd = zonedToUTC(Y, Mo, D, h0, m0, tz);
-      const when = dd.getTime() > Date.now() ? dd : new Date(Date.now() + 10 * 60 * 1000); // дата слота в минулому -> через 10 хв
-      await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [u.id, when.toISOString()]);
+      await placePost(u, Y, Mo, D, times[0]);
       await q(`update plan_slot set status='scheduled' where post_id=$1 and status in ('drafted','approved')`, [u.id]);
-      count++;
     }
     rest = units.filter((x) => !slotByPost.has(x.id));
   }
@@ -2093,10 +2130,7 @@ app.post("/api/schedule/auto", async (req: any) => {
     const Y = c.getUTCFullYear(), Mo = c.getUTCMonth() + 1, D = c.getUTCDate();
     if (bestDays.length && !bestDays.includes(c.getUTCDay())) { off++; continue; }
     for (let k = 0; k < times.length && i < rest.length; k++, i++) {
-      const [h, m] = times[k].split(":").map(Number);
-      const dd = zonedToUTC(Y, Mo, D, h, m, tz);
-      await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [rest[i].id, dd.toISOString()]);
-      count++;
+      await placePost(rest[i], Y, Mo, D, times[k]);
     }
     off++;
   }
