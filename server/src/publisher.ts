@@ -11,10 +11,10 @@ import * as youtube from "./youtube.js";
 import * as tiktok from "./tiktok.js";
 import { MEDIA_DIR } from "./media.js";
 import { ensureIgSafeImage } from "./images.js";
-import { adaptForChannels, reelCaption } from "./pipeline.js";
+import { adaptForChannels, reelCaption, threadsSplit } from "./pipeline.js";
 import { logEvent } from "./log.js";
 
-async function thValidToken(ws: string): Promise<{ token: string; userId: string } | null> {
+export async function thValidToken(ws: string): Promise<{ token: string; userId: string } | null> {
   const c = await one<{ threads_user_id: string | null; access_token: string | null; token_expires_at: string | null }>(
     `select threads_user_id, access_token, token_expires_at from threads_config where workspace_id=$1`, [ws]);
   if (!c?.access_token || !c.threads_user_id) return null;
@@ -31,6 +31,17 @@ async function thValidToken(ws: string): Promise<{ token: string; userId: string
 }
 
 export type PubResult = { channel: string; status: "sent" | "error" | "skipped"; error?: string };
+
+// Текст CTA-гілки Threads з cta_config (детерміновано, без LLM). null = CTA не налаштований.
+async function threadsCtaText(ws: string): Promise<string | null> {
+  const r = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='cta_config'`, [ws]);
+  let cfg: any = {}; try { cfg = JSON.parse(r?.content || "{}") || {}; } catch { return null; }
+  const c = cfg.threads; const v = String(c?.value || "").trim().slice(0, 300);
+  if (!v) return null;
+  if (c.type === "keyword") return `Хочеш деталі - напиши «${v}» у відповідь, і я надішлю.`;
+  if (c.type === "action") return v;
+  return `Обіцяні деталі - тут: ${v}`;
+}
 
 // Мережі, куди пост УЖЕ відправлено (status='sent') — щоб не публікувати вдруге (публікація один раз на мережу).
 export async function alreadySentNetworks(postId: string): Promise<string[]> {
@@ -110,8 +121,38 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
         if (!any) throw new Error("Не вказано канал/групу");
       } else if (k === "threads") {
         if (!thTok) throw new Error("Threads не підключено");
-        const r = await threads.publish(thTok.token, thTok.userId, textOf(k), imageUrl || undefined);
-        await q(`insert into threads_publish(post_id,media_id,status) values($1,$2,'sent')`, [postId, r.mediaId]);
+        // 🧵 стратегія Threads (settings_block.threads_strategy): гілка для довгих + відкладена CTA-гілка
+        let strat: any = {};
+        try { const sr = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='threads_strategy'`, [ws]); strat = JSON.parse(sr?.content || "{}") || {}; } catch { /* без стратегії */ }
+        const perPost = ch[k] || {};
+        // гілка: явний прапорець на пості АБО авто-режим для майстер-текстів понад ліміт (500)
+        const wantThread = perPost.thread === true || (strat.thread === "auto" && perPost.thread !== false && post.content.length > 500);
+        let rootId: string;
+        if (wantThread) {
+          // гілка пакує ПОВНИЙ майстер-текст (а не скорочену 500-символьну версію) - у цьому її сенс
+          const parts = await threadsSplit(ws, post.content);
+          const first = await threads.publish(thTok.token, thTok.userId, parts[0], imageUrl || undefined);
+          rootId = first.mediaId;
+          let prev = first.mediaId;
+          for (const part of parts.slice(1)) {
+            await new Promise((res) => setTimeout(res, 1500)); // невеликий інтервал між ветками
+            const rr = await threads.publish(thTok.token, thTok.userId, part, undefined, prev);
+            prev = rr.mediaId;
+          }
+        } else {
+          const r = await threads.publish(thTok.token, thTok.userId, textOf(k), imageUrl || undefined);
+          rootId = r.mediaId;
+        }
+        await q(`insert into threads_publish(post_id,media_id,status) values($1,$2,'sent')`, [postId, rootId]);
+        // CTA-гілка з затримкою: лінк/кодове слово доклеюємо, коли пост уже розганяється
+        const delayMin = Number(strat.cta_min || 0);
+        if (delayMin > 0) {
+          const cta = await threadsCtaText(ws);
+          if (cta) await q(
+            `insert into threads_reply_job(workspace_id,post_id,root_media_id,reply_text,due_at)
+             values($1,$2,$3,$4, now() + ($5 || ' minutes')::interval)`,
+            [ws, postId, rootId, cta, String(delayMin)]);
+        }
       } else if (k === "facebook") {
         if (!mt?.page_id || !mt.page_token) throw new Error("Facebook не підключено");
         const r = imageUrl ? await meta.publishPhotoToPage(mt.page_id, mt.page_token, textOf(k), imageUrl) : await meta.publishToPage(mt.page_id, mt.page_token, textOf(k));

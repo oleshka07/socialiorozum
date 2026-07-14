@@ -5,7 +5,7 @@
     "semantic_hash": ""
   },
   "server/package.json": {
-    "mtime": 1784015595.076868,
+    "mtime": 1784016477.168848,
     "ast_hash": "e20f3af62a8239dbe99ed1ddb23e835a",
     "semantic_hash": ""
   },
@@ -125,8 +125,8 @@
     "semantic_hash": ""
   },
   "server/src/server.ts": {
-    "mtime": 1784013709.271541,
-    "ast_hash": "2c67dd8f59261aa9284e4e2aa10a645a",
+    "mtime": 1784036451.5284603,
+    "ast_hash": "91e38f6b6bf5582249ca2cfb2e16a48a",
     "semantic_hash": ""
   },
   "server/src/telegram.ts": {
@@ -155,8 +155,8 @@
     "semantic_hash": "352df4b84f4af2922ccd9adaf8e4608f"
   },
   "CLAUDE.md": {
-    "mtime": 1784016413.9448495,
-    "ast_hash": "7d5473352cbe3d5bacafe695d174313b",
+    "mtime": 1784036771.8284793,
+    "ast_hash": "6218e4804ecdb99d562de9956e6bcd9c",
     "semantic_hash": ""
   },
   "DEPLOY.md": {
@@ -225,8 +225,8 @@
     "semantic_hash": ""
   },
   "server/public/app.html": {
-    "mtime": 1784016289.3808522,
-    "ast_hash": "e74bddcc0bf5b4ed18735a59d50c4688",
+    "mtime": 1784036702.2564752,
+    "ast_hash": "13e19bb21b5636aae27050c472c32ab7",
     "semantic_hash": ""
   },
   "server/public/auth.html": {
@@ -295,13 +295,13 @@
     "semantic_hash": ""
   },
   "server/src/reelvideo.ts": {
-    "mtime": 1784016271.7168527,
+    "mtime": 1784016477.173677,
     "ast_hash": "f1fe555837a29a69021f7cd6e1ea4c72",
     "semantic_hash": ""
   },
   ".github/workflows/beta-check.yml": {
-    "mtime": 1784016372.8808503,
-    "ast_hash": "25f351659d94c2ef4201d5d952f35246",
+    "mtime": 1784018607.5367992,
+    "ast_hash": "9a7837e8351b1e7270ee0ca0a366c4b4",
     "semantic_hash": ""
   },
   "server/src/rss-resolver.ts": {
@@ -335,17 +335,17 @@
     "semantic_hash": ""
   },
   "server/remotion/Reel.tsx": {
-    "mtime": 1784016056.7128575,
+    "mtime": 1784016477.172848,
     "ast_hash": "3eaeaa2da406d8a24d2c1791ea978b8c",
     "semantic_hash": ""
   },
   "server/remotion/index.tsx": {
-    "mtime": 1784015707.9328656,
+    "mtime": 1784016477.173677,
     "ast_hash": "b1a53abf1eb0b018ce50833ea1aec2b8",
     "semantic_hash": ""
   },
   "server/src/remotion-render.ts": {
-    "mtime": 1784016218.780854,
+    "mtime": 1784016477.173677,
     "ast_hash": "926ea54dc3237ba0d231eff1183e83dc",
     "semantic_hash": ""
   }

@@ -433,7 +433,7 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
   const rules: Record<string, string> = {
     telegram: "Telegram: короткі абзаци, помірні емодзі, 1-2 хештеги.",
     instagram: "Instagram: чіпкий підпис + 5-10 релевантних хештегів наприкінці.",
-    threads: "Threads: ЖОРСТКИЙ ліміт 500 символів (довший пост НЕ опублікується - скороти безжально), без хештегів, розмовний тон.",
+    threads: "Threads: ЖОРСТКИЙ ліміт 500 символів (довший пост НЕ опублікується - скороти безжально), без хештегів, розмовний тон, перший рядок = гачок, наприкінці питання або кодове слово (НЕ «лайкни/підпишись» - це ріжеться алгоритмом).",
     facebook: "Facebook: 1-3 абзаци, нейтральний тон, без надлишку хештегів.",
     linkedin: "LinkedIn: професійний, але живий тон від першої особи; сильний перший рядок (він видимий до «…more»); 2-4 короткі абзаци з особистим досвідом/висновком; 3-5 хештегів наприкінці; без емодзі-спаму.",
   };
@@ -593,7 +593,7 @@ const CHANNEL_PLAYBOOK: Record<string, string> = {
   instagram:
     "Instagram (Mosseri, 2025): головні сигнали - час перегляду, sends-per-reach (поширення в DM), saves. Reels = охоплення/нові люди; каруселі (до 20 слайдів) = збереження й глибоке залучення; Stories = стосунки. Гачок у перші 3 сек (інакше ~50% відвалюються). Тільки ОРИГІНАЛЬНИЙ контент (без водяних знаків). Ключові слова в підписі (social SEO), 3-5 релевантних тегів.",
   threads:
-    "Threads: до 500 символів, розмовний тон, без хештегів. Короткі думки, питання до аудиторії, треди з кількох постів. Заохочуй відповіді (репліки - головний сигнал поширення). Автентичність > полірованість.",
+    "Threads (доказова база 2025-26): ліміт 500 символів; підписники майже не важать - кожен пост змагається з нуля, алгоритм важить РАННЄ залучення і швидкість/якість відповідей (розмова > трансляція; Мосері: «відповідай більше, ніж постиш»). Пиши як розмову в курилці: одна думка = один пост, короткі речення, повітря між абзацами, перший рядок = гачок (без нього - скрол повз). Робочі формати: короткий тейк/спостереження з життя, питання до аудиторії, нумерований список/чек-лист (збирає сейви), особиста історія чи чесний провал з уроком, факт із конкретною цифрою, контр-теза до загальноприйнятого. Сейви й репости важать більше за лайки - давай те, що хочеться зберегти собі. CTA: кодове слово у відповідь АБО питання, що провокує відповіді; НІКОЛИ «постав лайк / підпишись / тегни друга» (engagement-bait алгоритм ріже). Без хештегів. Посилання не штрафуються, але сильніше працює окремою відповіддю, коли пост уже розганяється.",
   facebook:
     "Facebook: усе відео тепер Reels (охоплення поза підписниками); зберігання/поширення > лайки; фото добре заходять у стрічці (підписи 40-80 символів). Групи дають значно більше органіки, ніж сторінки - спільнота в групі, анонси на сторінці. Оригінальність винагороджується.",
 };
@@ -624,6 +624,76 @@ export async function generateChannelPlan(workspaceId: string, channel: string, 
     [workspaceId, "channel_plan_" + channel, JSON.stringify(rows)]
   );
   return rows;
+}
+
+// ---- 🧵 Threads: гілка (root + відповіді) та щоденні тейки ----
+// Розбити майстер-текст на гілку Threads: частина 1 = гачок + обіцянка, далі по тезі на ветку.
+// «Перелив-пости» з практики: у стрічці видно лише root + першу відповідь → клік = глибоке
+// залучення = сигнал утримання для алгоритму. Кожна частина має читатися самостійно.
+export async function threadsSplit(workspaceId: string, content: string): Promise<string[]> {
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const system =
+    "Розбий пост на гілку Threads: root-пост + відповіді автора самому собі." +
+    "\nПравила: кожна частина ≤450 символів і читається САМОСТІЙНО (людина може побачити її без сусідніх); частина 1 = гачок + обіцянка того, що буде далі (БЕЗ спойлера висновку); далі одна теза/крок на частину, нумеруй «2/», «3/»…; остання частина - висновок + мʼяке питання до читача. Разом 2-6 частин. НЕ вигадуй нового змісту - лише перепаковуй." +
+    (s.tone_of_voice ? `\nГолос бренду (зберігай): ${s.tone_of_voice}` : "") + voicePassport(s) +
+    NO_DASH_RULE + ANTI_AI_RULE +
+    `\nПоверни ЛИШЕ валідний JSON-масив рядків: ["частина 1","частина 2",…]. Мова: ${lang}.`;
+  let parts: string[] = [];
+  try {
+    const raw = await chat("openai/gpt-4o", system, `Пост:\n---\n${content}`, { workspaceId, step: "threads_split" });
+    parts = extractJsonArray<any>(raw).map((x) => String(x || "").trim()).filter(Boolean);
+  } catch { parts = []; }
+  if (!parts.length) {
+    // фолбек без LLM: детермінований зріз по абзацах ≤450 символів
+    const paras = content.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+    let cur = "";
+    for (const p of paras) {
+      if ((cur ? cur + "\n\n" + p : p).length <= 450) cur = cur ? cur + "\n\n" + p : p;
+      else { if (cur) parts.push(cur); cur = p.length <= 450 ? p : p.slice(0, 449); }
+    }
+    if (cur) parts.push(cur);
+  }
+  // страховка ліміту API (500) на кожній частині
+  parts = parts.map((p) => (p.length <= 495 ? p : p.slice(0, 494).replace(/\s+\S*$/, "") + "…")).slice(0, 8);
+  return parts.length ? parts : [content.slice(0, 495)];
+}
+
+// 🧵 Тейки: N коротких самостійних Threads-постів з живого палива (Банк ідей + щоденник + бренд).
+// Threads = полігон тестування: дешеві мікропости → бенчмарки покажуть, що залетіло → у рілс/гілку.
+// Створює source origin='takes' + run + чернетки з channels={threads:on}. Повертає кількість.
+export async function generateThreadsTakes(workspaceId: string, count: number): Promise<number> {
+  const n = Math.max(1, Math.min(7, Number(count) || 5));
+  const s = await loadSettings(workspaceId);
+  const lang = (s.output_language || "Українська").trim();
+  const [ideas, diary] = await Promise.all([
+    q<{ text: string }>(`select text from idea_bank where workspace_id=$1 and status='new' order by created_at desc limit 10`, [workspaceId]),
+    q<{ transcript: string }>(`select transcript from source where workspace_id=$1 and origin='diary' order by created_at desc limit 3`, [workspaceId]),
+  ]);
+  const fuel = [
+    ideas.length ? "Ідеї з банку автора:\n" + ideas.map((i) => "- " + i.text).join("\n") : "",
+    diary.length ? "Свіжі записи щоденника автора (живі історії - найцінніше паливо):\n" + diary.map((d) => (d.transcript || "").slice(0, 700)).join("\n---\n") : "",
+  ].filter(Boolean).join("\n\n") || "Живого палива нема - бери теми зі стратегії і болей аудиторії бренду.";
+  const system =
+    "Ти автор Threads, який пише короткі живі тейки у голосі бренду." +
+    (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") +
+    (s.tone_of_voice ? `\nГолос бренду (суворо): ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) +
+    `\n\nПравила тейків: кожен ≤280 символів; ОДНА самостійна думка; перший рядок чіпляє; розмовно, як думка вголос у курилці, не «пост із стрічки бренду»; міксуй типи - спостереження з життя/роботи, контр-теза до загальноприйнятого, пряме питання до аудиторії, факт із конкретною цифрою, чесне зізнання. Без хештегів, без емодзі-декору, без закликів лайкнути/підписатися.` +
+    goalRule(s) + NO_DASH_RULE + HOOK_RULE + ANTI_AI_RULE +
+    `\n\nЗгенеруй рівно ${n} різних тейків. Поверни ЛИШЕ валідний JSON-масив рядків: ["тейк 1",…]. Мова: ${lang}.`;
+  const raw = await chat("openai/gpt-4o", system, fuel, { workspaceId, step: "threads_takes" });
+  let takes: string[] = [];
+  try { takes = extractJsonArray<any>(raw).map((x) => String(x || "").trim()).filter(Boolean).slice(0, n); } catch { takes = []; }
+  takes = takes.map((t) => (t.length <= 495 ? t : t.slice(0, 494).replace(/\s+\S*$/, "") + "…"));
+  if (!takes.length) throw new Error("Не вдалося згенерувати тейки (порожня відповідь моделі)");
+  const src = await one<{ id: string }>(
+    `insert into source(workspace_id, origin, title, transcript) values($1,'takes',$2,$3) returning id`,
+    [workspaceId, "🧵 Тейки для Threads", takes.join("\n\n")]);
+  const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
+  for (const t of takes)
+    await q(`insert into post(run_id, stage, content, channels) values($1,'final',$2,$3::jsonb)`,
+      [run!.id, t, JSON.stringify({ threads: { on: true } })]);
+  return takes.length;
 }
 
 // ---- Lite-скелет плану: ДЕТЕРМІНОВАНО зі стратегії (рубрики × best_days × теми) ----
