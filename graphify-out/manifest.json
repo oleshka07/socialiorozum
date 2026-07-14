@@ -1,7 +1,7 @@
 {
   "server/db/schema.sql": {
-    "mtime": 1784042065.749311,
-    "ast_hash": "c19a4fb93b73b817754b9a6a9419e8e4",
+    "mtime": 1784044396.5840695,
+    "ast_hash": "9aeafd1831eedee0124ca75801e49d8b",
     "semantic_hash": ""
   },
   "server/package.json": {
@@ -105,12 +105,12 @@
     "semantic_hash": ""
   },
   "server/src/pipeline.ts": {
-    "mtime": 1784042042.2093115,
-    "ast_hash": "15990bb7c0be333deaa7633578f881c5",
+    "mtime": 1784044476.4360678,
+    "ast_hash": "44adff4bee4b2d8ebb5b550f2272682e",
     "semantic_hash": ""
   },
   "server/src/publisher.ts": {
-    "mtime": 1784042106.20531,
+    "mtime": 1784042514.9733007,
     "ast_hash": "76cbb7e72d6a73708a7a3ee916e37e5b",
     "semantic_hash": ""
   },
@@ -125,8 +125,8 @@
     "semantic_hash": ""
   },
   "server/src/server.ts": {
-    "mtime": 1784042207.7573078,
-    "ast_hash": "5d851b779a147625992092d77cac02d3",
+    "mtime": 1784044592.800065,
+    "ast_hash": "64ddae36354c3e132ff748eaefb5dd4a",
     "semantic_hash": ""
   },
   "server/src/telegram.ts": {
@@ -135,13 +135,13 @@
     "semantic_hash": ""
   },
   "server/src/tgbot.ts": {
-    "mtime": 1783918284.5428112,
-    "ast_hash": "b2f3be6df1af59a5b303289f3d934b44",
+    "mtime": 1784044683.216063,
+    "ast_hash": "d2d7e535e793b600fe39f1d8a0f45bdb",
     "semantic_hash": ""
   },
   "server/src/threads.ts": {
-    "mtime": 1784042053.9013112,
-    "ast_hash": "cca3f24c6b8146d6eedd7f7a9e9b9f0e",
+    "mtime": 1784044386.2720697,
+    "ast_hash": "bba77d8b95949e2832be286663d6b0f1",
     "semantic_hash": ""
   },
   "server/tsconfig.json": {
@@ -155,8 +155,8 @@
     "semantic_hash": "352df4b84f4af2922ccd9adaf8e4608f"
   },
   "CLAUDE.md": {
-    "mtime": 1784036842.1204834,
-    "ast_hash": "6218e4804ecdb99d562de9956e6bcd9c",
+    "mtime": 1784042514.9693007,
+    "ast_hash": "d7e2b5dfdb38d6037adda2afda6964ef",
     "semantic_hash": ""
   },
   "DEPLOY.md": {
@@ -225,8 +225,8 @@
     "semantic_hash": ""
   },
   "server/public/app.html": {
-    "mtime": 1784042316.0533051,
-    "ast_hash": "3007bff11d0398218663bcdde56b6675",
+    "mtime": 1784044835.2720594,
+    "ast_hash": "4fd01462b3190b7636586e20545faa05",
     "semantic_hash": ""
   },
   "server/public/auth.html": {
@@ -275,8 +275,8 @@
     "semantic_hash": ""
   },
   "server/src/digest.ts": {
-    "mtime": 1783918284.5428112,
-    "ast_hash": "1693311e3459bf63073d6e9cb34e6797",
+    "mtime": 1784044636.712064,
+    "ast_hash": "050f8cd07a58cef13abe913e40944a1a",
     "semantic_hash": ""
   },
   ".github/workflows/deploy-beta.yml": {
@@ -325,8 +325,8 @@
     "semantic_hash": ""
   },
   "server/src/metrics.ts": {
-    "mtime": 1783915911.5793335,
-    "ast_hash": "5c7fa451228c4873df16ce3c066440ba",
+    "mtime": 1784044414.8440692,
+    "ast_hash": "6373378cbca3bca1ecd5da06df8111b4",
     "semantic_hash": ""
   },
   "server/src/diary.ts": {
@@ -350,7 +350,7 @@
     "semantic_hash": ""
   },
   "server/src/threads-auto.ts": {
-    "mtime": 1784042155.053309,
+    "mtime": 1784042514.9773006,
     "ast_hash": "2da7ccc8c6068e9aca51f53bf25e725d",
     "semantic_hash": ""
   }

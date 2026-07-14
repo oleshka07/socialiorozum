@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet, topPatterns, generateThreadsTakes } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet, topPatterns, generateThreadsTakes, repeatVariant, expandTake, threadsStarterPack, threadsNicheReview } from "./pipeline.js";
 import { startReelJob, reelJobs, parseReelScript } from "./reelvideo.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
@@ -641,6 +641,69 @@ app.post("/api/posts/threads-takes", async (req: any, reply) => {
   catch (e: any) { await logEvent("error", "threads-takes", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
 });
 
+// 🔁 «Повторити хіт»: дубль поста зі свіжим гачком + план на +48 год (тільки Threads за замовч.)
+app.post("/api/posts/:postId/repeat", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const post = await one<{ run_id: string; content: string; image_prompt: string | null; rubric: string | null; media_id: string | null; channels: any }>(
+    `select p.run_id, p.content, p.image_prompt, p.rubric, p.media_id, p.channels from post p
+       join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+     where p.id=$1 and s.workspace_id=$2`, [req.params.postId, ws]);
+  if (!post) return reply.code(404).send({ error: "пост не знайдено" });
+  try {
+    const fresh = await repeatVariant(ws, post.content);
+    const hours = Math.max(1, Math.min(168, Number(req.body?.hours) || 48));
+    // дубль їде лише в Threads (там повтор іншій аудиторії - валідована практика; інші мережі дублікати не люблять)
+    const np = await one<{ id: string }>(
+      `insert into post(run_id, stage, content, image_prompt, rubric, media_id, channels)
+       values($1,'final',$2,$3,$4,$5,$6::jsonb) returning id`,
+      [post.run_id, fresh, post.image_prompt, post.rubric, post.media_id, JSON.stringify({ threads: { on: true } })]);
+    const when = new Date(Date.now() + hours * 3600e3).toISOString();
+    await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [np!.id, when]);
+    return { ok: true, id: np!.id, scheduledAt: when };
+  } catch (e: any) { await logEvent("error", "repeat", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
+});
+
+// 🧵 «Розгорнути в гілку»: тейк-хіт → повний пост-чернетка з увімкненою гілкою Threads
+app.post("/api/posts/:postId/expand-thread", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const post = await one<{ run_id: string; content: string; rubric: string | null }>(
+    `select p.run_id, p.content, p.rubric from post p
+       join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+     where p.id=$1 and s.workspace_id=$2`, [req.params.postId, ws]);
+  if (!post) return reply.code(404).send({ error: "пост не знайдено" });
+  try {
+    const full = await expandTake(ws, post.content);
+    const np = await one<{ id: string }>(
+      `insert into post(run_id, stage, content, rubric, channels) values($1,'final',$2,$3,$4::jsonb) returning id`,
+      [post.run_id, full, post.rubric, JSON.stringify({ threads: { on: true, thread: true } })]);
+    return { ok: true, id: np!.id };
+  } catch (e: any) { await logEvent("error", "expand-thread", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
+});
+
+// 🚀 Стартовий пакет Threads: біо-варіанти (копіювати руками) + 2 чернетки (знайомство + закріп)
+app.post("/api/threads/starter-pack", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  try {
+    const pack = await threadsStarterPack(ws);
+    const src = await one<{ id: string }>(
+      `insert into source(workspace_id, origin, title, transcript) values($1,'takes','🚀 Стартовий пакет Threads',$2) returning id`,
+      [ws, pack.intro + "\n\n" + pack.pinned]);
+    const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
+    const intro = await one<{ id: string }>(`insert into post(run_id, stage, content, channels) values($1,'final',$2,$3::jsonb) returning id`,
+      [run!.id, pack.intro, JSON.stringify({ threads: { on: true } })]);
+    const pinned = await one<{ id: string }>(`insert into post(run_id, stage, content, channels) values($1,'final',$2,$3::jsonb) returning id`,
+      [run!.id, pack.pinned, JSON.stringify({ threads: { on: true } })]);
+    return { ok: true, bio: pack.bio, introId: intro!.id, pinnedId: pinned!.id };
+  } catch (e: any) { await logEvent("error", "threads-starter", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
+});
+
+// 🔍 Розбір ніші: формули з хітів Threads-джерел + власних топів; ідеї падають у Банк
+app.post("/api/threads/niche-review", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  try { return { ok: true, ...(await threadsNicheReview(ws)) }; }
+  catch (e: any) { await logEvent("error", "niche-review", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
+});
+
 // AI-хештеги для поста (кнопка «# Хештеги» у композері)
 app.post("/api/posts/:postId/hashtags", async (req: any, reply) => {
   const ws = req.user.workspace_id;
@@ -786,6 +849,71 @@ app.get("/api/lead-magnets", async (req: any) => {
 // «Коваль» (самонавчання голосу): правка юзера → постійне правило в tone_of_voice
 // Бенчмарки ×N: медіана переглядів по мережі (норма) + множник кожного поста до неї
 app.get("/api/analytics/benchmarks", async (req: any) => networkBenchmarks(req.user.workspace_id));
+
+// 🧵 Розширена аналітика Threads: профіль за 7 днів (з дельтами до попередніх 7), підписники,
+// таблиця останніх постів, інтервал постингу, стрік, демографія (якщо API віддає).
+// Живі виклики Graph API → кеш 15 хв у settings_block (щоб не молотити API кожним відкриттям).
+app.get("/api/analytics/threads", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const cfg = await one<{ access_token: string | null; threads_user_id: string | null; username: string | null }>(
+    `select access_token, threads_user_id, username from threads_config where workspace_id=$1`, [ws]);
+  if (!cfg?.access_token || !cfg.threads_user_id) return reply.code(400).send({ error: "Threads не підключено" });
+  const cached = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='threads_an_cache'`, [ws]);
+  try { const c = JSON.parse(cached?.content || "{}"); if (c.ts && Date.now() - c.ts < 15 * 60e3 && c.data) return c.data; } catch { /* битий кеш - оновимо */ }
+  const nowSec = Math.floor(Date.now() / 1000), week = 7 * 86400;
+  const METRICS = ["views", "likes", "replies", "reposts", "quotes"];
+  const data: any = { username: cfg.username || null, period: 7 };
+  try { data.now = await threads.userInsights(cfg.access_token, cfg.threads_user_id, METRICS, nowSec - week, nowSec); } catch (e: any) { data.now = null; data.insightsError = String(e.message).slice(0, 200); }
+  try { data.prev = data.now ? await threads.userInsights(cfg.access_token, cfg.threads_user_id, METRICS, nowSec - 2 * week, nowSec - week) : null; } catch { data.prev = null; }
+  try { data.followers = (await threads.userInsights(cfg.access_token, cfg.threads_user_id, ["followers_count"])).followers_count ?? null; } catch { data.followers = null; }
+  // демографія - best effort (потрібен threads_manage_insights і ≥100 підписників)
+  data.demographics = {};
+  for (const b of ["gender", "age", "country"] as const) {
+    try { data.demographics[b] = await threads.followerDemographics(cfg.access_token, cfg.threads_user_id, b); } catch { /* без пермішена/замало підписників */ }
+  }
+  // останні пости з метриками (post_metric оновлює воркер кожні 6 год)
+  data.posts = await q<any>(
+    `select tp.post_id, tp.created_at, left(regexp_replace(p.content, '\\s+', ' ', 'g'), 90) as title,
+            coalesce(pm.views,0) views, coalesce(pm.likes,0) likes, coalesce(pm.replies,0) replies,
+            coalesce(pm.reposts,0) reposts, coalesce(pm.quotes,0) quotes
+       from threads_publish tp join post p on p.id=tp.post_id
+       join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+       left join post_metric pm on pm.post_id=tp.post_id and pm.network='threads'
+     where s.workspace_id=$1 and tp.status='sent'
+     order by tp.created_at desc limit 10`, [ws]);
+  // інтервал постингу за 7 днів + к-сть постів
+  const pubs = await q<{ created_at: string }>(
+    `select created_at from threads_publish tp join post p on p.id=tp.post_id
+       join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+     where s.workspace_id=$1 and tp.status='sent' and tp.created_at > now() - interval '7 days'
+     order by tp.created_at`, [ws]);
+  data.postsCount = pubs.length;
+  data.intervalH = pubs.length > 1
+    ? Math.round((new Date(pubs[pubs.length - 1].created_at).getTime() - new Date(pubs[0].created_at).getTime()) / (pubs.length - 1) / 3600e3 * 10) / 10
+    : null;
+  // стрік: поспіль днів із ≥1 публікацією (за таймзоною воркспейсу), рахуючи від сьогодні/вчора
+  const tzRow = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='timezone'`, [ws]);
+  const tz = tzRow?.content || "Europe/Kyiv";
+  const days = await q<{ d: string }>(
+    `select distinct to_char(tp.created_at at time zone $2, 'YYYY-MM-DD') as d
+       from threads_publish tp join post p on p.id=tp.post_id
+       join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+     where s.workspace_id=$1 and tp.status='sent' and tp.created_at > now() - interval '60 days'
+     order by d desc`, [ws, tz]);
+  const set = new Set(days.map((x) => x.d));
+  const dayStr = (offset: number) => {
+    const f = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" });
+    return f.format(new Date(Date.now() - offset * 86400e3));
+  };
+  let streak = 0, start = set.has(dayStr(0)) ? 0 : 1; // сьогодні ще без поста - стрік живий від учора
+  for (let i = start; i < 60; i++) { if (set.has(dayStr(i))) streak++; else break; }
+  data.streak = streak;
+  data.postedToday = set.has(dayStr(0));
+  await q(`insert into settings_block(workspace_id, key, content) values($1,'threads_an_cache',$2)
+           on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`,
+    [ws, JSON.stringify({ ts: Date.now(), data })]);
+  return data;
+});
 
 // «Що спрацювало»: розбір топ-постів (×N ≥ 1.2) → повторювані патерни + готове правило голосу
 app.post("/api/analytics/top-patterns", async (req: any, reply) => {

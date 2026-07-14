@@ -75,6 +75,26 @@ async function sendDigest(ws: string, chatId: string, localDate: string): Promis
   let breakout: { postId: string; views: number; title: string } | null = null;
   try { breakout = await findBreakout(ws); } catch { /* аналітика не критична */ }
   if (breakout) lines.push(`\n🔥 Пост «${breakout.title}» залетів (${breakout.views} переглядів — сильно вище решти). Розвинути, поки гаряче?`);
+  // 🧵 стрік Threads: поспіль днів із публікацією (за локальною датою) - і рятівний тейк, якщо сьогодні пусто
+  let thStreak = 0, thToday = true, thConnected = false;
+  try {
+    const cfg = await one<{ n: number }>(`select count(*)::int n from threads_config where workspace_id=$1 and access_token is not null`, [ws]);
+    thConnected = (cfg?.n || 0) > 0;
+    if (thConnected) {
+      const tzRow = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='timezone'`, [ws]);
+      const days = await q<{ d: string }>(
+        `select distinct to_char(tp.created_at at time zone $2, 'YYYY-MM-DD') as d
+           from threads_publish tp join post p on p.id=tp.post_id
+           join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+         where s.workspace_id=$1 and tp.status='sent' and tp.created_at > now() - interval '60 days'`, [ws, tzRow?.content || "Europe/Kyiv"]);
+      const set = new Set(days.map((x) => x.d));
+      thToday = set.has(localDate);
+      const prev = (n: number) => plusDay(localDate, -n);
+      for (let i = thToday ? 0 : 1; i < 60; i++) { if (set.has(i === 0 ? localDate : prev(i))) thStreak++; else break; }
+      if (thStreak >= 2 && !thToday) lines.push(`\n🧵 Стрік Threads: ${thStreak} дн. поспіль — сьогодні ще пусто, не дай йому згоріти.`);
+      else if (thStreak >= 3) lines.push(`\n🧵 Стрік Threads: ${thStreak} дн. поспіль — так тримати.`);
+    }
+  } catch { /* стрік не критичний */ }
   // 🎯 Директор: «третя ідея повз ціль» - патерн, який варто назвати
   try {
     const dm = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='director_misses'`, [ws]);
@@ -106,7 +126,10 @@ async function sendDigest(ws: string, chatId: string, localDate: string): Promis
       if (pro?.content === "1") row.push({ text: "🎬 Рілс із цього", data: `reel:${breakout.postId}` });
     } catch { /* без кнопки */ }
     buttons.push(row);
+    // «тест → масштаб»: повтор хіта зі свіжим гачком через 48 год (іншій аудиторії)
+    buttons.push([{ text: "🔁 Повторити хіт через 48 год", data: `rep:${breakout.postId}` }]);
   }
+  if (thConnected && !thToday) buttons.push([{ text: "🧵 3 тейки зараз (урятувати день)", data: "takes_gen" }]);
   if (nextSlot?.id) buttons.push([{ text: "✍️ Зробити пост зараз", data: `slot_post:${nextSlot.id}` }]); // 1 тап: тема слота → чернетка в DM
   if (ideasCount?.n) buttons.push([{ text: "💡 Показати ідеї", data: "idea_list" }]);
   if (!(anyPlan?.n)) buttons.push([{ text: "⚡ Сформувати план", data: "plan_gen" }]);
