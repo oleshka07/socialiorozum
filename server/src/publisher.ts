@@ -130,7 +130,7 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
         let rootId: string;
         if (wantThread) {
           // гілка пакує ПОВНИЙ майстер-текст (а не скорочену 500-символьну версію) - у цьому її сенс
-          const parts = await threadsSplit(ws, post.content);
+          const parts = await threadsSplit(ws, post.content, perPost.number !== false);
           const first = await threads.publish(thTok.token, thTok.userId, parts[0], imageUrl || undefined);
           rootId = first.mediaId;
           // root УЖЕ в мережі → фіксуємо sent ОДРАЗУ: якщо якась ветка впаде, повторна публікація
