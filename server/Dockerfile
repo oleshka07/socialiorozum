@@ -14,7 +14,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 # ffmpeg + шрифт із кирилицею - збірка відео-рілсів (укр. субтитри через libass/DejaVu Sans)
 # chromium - Motion-рендер рілсів (Remotion: React-композиція → headless Chromium)
-RUN apk add --no-cache ffmpeg font-dejavu chromium
+# util-linux-misc - справжній setpriv: Remotion запускає браузер через `setpriv --pdeathsig`,
+# а BusyBox-заглушка з альпіни цю опцію не знає (browser launch падав з exit 1)
+RUN apk add --no-cache ffmpeg font-dejavu chromium util-linux-misc
 ENV REMOTION_CHROME=/usr/bin/chromium-browser
 COPY package*.json ./
 RUN npm install --omit=dev
