@@ -289,6 +289,15 @@ export async function attachCroppedImage(ws: string, postId: string, mediaId: st
 // Наші AI-зображення без оверлея - PNG, а завантаження бувають будь-якими → перед IG-публікацією
 // робимо сумісну копію: конвертація в JPEG + за потреби центр-кроп до найближчої допустимої пропорції.
 export async function ensureIgSafeImage(ws: string, filename: string): Promise<string> {
+  // ДЕДУП: сумісну копію для цього файлу вже робили (повторна публікація/адаптація) → реюзаємо,
+  // а не плодимо дублі в медіатеці (external_id = ім'я оригіналу)
+  const existing = await one<{ filename: string }>(
+    `select filename from media_asset where workspace_id=$1 and source='ig-safe' and external_id=$2 order by created_at desc limit 1`,
+    [ws, filename]);
+  if (existing) {
+    try { await readFile(join(MEDIA_DIR, existing.filename)); return existing.filename; }
+    catch { /* файл стерли з диска - зробимо копію заново */ }
+  }
   const buf = await readFile(join(MEDIA_DIR, filename));
   const meta = await sharp(buf).metadata();
   const W = meta.width || 0, H = meta.height || 0;
@@ -307,7 +316,7 @@ export async function ensureIgSafeImage(ws: string, filename: string): Promise<s
     img = img.extract({ left: Math.max(0, Math.round((W - cw) / 2)), top: Math.max(0, Math.round((H - ch) / 2)), width: Math.min(W, cw), height: Math.min(H, ch) });
   }
   const out = await img.jpeg({ quality: 90 }).toBuffer();
-  const saved = await saveMedia(ws, { buffer: out, mime: "image/jpeg", name: "ig-safe.jpg", source: "ig-safe" });
+  const saved = await saveMedia(ws, { buffer: out, mime: "image/jpeg", name: "ig-safe.jpg", source: "ig-safe", externalId: filename });
   return saved.filename;
 }
 

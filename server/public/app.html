@@ -211,9 +211,30 @@
   /* minmax(0,1fr): без нього 1fr=minmax(auto,1fr) і чіп з довгим словом РОЗТЯГУЄ свою колонку - календар «з'їжджає» */
   .cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px;margin-top:7px}
   .calhead{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px}
+  /* «?»-підказка: коротка назва + пояснення при наведенні (замість довгих абзаців у панелях) */
+  .qh{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;border:1px solid var(--line);color:var(--faint);font-size:10.5px;font-weight:800;cursor:help;flex:none}
+  .qh:hover{color:var(--brand);border-color:var(--brand)}
   .calhead b{font-size:14px;min-width:150px;text-align:center}
   .cal.week .day{min-height:240px}
   .cal.week .pchip{font-size:12px;line-height:1.45;padding:6px 8px;white-space:normal}
+  /* тижнева ПОГОДИННА сітка (вертикальний скрол, пости на своєму часі) */
+  .twk{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:7px;background:var(--surface)}
+  .twk-head{display:grid;grid-template-columns:46px repeat(7,minmax(0,1fr));border-bottom:1px solid var(--line)}
+  .twk-head .dh{padding:8px 6px;font-size:12px;font-weight:700;text-align:center;border-left:1px solid var(--line);min-width:0}
+  .twk-head .dh.today{color:var(--brand)}
+  .twk-allday{display:grid;grid-template-columns:46px repeat(7,minmax(0,1fr));border-bottom:1px solid var(--line);background:var(--surface2)}
+  .twk-allday .ad{border-left:1px solid var(--line);padding:3px;min-width:0;display:flex;flex-direction:column;gap:3px}
+  .twk-scroll{max-height:600px;overflow-y:auto;position:relative}
+  .twk-grid{display:grid;grid-template-columns:46px repeat(7,minmax(0,1fr));position:relative}
+  .twk-hours{position:relative}
+  .twk-hours .hl{height:52px;font-size:10.5px;color:var(--faint);text-align:right;padding-right:6px;transform:translateY(-6px)}
+  .twk-col{position:relative;border-left:1px solid var(--line);min-width:0;
+    background-image:repeating-linear-gradient(to bottom, var(--line) 0, var(--line) 1px, transparent 1px, transparent 52px)}
+  .twk-col.today{background-color:color-mix(in srgb, var(--brand) 4%, transparent)}
+  .twk-col .pchip{position:absolute;left:3px;right:3px;font-size:11.5px;line-height:1.4;padding:5px 7px;white-space:normal;box-shadow:0 1px 4px rgba(0,0,0,.08);z-index:2}
+  .twk-now{position:absolute;left:46px;right:0;height:2px;background:var(--brand);z-index:3;pointer-events:none}
+  .twk-now::before{content:'';position:absolute;left:-5px;top:-3px;width:8px;height:8px;border-radius:50%;background:var(--brand)}
+  .twk-col.over{background-color:color-mix(in srgb, var(--brand) 9%, transparent)}
   .day.dim{opacity:.45}
   .dow{text-align:center;font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.04em;padding-bottom:2px}
   .day{min-height:96px;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:7px 8px;display:flex;flex-direction:column;gap:5px}
@@ -282,6 +303,9 @@
     .modal-card{max-height:calc(100dvh - 20px);overflow:auto}
     /* календар: 7 днів скролються горизонтально всередині панелі */
     .cal{grid-template-columns:repeat(7,minmax(86px,1fr));overflow-x:auto;padding-bottom:6px}
+    /* погодинний тиждень на мобільному: вся сітка скролиться горизонтально одним контейнером */
+    .twk{overflow-x:auto}
+    .twk-head,.twk-allday,.twk-scroll{min-width:640px}
     /* композер: панелі в стовпчик, кнопки внизу з safe-area */
     .cmp-left{padding:14px}
     .cmp-right{padding:14px}
@@ -359,7 +383,7 @@
     <div class="topnav-right">
       <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--faint)"><span class="cdot" id="srvDot" style="width:8px;height:8px;background:var(--danger)"></span><span id="saved" style="opacity:0;transition:.3s;color:var(--brand)">✓</span></span>
       <button id="scorePill" title="Заповнення профілю - натисни, щоб побачити задачі">⚙ <span id="scoreVal">…</span></button>
-      <button class="primary" id="genPostsBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.8L19 9l-5.1 1.2L12 15l-1.9-4.8L5 9l5.1-1.2z"></path></svg>Згенерувати</button>
+      <button class="primary" id="genPostsBtn" title="Додати контент будь-коли: текст, ідею, посилання, стрічку">＋ Додати матеріал</button>
       <div style="position:relative">
         <div class="avatar" id="avatar" title="Акаунт і налаштування" style="cursor:pointer">О<span id="avProBadge" style="display:none;position:absolute;top:-4px;right:-5px;font-size:10px">⚡</span></div>
         <div id="userMenu" class="usermenu" style="display:none">
@@ -394,7 +418,8 @@
 
       <!-- ============ CREATE: конвеєр Матеріали → План → Чорновики ============ -->
       <section class="viewsec active" data-view="create">
-        <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;flex-wrap:wrap">
+        <!-- закріплений ряд вкладок: тут же живе кнопка наступного кроку («До календаря») -->
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;position:sticky;top:52px;z-index:25;background:var(--bg);padding:10px 0 12px;margin-bottom:10px">
           <div class="tabs" id="cTabs">
             <div class="tab" data-ctab="materials">📥 Матеріали <span class="badge" id="matCount" style="margin-left:5px"></span></div>
             <div class="tab on" data-ctab="posts">📝 Чорновики <span class="badge" id="postCount" style="margin-left:5px"></span></div>
@@ -404,6 +429,7 @@
             <div class="tab" data-lay="pipeline">Конвеєр <span id="pipePro" style="display:none;font-size:9px;font-weight:800;background:var(--brand);color:var(--brand-ink);border-radius:5px;padding:1px 5px;margin-left:3px">PRO</span></div>
           </div>
           <div class="hint" id="layoutHint" style="margin:0"></div>
+          <button class="primary" id="toCalendar" style="display:none;margin-left:auto">До календаря →</button>
         </div>
 
         <!-- MATERIALS: стрічка сировини -->
@@ -415,27 +441,39 @@
           <div class="panel" style="padding:0;overflow:hidden"><div id="matFeed"><div class="empty" style="padding:20px">Завантажую матеріали…</div></div></div>
         </div>
 
-        <!-- PLAN: скелет -->
+        <!-- PLAN: скелет + ритм у дві колонки (компактно), довгі пояснення - у «?»-підказках -->
         <div id="layPlan" style="display:none">
-          <div class="panel" style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
-            <div style="flex:1;min-width:230px">
-              <div style="font-weight:700;font-size:14.5px;margin-bottom:7px" id="planProgressLabel">Скелет плану</div>
-              <div style="height:9px;border-radius:6px;background:var(--surface2);overflow:hidden"><div id="planProgressBar" style="height:100%;background:var(--brand);width:0%;border-radius:6px;transition:width .3s"></div></div>
+          <div class="grid2" style="grid-template-columns:1fr 1.35fr;align-items:start;gap:14px">
+            <div class="panel" style="margin:0">
+              <div style="font-weight:700;font-size:14.5px;margin-bottom:7px;display:flex;align-items:center;gap:6px"><span id="planProgressLabel">Скелет плану</span><span class="qh" title="Скелет = теми на майбутні дні за твоєю стратегією (рубрики × найкращі дні). Кожен слот - ще НЕ пост: клік на тему в календарі чи «→ до поста» генерує чернетку.">?</span></div>
+              <div style="height:9px;border-radius:6px;background:var(--surface2);overflow:hidden;margin-bottom:10px"><div id="planProgressBar" style="height:100%;background:var(--brand);width:0%;border-radius:6px;transition:width .3s"></div></div>
+              <div class="btnrow" style="margin:0;align-items:center;flex-wrap:wrap">
+                <label class="proonly" id="planChannelWrap" style="display:none;font-size:12px;color:var(--muted)">канал <select id="planChannel"><option value="telegram">Telegram</option><option value="instagram">Instagram</option><option value="threads">Threads</option><option value="facebook">Facebook</option></select></label>
+                <label style="font-size:12px;color:var(--muted)">днів <input id="planHorizon" class="txt" type="number" value="14" min="7" max="90" style="width:60px;display:inline-block;padding:7px 9px"></label>
+                <label id="planPpwWrap" style="font-size:12px;color:var(--muted)">п/тиж <input id="planPpw" class="txt" type="number" value="4" min="1" max="14" style="width:54px;display:inline-block;padding:7px 9px"></label>
+                <span id="planEst" style="font-size:12px;font-weight:700;color:var(--brand)"></span>
+              </div>
+              <div class="btnrow" style="margin-top:8px">
+                <button class="primary" id="planGenBtn">↻ Згенерувати скелет</button>
+                <button class="ghost" id="planMatchBtn" title="Підібрати наявні матеріали під теми слотів">🔗 Підібрати матеріали</button>
+                <span id="planMsg" style="font-size:12px;color:var(--muted)"></span>
+              </div>
             </div>
-            <div class="btnrow" style="margin:0;align-items:center;flex-wrap:wrap">
-              <label class="proonly" id="planChannelWrap" style="display:none;font-size:12px;color:var(--muted)">канал <select id="planChannel"><option value="telegram">Telegram</option><option value="instagram">Instagram</option><option value="threads">Threads</option><option value="facebook">Facebook</option></select></label>
-              <label style="font-size:12px;color:var(--muted)">днів <input id="planHorizon" class="txt" type="number" value="14" min="7" max="90" style="width:60px;display:inline-block;padding:7px 9px"></label>
-              <label id="planPpwWrap" style="font-size:12px;color:var(--muted)">постів/тиждень <input id="planPpw" class="txt" type="number" value="4" min="1" max="14" style="width:54px;display:inline-block;padding:7px 9px"></label>
-              <span id="planEst" style="font-size:12px;font-weight:700;color:var(--brand)"></span>
-              <button class="primary" id="planGenBtn">↻ Згенерувати скелет</button>
-              <button class="ghost" id="planMatchBtn" title="Підібрати наявні матеріали під теми слотів">🔗 Підібрати матеріали</button>
-              <span id="planMsg" style="font-size:12px;color:var(--muted)"></span>
+            <div class="panel" id="rhythmPanel" style="margin:0">
+              <div class="ph" style="margin:0 0 8px;display:flex;align-items:center;gap:6px">📡 Ритм каналів<span class="qh" title="За замовчуванням усі мережі публікують за спільним ритмом бренду - нічого налаштовувати не треба. Хочеш інший графік чи тематику для конкретної мережі - перемкни її на «свій ритм»: дні, час(и) і (за бажанням) рубрики. Той самий пост поїде в кожну мережу у ЇЇ час - дублі неможливі, кожна мережа отримує пост рівно раз. Кілька часів = кілька постів на день (напр. Threads 2-3 рази).">?</span></div>
+              <div id="rhythmRows"><span style="font-size:12.5px;color:var(--muted)">…</span></div>
             </div>
           </div>
-          <div class="panel" id="rhythmPanel">
-            <div class="ph" style="margin:0 0 4px">📡 Ритм каналів</div>
-            <div class="hint" style="margin-bottom:8px">За замовчуванням усі мережі публікують за спільним ритмом бренду - нічого налаштовувати не треба. Хочеш інший графік чи тематику для конкретної мережі - перемкни її на «свій ритм»: дні, час і (за бажанням) рубрики. Тоді той самий пост поїде в кожну мережу у ЇЇ час - дублі неможливі, кожна мережа отримує пост рівно раз.</div>
-            <div id="rhythmRows"><span style="font-size:12.5px;color:var(--muted)">…</span></div>
+          <div class="panel proonly" id="chanPlanPanel" style="display:none">
+            <div class="ph" style="display:flex;align-items:center;gap:6px">📅 Контент-план по каналах<span class="qh" title="Бере стратегічний бриф і будує нативний план під обраний канал (алгоритми 2025-2026).">?</span></div>
+            <div class="btnrow" style="margin-top:8px;align-items:center;flex-wrap:wrap">
+              <select id="cpChannel"><option value="telegram">Telegram</option><option value="instagram">Instagram</option><option value="threads">Threads</option><option value="facebook">Facebook</option></select>
+              <label style="font-size:12px;color:var(--muted)">днів <input id="cpHorizon" class="txt" type="number" value="30" min="7" max="90" style="width:64px;display:inline-block;padding:7px 9px"></label>
+              <label style="font-size:12px;color:var(--muted)">постів/тиж <input id="cpPpw" class="txt" type="number" value="4" min="1" max="14" style="width:56px;display:inline-block;padding:7px 9px"></label>
+              <button class="primary" id="cpGen">Згенерувати план</button>
+              <span id="cpMsg" style="font-size:12px;color:var(--muted)"></span>
+            </div>
+            <div id="cpView" class="out" style="margin-top:10px"></div>
           </div>
           <div class="tabs proonly" id="planChanTabs" style="display:none;margin-bottom:12px"></div>
           <div class="panel" style="padding:0;overflow:hidden"><div id="planList"><div class="empty" style="padding:20px">Скелета ще нема - натисни «Згенерувати скелет» (потрібна стратегія з розділу Стратегія).</div></div></div>
@@ -470,13 +508,11 @@
             </details>
           </div>
           <div>
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
               <div class="disp" style="font-weight:600;font-size:17px">Чорновики</div>
               <div class="ftabs" id="studioFilters"></div>
-              <div class="ftabs" id="studioTagFilters" style="flex-wrap:wrap"></div>
-              <button class="ghost" id="studioMore" style="margin-left:auto"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v4h4"></path></svg>Згенерувати ще</button>
-              <button class="primary" id="toCalendar" style="display:none">До календаря →</button>
-              <button class="ghost" id="viewPrompt" title="Переглянути спільний промт генерації">👁 Промт</button>
+              <span id="studioTagFilters" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"></span>
+              <button class="ghost" id="viewPrompt" title="Переглянути спільний промт генерації" style="margin-left:auto">👁 Промт</button>
             </div>
             <div class="studio-grid" id="studioGrid"></div>
           </div>
@@ -662,18 +698,6 @@
           <div class="ph">🧠 Стратегічний бриф</div>
           <div class="hint">Джерело правди для всієї генерації. Оновлюється кнопкою «Згенерувати» вгорі.</div>
           <div id="briefView" class="out"></div>
-        </div>
-        <div class="panel proonly" id="chanPlanPanel" style="display:none">
-          <div class="ph">📅 Контент-план по каналах</div>
-          <div class="hint">Бере стратегічний бриф і будує нативний план під обраний канал (алгоритми 2025-2026).</div>
-          <div class="btnrow" style="margin-top:8px;align-items:center;flex-wrap:wrap">
-            <select id="cpChannel"><option value="telegram">Telegram</option><option value="instagram">Instagram</option><option value="threads">Threads</option><option value="facebook">Facebook</option></select>
-            <label style="font-size:12px;color:var(--muted)">днів <input id="cpHorizon" class="txt" type="number" value="30" min="7" max="90" style="width:64px;display:inline-block;padding:7px 9px"></label>
-            <label style="font-size:12px;color:var(--muted)">постів/тиж <input id="cpPpw" class="txt" type="number" value="4" min="1" max="14" style="width:56px;display:inline-block;padding:7px 9px"></label>
-            <button class="primary" id="cpGen">Згенерувати план</button>
-            <span id="cpMsg" style="font-size:12px;color:var(--muted)"></span>
-          </div>
-          <div id="cpView" class="out" style="margin-top:10px"></div>
         </div>
       </section>
 
@@ -935,7 +959,7 @@ function selectView(v){
   document.querySelectorAll('.navitem').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
   document.querySelectorAll('.viewsec').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
   const p=PAGES[v]||['','']; $('pageTitle').textContent=p[0]; $('pageSub').textContent=p[1];
-  $('genPostsBtn').style.display=v==='create'?'inline-flex':'none';
+  $('genPostsBtn').style.display='inline-flex'; // «＋ Додати матеріал» доступна з будь-якого розділу
   if(v==='analytics') loadAnalytics();
   if(v==='publish'){ loadPublish(); loadPlan(); }
   if(v==='strategy' && PRO) loadChannelPlan();
@@ -1129,7 +1153,7 @@ function renderIdeaBank(feed){
     });
   });
 }
-if($('addMaterialBtn')) $('addMaterialBtn').onclick=()=>{
+function openAddMaterial(){
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
   ov.innerHTML='<div class="modal-card" style="max-width:560px;padding:20px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">＋ Додати матеріал</b><button class="icon" id="amX" style="margin-left:auto">✕</button></div>'
     +'<input class="txt" id="amTitle" placeholder="Назва (необовʼязково)" style="margin-bottom:8px">'
@@ -1141,7 +1165,8 @@ if($('addMaterialBtn')) $('addMaterialBtn').onclick=()=>{
     const title=ov.querySelector('#amTitle').value.trim();
     try{ await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript:text,title:title||undefined})}); close(); await loadMaterials(); try{ await api('/plan/match',{method:'POST'}); await loadMaterials(); }catch(_){} flash('Матеріал додано ✓'); }
     catch(e){ flash('⚠ '+e.message); } };
-};
+}
+if($('addMaterialBtn')) $('addMaterialBtn').onclick=openAddMaterial;
 // модалка «Ідеї з матеріалу»: КРОК 1 налаштування генерації -> КРОК 2 обери ідеї -> чернетки постів
 async function openMaterialIdeas(matId){
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
@@ -1225,28 +1250,38 @@ async function renderRhythm(){
   let rh={}; try{ const rows=await api('/settings'); const m=Object.fromEntries(rows.map(r=>[r.key,r.content])); rh=JSON.parse(m.channel_rhythm||'{}')||{}; }catch(e){ rh={}; }
   const nets=NETS.filter(n=>ChanStatus[n[0]]);
   if(!nets.length){ box.innerHTML='<div style="font-size:12.5px;color:var(--faint)">Спершу підключи мережі в Налаштування → Канали.</div>'; return; }
+  // компактні рядки; кілька часів на мережу (Threads 2-3 рази/день): часи ротуються між постами
   box.innerHTML=nets.map(n=>{ const k=n[0], r=rh[k]||null, custom=!!r;
-    return '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line)" data-net="'+k+'">'
-      +'<span style="font-size:13px;font-weight:600;min-width:86px">'+esc(n[1])+'</span>'
-      +'<select class="rhMode txt" style="width:auto;padding:5px 8px;font-size:12px"><option value="inherit"'+(custom?'':' selected')+'>як у бренду</option><option value="custom"'+(custom?' selected':'')+'>свій ритм</option></select>'
-      +'<span class="rhCustom" style="display:'+(custom?'flex':'none')+';gap:8px;align-items:center;flex-wrap:wrap">'
-        +'<span style="display:flex;gap:3px">'+DAY_LBL.map(d=>'<button class="rhDay" data-d="'+d[0]+'" style="padding:3px 7px;font-size:11.5px;border-radius:6px;border:1px solid var(--line);background:'+((r&&r.days||[]).includes(+d[0])?'var(--brand-soft)':'transparent')+';color:'+((r&&r.days||[]).includes(+d[0])?'var(--brand)':'var(--muted)')+';cursor:pointer">'+d[1]+'</button>').join('')+'</span>'
-        +'<input class="rhTime txt" type="time" value="'+esc((r&&r.time)||'')+'" style="width:auto;padding:4px 7px;font-size:12px" title="час публікації цієї мережі">'
-        +'<input class="rhRub txt" placeholder="рубрики через кому (порожньо = всі)" value="'+esc(((r&&r.rubrics)||[]).join(', '))+'" style="width:210px;padding:4px 8px;font-size:12px" title="ця мережа братиме лише ці рубрики">'
-      +'</span></div>'; }).join('')
-    +'<div style="font-size:11.5px;color:var(--faint);margin-top:8px">Застосовується при «AI-розподілі» та автопублікації з плану. Дні не обрано - береться дата поста; час порожній - час бренду.</div>';
+    const times=(r&&(Array.isArray(r.times)?r.times:(r.time?[r.time]:[])))||[];
+    return '<div style="padding:7px 0;border-bottom:1px solid var(--line)" data-net="'+k+'">'
+      +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+        +'<span style="font-size:12.5px;font-weight:700;min-width:80px">'+esc(n[1])+'</span>'
+        +'<select class="rhMode txt" style="width:auto;padding:4px 7px;font-size:11.5px"><option value="inherit"'+(custom?'':' selected')+'>як у бренду</option><option value="custom"'+(custom?' selected':'')+'>свій ритм</option></select>'
+        +'<span class="rhCustom" style="display:'+(custom?'flex':'none')+';gap:6px;align-items:center;flex-wrap:wrap">'
+          +'<span style="display:flex;gap:2px">'+DAY_LBL.map(d=>'<button class="rhDay" data-d="'+d[0]+'" style="padding:2px 6px;font-size:11px;border-radius:6px;border:1px solid var(--line);background:'+((r&&r.days||[]).includes(+d[0])?'var(--brand-soft)':'transparent')+';color:'+((r&&r.days||[]).includes(+d[0])?'var(--brand)':'var(--muted)')+';cursor:pointer">'+d[1]+'</button>').join('')+'</span>'
+          +'<span class="rhTimes" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">'
+            +(times.length?times:['']).map(t=>'<input class="rhTime txt" type="time" value="'+esc(t)+'" style="width:auto;padding:3px 6px;font-size:11.5px" title="час публікації (порожній - час бренду)">').join('')
+            +'<button class="rhAddTime icon" title="Ще один час на день (пости ротуються між часами)" style="width:24px;height:24px;font-size:13px">＋</button>'
+          +'</span>'
+          +'<input class="rhRub txt" placeholder="рубрики через кому" value="'+esc(((r&&r.rubrics)||[]).join(', '))+'" style="width:150px;padding:3px 7px;font-size:11.5px" title="ця мережа братиме лише ці рубрики (порожньо = всі)">'
+        +'</span>'
+      +'</div></div>'; }).join('')
+    +'<div style="font-size:11px;color:var(--faint);margin-top:7px">Застосовується при «AI-розподілі» та автопублікації з плану. Кілька часів = кілька постів на день у цій мережі.</div>';
   const save=async()=>{ const out={};
     box.querySelectorAll('[data-net]').forEach(row=>{ if(row.querySelector('.rhMode').value!=='custom') return;
       const days=[...row.querySelectorAll('.rhDay')].filter(b=>b.dataset.on==='1').map(b=>+b.dataset.d);
-      const time=row.querySelector('.rhTime').value||'';
+      const times=[...row.querySelectorAll('.rhTime')].map(i=>i.value).filter(Boolean);
       const rubrics=row.querySelector('.rhRub').value.split(',').map(s=>s.trim()).filter(Boolean);
-      out[row.dataset.net]={...(days.length?{days}:{}),...(time?{time}:{}),...(rubrics.length?{rubrics}:{})}; });
+      out[row.dataset.net]={...(days.length?{days}:{}),...(times.length?{times}:{}),...(rubrics.length?{rubrics}:{})}; });
     try{ await saveSetting('channel_rhythm', JSON.stringify(out)); }catch(e){} };
   box.querySelectorAll('[data-net]').forEach(row=>{
     row.querySelectorAll('.rhDay').forEach(b=>{ const r=rh[row.dataset.net]; b.dataset.on=((r&&r.days)||[]).includes(+b.dataset.d)?'1':'0';
       b.onclick=()=>{ const on=b.dataset.on!=='1'; b.dataset.on=on?'1':'0'; b.style.background=on?'var(--brand-soft)':'transparent'; b.style.color=on?'var(--brand)':'var(--muted)'; save(); }; });
     row.querySelector('.rhMode').onchange=(e)=>{ row.querySelector('.rhCustom').style.display=e.target.value==='custom'?'flex':'none'; save(); };
-    row.querySelector('.rhTime').onchange=save;
+    row.querySelectorAll('.rhTime').forEach(i=>i.onchange=save);
+    row.querySelector('.rhAddTime').onclick=()=>{ const wrap=row.querySelector('.rhTimes'); const inp=document.createElement('input');
+      inp.className='rhTime txt'; inp.type='time'; inp.style.cssText='width:auto;padding:3px 6px;font-size:11.5px'; inp.onchange=save;
+      wrap.insertBefore(inp, row.querySelector('.rhAddTime')); inp.focus(); };
     row.querySelector('.rhRub').addEventListener('input',()=>{ clearTimeout(row._t); row._t=setTimeout(save,700); });
   });
 }
@@ -1499,6 +1534,10 @@ function renderPosts(oid,posts,emptyTxt){ const o=$(oid); if(!o) return; if(!pos
 
 // ---------- мережі ----------
 const NETS=[['telegram','Telegram'],['instagram','Instagram'],['facebook','Facebook'],['threads','Threads'],['linkedin','LinkedIn']];
+// клієнтська розбивка на гілку Threads (прев'ю в композері; сервер при публікації ріже точніше через AI)
+function clientThreadSplit(text){ const parts=[]; const paras=String(text||'').split(/\n{2,}/).map(p=>p.trim()).filter(Boolean); let cur='';
+  for(const p of paras){ if((cur?cur+'\n\n'+p:p).length<=450) cur=cur?cur+'\n\n'+p:p; else { if(cur) parts.push(cur); cur=p.length<=450?p:p.slice(0,449); } }
+  if(cur) parts.push(cur); return (parts.length?parts:[String(text||'').slice(0,450)]).slice(0,8); }
 const NETVAR={telegram:'--tg',instagram:'--ig',facebook:'--fb',threads:'--th',linkedin:'--li'};
 // ---------- 🎯 головна ціль («Директор») + 📮 CTA-конфіг («Дистриб'ютор») ----------
 const GOALS=[['money','💰 Гроші / продажі'],['leads','📩 Ліди / заявки'],['growth','📈 Зростання аудиторії'],['authority','🎓 Авторитет'],['quality','💎 Якість аудиторії']];
@@ -1736,15 +1775,15 @@ function renderStudio(){
   const pub=all.filter(p=>p.sent&&p.sent.length).length;
   const tc=$('toCalendar'); if(tc){ tc.style.display=appr>0?'':'none'; tc.textContent='До календаря ('+appr+') →'; }
   const ft=$('studioFilters'); if(ft){ ft.innerHTML=[['all','Усі',all.length],['review','На перегляд',rev],['approved','Затверджені',appr],['published','✈️ Опубліковані',pub]].map(f=>'<div class="ftab'+(StudioFilter===f[0]?' on':'')+'" data-sf="'+f[0]+'">'+f[1]+' <span style="opacity:.6">'+f[2]+'</span></div>').join(''); ft.querySelectorAll('[data-sf]').forEach(t=>t.onclick=()=>{ StudioFilter=t.dataset.sf; renderStudio(); }); }
-  // теги: рубрики й джерела, що реально є в постах (композитний фільтр, як у Publer: статус × рубрика × джерело)
+  // рубрика × джерело - компактні дропдауни (було: два ряди чіпів = візуальний шум)
   const tf=$('studioTagFilters');
   if(tf){
     const rubset=[...new Set(all.map(p=>p.rubric).filter(Boolean))];
     const orgset=[...new Set(all.map(p=>p.source_origin).filter(Boolean))];
-    tf.innerHTML=(rubset.length?rubset.map(r=>'<div class="ftab'+(StudioRubric===r?' on':'')+'" data-rb="'+esc(r)+'">🏷 '+esc(r)+'</div>').join(''):'')
-      +(orgset.length>1?orgset.map(o=>'<div class="ftab'+(StudioOrigin===o?' on':'')+'" data-og="'+esc(o)+'">'+(ORIGIN_LABEL[o]||o)+'</div>').join(''):'');
-    tf.querySelectorAll('[data-rb]').forEach(t=>t.onclick=()=>{ StudioRubric=StudioRubric===t.dataset.rb?'':t.dataset.rb; renderStudio(); });
-    tf.querySelectorAll('[data-og]').forEach(t=>t.onclick=()=>{ StudioOrigin=StudioOrigin===t.dataset.og?'':t.dataset.og; renderStudio(); });
+    tf.innerHTML=(rubset.length?'<select id="stRubSel" class="txt" style="width:auto;padding:6px 9px;display:inline-block;font-size:12.5px'+(StudioRubric?';border-color:var(--brand);color:var(--brand)':'')+'"><option value="">🏷 Всі рубрики</option>'+rubset.map(r=>'<option value="'+esc(r)+'"'+(StudioRubric===r?' selected':'')+'>🏷 '+esc(r)+'</option>').join('')+'</select>':'')
+      +(orgset.length>1?'<select id="stOrgSel" class="txt" style="width:auto;padding:6px 9px;display:inline-block;font-size:12.5px'+(StudioOrigin?';border-color:var(--brand);color:var(--brand)':'')+'"><option value="">📦 Всі джерела</option>'+orgset.map(o=>'<option value="'+esc(o)+'"'+(StudioOrigin===o?' selected':'')+'>'+(ORIGIN_LABEL[o]||esc(o))+'</option>').join('')+'</select>':'');
+    const rs=$('stRubSel'); if(rs) rs.onchange=(e)=>{ StudioRubric=e.target.value; renderStudio(); };
+    const os=$('stOrgSel'); if(os) os.onchange=(e)=>{ StudioOrigin=e.target.value; renderStudio(); };
   }
   let show=all; if(StudioFilter==='review') show=all.filter(p=>p.review!=='approved'); if(StudioFilter==='approved') show=all.filter(p=>p.review==='approved');
   if(StudioFilter==='published') show=all.filter(p=>p.sent&&p.sent.length);
@@ -1766,7 +1805,7 @@ function renderStudio(){
         +(PRO&&p.reel_video?'<button class="icon" data-a="reelplay" data-rv="'+esc(p.reel_video)+'" title="▶ Дивитися зібраний рілс">▶️</button>':'')
         +(!isPub?'<button class="icon" data-a="del" title="Видалити пост" style="color:var(--danger)">🗑</button>':'')
         +'<button class="icon" data-a="menu" title="Ще: AI-інструменти й дії">⋯</button>'
-        +'<button class="icon" data-a="composer" title="Редагувати, запланувати чи опублікувати">📣</button>'
+        +'<button class="ghost" data-a="composer" title="Редагувати, запланувати чи опублікувати" style="padding:7px 12px;font-size:12.5px;font-weight:700">📣 Опублікувати</button>'
         +'<button class="approve'+(ap?' on':'')+'" data-a="approve"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg>'+(ap?'Затверджено':'Затвердити')+'</button>'
       +'</div></div>';
   }).join('');
@@ -1987,9 +2026,6 @@ async function openComposer(postId, opts){
   let full; try{ full=await api('/posts/'+postId+'/full'); }catch(e){ flash('Не вдалося відкрити: '+e.message); return; }
   let ps={sent:[]}; try{ ps=await api('/posts/'+postId+'/publish-state'); }catch(e){}
   const sentSet=new Set(ps.sent||[]);
-  // 🗑 видалення доступне лише НЕопублікованим (опубліковані - історія й аналітика)
-  const delBtn=ov.querySelector('#cmpDel');
-  if(delBtn){ delBtn.style.display=sentSet.size?'none':''; delBtn.onclick=()=>deletePost(postId, close); }
   const C=JSON.parse(JSON.stringify(full.channels||{}));
   // якщо жодна мережа не обрана - вмикаємо всі підключені й ще не надіслані
   if(!Object.keys(C).some(k=>C[k]&&C[k].on)) NETS.forEach(n=>{ if(ChanStatus[n[0]]&&!sentSet.has(n[0])){ C[n[0]]=C[n[0]]||{text:''}; C[n[0]].on=true; } });
@@ -2017,7 +2053,7 @@ async function openComposer(postId, opts){
       +'</div>'
       +'<div class="cmp-right"><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:14px;text-align:center">Прев\'ю · мобільний</div><div id="cmpPrev"></div></div>'
     +'</div>'
-    +'<div class="cmp-foot"><button class="icon" id="cmpDel" title="Видалити пост назавжди" style="color:var(--danger);display:none">🗑</button><span style="font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--faint)">ЧЕРНЕТКА</span><button class="ghost" id="cmpSave">💾 Зберегти</button><button id="cmpAdapt">✨ Підлаштувати під канали</button><span style="flex:1"></span><span style="font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--faint);border-left:1px solid var(--line);padding-left:12px">ПУБЛІКАЦІЯ</span>'
+    +'<div class="cmp-foot"><button class="icon" id="cmpDel" title="Видалити пост назавжди" style="color:var(--danger);display:none">🗑</button><span style="font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--faint)">ЧЕРНЕТКА</span><button class="ghost" id="cmpSave">💾 Зберегти</button><button class="ghost" id="cmpApprove">✅ Затвердити</button><button id="cmpAdapt">✨ Підлаштувати під канали</button><span style="flex:1"></span><span style="font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--faint);border-left:1px solid var(--line);padding-left:12px">ПУБЛІКАЦІЯ</span>'
       +'<label style="font-size:12px;color:var(--muted)">Дата <input type="date" id="cmpDate" class="txt" value="'+initDate+'" style="width:auto;padding:6px 8px;display:inline-block"></label>'
       +'<label style="font-size:12px;color:var(--muted)">Час <input type="time" id="cmpTime" class="txt" value="'+initTime+'" style="width:auto;padding:6px 8px;display:inline-block"></label>'
       +'<button class="ok" id="cmpSched">🗓 Запланувати</button><button class="primary" id="cmpNow">📣 Опублікувати зараз</button></div>';
@@ -2028,6 +2064,15 @@ async function openComposer(postId, opts){
   const msg=ov.querySelector('#cmpMsg'); const txt=ov.querySelector('#cmpText'); txt.value=master;
   const setMsg=(t,c)=>{ msg.textContent=t; msg.style.color=c||'var(--muted)'; };
   ov.querySelector('#cmpX').onclick=close;
+  // 🗑 видалення доступне лише НЕопублікованим (опубліковані - історія й аналітика)
+  const delBtn=ov.querySelector('#cmpDel');
+  if(delBtn){ delBtn.style.display=sentSet.size?'none':''; delBtn.onclick=()=>deletePost(postId, close); }
+  // ✅ затвердження прямо з композера (не вертаючись до картки)
+  const apBtn=ov.querySelector('#cmpApprove');
+  if(apBtn){ const cur=(Finals||[]).find(x=>x.id===postId);
+    const setAp=(on)=>{ apBtn.textContent=on?'✅ Затверджено':'✅ Затвердити'; apBtn.style.color=on?'var(--brand)':''; };
+    setAp(cur&&cur.review==='approved');
+    apBtn.onclick=async()=>{ apBtn.disabled=true; try{ await saveDraft(); await api('/posts/'+postId+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'approved'})}); setAp(true); setMsg('затверджено ✓ (можна планувати)','var(--brand)'); try{ await loadStudioPosts(); }catch(_){ } }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ apBtn.disabled=false; } }; }
   // ----- канали (надіслані = заблоковані з ✓) -----
   function renderChips(){ const box=ov.querySelector('#cmpChips'); box.innerHTML=NETS.map(n=>{ const k=n[0]; const on=C[k]&&C[k].on; const conn=ChanStatus[k]; const sent=sentSet.has(k);
       return '<button class="netchip'+(on?' on':'')+'" data-net="'+k+'"'+((!conn||sent)?' disabled':'')+' title="'+(sent?'вже опубліковано':(conn?'':'не підключено'))+'">'+(sent?'✓ ':'')+n[1]+'</button>'; }).join('');
@@ -2058,8 +2103,18 @@ async function openComposer(postId, opts){
       let body;
       if(k==='instagram') body=head+img+'<div class="ig-acts">♡ 💬 ↗<span class="sp"></span>🔖</div><div class="phone-b"><span class="phone-user">ваш_профіль</span> <span class="phone-txt" style="display:inline">'+(t?pvCap(k,t):empty)+'</span></div>';
       else if(k==='telegram') body=head+img+'<div class="phone-b"><div class="phone-txt">'+(t?esc(t):empty)+'</div></div>'+((over&&mediaFilename)?'<div class="pv-note">довгий підпис Telegram надішле окремим повідомленням під фото</div>':'');
-      else body=head+'<div class="phone-b"><div class="phone-txt">'+(t?pvCap(k,t):empty)+'</div></div>'+img
-        +((k==='threads'&&C.threads&&C.threads.thread)?'<div class="pv-note">🧵 поїде гілкою з повного тексту (~'+Math.max(2,Math.ceil(master.length/450))+' частин: гачок + відповіді)</div>':'');
+      else if(k==='threads'&&C.threads&&C.threads.thread){
+        // 🧵 прев'ю гілки як у Threads: аватар + вертикальна лінія + частини-відповіді
+        // (тут детермінована розбивка по абзацах; при публікації AI переріже точніше, з гачком у root)
+        const parts=clientThreadSplit(master);
+        body=head+'<div style="padding:10px 12px">'+parts.map((p,i)=>
+          '<div style="display:flex;gap:8px">'
+            +'<div style="display:flex;flex-direction:column;align-items:center;flex:none"><span class="phone-av" style="width:22px;height:22px;font-size:10px">'+esc(av)+'</span>'+(i<parts.length-1?'<span style="flex:1;width:2px;background:var(--line);margin:3px 0;border-radius:2px"></span>':'')+'</div>'
+            +'<div style="flex:1;min-width:0;padding-bottom:'+(i<parts.length-1?'12px':'0')+'"><div style="font-size:10.5px;color:var(--faint);font-weight:700">'+(i?('#'+(i+1)):'ваш_профіль')+'</div><div class="phone-txt" style="margin-top:2px">'+esc(p)+'</div>'+(i===0&&mediaFilename?'<img src="/media/'+esc(mediaFilename)+'" style="width:100%;display:block;border-radius:8px;margin-top:6px">':'')+'</div>'
+          +'</div>').join('')+'</div>'
+          +'<div class="pv-note">🧵 гілка: '+parts.length+' частин(и) з повного тексту - root-гачок + відповіді</div>';
+      }
+      else body=head+'<div class="phone-b"><div class="phone-txt">'+(t?pvCap(k,t):empty)+'</div></div>'+img;
       return '<div class="pv-label" style="background:var('+NETVAR[k]+')">'+n[1]+'</div><div class="phone">'+body+'</div>'; }).join('');
     box.querySelectorAll('[data-more]').forEach(el=>el.onclick=()=>{ _pvExp.add(el.dataset.more); renderPrev(); }); }
   txt.addEventListener('input',()=>{ master=txt.value; renderPrev(); });
@@ -2330,7 +2385,7 @@ async function genPosts(){
   catch(e){ flash('⚠ '+e.message); try{await refresh();}catch(_){} }
   finally{ setBusy(false); aiDone(); }
 }
-$('genPostsBtn').onclick=genPosts; $('studioMore').onclick=genPosts;
+$('genPostsBtn').onclick=openAddMaterial; // топбар: завжди «＋ Додати матеріал» (генерація живе в діях матеріалів/ідей)
 async function genIdeas(){
   if(busy) return;
   let rid; try{ rid=await ensureRun(); }catch(e){ try{ const r=await api('/generate/from-brand',{method:'POST'}); rid=r.runId; runId=rid; localStorage.setItem('kg_run',rid); updRunLabel(); }catch(e2){ go('brand'); flash('Спершу заповни Базу бренду (ніша й аудиторія).'); return; } }
@@ -2425,7 +2480,9 @@ function renderCal(){
   head.querySelector('#calToday').onclick=()=>{ CalOff=0; renderCal(); };
   head.querySelector('#calWeekB').onclick=()=>{ CalMode='week'; CalOff=0; localStorage.setItem('kg_calmode','week'); renderCal(); };
   head.querySelector('#calMonthB').onclick=()=>{ CalMode='month'; CalOff=0; localStorage.setItem('kg_calmode','month'); renderCal(); };
-  // сітка
+  // тиждень = погодинна сітка з вертикальним скролом (пости стоять на своєму часі)
+  if(CalMode==='week'){ renderWeekGrid(wrap, days, byDay, todayIso); return; }
+  // сітка (місяць)
   const cal=document.createElement('div'); cal.className='cal'+(CalMode==='week'?' week':''); wrap.appendChild(cal);
   ['Пн','Вт','Ср','Чт','Пт','Сб','Нд'].forEach(d=>{const h=document.createElement('div');h.className='dow';h.textContent=d;cal.appendChild(h);});
   const maxTxt=CalMode==='week'?70:18; // тиждень показує повний контент дня, місяць - компактні чіпи
@@ -2475,6 +2532,89 @@ function renderCal(){
     cell.addEventListener('click',ev=>{ if(ev.target.closest('.pchip')) return; openDayScheduler(iso); });
     cal.appendChild(cell);
   }
+}
+// Тижнева ПОГОДИННА сітка: колонка годин + 7 днів, чіпи стоять на своєму часі, скрол по вертикалі.
+// Дроп чіпа/поста на колонку ставить і ДЕНЬ, і ЧАС (з кроком 15 хв). Теми з плану (без часу) - у смузі зверху.
+function renderWeekGrid(wrap, days, byDay, todayIso){
+  const HPX=52, DOWS=['Пн','Вт','Ср','Чт','Пт','Сб','Нд'];
+  const twk=document.createElement('div'); twk.className='twk'; wrap.appendChild(twk);
+  // шапка: дні
+  const head=document.createElement('div'); head.className='twk-head';
+  head.innerHTML='<div></div>'+days.map((iso,i)=>{ const [,mm,dd]=iso.split('-');
+    return '<div class="dh'+(iso===todayIso?' today':'')+'">'+DOWS[i]+' '+(+dd)+'.'+(+mm)+'</div>'; }).join('');
+  twk.appendChild(head);
+  // смуга «без часу»: привиди-теми з плану (пост ще не створено / чернетка без слота в календарі)
+  const ghosts={}; let anyGhost=false;
+  days.forEach(iso=>{ ghosts[iso]=(PlanAll||[]).filter(p=>String(p.slot_date||'').slice(0,10)===iso&&['empty','matched','drafted'].includes(p.status)); if(ghosts[iso].length) anyGhost=true; });
+  if(anyGhost){
+    const ad=document.createElement('div'); ad.className='twk-allday';
+    ad.innerHTML='<div style="font-size:9.5px;color:var(--faint);display:flex;align-items:center;justify-content:center">план</div>';
+    days.forEach(iso=>{ const c=document.createElement('div'); c.className='ad';
+      ghosts[iso].forEach(p=>{ const drafted=p.status==='drafted';
+        const g=document.createElement('div'); g.className='pchip ghost'; g.style.position='static';
+        g.title=drafted?'Чернетка готова - відкрити в композері':'Тема з плану (пост ще не створено). Клік = згенерувати пост'+(p.status==='matched'?' зі зметченого матеріалу':'');
+        g.innerHTML='<b>'+(drafted?'✍️':'📋')+'</b> '+esc(String(p.theme||p.rubric||'').replace(/\n+/g,' ').slice(0,26));
+        g.onclick=async(ev)=>{ ev.stopPropagation();
+          if(drafted&&p.post_id){ openComposer(p.post_id); return; }
+          const from=p.match_source_id?'material':'theme';
+          if(!confirm('Згенерувати пост із теми «'+String(p.theme||'').slice(0,80)+'»'+(from==='material'?' (є підібраний матеріал)':'')+'?')) return;
+          aiBusy('✨ Генерую пост із теми плану…');
+          try{ await api('/plan/slots/'+p.id+'/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from})}); await loadPlan(); renderCal(); flash('Чернетка готова - у Чорновиках і на цій даті ✓'); }
+          catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } };
+        c.appendChild(g); });
+      ad.appendChild(c); });
+    twk.appendChild(ad);
+  }
+  // скрол-зона з годинами
+  const sc=document.createElement('div'); sc.className='twk-scroll'; twk.appendChild(sc);
+  const grid=document.createElement('div'); grid.className='twk-grid'; sc.appendChild(grid);
+  const hoursCol=document.createElement('div'); hoursCol.className='twk-hours';
+  for(let h=0;h<24;h++){ const l=document.createElement('div'); l.className='hl'; l.textContent=(h<10?'0':'')+h+':00'; hoursCol.appendChild(l); }
+  grid.appendChild(hoursCol);
+  const yToTime=(y)=>{ const mins=Math.max(0,Math.min(23*60+45, Math.round(y/HPX*60/15)*15)); const h=Math.floor(mins/60), m=mins%60; return (h<10?'0':'')+h+':'+(m<10?'0':'')+m; };
+  days.forEach(iso=>{
+    const col=document.createElement('div'); col.className='twk-col'+(iso===todayIso?' today':''); col.style.height=(24*HPX)+'px'; col.dataset.iso=iso;
+    let lastBottom=-9;
+    (byDay[iso]||[]).sort((a,b)=>String(a.scheduled_at).localeCompare(String(b.scheduled_at))).forEach(s=>{
+      const time=locHM(s.scheduled_at); const st=s.status;
+      const icon=st==='posted'?' ✅':(st==='failed'?' ⚠️':(st==='posting'?' ⏳':''));
+      const movable=(st==='planned'||st==='failed');
+      const ch=document.createElement('div'); ch.className='pchip'+(st==='failed'?' failed':'')+(st==='posted'?' posted':'');
+      ch.title=(s.result||(st==='planned'?'заплановано':st))+(movable?' · тягни на інший день/час':'');
+      ch.innerHTML='<b>'+time+icon+'</b> '+chanIcons(s.channels)+' '+esc((s.content||'').replace(/\n+/g,' ').slice(0,60))
+        +(st!=='posted'?'<span class="pchip-x" data-del="'+s.id+'" title="Прибрати з календаря" style="float:right;margin-left:4px;padding:0 4px;border-radius:4px;color:var(--faint);cursor:pointer">✕</span>':'');
+      const [hh,mm]=time.split(':').map(Number);
+      let top=(hh*60+mm)/60*HPX;
+      if(top<lastBottom+2) top=lastBottom+2; // чіпи на близький час не накладаються
+      ch.style.top=top+'px';
+      if(movable){ ch.draggable=true; ch.addEventListener('dragstart',ev=>{ ev.dataTransfer.setData('text/plain','slot:'+s.id+':'+time); }); }
+      ch.onclick=(ev)=>{ ev.stopPropagation();
+        if(ev.target.dataset&&ev.target.dataset.del){ if(!confirm('Прибрати пост з календаря? (сам пост лишиться в Студії)')) return;
+          api('/schedule/'+ev.target.dataset.del,{method:'DELETE'}).then(()=>loadPublish()).catch(e=>flash('⚠ '+e.message)); return; }
+        openComposer(s.post_id,{scheduledAt:s.scheduled_at,slotId:s.id}); };
+      col.appendChild(ch);
+      lastBottom=top+(ch.offsetHeight||42);
+    });
+    col.addEventListener('dragover',ev=>{ev.preventDefault();col.classList.add('over');});
+    col.addEventListener('dragleave',()=>col.classList.remove('over'));
+    col.addEventListener('drop',async ev=>{ ev.preventDefault(); col.classList.remove('over');
+      const d=ev.dataTransfer.getData('text/plain');
+      const time=yToTime(ev.clientY-col.getBoundingClientRect().top); // час = точка дропу (крок 15 хв)
+      try{
+        if(d.indexOf('post:')===0){ await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId:d.slice(5),scheduledAt:zonedToUTCISO(iso,time)})}); await loadPublish(); return; }
+        if(d.indexOf('slot:')===0){ const rest=d.slice(5); const sep=rest.indexOf(':'); const slotId=sep>0?rest.slice(0,sep):rest;
+          await api('/schedule/'+slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:zonedToUTCISO(iso,time)})}); await loadPublish(); return; }
+      }catch(e){ flash('⚠ '+e.message); } });
+    col.addEventListener('click',ev=>{ if(ev.target.closest('.pchip')) return; openDayScheduler(iso); });
+    grid.appendChild(col);
+  });
+  // лінія «зараз» у сьогоднішньому дні
+  if(days.includes(todayIso)){
+    const nowHM=locHM(new Date()); const [nh,nm]=nowHM.split(':').map(Number);
+    const line=document.createElement('div'); line.className='twk-now'; line.style.top=((nh*60+nm)/60*HPX)+'px';
+    grid.appendChild(line);
+    sc.scrollTop=Math.max(0,(nh-2)*HPX); // відкриваємось біля поточного часу
+  } else { sc.scrollTop=7.5*HPX; } // інший тиждень - від ~7:30 ранку
 }
 // ---------- wiring ----------
 document.querySelectorAll('[data-run]').forEach(b=>b.onclick=()=>run(+b.dataset.run));
@@ -2697,12 +2837,34 @@ async function loadRecent(){
 $('recReload').onclick=()=>loadRecent();
 
 // ---------- медіа ----------
+let MediaSel=null; // null = звичайний режим; Set(id) = режим виділення для масового видалення
 async function loadMedia(){
   const o=$('mediaGrid'); if(!o) return;
   try{ const m=await api('/media');
-    if(!m.length){ o.innerHTML='<div class="empty">Порожньо.</div>'; return; }
-    o.innerHTML=m.map(x=>'<div style="position:relative" data-id="'+x.id+'">'+(x.kind==='video'?'<video src="/media/'+esc(x.filename)+'" style="height:90px;border-radius:8px"></video>':'<img loading="lazy" src="/thumb/'+esc(x.filename)+'" onerror="this.style.opacity=.3" style="height:90px;border-radius:8px;background:var(--surface2)">')+'<button class="mediaDel" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;padding:1px 6px">✕</button></div>').join('');
-    o.querySelectorAll('[data-id]').forEach(c=>{ c.querySelector('.mediaDel').onclick=async()=>{ if(!confirm('Видалити фото?'))return; try{ await api('/media/'+c.dataset.id,{method:'DELETE'}); await loadMedia(); }catch(e){ flash(e.message); } }; });
+    if(!m.length){ MediaSel=null; o.innerHTML='<div class="empty">Порожньо.</div>'; return; }
+    const sel=MediaSel;
+    const bar='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%;margin-bottom:8px">'
+      +(sel
+        ?'<button class="ghost" id="mSelAll">Вибрати всі</button><button class="danger" id="mSelDel"'+(sel.size?'':' disabled')+'>🗑 Видалити обрані ('+sel.size+')</button><button class="ghost" id="mSelOff">Скасувати</button>'
+        :'<button class="ghost" id="mSelOn">☑️ Вибрати кілька</button><span style="font-size:12px;color:var(--muted)">для масового видалення</span>')
+      +'</div>';
+    o.innerHTML=bar+m.map(x=>{ const on=sel&&sel.has(x.id);
+      return '<div style="position:relative;cursor:'+(sel?'pointer':'default')+'" data-id="'+x.id+'">'
+        +(x.kind==='video'?'<video src="/media/'+esc(x.filename)+'" style="height:90px;border-radius:8px'+(on?';outline:3px solid var(--brand)':'')+'"></video>':'<img loading="lazy" src="/thumb/'+esc(x.filename)+'" onerror="this.style.opacity=.3" style="height:90px;border-radius:8px;background:var(--surface2)'+(on?';outline:3px solid var(--brand)':'')+'">')
+        +(sel?'<span style="position:absolute;top:4px;left:4px;width:20px;height:20px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;background:'+(on?'var(--brand)':'rgba(0,0,0,.55)')+';color:#fff">'+(on?'✓':'')+'</span>'
+             :'<button class="mediaDel" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;padding:1px 6px">✕</button>')
+        +'</div>'; }).join('');
+    if(sel){
+      o.querySelectorAll('[data-id]').forEach(c=>{ c.onclick=()=>{ const id=c.dataset.id; if(sel.has(id)) sel.delete(id); else sel.add(id); loadMedia(); }; });
+      const all=$('mSelAll'); if(all) all.onclick=(e)=>{ e.stopPropagation(); m.forEach(x=>sel.add(x.id)); loadMedia(); };
+      const off=$('mSelOff'); if(off) off.onclick=(e)=>{ e.stopPropagation(); MediaSel=null; loadMedia(); };
+      const del=$('mSelDel'); if(del) del.onclick=async(e)=>{ e.stopPropagation(); if(!sel.size) return;
+        if(!confirm('Видалити '+sel.size+' файл(ів) назавжди? Пости не зламаються - фото просто відкріпиться.')) return;
+        del.disabled=true; try{ const r=await api('/media/bulk-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[...sel]})}); flash('🗑 Видалено: '+r.deleted); MediaSel=null; await loadMedia(); }catch(err){ flash('⚠ '+err.message); del.disabled=false; } };
+    } else {
+      const on=$('mSelOn'); if(on) on.onclick=()=>{ MediaSel=new Set(); loadMedia(); };
+      o.querySelectorAll('[data-id]').forEach(c=>{ const d=c.querySelector('.mediaDel'); if(d) d.onclick=async()=>{ if(!confirm('Видалити фото?'))return; try{ await api('/media/'+c.dataset.id,{method:'DELETE'}); await loadMedia(); }catch(e){ flash(e.message); } }; });
+    }
   }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }
 $('mediaUpload').onclick=async()=>{
