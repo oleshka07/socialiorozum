@@ -1765,7 +1765,7 @@ function renderFinals(posts){
 }
 async function saveContent(id,v){ try{ await api('/posts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:v})}); flashSaved(); }catch(e){} }
 let StudioFilter='all', StudioRubric='', StudioOrigin='';
-const ORIGIN_LABEL={manual:'✍️ вручну',rss:'📡 RSS',fireflies:'🎙 транскрипт',grain:'🎙 транскрипт',meetgeek:'🎙 транскрипт',brand:'✨ з бренду',gdrive:'📁 Drive',plan:'📅 з плану',diary:'📔 щоденник'};
+const ORIGIN_LABEL={manual:'✍️ вручну',rss:'📡 RSS',fireflies:'🎙 транскрипт',grain:'🎙 транскрипт',meetgeek:'🎙 транскрипт',brand:'✨ з бренду',gdrive:'📁 Drive',plan:'📅 з плану',diary:'📔 щоденник',takes:'🧵 тейк',idea:'💡 з ідеї'};
 const SelPosts=new Set(); // масові дії
 // глобальний список усіх фінальних постів воркспейсу (НЕ привʼязаний до активного джерела/прогону)
 async function loadStudioPosts(){ try{ Finals=(await api('/posts/studio'))||[]; }catch(e){} SelPosts.clear(); renderStudio(); renderInbox(); if(typeof updateCounts==='function') updateCounts(); }
@@ -1805,7 +1805,7 @@ function renderStudio(){
         +(PRO&&p.reel_video?'<button class="icon" data-a="reelplay" data-rv="'+esc(p.reel_video)+'" title="▶ Дивитися зібраний рілс">▶️</button>':'')
         +(!isPub?'<button class="icon" data-a="del" title="Видалити пост" style="color:var(--danger)">🗑</button>':'')
         +'<button class="icon" data-a="menu" title="Ще: AI-інструменти й дії">⋯</button>'
-        +'<button class="ghost" data-a="composer" title="Редагувати, запланувати чи опублікувати" style="padding:7px 12px;font-size:12.5px;font-weight:700">📣 Опублікувати</button>'
+        +'<button class="ghost" data-a="composer" title="Редагувати, запланувати чи опублікувати" style="padding:7px 12px;font-size:12.5px;font-weight:700">✍ Редагувати</button>'
         +'<button class="approve'+(ap?' on':'')+'" data-a="approve"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg>'+(ap?'Затверджено':'Затвердити')+'</button>'
       +'</div></div>';
   }).join('');
@@ -2072,7 +2072,7 @@ async function openComposer(postId, opts){
   if(apBtn){ const cur=(Finals||[]).find(x=>x.id===postId);
     const setAp=(on)=>{ apBtn.textContent=on?'✅ Затверджено':'✅ Затвердити'; apBtn.style.color=on?'var(--brand)':''; };
     setAp(cur&&cur.review==='approved');
-    apBtn.onclick=async()=>{ apBtn.disabled=true; try{ await saveDraft(); await api('/posts/'+postId+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'approved'})}); setAp(true); setMsg('затверджено ✓ (можна планувати)','var(--brand)'); try{ await loadStudioPosts(); }catch(_){ } }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ apBtn.disabled=false; } }; }
+    apBtn.onclick=async()=>{ apBtn.disabled=true; try{ await saveDraft(); await api('/posts/'+postId+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'approved'})}); setAp(true); try{ await loadStudioPosts(); }catch(_){ } flash('✅ Затверджено - пост готовий до календаря'); close(); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); apBtn.disabled=false; } }; }
   // ----- канали (надіслані = заблоковані з ✓) -----
   function renderChips(){ const box=ov.querySelector('#cmpChips'); box.innerHTML=NETS.map(n=>{ const k=n[0]; const on=C[k]&&C[k].on; const conn=ChanStatus[k]; const sent=sentSet.has(k);
       return '<button class="netchip'+(on?' on':'')+'" data-net="'+k+'"'+((!conn||sent)?' disabled':'')+' title="'+(sent?'вже опубліковано':(conn?'':'не підключено'))+'">'+(sent?'✓ ':'')+n[1]+'</button>'; }).join('');

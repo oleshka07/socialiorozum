@@ -133,17 +133,26 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
           const parts = await threadsSplit(ws, post.content);
           const first = await threads.publish(thTok.token, thTok.userId, parts[0], imageUrl || undefined);
           rootId = first.mediaId;
-          let prev = first.mediaId;
+          // root УЖЕ в мережі → фіксуємо sent ОДРАЗУ: якщо якась ветка впаде, повторна публікація
+          // не задублює root (дедуп «раз на мережу» побачить sent)
+          await q(`insert into threads_publish(post_id,media_id,status) values($1,$2,'sent')`, [postId, rootId]);
+          let prev = rootId;
           for (const part of parts.slice(1)) {
-            await new Promise((res) => setTimeout(res, 1500)); // невеликий інтервал між ветками
-            const rr = await threads.publish(thTok.token, thTok.userId, part, undefined, prev);
-            prev = rr.mediaId;
+            await new Promise((res) => setTimeout(res, 3000)); // пауза: root/попередня ветка мають «доїхати»
+            try {
+              const rr = await threads.publish(thTok.token, thTok.userId, part, undefined, prev);
+              prev = rr.mediaId;
+            } catch (e: any) {
+              // ветка не доїхала - не валимо публікацію (root уже живий), лишаємо слід у логах
+              await logEvent("error", "threads-thread", `ветка гілки не опублікувалась: ${e.message}`, { ws, postId });
+              break;
+            }
           }
         } else {
           const r = await threads.publish(thTok.token, thTok.userId, textOf(k), imageUrl || undefined);
           rootId = r.mediaId;
+          await q(`insert into threads_publish(post_id,media_id,status) values($1,$2,'sent')`, [postId, rootId]);
         }
-        await q(`insert into threads_publish(post_id,media_id,status) values($1,$2,'sent')`, [postId, rootId]);
         // CTA-гілка з затримкою: лінк/кодове слово доклеюємо, коли пост уже розганяється
         const delayMin = Number(strat.cta_min || 0);
         if (delayMin > 0) {

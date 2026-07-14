@@ -182,15 +182,38 @@ export async function publishVideoToPage(pageId: string, pageToken: string, desc
   });
 }
 
-// Instagram: двокроковий публіш (контейнер із image_url+caption -> media_publish)
+// Instagram: двокроковий публіш (контейнер із image_url+caption -> media_publish).
+// НАДІЙНІСТЬ: навіть фото-контейнер обробляється асинхронно (IG ще тягне картинку з нашого /media) -
+// media_publish одразу після create періодично падав «Media ID is not available». Тому: чекаємо
+// status_code=FINISHED (фото зазвичай 1-3с) і ретраїмо публіш, якщо IG ще «не бачить» медіа.
 export async function publishToInstagram(igUserId: string, pageToken: string, imageUrl: string, caption: string) {
   const cbody = new URLSearchParams({ image_url: imageUrl, caption, access_token: pageToken });
   const c = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media`, {
     method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: cbody,
   });
+  for (let i = 0; i < 20; i++) {
+    let st: { status_code?: string } = {};
+    try { st = await fbFetch<{ status_code?: string }>(`${GRAPH}/${c.id}?fields=status_code&access_token=${encodeURIComponent(pageToken)}`); }
+    catch { /* статус інколи недоступний одразу - просто чекаємо далі */ }
+    if (st.status_code === "FINISHED") break;
+    if (st.status_code === "ERROR") throw new Error("Instagram не зміг обробити зображення (формат/недоступний URL фото)");
+    await new Promise((r) => setTimeout(r, 2000));
+    if (i === 19) throw new Error("Instagram довго обробляє зображення - спробуй ще раз за хвилину");
+  }
   const pbody = new URLSearchParams({ creation_id: c.id, access_token: pageToken });
-  const p = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media_publish`, {
-    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: pbody,
-  });
-  return { mediaId: p.id };
+  let lastErr: any = null;
+  for (let att = 0; att < 4; att++) {
+    try {
+      const p = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media_publish`, {
+        method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: pbody,
+      });
+      return { mediaId: p.id };
+    } catch (e: any) {
+      lastErr = e;
+      // «Media ID is not available» = контейнер ще доїжджає - почекати і повторити, не валити публікацію
+      if (!/media id is not available|not available/i.test(String(e.message))) throw e;
+      await new Promise((r) => setTimeout(r, 4000 * (att + 1)));
+    }
+  }
+  throw lastErr || new Error("Instagram: не вдалося опублікувати");
 }
