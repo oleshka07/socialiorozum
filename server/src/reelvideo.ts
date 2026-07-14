@@ -3,12 +3,12 @@
 // → FFmpeg: сегменти → конкат → аудіо → вшиті субтитри (ASS, DejaVu Sans).
 // Ключі: AZURE_SPEECH_KEY(+REGION) обовʼязково; PEXELS_API_KEY опційно (без нього - фон з картинки поста/градієнта).
 import { spawn } from "node:child_process";
-import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm, copyFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { env } from "./env.js";
-import { q } from "./db.js";
+import { q, one } from "./db.js";
 import { chat, extractJsonArray } from "./openrouter.js";
 import { MEDIA_DIR } from "./media.js";
 import { logEvent } from "./log.js";
@@ -165,6 +165,35 @@ export async function buildReelVideo(ws: string, postId: string, content: string
           "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", seg], 180000);
       } else {
         await run("ffmpeg", ["-y", "-f", "lavfi", "-i", `color=c=0x14141c:s=1080x1920:d=${d}`, "-vf", "fps=30,format=yuv420p", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", seg], 120000);
+      }
+    }
+    // 6.2b «Motion»-рендер (Remotion, налаштування reel_renderer='motion'): монтаж робить React-композиція
+    // (анімований хук, караоке-титри, прогрес-бар) з ТИХ САМИХ пер-сегментних файлів. Будь-який збій -
+    // фолбек на класичний ffmpeg-шлях нижче (файли в tmp неторкані).
+    const rend = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='reel_renderer'`, [ws]).catch(() => null);
+    if (rend?.content === "motion") {
+      const tmpPub: string[] = [];
+      try {
+        // Chromium тягне медіа через наш /media (127.0.0.1) - тимчасово публікуємо сегменти
+        const pub = async (src: string, ext: string): Promise<string> => {
+          const n = `rmtmp-${randomUUID().slice(0, 10)}.${ext}`;
+          await copyFile(src, join(MEDIA_DIR, n)); tmpPub.push(n);
+          return `http://127.0.0.1:${env.port}/media/${n}`;
+        };
+        const sigRow = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='voice_signature'`, [ws]).catch(() => null);
+        const handle = (sigRow?.content || "").trim().length && sigRow!.content.trim().length <= 30 ? sigRow!.content.trim() : undefined;
+        const propSegs: { text: string; dur: number; audio: string; video: string; label: string }[] = [];
+        for (let i = 0; i < segs.length; i++)
+          propSegs.push({ text: segs[i].text, dur: durs[i], label: segs[i].label, audio: await pub(join(dir, `a${i}.mp3`), "mp3"), video: await pub(join(dir, `v${i}.mp4`), "mp4") });
+        const outName = `reel-${randomUUID().slice(0, 12)}.mp4`;
+        const { renderReelRemotion } = await import("./remotion-render.js");
+        await renderReelRemotion({ segments: propSegs, accent: "#F6C444", handle }, join(MEDIA_DIR, outName));
+        await logEvent("info", "reel", `Motion-рендер ${outName} (${segs.length} сегментів, ~${Math.round(durs.reduce((s, x) => s + x, 0))}с)`);
+        return outName;
+      } catch (e: any) {
+        await logEvent("warn", "reel", "Motion-рендер не вдався, фолбек на класичний: " + String(e.message).slice(0, 300));
+      } finally {
+        for (const n of tmpPub) unlink(join(MEDIA_DIR, n)).catch(() => {});
       }
     }
     // 6.3 конкат відео та аудіо
