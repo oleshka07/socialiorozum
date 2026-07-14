@@ -82,11 +82,37 @@ export async function publish(token: string, userId: string, text: string, image
   }
   if (replyToId) create.searchParams.set("reply_to_id", replyToId);
   const c = await thFetch<{ id: string }>(create.toString(), { method: "POST" });
+  // НАДІЙНІСТЬ: контейнер (особливо з фото - Threads тягне його з нашого /media) обробляється
+  // асинхронно; threads_publish одразу падав «The requested resource does not exist».
+  // Док Meta: чекати до ~30с. Полимо статус контейнера до FINISHED, потім публікуємо з ретраями.
+  for (let i = 0; i < 20; i++) {
+    let st: { status?: string; error_message?: string } = {};
+    try {
+      const su = new URL(`${GRAPH}/v1.0/${c.id}`);
+      su.searchParams.set("fields", "status,error_message");
+      su.searchParams.set("access_token", token);
+      st = await thFetch(su.toString());
+    } catch { /* статус ще не віддається - чекаємо далі */ }
+    if (st.status === "FINISHED") break;
+    if (st.status === "ERROR") throw new Error("Threads не зміг обробити медіа" + (st.error_message ? `: ${st.error_message}` : ""));
+    await new Promise((r) => setTimeout(r, 2000));
+    if (i === 19) throw new Error("Threads довго обробляє медіа - спробуй ще раз за хвилину");
+  }
   const pub = new URL(`${GRAPH}/v1.0/${userId}/threads_publish`);
   pub.searchParams.set("creation_id", c.id);
   pub.searchParams.set("access_token", token);
-  const p = await thFetch<{ id: string }>(pub.toString(), { method: "POST" });
-  return { mediaId: p.id };
+  let lastErr: any = null;
+  for (let att = 0; att < 4; att++) {
+    try {
+      const p = await thFetch<{ id: string }>(pub.toString(), { method: "POST" });
+      return { mediaId: p.id };
+    } catch (e: any) {
+      lastErr = e;
+      if (!/does not exist|not exist|try again/i.test(String(e.message))) throw e;
+      await new Promise((r) => setTimeout(r, 4000 * (att + 1))); // контейнер/root ще доїжджає
+    }
+  }
+  throw lastErr || new Error("Threads: не вдалося опублікувати");
 }
 
 // інсайти ПРОФІЛЮ за період (views - часовий ряд, решта - total_value за since..until;

@@ -122,11 +122,28 @@ const OVERLAY_FONTS: Record<string, string> = {
   mono: "'DejaVu Sans Mono','Courier New',monospace",
 };
 // перенос слів у рядки за приблизною шириною символа
-function wrapWords(words: { t: string; a: boolean }[], maxChars: number): { t: string; a: boolean }[][] {
-  const lines: { t: string; a: boolean }[][] = []; let cur: { t: string; a: boolean }[] = []; let len = 0;
-  for (const w of words) {
-    if (len && len + 1 + w.t.length > maxChars) { lines.push(cur); cur = []; len = 0; }
-    cur.push(w); len += (len ? 1 : 0) + w.t.length;
+// Ширина символа в частках font-size (bold DejaVu, з запасом угору): константа 0.6 брехала для
+// ALL-CAPS кирилиці (реально ~0.78) - заголовок вилазив за край на 4:5. Краще перенести раніше.
+function charFrac(c: string, mono: boolean): number {
+  if (mono) return 0.64;
+  if (/[ \-–.,:;!'’|()іїІЇjl]/.test(c)) return 0.36; // вузькі (І/Ї вузькі навіть ВЕЛИКІ) + пробіл/пунктуація
+  if (/[МШЩЮЖФMW]/.test(c)) return 0.98;             // найширші ВЕЛИКІ
+  if (/[мшщюжфmw]/.test(c)) return 0.82;             // широкі рядкові
+  if (/[A-ZА-ЯЄҐ0-9]/.test(c)) return 0.8;           // решта ВЕЛИКИХ + цифри
+  return 0.66;                                       // рядкові
+}
+// піксельна ширина рядка тексту для даного font-size
+function textPx(s: string, fs: number, mono: boolean): number {
+  let w = 0; for (const c of s) w += charFrac(c, mono); return w * fs;
+}
+// перенос по ПІКСЕЛЯХ: слово додається, лише якщо рядок реально влазить у maxW
+function wrapPx(words: { t: string; a: boolean }[], fs: number, maxW: number, mono: boolean): { t: string; a: boolean }[][] {
+  const lines: { t: string; a: boolean }[][] = []; let cur: { t: string; a: boolean }[] = []; let w = 0;
+  const sp = textPx(" ", fs, mono);
+  for (const word of words) {
+    const ww = textPx(word.t, fs, mono);
+    if (cur.length && w + sp + ww > maxW) { lines.push(cur); cur = []; w = 0; }
+    cur.push(word); w += (w ? sp : 0) + ww;
   }
   if (cur.length) lines.push(cur);
   return lines;
@@ -142,8 +159,9 @@ export async function overlayHeadline(buf: Buffer, headline: string, style?: Ove
   const accent = /^#[0-9a-f]{6}$/i.test(style?.accent || "") ? style!.accent! : "";
   const scale = W / 1024;
   const sizeMul = style?.size === "lg" ? 1.28 : style?.size === "sm" ? 0.8 : 1;
-  const fs = Math.round(66 * scale * sizeMul), lh = Math.round(fs * 1.22), pad = Math.round(56 * scale);
-  const chW = fs * (fontKey === "mono" ? 0.64 : 0.6); // ширина символа bold DejaVu: краще недокласти слово, ніж обрізати край
+  let fs = Math.round(66 * scale * sizeMul), lh = Math.round(fs * 1.22);
+  const pad = Math.round(56 * scale);
+  const mono = fontKey === "mono";
   // акцент: фрагмент у *зірочках*, інакше останнє слово (якщо заданий колір акценту)
   let text = (headline || "").trim(); if (style?.upper) text = text.toUpperCase();
   let accentSet = new Set<number>();
@@ -158,14 +176,23 @@ export async function overlayHeadline(buf: Buffer, headline: string, style?: Ove
     } else if (rawWords.length) accentSet.add(rawWords.length - 1);
   }
   const words = rawWords.map((t, i) => ({ t, a: accentSet.has(i) }));
-  const usableW = (align === "center" ? W * 0.86 : W - 2 * pad) - Math.round(30 * scale); // запас: реальний bold ширший за оцінку
-  const lines = wrapWords(words, Math.max(8, Math.floor(usableW / chW)));
+  const usableW = (align === "center" ? W * 0.86 : W - 2 * pad) - Math.round(10 * scale);
+  // перенос по РЕАЛЬНІЙ ширині символів; якщо найдовше слово/рядок все одно ширші за поле -
+  // зменшуємо шрифт (shrink-to-fit), а не ріжемо текст краєм кадру
+  let lines = wrapPx(words, fs, usableW, mono);
+  for (let guard = 0; guard < 6; guard++) {
+    const maxLnW = Math.max(...lines.map((ws) => textPx(ws.map((w) => w.t).join(" "), fs, mono)), 1);
+    if (maxLnW <= usableW) break;
+    fs = Math.max(Math.round(22 * scale), Math.floor(fs * Math.min(0.92, usableW / maxLnW)));
+    lh = Math.round(fs * 1.22);
+    lines = wrapPx(words, fs, usableW, mono);
+  }
   // кікер і підзаголовок
   const kicker = (style?.kicker || "").trim().toUpperCase().slice(0, 60);
   const kfs = Math.round(fs * 0.34), klh = kicker ? Math.round(kfs * 2.1) : 0;
   const sfs = Math.round(fs * 0.42), slh = Math.round(sfs * 1.5);
   const subWords = (style?.subtitle || "").trim().slice(0, 200).split(/\s+/).filter(Boolean).map((t) => ({ t, a: false }));
-  const subLines = subWords.length ? wrapWords(subWords, Math.max(12, Math.floor(usableW / (sfs * 0.52)))) : [];
+  const subLines = subWords.length ? wrapPx(subWords, sfs, usableW, mono) : [];
   const gapSub = subLines.length ? Math.round(14 * scale) : 0;
   const blockH = klh + lines.length * lh + gapSub + subLines.length * slh;
   const yStart = pos === "top" ? Math.round(64 * scale)
@@ -194,8 +221,8 @@ export async function overlayHeadline(buf: Buffer, headline: string, style?: Ove
     else if (pos === "top") bgSvg = `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0.78"/><stop offset="1" stop-color="#000" stop-opacity="0"/></linearGradient></defs><rect x="0" y="0" width="${W}" height="${yStart + blockH + Math.round(40 * scale)}" fill="url(#g)"/>`;
     else bgSvg = `<rect x="0" y="${yStart - Math.round(24 * scale)}" width="${W}" height="${blockH + Math.round(48 * scale)}" fill="#000" fill-opacity="0.5"/>`;
   } else if (bg === "plate") {
-    const maxLn = Math.max(...lines.map((l) => l.reduce((s, w) => s + w.t.length + 1, -1)), 1);
-    const plW = Math.min(W - Math.round(16 * scale), Math.round(maxLn * chW) + Math.round(52 * scale));
+    const maxLnW = Math.max(...lines.map((ws) => textPx(ws.map((w) => w.t).join(" "), fs, mono)), 1);
+    const plW = Math.min(W - Math.round(16 * scale), Math.round(maxLnW) + Math.round(72 * scale));
     const plX = align === "center" ? Math.round((W - plW) / 2) : pad - Math.round(24 * scale);
     bgSvg = `<rect x="${plX}" y="${yStart - Math.round(18 * scale)}" width="${plW}" height="${blockH + Math.round(34 * scale)}" rx="${Math.round(18 * scale)}" fill="#000" fill-opacity="0.55"/>`;
   }

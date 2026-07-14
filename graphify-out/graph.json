@@ -1023,7 +1023,7 @@
       "source_location": "L78",
       "_origin": "ast",
       "id": "server_src_auth_userbyemail",
-      "community": 40,
+      "community": 0,
       "norm_label": "userbyemail()"
     },
     {
@@ -1063,7 +1063,7 @@
       "source_location": "L97",
       "_origin": "ast",
       "id": "server_src_auth_userbysession",
-      "community": 0,
+      "community": 40,
       "norm_label": "userbysession()"
     },
     {
@@ -1173,7 +1173,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_db",
-      "community": 96,
+      "community": 15,
       "norm_label": "db.ts"
     },
     {
@@ -1183,7 +1183,7 @@
       "source_location": "L4",
       "_origin": "ast",
       "id": "server_src_db_pool",
-      "community": 0,
+      "community": 15,
       "norm_label": "pool"
     },
     {
@@ -1453,7 +1453,7 @@
       "source_location": "L199",
       "_origin": "ast",
       "id": "server_src_diary_startdiary",
-      "community": 39,
+      "community": 41,
       "norm_label": "startdiary()"
     },
     {
@@ -1633,7 +1633,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_env",
-      "community": 96,
+      "community": 15,
       "norm_label": "env.ts"
     },
     {
@@ -1643,7 +1643,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_env_env",
-      "community": 96,
+      "community": 15,
       "norm_label": "env"
     },
     {
@@ -2077,20 +2077,40 @@
       "norm_label": "overlay_fonts"
     },
     {
-      "label": "wrapWords()",
+      "label": "charFrac()",
       "file_type": "code",
       "source_file": "server/src/images.ts",
-      "source_location": "L125",
+      "source_location": "L127",
       "_origin": "ast",
-      "id": "server_src_images_wrapwords",
+      "id": "server_src_images_charfrac",
       "community": 4,
-      "norm_label": "wrapwords()"
+      "norm_label": "charfrac()"
+    },
+    {
+      "label": "textPx()",
+      "file_type": "code",
+      "source_file": "server/src/images.ts",
+      "source_location": "L136",
+      "_origin": "ast",
+      "id": "server_src_images_textpx",
+      "community": 4,
+      "norm_label": "textpx()"
+    },
+    {
+      "label": "wrapPx()",
+      "file_type": "code",
+      "source_file": "server/src/images.ts",
+      "source_location": "L140",
+      "_origin": "ast",
+      "id": "server_src_images_wrappx",
+      "community": 4,
+      "norm_label": "wrappx()"
     },
     {
       "label": "overlayHeadline()",
       "file_type": "code",
       "source_file": "server/src/images.ts",
-      "source_location": "L134",
+      "source_location": "L151",
       "_origin": "ast",
       "id": "server_src_images_overlayheadline",
       "community": 4,
@@ -2100,7 +2120,7 @@
       "label": "generateImageForPost()",
       "file_type": "code",
       "source_file": "server/src/images.ts",
-      "source_location": "L219",
+      "source_location": "L246",
       "_origin": "ast",
       "id": "server_src_images_generateimageforpost",
       "community": 4,
@@ -2110,7 +2130,7 @@
       "label": "overlayForPost()",
       "file_type": "code",
       "source_file": "server/src/images.ts",
-      "source_location": "L241",
+      "source_location": "L268",
       "_origin": "ast",
       "id": "server_src_images_overlayforpost",
       "community": 4,
@@ -2120,7 +2140,7 @@
       "label": "CropRect",
       "file_type": "code",
       "source_file": "server/src/images.ts",
-      "source_location": "L259",
+      "source_location": "L286",
       "_origin": "ast",
       "id": "server_src_images_croprect",
       "community": 4,
@@ -2130,7 +2150,7 @@
       "label": "attachCroppedImage()",
       "file_type": "code",
       "source_file": "server/src/images.ts",
-      "source_location": "L260",
+      "source_location": "L287",
       "_origin": "ast",
       "id": "server_src_images_attachcroppedimage",
       "community": 4,
@@ -2140,17 +2160,17 @@
       "label": "ensureIgSafeImage()",
       "file_type": "code",
       "source_file": "server/src/images.ts",
-      "source_location": "L291",
+      "source_location": "L318",
       "_origin": "ast",
       "id": "server_src_images_ensureigsafeimage",
-      "community": 9,
+      "community": 4,
       "norm_label": "ensureigsafeimage()"
     },
     {
       "label": "StockPhoto",
       "file_type": "code",
       "source_file": "server/src/images.ts",
-      "source_location": "L324",
+      "source_location": "L351",
       "_origin": "ast",
       "id": "server_src_images_stockphoto",
       "community": 4,
@@ -2160,7 +2180,7 @@
       "label": "stockPhotoOptions()",
       "file_type": "code",
       "source_file": "server/src/images.ts",
-      "source_location": "L325",
+      "source_location": "L352",
       "_origin": "ast",
       "id": "server_src_images_stockphotooptions",
       "community": 5,
@@ -2170,7 +2190,7 @@
       "label": "attachStockPhoto()",
       "file_type": "code",
       "source_file": "server/src/images.ts",
-      "source_location": "L350",
+      "source_location": "L377",
       "_origin": "ast",
       "id": "server_src_images_attachstockphoto",
       "community": 4,
@@ -2343,7 +2363,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_log",
-      "community": 96,
+      "community": 102,
       "norm_label": "log.ts"
     },
     {
@@ -2353,7 +2373,7 @@
       "source_location": "L3",
       "_origin": "ast",
       "id": "server_src_log_loglevel",
-      "community": 96,
+      "community": 102,
       "norm_label": "loglevel"
     },
     {
@@ -2670,7 +2690,7 @@
       "label": "publishToInstagram()",
       "file_type": "code",
       "source_file": "server/src/meta.ts",
-      "source_location": "L186",
+      "source_location": "L189",
       "_origin": "ast",
       "id": "server_src_meta_publishtoinstagram",
       "community": 100,
@@ -2763,7 +2783,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_migrate",
-      "community": 0,
+      "community": 15,
       "norm_label": "migrate.ts"
     },
     {
@@ -2773,7 +2793,7 @@
       "source_location": "L7",
       "_origin": "ast",
       "id": "server_src_migrate_dirname",
-      "community": 0,
+      "community": 15,
       "norm_label": "__dirname"
     },
     {
@@ -2783,7 +2803,7 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "server_src_migrate_main",
-      "community": 0,
+      "community": 15,
       "norm_label": "main()"
     },
     {
@@ -2793,7 +2813,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_openrouter",
-      "community": 5,
+      "community": 15,
       "norm_label": "openrouter.ts"
     },
     {
@@ -2803,7 +2823,7 @@
       "source_location": "L4",
       "_origin": "ast",
       "id": "server_src_openrouter_chatctx",
-      "community": 5,
+      "community": 15,
       "norm_label": "chatctx"
     },
     {
@@ -2813,7 +2833,7 @@
       "source_location": "L8",
       "_origin": "ast",
       "id": "server_src_openrouter_stripdashes",
-      "community": 5,
+      "community": 15,
       "norm_label": "stripdashes()"
     },
     {
@@ -2823,7 +2843,7 @@
       "source_location": "L11",
       "_origin": "ast",
       "id": "server_src_openrouter_openai_prices",
-      "community": 5,
+      "community": 15,
       "norm_label": "openai_prices"
     },
     {
@@ -2833,7 +2853,7 @@
       "source_location": "L18",
       "_origin": "ast",
       "id": "server_src_openrouter_gemini_prices",
-      "community": 5,
+      "community": 15,
       "norm_label": "gemini_prices"
     },
     {
@@ -2843,7 +2863,7 @@
       "source_location": "L21",
       "_origin": "ast",
       "id": "server_src_openrouter_geminichat",
-      "community": 5,
+      "community": 15,
       "norm_label": "geminichat()"
     },
     {
@@ -3610,7 +3630,7 @@
       "label": "ReelPubJob",
       "file_type": "code",
       "source_file": "server/src/publisher.ts",
-      "source_location": "L187",
+      "source_location": "L196",
       "_origin": "ast",
       "id": "server_src_publisher_reelpubjob",
       "community": 9,
@@ -3620,7 +3640,7 @@
       "label": "reelPubJobs",
       "file_type": "code",
       "source_file": "server/src/publisher.ts",
-      "source_location": "L188",
+      "source_location": "L197",
       "_origin": "ast",
       "id": "server_src_publisher_reelpubjobs",
       "community": 9,
@@ -3630,7 +3650,7 @@
       "label": "reelSentNetworks()",
       "file_type": "code",
       "source_file": "server/src/publisher.ts",
-      "source_location": "L191",
+      "source_location": "L200",
       "_origin": "ast",
       "id": "server_src_publisher_reelsentnetworks",
       "community": 9,
@@ -3640,7 +3660,7 @@
       "label": "publishReelToChannels()",
       "file_type": "code",
       "source_file": "server/src/publisher.ts",
-      "source_location": "L203",
+      "source_location": "L212",
       "_origin": "ast",
       "id": "server_src_publisher_publishreeltochannels",
       "community": 9,
@@ -3650,7 +3670,7 @@
       "label": "startReelPublishJob()",
       "file_type": "code",
       "source_file": "server/src/publisher.ts",
-      "source_location": "L274",
+      "source_location": "L283",
       "_origin": "ast",
       "id": "server_src_publisher_startreelpublishjob",
       "community": 9,
@@ -4413,7 +4433,7 @@
       "source_location": "L2014",
       "_origin": "ast",
       "id": "server_src_server_saverubrics",
-      "community": 41,
+      "community": 0,
       "norm_label": "saverubrics()"
     },
     {
@@ -4623,7 +4643,7 @@
       "source_location": "L17",
       "_origin": "ast",
       "id": "server_src_tgbot_botenabled",
-      "community": 39,
+      "community": 41,
       "norm_label": "botenabled()"
     },
     {
@@ -4633,7 +4653,7 @@
       "source_location": "L18",
       "_origin": "ast",
       "id": "server_src_tgbot_botusername",
-      "community": 39,
+      "community": 41,
       "norm_label": "botusername()"
     },
     {
@@ -4653,7 +4673,7 @@
       "source_location": "L37",
       "_origin": "ast",
       "id": "server_src_tgbot_createconnectlink",
-      "community": 0,
+      "community": 41,
       "norm_label": "createconnectlink()"
     },
     {
@@ -4910,7 +4930,7 @@
       "label": "userInsights()",
       "file_type": "code",
       "source_file": "server/src/threads.ts",
-      "source_location": "L94",
+      "source_location": "L120",
       "_origin": "ast",
       "id": "server_src_threads_userinsights",
       "community": 101,
@@ -4920,7 +4940,7 @@
       "label": "followerDemographics()",
       "file_type": "code",
       "source_file": "server/src/threads.ts",
-      "source_location": "L108",
+      "source_location": "L134",
       "_origin": "ast",
       "id": "server_src_threads_followerdemographics",
       "community": 101,
@@ -4930,7 +4950,7 @@
       "label": "mediaInsights()",
       "file_type": "code",
       "source_file": "server/src/threads.ts",
-      "source_location": "L120",
+      "source_location": "L146",
       "_origin": "ast",
       "id": "server_src_threads_mediainsights",
       "community": 101,
@@ -10773,7 +10793,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "server/src/images.ts",
-      "source_location": "L284",
+      "source_location": "L311",
       "weight": 1.0,
       "source": "server_src_images_attachcroppedimage",
       "target": "server_src_db_q"
@@ -10795,7 +10815,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "server/src/images.ts",
-      "source_location": "L236",
+      "source_location": "L263",
       "weight": 1.0,
       "source": "server_src_images_generateimageforpost",
       "target": "server_src_db_q"
@@ -10806,7 +10826,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "server/src/images.ts",
-      "source_location": "L252",
+      "source_location": "L279",
       "weight": 1.0,
       "source": "server_src_images_overlayforpost",
       "target": "server_src_db_q"
@@ -11224,7 +11244,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "server/src/publisher.ts",
-      "source_location": "L217",
+      "source_location": "L226",
       "weight": 1.0,
       "source": "server_src_publisher_publishreeltochannels",
       "target": "server_src_db_q"
@@ -11235,7 +11255,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "server/src/publisher.ts",
-      "source_location": "L193",
+      "source_location": "L202",
       "weight": 1.0,
       "source": "server_src_publisher_reelsentnetworks",
       "target": "server_src_db_q"
@@ -11587,7 +11607,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "server/src/publisher.ts",
-      "source_location": "L194",
+      "source_location": "L203",
       "weight": 1.0,
       "source": "server_src_publisher_reelsentnetworks",
       "target": "server_src_db_one"
@@ -14022,7 +14042,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/src/images.ts",
-      "source_location": "L260",
+      "source_location": "L287",
       "weight": 1.0,
       "source": "server_src_images",
       "target": "server_src_images_attachcroppedimage",
@@ -14032,10 +14052,20 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/src/images.ts",
-      "source_location": "L350",
+      "source_location": "L377",
       "weight": 1.0,
       "source": "server_src_images",
       "target": "server_src_images_attachstockphoto",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "server/src/images.ts",
+      "source_location": "L127",
+      "weight": 1.0,
+      "source": "server_src_images",
+      "target": "server_src_images_charfrac",
       "confidence_score": 1.0
     },
     {
@@ -14052,7 +14082,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/src/images.ts",
-      "source_location": "L259",
+      "source_location": "L286",
       "weight": 1.0,
       "source": "server_src_images",
       "target": "server_src_images_croprect",
@@ -14072,7 +14102,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/src/images.ts",
-      "source_location": "L291",
+      "source_location": "L318",
       "weight": 1.0,
       "source": "server_src_images",
       "target": "server_src_images_ensureigsafeimage",
@@ -14112,7 +14142,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/src/images.ts",
-      "source_location": "L219",
+      "source_location": "L246",
       "weight": 1.0,
       "source": "server_src_images",
       "target": "server_src_images_generateimageforpost",
@@ -14212,7 +14242,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/src/images.ts",
-      "source_location": "L241",
+      "source_location": "L268",
       "weight": 1.0,
       "source": "server_src_images",
       "target": "server_src_images_overlayforpost",
@@ -14222,7 +14252,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/src/images.ts",
-      "source_location": "L134",
+      "source_location": "L151",
       "weight": 1.0,
       "source": "server_src_images",
       "target": "server_src_images_overlayheadline",
@@ -14252,7 +14282,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/src/images.ts",
-      "source_location": "L324",
+      "source_location": "L351",
       "weight": 1.0,
       "source": "server_src_images",
       "target": "server_src_images_stockphoto",
@@ -14262,7 +14292,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/src/images.ts",
-      "source_location": "L325",
+      "source_location": "L352",
       "weight": 1.0,
       "source": "server_src_images",
       "target": "server_src_images_stockphotooptions",
@@ -14272,10 +14302,20 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/src/images.ts",
-      "source_location": "L125",
+      "source_location": "L136",
       "weight": 1.0,
       "source": "server_src_images",
-      "target": "server_src_images_wrapwords",
+      "target": "server_src_images_textpx",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "server/src/images.ts",
+      "source_location": "L140",
+      "weight": 1.0,
+      "source": "server_src_images",
+      "target": "server_src_images_wrappx",
       "confidence_score": 1.0
     },
     {
@@ -14371,7 +14411,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/src/images.ts",
-      "source_location": "L264",
+      "source_location": "L291",
       "weight": 1.0,
       "source": "server_src_images_attachcroppedimage",
       "target": "server_src_images_normaspect",
@@ -14393,7 +14433,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/src/images.ts",
-      "source_location": "L229",
+      "source_location": "L256",
       "weight": 1.0,
       "source": "server_src_images_generateimageforpost",
       "target": "server_src_images_normaspect",
@@ -14481,7 +14521,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/src/images.ts",
-      "source_location": "L229",
+      "source_location": "L256",
       "weight": 1.0,
       "source": "server_src_images_generateimageforpost",
       "target": "server_src_images_generateimage",
@@ -14492,7 +14532,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/src/images.ts",
-      "source_location": "L207",
+      "source_location": "L234",
       "weight": 1.0,
       "source": "server_src_images_overlayheadline",
       "target": "server_src_images_escxml",
@@ -14503,10 +14543,10 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/src/images.ts",
-      "source_location": "L162",
+      "source_location": "L137",
       "weight": 1.0,
-      "source": "server_src_images_overlayheadline",
-      "target": "server_src_images_wrapwords",
+      "source": "server_src_images_textpx",
+      "target": "server_src_images_charfrac",
       "confidence_score": 1.0
     },
     {
@@ -14514,7 +14554,29 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/src/images.ts",
-      "source_location": "L234",
+      "source_location": "L142",
+      "weight": 1.0,
+      "source": "server_src_images_wrappx",
+      "target": "server_src_images_textpx",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/src/images.ts",
+      "source_location": "L182",
+      "weight": 1.0,
+      "source": "server_src_images_overlayheadline",
+      "target": "server_src_images_wrappx",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/src/images.ts",
+      "source_location": "L261",
       "weight": 1.0,
       "source": "server_src_images_generateimageforpost",
       "target": "server_src_images_overlayheadline",
@@ -14525,7 +14587,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/src/images.ts",
-      "source_location": "L249",
+      "source_location": "L276",
       "weight": 1.0,
       "source": "server_src_images_overlayforpost",
       "target": "server_src_images_overlayheadline",
@@ -14537,7 +14599,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "server/src/images.ts",
-      "source_location": "L231",
+      "source_location": "L258",
       "weight": 1.0,
       "source": "server_src_images_generateimageforpost",
       "target": "server_src_media_savemedia"
@@ -14559,7 +14621,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "server/src/images.ts",
-      "source_location": "L251",
+      "source_location": "L278",
       "weight": 1.0,
       "source": "server_src_images_overlayforpost",
       "target": "server_src_media_savemedia"
@@ -14581,7 +14643,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "server/src/images.ts",
-      "source_location": "L283",
+      "source_location": "L310",
       "weight": 1.0,
       "source": "server_src_images_attachcroppedimage",
       "target": "server_src_media_savemedia"
@@ -14591,7 +14653,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/src/images.ts",
-      "source_location": "L361",
+      "source_location": "L388",
       "weight": 1.0,
       "source": "server_src_images_attachstockphoto",
       "target": "server_src_images_attachcroppedimage",
@@ -14614,7 +14676,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "server/src/images.ts",
-      "source_location": "L319",
+      "source_location": "L346",
       "weight": 1.0,
       "source": "server_src_images_ensureigsafeimage",
       "target": "server_src_media_savemedia"
@@ -14636,7 +14698,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "server/src/publisher.ts",
-      "source_location": "L164",
+      "source_location": "L173",
       "weight": 1.0,
       "source": "server_src_publisher_publishposttochannels",
       "target": "server_src_images_ensureigsafeimage"
@@ -14647,7 +14709,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "server/src/images.ts",
-      "source_location": "L330",
+      "source_location": "L357",
       "weight": 1.0,
       "source": "server_src_images_stockphotooptions",
       "target": "server_src_openrouter_chat"
@@ -14658,7 +14720,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "server/src/images.ts",
-      "source_location": "L333",
+      "source_location": "L360",
       "weight": 1.0,
       "source": "server_src_images_stockphotooptions",
       "target": "server_src_openrouter_extractjsonarray"
@@ -14680,7 +14742,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "server/src/images.ts",
-      "source_location": "L360",
+      "source_location": "L387",
       "weight": 1.0,
       "source": "server_src_images_attachstockphoto",
       "target": "server_src_media_savemedia"
@@ -15253,6 +15315,17 @@
       "confidence_score": 1.0
     },
     {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "server/src/publisher.ts",
+      "source_location": "L147",
+      "weight": 1.0,
+      "source": "server_src_publisher_publishposttochannels",
+      "target": "server_src_log_logevent"
+    },
+    {
       "relation": "imports",
       "context": "import",
       "confidence": "EXTRACTED",
@@ -15792,7 +15865,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/src/meta.ts",
-      "source_location": "L186",
+      "source_location": "L189",
       "weight": 1.0,
       "source": "server_src_meta",
       "target": "server_src_meta_publishtoinstagram",
@@ -19338,7 +19411,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "server/src/publisher.ts",
-      "source_location": "L215",
+      "source_location": "L224",
       "weight": 1.0,
       "source": "server_src_publisher_publishreeltochannels",
       "target": "server_src_pipeline_reelcaption"
@@ -19488,7 +19561,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/src/publisher.ts",
-      "source_location": "L203",
+      "source_location": "L212",
       "weight": 1.0,
       "source": "server_src_publisher",
       "target": "server_src_publisher_publishreeltochannels",
@@ -19508,7 +19581,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/src/publisher.ts",
-      "source_location": "L187",
+      "source_location": "L196",
       "weight": 1.0,
       "source": "server_src_publisher",
       "target": "server_src_publisher_reelpubjob",
@@ -19518,7 +19591,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/src/publisher.ts",
-      "source_location": "L188",
+      "source_location": "L197",
       "weight": 1.0,
       "source": "server_src_publisher",
       "target": "server_src_publisher_reelpubjobs",
@@ -19528,7 +19601,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/src/publisher.ts",
-      "source_location": "L191",
+      "source_location": "L200",
       "weight": 1.0,
       "source": "server_src_publisher",
       "target": "server_src_publisher_reelsentnetworks",
@@ -19538,7 +19611,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/src/publisher.ts",
-      "source_location": "L274",
+      "source_location": "L283",
       "weight": 1.0,
       "source": "server_src_publisher",
       "target": "server_src_publisher_startreelpublishjob",
@@ -19679,7 +19752,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/src/publisher.ts",
-      "source_location": "L150",
+      "source_location": "L159",
       "weight": 1.0,
       "source": "server_src_publisher_publishposttochannels",
       "target": "server_src_publisher_threadsctatext",
@@ -19756,7 +19829,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/src/publisher.ts",
-      "source_location": "L221",
+      "source_location": "L230",
       "weight": 1.0,
       "source": "server_src_publisher_publishreeltochannels",
       "target": "server_src_publisher_reelsentnetworks",
@@ -19778,7 +19851,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/src/publisher.ts",
-      "source_location": "L276",
+      "source_location": "L285",
       "weight": 1.0,
       "source": "server_src_publisher_startreelpublishjob",
       "target": "server_src_publisher_publishreeltochannels",
@@ -22141,7 +22214,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/src/threads.ts",
-      "source_location": "L108",
+      "source_location": "L134",
       "weight": 1.0,
       "source": "server_src_threads",
       "target": "server_src_threads_followerdemographics",
@@ -22161,7 +22234,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/src/threads.ts",
-      "source_location": "L120",
+      "source_location": "L146",
       "weight": 1.0,
       "source": "server_src_threads",
       "target": "server_src_threads_mediainsights",
@@ -22201,7 +22274,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/src/threads.ts",
-      "source_location": "L94",
+      "source_location": "L120",
       "weight": 1.0,
       "source": "server_src_threads",
       "target": "server_src_threads_userinsights",
@@ -22237,6 +22310,17 @@
       "source_location": "L66",
       "weight": 1.0,
       "source": "server_src_threads_getme",
+      "target": "server_src_threads_thfetch",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/src/threads.ts",
+      "source_location": "L94",
+      "weight": 1.0,
+      "source": "server_src_threads_publish",
       "target": "server_src_threads_thfetch",
       "confidence_score": 1.0
     },
@@ -24808,5 +24892,5 @@
       "source_file": "server/public/app.html"
     }
   ],
-  "built_at_commit": "3a3028e88ba9900f554a80212f87be8b28d96353"
+  "built_at_commit": "8667308dc2e79519ba9236f9cae132ac6780e93f"
 }
