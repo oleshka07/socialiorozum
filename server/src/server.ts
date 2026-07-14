@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet, topPatterns } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet, topPatterns, generateThreadsTakes } from "./pipeline.js";
 import { startReelJob, reelJobs, parseReelScript } from "./reelvideo.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
@@ -35,6 +35,7 @@ import { startLifecycleWorker } from "./lifecycle.js";
 import { startDigest } from "./digest.js";
 import { startMetrics, networkBenchmarks } from "./metrics.js";
 import { startDiary } from "./diary.js";
+import { startThreadsAuto } from "./threads-auto.js";
 import { generateImageForPost, imageProviders, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto } from "./images.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername } from "./tgbot.js";
 
@@ -630,6 +631,14 @@ app.get("/api/posts/:postId/publish-state", async (req: any, reply) => {
   if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
   const sent = await alreadySentNetworks(req.params.postId);
   return { sent };
+});
+
+// 🧵 Тейки для Threads: N коротких чернеток з Банку ідей/щоденника (кнопка в Студії;
+// щоденну автопорцію вмикає threads_strategy.takes - воркер threads-auto)
+app.post("/api/posts/threads-takes", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  try { const created = await generateThreadsTakes(ws, Number(req.body?.count || 5)); return { ok: true, created }; }
+  catch (e: any) { await logEvent("error", "threads-takes", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
 });
 
 // AI-хештеги для поста (кнопка «# Хештеги» у композері)
@@ -2301,6 +2310,7 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
   startDigest();
   startMetrics();
   startDiary();
+  startThreadsAuto();
   initTelegramBot();
   // одноразово полагодити залишкові iPhone HEIF -> JPEG (у фоні; ідемпотентно)
   convertAllHeif().then((n) => { if (n) app.log.info(`HEIF→JPEG конвертовано: ${n}`); }).catch((e: any) => app.log.error("convertAllHeif: " + e.message));

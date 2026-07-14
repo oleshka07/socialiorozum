@@ -1,7 +1,7 @@
 {
   "server/db/schema.sql": {
-    "mtime": 1784013709.2675412,
-    "ast_hash": "f4ae6bb0d1d8ffd92d426036347f910f",
+    "mtime": 1784042065.749311,
+    "ast_hash": "c19a4fb93b73b817754b9a6a9419e8e4",
     "semantic_hash": ""
   },
   "server/package.json": {
@@ -105,13 +105,13 @@
     "semantic_hash": ""
   },
   "server/src/pipeline.ts": {
-    "mtime": 1783915911.5793335,
-    "ast_hash": "6e93e6e0998b8d2be1ae9abfa615d77b",
+    "mtime": 1784042042.2093115,
+    "ast_hash": "15990bb7c0be333deaa7633578f881c5",
     "semantic_hash": ""
   },
   "server/src/publisher.ts": {
-    "mtime": 1784013709.271541,
-    "ast_hash": "2f717768a14498d338e994e5339dafa3",
+    "mtime": 1784042106.20531,
+    "ast_hash": "76cbb7e72d6a73708a7a3ee916e37e5b",
     "semantic_hash": ""
   },
   "server/src/rss-poller.ts": {
@@ -125,8 +125,8 @@
     "semantic_hash": ""
   },
   "server/src/server.ts": {
-    "mtime": 1784036451.5284603,
-    "ast_hash": "91e38f6b6bf5582249ca2cfb2e16a48a",
+    "mtime": 1784042207.7573078,
+    "ast_hash": "5d851b779a147625992092d77cac02d3",
     "semantic_hash": ""
   },
   "server/src/telegram.ts": {
@@ -140,9 +140,9 @@
     "semantic_hash": ""
   },
   "server/src/threads.ts": {
-    "mtime": 1782731362.9670131,
-    "ast_hash": "a82d069ed9d20964188e862873b80e81",
-    "semantic_hash": "a82d069ed9d20964188e862873b80e81"
+    "mtime": 1784042053.9013112,
+    "ast_hash": "cca3f24c6b8146d6eedd7f7a9e9b9f0e",
+    "semantic_hash": ""
   },
   "server/tsconfig.json": {
     "mtime": 1782731362.9670131,
@@ -155,7 +155,7 @@
     "semantic_hash": "352df4b84f4af2922ccd9adaf8e4608f"
   },
   "CLAUDE.md": {
-    "mtime": 1784036771.8284793,
+    "mtime": 1784036842.1204834,
     "ast_hash": "6218e4804ecdb99d562de9956e6bcd9c",
     "semantic_hash": ""
   },
@@ -225,8 +225,8 @@
     "semantic_hash": ""
   },
   "server/public/app.html": {
-    "mtime": 1784036702.2564752,
-    "ast_hash": "13e19bb21b5636aae27050c472c32ab7",
+    "mtime": 1784042316.0533051,
+    "ast_hash": "3007bff11d0398218663bcdde56b6675",
     "semantic_hash": ""
   },
   "server/public/auth.html": {
@@ -347,6 +347,11 @@
   "server/src/remotion-render.ts": {
     "mtime": 1784016477.173677,
     "ast_hash": "926ea54dc3237ba0d231eff1183e83dc",
+    "semantic_hash": ""
+  },
+  "server/src/threads-auto.ts": {
+    "mtime": 1784042155.053309,
+    "ast_hash": "2da7ccc8c6068e9aca51f53bf25e725d",
     "semantic_hash": ""
   }
 }

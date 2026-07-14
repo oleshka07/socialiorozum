@@ -66,8 +66,10 @@ export async function getMe(token: string) {
   return thFetch<{ id: string; username?: string }>(u.toString());
 }
 
-// двокроковий публіш: текст (+ опційне зображення за URL)
-export async function publish(token: string, userId: string, text: string, imageUrl?: string) {
+// двокроковий публіш: текст (+ опційне зображення за URL).
+// replyToId - відповідь у гілку (на ВЛАСНИЙ пост це працює з базовим threads_content_publish;
+// для відповідей на чужі пости потрібен окремий пермішен threads_manage_replies).
+export async function publish(token: string, userId: string, text: string, imageUrl?: string, replyToId?: string) {
   const create = new URL(`${GRAPH}/v1.0/${userId}/threads`);
   create.searchParams.set("access_token", token);
   if (imageUrl) {
@@ -78,6 +80,7 @@ export async function publish(token: string, userId: string, text: string, image
     create.searchParams.set("media_type", "TEXT");
     create.searchParams.set("text", text);
   }
+  if (replyToId) create.searchParams.set("reply_to_id", replyToId);
   const c = await thFetch<{ id: string }>(create.toString(), { method: "POST" });
   const pub = new URL(`${GRAPH}/v1.0/${userId}/threads_publish`);
   pub.searchParams.set("creation_id", c.id);

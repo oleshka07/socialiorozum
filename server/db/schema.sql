@@ -259,6 +259,21 @@ create table if not exists threads_publish (
 );
 create index if not exists idx_thpub_post on threads_publish(post_id);
 
+-- 🧵 відкладені відповіді у ВЛАСНУ гілку Threads (CTA-гілка: лінк/кодове слово доклеюється,
+-- коли пост уже розганяється - практика «спершу охоплення, потім перелив»)
+create table if not exists threads_reply_job (
+  id            uuid primary key default gen_random_uuid(),
+  workspace_id  uuid not null references workspace(id) on delete cascade,
+  post_id       uuid references post(id) on delete cascade,
+  root_media_id text not null,
+  reply_text    text not null,
+  due_at        timestamptz not null,
+  status        text not null default 'pending',   -- pending|sent|error
+  error         text,
+  created_at    timestamptz not null default now()
+);
+create index if not exists idx_threply_due on threads_reply_job(status, due_at);
+
 -- інтеграція Meta (Facebook + Instagram): FB-постинг + аналітика (токени лише на сервері)
 create table if not exists meta_config (
   workspace_id     uuid primary key references workspace(id) on delete cascade,
