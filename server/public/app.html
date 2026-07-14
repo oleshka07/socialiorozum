@@ -221,6 +221,8 @@
   .day .dn{font-size:12px;font-weight:600;color:var(--faint)}
   .pchip{background:var(--surface2);border-left:3px solid var(--brand);border-radius:6px;padding:4px 6px;cursor:pointer;font-size:11px;min-width:0;overflow-wrap:anywhere}
   .pchip b{font-size:10.5px;color:var(--muted);font-weight:700}
+  .pchip.ghost{background:transparent;border:1.5px dashed var(--line);border-left:1.5px dashed var(--line);color:var(--muted);opacity:.85}
+  .pchip.ghost:hover{border-color:var(--brand);color:var(--ink)}
   /* stat cards / charts */
   .stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
   .stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:16px 17px}
@@ -384,7 +386,6 @@
         <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;flex-wrap:wrap">
           <div class="tabs" id="cTabs">
             <div class="tab" data-ctab="materials">📥 Матеріали <span class="badge" id="matCount" style="margin-left:5px"></span></div>
-            <div class="tab" data-ctab="plan">📅 План <span class="badge" id="planCount" style="margin-left:5px"></span></div>
             <div class="tab on" data-ctab="posts">📝 Чорновики <span class="badge" id="postCount" style="margin-left:5px"></span></div>
           </div>
           <div class="tabs proonly" id="layoutTabs" style="display:none">
@@ -419,6 +420,11 @@
               <button class="ghost" id="planMatchBtn" title="Підібрати наявні матеріали під теми слотів">🔗 Підібрати матеріали</button>
               <span id="planMsg" style="font-size:12px;color:var(--muted)"></span>
             </div>
+          </div>
+          <div class="panel" id="rhythmPanel">
+            <div class="ph" style="margin:0 0 4px">📡 Ритм каналів</div>
+            <div class="hint" style="margin-bottom:8px">За замовчуванням усі мережі публікують за спільним ритмом бренду - нічого налаштовувати не треба. Хочеш інший графік чи тематику для конкретної мережі - перемкни її на «свій ритм»: дні, час і (за бажанням) рубрики. Тоді той самий пост поїде в кожну мережу у ЇЇ час - дублі неможливі, кожна мережа отримує пост рівно раз.</div>
+            <div id="rhythmRows"><span style="font-size:12.5px;color:var(--muted)">…</span></div>
           </div>
           <div class="tabs proonly" id="planChanTabs" style="display:none;margin-bottom:12px"></div>
           <div class="panel" style="padding:0;overflow:hidden"><div id="planList"><div class="empty" style="padding:20px">Скелета ще нема - натисни «Згенерувати скелет» (потрібна стратегія з розділу Стратегія).</div></div></div>
@@ -507,6 +513,11 @@
       </section>
       <!-- ============ PUBLISH ============ -->
       <section class="viewsec" data-view="publish">
+        <div class="tabs" id="pubTabs" style="margin-bottom:16px">
+          <div class="tab on" data-ptab="cal">📅 Календар</div>
+          <div class="tab" data-ptab="plan">📋 План і ритм <span class="badge" id="planCount" style="margin-left:5px"></span></div>
+        </div>
+        <div id="pubCal">
         <div class="panel">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             <div class="ph" style="margin:0">🏦 Банк публікацій <span class="badge" id="bankCount">0</span></div>
@@ -516,9 +527,12 @@
           <div class="tray" id="bank"></div>
         </div>
         <div class="panel">
-          <div class="ph">📅 Календар</div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div class="ph" style="margin:0">📅 Календар</div><span id="calSum" style="font-size:12px;color:var(--muted)"></span><button class="ghost" id="calToPlan" style="margin-left:auto;padding:5px 12px;font-size:12.5px">⚙️ План і ритм</button></div>
+          <div class="hint">Пунктирні картки - це ТЕМИ з плану (ще не пости): клікни, щоб згенерувати пост. Суцільні - заплановані публікації.</div>
           <div id="cal"></div>
         </div>
+        </div>
+        <div id="pubPlanHost" style="display:none"></div>
       </section>
 
       <!-- ============ BRAND: Голос / Візуал ============ -->
@@ -889,7 +903,7 @@ function selectView(v){
   const p=PAGES[v]||['','']; $('pageTitle').textContent=p[0]; $('pageSub').textContent=p[1];
   $('genPostsBtn').style.display=v==='create'?'inline-flex':'none';
   if(v==='analytics') loadAnalytics();
-  if(v==='publish') loadPublish();
+  if(v==='publish'){ loadPublish(); loadPlan(); }
   if(v==='strategy' && PRO) loadChannelPlan();
   if(v==='create') loadStudioPosts();
   if(v==='settings'){ loadAccount(); loadPlans(); }
@@ -948,19 +962,33 @@ if($('planLiteBtn')) $('planLiteBtn').onclick=async()=>{ if(!PRO) return; try{ a
 // ---------- конвеєр Створення: Матеріали → План → Чорновики ----------
 let cTab='posts';
 function setCTab(t){
+  if(t==='plan'){ selectView('publish'); setPTab('plan'); return; } // План переїхав у Публікацію (хаб календаря)
   cTab=t;
   try{ localStorage.setItem('kg_ctab', t); }catch(e){} // памʼятаємо під-вкладку Створення між оновленнями
   document.querySelectorAll('#cTabs .tab').forEach(x=>x.classList.toggle('on',x.dataset.ctab===t));
   const show=(id,on)=>{ const el=$(id); if(el) el.style.display=on?'':'none'; };
-  show('layMaterials',t==='materials'); show('layPlan',t==='plan');
+  show('layMaterials',t==='materials');
   const posts=t==='posts';
   show('layStudio',posts&&curLayout==='studio'); show('layPipeline',posts&&curLayout==='pipeline');
   const lt=$('layoutTabs'); if(lt) lt.style.display=(posts&&PRO)?'':'none';
-  const H={materials:'Стрічка сировини - все, з чого можна зробити пост',plan:'Скелет: що і коли має вийти - і чим воно заповнюється',posts:'Переглянь, відредагуй, затвердь'};
+  const H={materials:'Стрічка сировини - все, з чого можна зробити пост',posts:'Переглянь, відредагуй, затвердь'};
   $('layoutHint').textContent=H[t]||''; if($('pageSub')) $('pageSub').textContent=H[t]||'';
   if(t==='materials') loadMaterials();
-  if(t==='plan') loadPlan();
 }
+// ---- вкладки Публікації: Календар | План і ритм (layPlan фізично переїздить сюди при старті) ----
+let pTab='cal';
+function setPTab(t){
+  pTab=t;
+  document.querySelectorAll('#pubTabs .tab').forEach(x=>x.classList.toggle('on',x.dataset.ptab===t));
+  if($('pubCal')) $('pubCal').style.display=t==='cal'?'':'none';
+  const host=$('pubPlanHost'); if(host) host.style.display=t==='plan'?'':'none';
+  const lp=$('layPlan'); if(lp) lp.style.display=t==='plan'?'':'none';
+  if(t==='plan'){ loadPlan(); try{ renderRhythm(); }catch(e){} }
+}
+document.querySelectorAll('#pubTabs .tab').forEach(x=>x.onclick=()=>setPTab(x.dataset.ptab));
+if($('calToPlan')) $('calToPlan').onclick=()=>setPTab('plan');
+// переселення панелі плану в хаб Публікації (обробники лишаються живими - вузол той самий)
+(function(){ const host=$('pubPlanHost'), lp=$('layPlan'); if(host&&lp) host.appendChild(lp); })();
 document.querySelectorAll('#cTabs .tab').forEach(x=>x.onclick=()=>setCTab(x.dataset.ctab));
 let curLayout='studio';
 function setLayout(l){
@@ -1151,6 +1179,42 @@ async function loadPlan(){
   try{ const r=await api('/plan'); PlanAll=r.slots||[]; PlanChans=[...new Set(PlanAll.map(s=>s.channel).filter(Boolean))]; }
   catch(e){ PlanAll=[]; PlanChans=[]; }
   applyPlanFilter();
+  // хаб Публікації: лічильник тем біля календаря + перерендер привидів-тем
+  try{ const cs=$('calSum'); if(cs){ const th=PlanAll.filter(s=>['empty','matched','drafted'].includes(s.status)).length; cs.textContent=th?('· у плані '+th+' тем'):''; }
+    if($('cal')&&$('cal').childNodes.length) renderCal(); }catch(e){}
+}
+// ---- 📡 Ритм каналів (спадкування «як у бренду» / свій ритм: дні, час, рубрики) ----
+const DAY_LBL=[['1','пн'],['2','вт'],['3','ср'],['4','чт'],['5','пт'],['6','сб'],['0','нд']];
+async function renderRhythm(){
+  const box=$('rhythmRows'); if(!box) return;
+  if(!Object.keys(ChanStatus||{}).length){ try{ await loadChanStatus(); }catch(e){} }
+  let rh={}; try{ const rows=await api('/settings'); const m=Object.fromEntries(rows.map(r=>[r.key,r.content])); rh=JSON.parse(m.channel_rhythm||'{}')||{}; }catch(e){ rh={}; }
+  const nets=NETS.filter(n=>ChanStatus[n[0]]);
+  if(!nets.length){ box.innerHTML='<div style="font-size:12.5px;color:var(--faint)">Спершу підключи мережі в Налаштування → Канали.</div>'; return; }
+  box.innerHTML=nets.map(n=>{ const k=n[0], r=rh[k]||null, custom=!!r;
+    return '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line)" data-net="'+k+'">'
+      +'<span style="font-size:13px;font-weight:600;min-width:86px">'+esc(n[1])+'</span>'
+      +'<select class="rhMode txt" style="width:auto;padding:5px 8px;font-size:12px"><option value="inherit"'+(custom?'':' selected')+'>як у бренду</option><option value="custom"'+(custom?' selected':'')+'>свій ритм</option></select>'
+      +'<span class="rhCustom" style="display:'+(custom?'flex':'none')+';gap:8px;align-items:center;flex-wrap:wrap">'
+        +'<span style="display:flex;gap:3px">'+DAY_LBL.map(d=>'<button class="rhDay" data-d="'+d[0]+'" style="padding:3px 7px;font-size:11.5px;border-radius:6px;border:1px solid var(--line);background:'+((r&&r.days||[]).includes(+d[0])?'var(--brand-soft)':'transparent')+';color:'+((r&&r.days||[]).includes(+d[0])?'var(--brand)':'var(--muted)')+';cursor:pointer">'+d[1]+'</button>').join('')+'</span>'
+        +'<input class="rhTime txt" type="time" value="'+esc((r&&r.time)||'')+'" style="width:auto;padding:4px 7px;font-size:12px" title="час публікації цієї мережі">'
+        +'<input class="rhRub txt" placeholder="рубрики через кому (порожньо = всі)" value="'+esc(((r&&r.rubrics)||[]).join(', '))+'" style="width:210px;padding:4px 8px;font-size:12px" title="ця мережа братиме лише ці рубрики">'
+      +'</span></div>'; }).join('')
+    +'<div style="font-size:11.5px;color:var(--faint);margin-top:8px">Застосовується при «AI-розподілі» та автопублікації з плану. Дні не обрано - береться дата поста; час порожній - час бренду.</div>';
+  const save=async()=>{ const out={};
+    box.querySelectorAll('[data-net]').forEach(row=>{ if(row.querySelector('.rhMode').value!=='custom') return;
+      const days=[...row.querySelectorAll('.rhDay')].filter(b=>b.dataset.on==='1').map(b=>+b.dataset.d);
+      const time=row.querySelector('.rhTime').value||'';
+      const rubrics=row.querySelector('.rhRub').value.split(',').map(s=>s.trim()).filter(Boolean);
+      out[row.dataset.net]={...(days.length?{days}:{}),...(time?{time}:{}),...(rubrics.length?{rubrics}:{})}; });
+    try{ await saveSetting('channel_rhythm', JSON.stringify(out)); }catch(e){} };
+  box.querySelectorAll('[data-net]').forEach(row=>{
+    row.querySelectorAll('.rhDay').forEach(b=>{ const r=rh[row.dataset.net]; b.dataset.on=((r&&r.days)||[]).includes(+b.dataset.d)?'1':'0';
+      b.onclick=()=>{ const on=b.dataset.on!=='1'; b.dataset.on=on?'1':'0'; b.style.background=on?'var(--brand-soft)':'transparent'; b.style.color=on?'var(--brand)':'var(--muted)'; save(); }; });
+    row.querySelector('.rhMode').onchange=(e)=>{ row.querySelector('.rhCustom').style.display=e.target.value==='custom'?'flex':'none'; save(); };
+    row.querySelector('.rhTime').onchange=save;
+    row.querySelector('.rhRub').addEventListener('input',()=>{ clearTimeout(row._t); row._t=setTimeout(save,700); });
+  });
 }
 function renderPlan(){
   const list=$('planList'); if(!list) return;
@@ -2180,6 +2244,21 @@ function renderCal(){
         openComposer(s.post_id,{scheduledAt:s.scheduled_at,slotId:s.id}); };
       cell.appendChild(ch);
     });
+    // 📋 привиди-теми з ПЛАНУ: пунктирні картки (це ще НЕ пости) - клік генерує пост із теми
+    (PlanAll||[]).filter(p=>String(p.slot_date||'').slice(0,10)===iso&&['empty','matched','drafted'].includes(p.status)).forEach(p=>{
+      const g=document.createElement('div'); g.className='pchip ghost';
+      const drafted=p.status==='drafted';
+      g.title=drafted?'Чернетка готова - відкрити в композері':'Тема з плану (пост ще не створено). Клік = згенерувати пост'+(p.status==='matched'?' зі зметченого матеріалу':'');
+      g.innerHTML='<b>'+(drafted?'✍️ чернетка':'📋 тема')+'</b> '+esc(String(p.theme||p.rubric||'').replace(/\n+/g,' ').slice(0,maxTxt));
+      g.onclick=async(ev)=>{ ev.stopPropagation();
+        if(drafted&&p.post_id){ openComposer(p.post_id); return; }
+        const from=p.match_source_id?'material':'theme';
+        if(!confirm('Згенерувати пост із теми «'+String(p.theme||'').slice(0,80)+'»'+(from==='material'?' (є підібраний матеріал)':'')+'?')) return;
+        aiBusy('✨ Генерую пост із теми плану…');
+        try{ await api('/plan/slots/'+p.id+'/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from})}); await loadPlan(); renderCal(); flash('Чернетка готова - у Чорновиках і на цій даті ✓'); }
+        catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } };
+      cell.appendChild(g);
+    });
     cell.addEventListener('dragover',ev=>{ev.preventDefault();cell.classList.add('over');});
     cell.addEventListener('dragleave',()=>cell.classList.remove('over'));
     cell.addEventListener('drop',async ev=>{ev.preventDefault();cell.classList.remove('over');const d=ev.dataTransfer.getData('text/plain');
@@ -2710,7 +2789,7 @@ async function renderObConnect(oc){
   await loadPrompts();
   loadRubrics(); loadStrategy(); loadFF(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadTasks(); loadStudioPosts(); loadGoalCta(); loadMagnets();
   loadMaterials(); // стрічка + лічильник
-  loadPlan().then(()=>{ const _ct=localStorage.getItem('kg_ctab'); if(_ct&&['materials','plan','posts'].includes(_ct)) setCTab(_ct); else if(PlanSlots.length) setCTab('plan'); }); // відновлюємо під-вкладку; уперше - План якщо скелет є
+  loadPlan().then(()=>{ const _ct=localStorage.getItem('kg_ctab'); setCTab(_ct==='materials'?'materials':'posts'); }); // План живе в Публікації; тут лише Матеріали/Чорновики
   await loadChanStatus();
   try{ const st=await api('/settings'); if(!st.some(r=>r.key==='onboarded')) showOnboarding(); }catch(e){}
   updRunLabel();

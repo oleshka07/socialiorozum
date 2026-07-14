@@ -6,8 +6,8 @@ import { publishQuestions } from "./pipeline.js";
 // Фоновий воркер: публікує заплановані (status='planned') слоти, час яких настав,
 // у ВСІ обрані мережі поста (post.channels). Якщо мережі не обрані — Telegram (legacy).
 async function tick(): Promise<void> {
-  const due = await q<{ id: string; post_id: string; workspace_id: string }>(
-    `select ss.id, p.id as post_id, s.workspace_id
+  const due = await q<{ id: string; post_id: string; workspace_id: string; channels: any }>(
+    `select ss.id, p.id as post_id, s.workspace_id, ss.channels
      from schedule_slot ss
        left join plan_item pi on pi.id = ss.plan_item_id
        join post p on p.id = coalesce(ss.post_id, pi.post_id)
@@ -23,7 +23,9 @@ async function tick(): Promise<void> {
     const claimed = await one(`update schedule_slot set status='posting' where id=$1 and status='planned' returning id`, [slot.id]);
     if (!claimed) continue;
     try {
-      const results = await publishPostToChannels(slot.workspace_id, slot.post_id);
+      // слот із channels (ритм каналів) цілить лише свою підмножину мереж
+      const only = slot.channels ? Object.keys(slot.channels).filter((k) => slot.channels[k] && slot.channels[k].on) : undefined;
+      const results = await publishPostToChannels(slot.workspace_id, slot.post_id, only && only.length ? only : undefined);
       const anyOk = results.some((r) => r.status === "sent");
       const ok = results.filter((r) => r.status === "sent").map((r) => r.channel).join(", ");
       const skip = results.filter((r) => r.status === "skipped").map((r) => r.channel).join(", ");
