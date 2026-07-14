@@ -2014,6 +2014,7 @@ async function openComposer(postId, opts){
   // надіслані мережі завжди позначені як обрані (щоб було видно в прев'ю)
   sentSet.forEach(k=>{ C[k]=C[k]||{text:''}; C[k].on=true; });
   let master=full.content||''; let mediaFilename=full.media_filename||null; let rubric=full.rubric||'';
+  let thSnap=null; // мережі, вимкнені режимом «🧵 Гілкою» (відновлюються при вимкненні режиму)
   const initDate=opts.scheduledAt?locDate(opts.scheduledAt):''; const initTime=opts.scheduledAt?locHM(opts.scheduledAt):'11:00';
   const textOf=(k)=> (C[k]&&typeof C[k].text==='string'&&C[k].text) ? C[k].text : master;
   const ov=document.createElement('div'); ov.className='cmp-ov';
@@ -2023,7 +2024,13 @@ async function openComposer(postId, opts){
     +'<div class="cmp-body">'
       +'<div class="cmp-left">'
         +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Канали</div><div id="cmpChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>'
-        +'<div id="cmpThreadWrap" style="display:none;margin:0 0 12px"><label style="font-size:12.5px;color:var(--ink2);display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="cmpThread"> 🧵 У Threads - гілкою <span style="color:var(--muted)">(root-гачок + відповіді, пакує ПОВНИЙ текст, а не скорочену версію)</span></label></div>'
+        +'<div id="cmpThreadWrap" style="display:none;margin:0 0 12px;padding:9px 11px;border:1px dashed var(--line);border-radius:10px">'
+          +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+            +'<button class="netchip" id="cmpThread" title="Опублікувати серією повʼязаних постів: перший = гачок, далі відповіді автора">🧵 Гілкою</button>'
+            +'<button class="netchip" id="cmpThreadNum" style="display:none" title="Нумерувати частини серії: 2/ 3/ 4/…">#⃣ Нумерація</button>'
+            +'<span id="cmpThreadHint" style="font-size:11.5px;color:var(--muted)">серія повʼязаних постів у Threads</span>'
+          +'</div>'
+        +'</div>'
         +'<label style="font-size:12px;color:var(--muted);display:inline-block;margin-bottom:12px">Рубрика <select id="cmpRubric" class="txt" style="width:auto;padding:6px 9px;display:inline-block;margin-left:4px">'+rubOpts+'</select></label>'
         +'<textarea id="cmpText" class="txt" style="min-height:240px;font-size:14px;line-height:1.55;resize:vertical"></textarea>'
         +'<div style="font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint);margin-top:12px">🤖 ПОМІЧНИКИ ТЕКСТУ</div>'
@@ -2056,14 +2063,23 @@ async function openComposer(postId, opts){
     setAp(cur&&cur.review==='approved');
     apBtn.onclick=async()=>{ apBtn.disabled=true; try{ await saveDraft(); await api('/posts/'+postId+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'approved'})}); setAp(true); try{ await loadStudioPosts(); }catch(_){ } flash('✅ Затверджено - пост готовий до календаря'); close(); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); apBtn.disabled=false; } }; }
   // ----- канали (надіслані = заблоковані з ✓) -----
-  function renderChips(){ const box=ov.querySelector('#cmpChips'); box.innerHTML=NETS.map(n=>{ const k=n[0]; const on=C[k]&&C[k].on; const conn=ChanStatus[k]; const sent=sentSet.has(k);
-      return '<button class="netchip'+(on?' on':'')+'" data-net="'+k+'"'+((!conn||sent)?' disabled':'')+' title="'+(sent?'вже опубліковано':(conn?'':'не підключено'))+'">'+(sent?'✓ ':'')+n[1]+'</button>'; }).join('');
+  function renderChips(){ const box=ov.querySelector('#cmpChips'); const thOn=!!(C.threads&&C.threads.on&&C.threads.thread);
+    box.innerHTML=NETS.map(n=>{ const k=n[0]; const on=C[k]&&C[k].on; const conn=ChanStatus[k]; const sent=sentSet.has(k);
+      const dimmed=thOn&&k!=='threads'; // режим гілки: серія їде ЛИШЕ в Threads, решта мереж затінені
+      return '<button class="netchip'+(on&&!dimmed?' on':'')+'" data-net="'+k+'"'+((!conn||sent||dimmed)?' disabled':'')+' style="'+(dimmed?'opacity:.35':'')+'" title="'+(sent?'вже опубліковано':(dimmed?'у режимі гілки пост їде лише в Threads (вимкни 🧵, щоб обрати інші мережі)':(conn?'':'не підключено')))+'">'+(sent?'✓ ':'')+n[1]+'</button>'; }).join('');
     box.querySelectorAll('.netchip').forEach(b=>{ if(b.disabled) return; b.onclick=()=>{ const k=b.dataset.net; C[k]=C[k]||{text:''}; C[k].on=!C[k].on; renderChips(); renderPrev(); }; });
-    // 🧵 разовий оверрайд «гілкою» для цього поста (їде в channels.threads.thread)
+    // 🧵 режим «Гілкою»: серія повʼязаних постів (root-гачок + відповіді) з ПОВНОГО тексту
     const tw=ov.querySelector('#cmpThreadWrap');
     if(tw){ const showTh=C.threads&&C.threads.on&&!sentSet.has('threads'); tw.style.display=showTh?'':'none';
-      const cb=ov.querySelector('#cmpThread'); cb.checked=!!(C.threads&&C.threads.thread);
-      cb.onchange=()=>{ C.threads=C.threads||{}; C.threads.thread=cb.checked; renderPrev(); }; } }
+      const tb=ov.querySelector('#cmpThread'), nb=ov.querySelector('#cmpThreadNum'), hint=ov.querySelector('#cmpThreadHint');
+      tb.classList.toggle('on',thOn);
+      nb.style.display=thOn?'':'none'; nb.classList.toggle('on',thOn&&C.threads.number!==false);
+      if(hint) hint.textContent=thOn?'порожній рядок у тексті = нова частина серії; фото їде в першому пості':'серія повʼязаних постів у Threads';
+      tb.onclick=()=>{ C.threads=C.threads||{}; C.threads.thread=!C.threads.thread;
+        if(C.threads.thread){ thSnap=NETS.map(n=>n[0]).filter(k=>k!=='threads'&&C[k]&&C[k].on); thSnap.forEach(k=>{ C[k].on=false; }); }
+        else if(thSnap){ thSnap.forEach(k=>{ if(C[k]&&!sentSet.has(k)) C[k].on=true; }); thSnap=null; }
+        renderChips(); renderPrev(); };
+      nb.onclick=()=>{ C.threads.number=C.threads.number===false?true:false; renderChips(); renderPrev(); }; } }
   // ----- медіа (ліва панель) -----
   function renderMedia(){ ov.querySelector('#cmpMediaWrap').innerHTML=(mediaFilename
       ?'<img src="/media/'+esc(mediaFilename)+'" style="max-height:120px;border-radius:10px;border:1px solid var(--line)">'
@@ -2088,13 +2104,13 @@ async function openComposer(postId, opts){
       else if(k==='threads'&&C.threads&&C.threads.thread){
         // 🧵 прев'ю гілки як у Threads: аватар + вертикальна лінія + частини-відповіді
         // (тут детермінована розбивка по абзацах; при публікації AI переріже точніше, з гачком у root)
-        const parts=clientThreadSplit(master);
+        const parts=clientThreadSplit(master); const num=C.threads.number!==false;
         body=head+'<div style="padding:10px 12px">'+parts.map((p,i)=>
           '<div style="display:flex;gap:8px">'
             +'<div style="display:flex;flex-direction:column;align-items:center;flex:none"><span class="phone-av" style="width:22px;height:22px;font-size:10px">'+esc(av)+'</span>'+(i<parts.length-1?'<span style="flex:1;width:2px;background:var(--line);margin:3px 0;border-radius:2px"></span>':'')+'</div>'
-            +'<div style="flex:1;min-width:0;padding-bottom:'+(i<parts.length-1?'12px':'0')+'"><div style="font-size:10.5px;color:var(--faint);font-weight:700">'+(i?('#'+(i+1)):'ваш_профіль')+'</div><div class="phone-txt" style="margin-top:2px">'+esc(p)+'</div>'+(i===0&&mediaFilename?'<img src="/media/'+esc(mediaFilename)+'" style="width:100%;display:block;border-radius:8px;margin-top:6px">':'')+'</div>'
+            +'<div style="flex:1;min-width:0;padding-bottom:'+(i<parts.length-1?'12px':'0')+'"><div style="font-size:10.5px;color:var(--faint);font-weight:700">ваш_профіль'+(i?' · відповідь':'')+'</div><div class="phone-txt" style="margin-top:2px">'+(num&&i?('<b>'+(i+1)+'/</b> '):'')+esc(p)+'</div>'+(i===0&&mediaFilename?'<img src="/media/'+esc(mediaFilename)+'" style="width:100%;display:block;border-radius:8px;margin-top:6px">':'')+'</div>'
           +'</div>').join('')+'</div>'
-          +'<div class="pv-note">🧵 гілка: '+parts.length+' частин(и) з повного тексту - root-гачок + відповіді</div>';
+          +'<div class="pv-note">🧵 гілка: '+parts.length+' частин(и)'+(num?' з нумерацією 2/ 3/…':' без нумерації')+' - root-гачок + відповіді</div>';
       }
       else body=head+'<div class="phone-b"><div class="phone-txt">'+(t?pvCap(k,t):empty)+'</div></div>'+img;
       return '<div class="pv-label" style="background:var('+NETVAR[k]+')">'+n[1]+'</div><div class="phone">'+body+'</div>'; }).join('');
