@@ -644,19 +644,23 @@ export async function threadsSplit(workspaceId: string, content: string, numberi
     const raw = await chat("openai/gpt-4o", system, `Пост:\n---\n${content}`, { workspaceId, step: "threads_split" });
     parts = extractJsonArray<any>(raw).map((x) => String(x || "").trim()).filter(Boolean);
   } catch { parts = []; }
-  if (!parts.length) {
-    // фолбек без LLM: детермінований зріз по абзацах ≤450 символів
-    const paras = content.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
-    let cur = "";
-    for (const p of paras) {
-      if ((cur ? cur + "\n\n" + p : p).length <= 450) cur = cur ? cur + "\n\n" + p : p;
-      else { if (cur) parts.push(cur); cur = p.length <= 450 ? p : p.slice(0, 449); }
-    }
-    if (cur) parts.push(cur);
-  }
+  if (!parts.length) parts = splitTextForThread(content);
   // страховка ліміту API (500) на кожній частині
   parts = parts.map((p) => (p.length <= 495 ? p : p.slice(0, 494).replace(/\s+\S*$/, "") + "…")).slice(0, 8);
   return parts.length ? parts : [content.slice(0, 495)];
+}
+
+// детермінований фолбек розбивки на гілку: зріз по абзацах ≤maxLen (чиста функція - під юніти)
+export function splitTextForThread(content: string, maxLen = 450): string[] {
+  const parts: string[] = [];
+  const paras = String(content || "").split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  let cur = "";
+  for (const p of paras) {
+    if ((cur ? cur + "\n\n" + p : p).length <= maxLen) cur = cur ? cur + "\n\n" + p : p;
+    else { if (cur) parts.push(cur); cur = p.length <= maxLen ? p : p.slice(0, maxLen - 1); }
+  }
+  if (cur) parts.push(cur);
+  return parts;
 }
 
 // 🧵 Тейки: N коротких самостійних Threads-постів з живого палива (Банк ідей + щоденник + бренд).

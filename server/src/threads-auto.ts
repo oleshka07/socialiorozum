@@ -7,6 +7,7 @@ import { logEvent } from "./log.js";
 import * as threads from "./threads.js";
 import { thValidToken } from "./publisher.js";
 import { generateThreadsTakes } from "./pipeline.js";
+import { setSetting } from "./settings.js";
 
 const TAKES_HOUR = 8; // за годину до ранкового зведення (9:00) - воно вже побачить свіжі чернетки
 
@@ -51,8 +52,7 @@ async function processDailyTakes(): Promise<void> {
       const last = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='takes_last'`, [r.workspace_id]);
       if (last?.content === date) continue; // сьогодні вже генерували
       await generateThreadsTakes(r.workspace_id, n);
-      await q(`insert into settings_block(workspace_id, key, content) values($1,'takes_last',$2)
-               on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`, [r.workspace_id, date]);
+      await setSetting(r.workspace_id, "takes_last", date);
     } catch (e: any) { await logEvent("error", "threads-auto", "тейки: " + e.message, { ws: r.workspace_id }); }
   }
 }

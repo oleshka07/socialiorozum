@@ -39,6 +39,24 @@ import { startThreadsAuto } from "./threads-auto.js";
 import { generateImageForPost, imageProviders, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto } from "./images.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername } from "./tgbot.js";
 
+// ============================================================================
+// ЗМІСТ ФАЙЛУ (182 роути; шукай за банером «===== НАЗВА =====» або шляхом роуту)
+//   гейти/хуки:  BETA_PIN, onSend, preHandler auth (≈ рядок 60-140)
+//   AUTH+ACCOUNT: /api/auth/*, /api/account/* (register/login/lifecycle)
+//   SETTINGS/PROMPTS: /api/settings, /api/prompts
+//   SOURCES/MEDIA: /api/sources/*, /api/media/* (+bulk-delete)
+//   POSTS: CRUD, review, regenerate, adapt, hooks, ai-audit, image*, repeat, expand-thread
+//   THREADS: takes, starter-pack, niche-review, comments (реплай-коуч)
+//   ANALYTICS: benchmarks, top-patterns, threads
+//   RUNS/PIPELINE: /api/runs/* (PRO-кишка)
+//   INTEGRATIONS: telegram → meta → threads → linkedin → youtube → tiktok → gdrive (OAuth-мости)
+//   PLAN/MATERIALS/IDEAS: /api/plan/*, /api/materials/*, /api/ideas/*
+//   SCHEDULE/PUBLISH: /api/schedule/*, /api/posts/:id/publish-all, /api/published
+//   WEBHOOKS/PAGES: /api/webhooks/*, статичні сторінки, listen + старт воркерів
+// TODO(рефакторинг, окрема сесія): фізичний розріз на src/routes/* по одному
+// модулю за раз із деплоєм після кожного (інтеграції перемішані з post-роутами -
+// різати треба уважно, не механічно).
+// ============================================================================
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = Fastify({ logger: true, trustProxy: true });
 await app.register(cors, { origin: env.appBaseUrl, credentials: true });

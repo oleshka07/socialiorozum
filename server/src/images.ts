@@ -124,7 +124,7 @@ const OVERLAY_FONTS: Record<string, string> = {
 // перенос слів у рядки за приблизною шириною символа
 // Ширина символа в частках font-size (bold DejaVu, з запасом угору): константа 0.6 брехала для
 // ALL-CAPS кирилиці (реально ~0.78) - заголовок вилазив за край на 4:5. Краще перенести раніше.
-function charFrac(c: string, mono: boolean): number {
+export function charFrac(c: string, mono: boolean): number {
   if (mono) return 0.64;
   if (/[ \-–.,:;!'’|()іїІЇjl]/.test(c)) return 0.36; // вузькі (І/Ї вузькі навіть ВЕЛИКІ) + пробіл/пунктуація
   if (/[МШЩЮЖФMW]/.test(c)) return 0.98;             // найширші ВЕЛИКІ
@@ -133,11 +133,11 @@ function charFrac(c: string, mono: boolean): number {
   return 0.66;                                       // рядкові
 }
 // піксельна ширина рядка тексту для даного font-size
-function textPx(s: string, fs: number, mono: boolean): number {
+export function textPx(s: string, fs: number, mono: boolean): number {
   let w = 0; for (const c of s) w += charFrac(c, mono); return w * fs;
 }
 // перенос по ПІКСЕЛЯХ: слово додається, лише якщо рядок реально влазить у maxW
-function wrapPx(words: { t: string; a: boolean }[], fs: number, maxW: number, mono: boolean): { t: string; a: boolean }[][] {
+export function wrapPx(words: { t: string; a: boolean }[], fs: number, maxW: number, mono: boolean): { t: string; a: boolean }[][] {
   const lines: { t: string; a: boolean }[][] = []; let cur: { t: string; a: boolean }[] = []; let w = 0;
   const sp = textPx(" ", fs, mono);
   for (const word of words) {

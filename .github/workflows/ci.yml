@@ -1,0 +1,27 @@
+name: ci
+
+# Швидкий контроль якості на кожен push: збірка TS + юніти чистих функцій + ESLint на JS з app.html.
+# Ловить регресії ДО деплою (деплой-воркфлоу окремі й не блокуються цим - сигнал, не шлагбаум).
+
+on:
+  push:
+    branches: [main, beta, "claude/**"]
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npm run lint
