@@ -12,6 +12,7 @@ import * as tiktok from "./tiktok.js";
 import { MEDIA_DIR } from "./media.js";
 import { ensureIgSafeImage } from "./images.js";
 import { adaptForChannels, reelCaption, threadsSplit } from "./pipeline.js";
+import { getSetting } from "./settings.js";
 import { logEvent } from "./log.js";
 
 export async function thValidToken(ws: string): Promise<{ token: string; userId: string } | null> {
@@ -85,7 +86,11 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
       let changed = false;
       for (const k of missing) if (variants[k]) { ch[k] = { ...(ch[k] || {}), on: true, text: variants[k] }; changed = true; }
       if (changed) await q(`update post set channels=$2 where id=$1`, [postId, JSON.stringify(ch)]);
-    } catch { /* адаптація не критична - публікуємо майстер-текстом */ }
+    } catch (e: any) {
+      // не критично (їде майстер-текст), але слід лишаємо: тихий збій адаптації = Threads отримує
+      // текст понад 500 симв. і публікація там падає «незрозуміло чому»
+      await logEvent("warn", "publish", `авто-адаптація не вдалась (їде майстер-текст): ${e.message}`, { ws, postId });
+    }
   }
   const textOf = (k: string) => (ch[k] && ch[k].text) || post.content;
   const imageUrl = post.filename ? `${env.appBaseUrl}/media/${post.filename}` : null;
@@ -122,8 +127,7 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
       } else if (k === "threads") {
         if (!thTok) throw new Error("Threads не підключено");
         // 🧵 стратегія Threads (settings_block.threads_strategy): гілка для довгих + відкладена CTA-гілка
-        let strat: any = {};
-        try { const sr = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='threads_strategy'`, [ws]); strat = JSON.parse(sr?.content || "{}") || {}; } catch { /* без стратегії */ }
+        const strat = await getSetting<any>(ws, "threads_strategy", {});
         const perPost = ch[k] || {};
         // гілка: явний прапорець на пості АБО авто-режим для майстер-текстів понад ліміт (500)
         const wantThread = perPost.thread === true || (strat.thread === "auto" && perPost.thread !== false && post.content.length > 500);
@@ -209,6 +213,21 @@ export async function reelSentNetworks(postId: string): Promise<string[]> {
   return sent;
 }
 
+// Спільний патерн «освіжи OAuth-токен, якщо скоро протухне» (YouTube/TikTok мають однакову механіку
+// refresh_token → новий access_token; раніше два дослівно схожі блоки жили в publishReelToChannels)
+async function freshToken(
+  cfg: { access_token: string; refresh_token: string | null; token_expires_at: string | null },
+  refresh: (rt: string) => Promise<{ access_token: string; refresh_token?: string; expires_in: number }>,
+  persist: (token: string, refreshToken: string | null, expiresAt: string) => Promise<void>
+): Promise<string> {
+  const exp = cfg.token_expires_at ? new Date(cfg.token_expires_at).getTime() : 0;
+  if (!cfg.refresh_token || (exp && exp - Date.now() > 5 * 60e3)) return cfg.access_token;
+  const r = await refresh(cfg.refresh_token);
+  const newExp = new Date(Date.now() + r.expires_in * 1000).toISOString();
+  await persist(r.access_token, r.refresh_token || cfg.refresh_token, newExp);
+  return r.access_token;
+}
+
 export async function publishReelToChannels(ws: string, postId: string, nets: string[]): Promise<PubResult[]> {
   const post = await one<{ content: string; channels: any; reel_video: string | null }>(
     `select p.content, p.channels, p.reel_video from post p
@@ -248,14 +267,9 @@ export async function publishReelToChannels(ws: string, postId: string, nets: st
         const yc = await one<{ access_token: string; refresh_token: string | null; token_expires_at: string | null }>(
           `select access_token, refresh_token, token_expires_at from youtube_config where workspace_id=$1`, [ws]);
         if (!yc) throw new Error("YouTube не підключено");
-        let token = yc.access_token;
-        const exp = yc.token_expires_at ? new Date(yc.token_expires_at).getTime() : 0;
-        if (yc.refresh_token && (!exp || exp - Date.now() < 5 * 60e3)) {
-          const r = await youtube.refreshAccessToken(env.google.clientId, env.google.clientSecret, yc.refresh_token);
-          token = r.access_token;
-          await q(`update youtube_config set access_token=$2, token_expires_at=$3, updated_at=now() where workspace_id=$1`,
-            [ws, token, new Date(Date.now() + r.expires_in * 1000).toISOString()]);
-        }
+        const token = await freshToken(yc,
+          (rt) => youtube.refreshAccessToken(env.google.clientId, env.google.clientSecret, rt),
+          async (t, _rt, expAt) => { await q(`update youtube_config set access_token=$2, token_expires_at=$3, updated_at=now() where workspace_id=$1`, [ws, t, expAt]); });
         const title = caption.split("\n")[0].replace(/#[^\s#]+/g, "").trim() || "Reels";
         const r = await youtube.uploadVideo(token, await getBuf(), title, caption);
         await q(`insert into youtube_publish(post_id,external_id,status) values($1,$2,'sent')`, [postId, r.videoId]);
@@ -263,14 +277,9 @@ export async function publishReelToChannels(ws: string, postId: string, nets: st
         const tc = await one<{ access_token: string; refresh_token: string | null; token_expires_at: string | null }>(
           `select access_token, refresh_token, token_expires_at from tiktok_config where workspace_id=$1`, [ws]);
         if (!tc) throw new Error("TikTok не підключено");
-        let token = tc.access_token;
-        const exp = tc.token_expires_at ? new Date(tc.token_expires_at).getTime() : 0;
-        if (tc.refresh_token && (!exp || exp - Date.now() < 5 * 60e3)) {
-          const r = await tiktok.refreshToken(env.tiktok.clientKey, env.tiktok.clientSecret, tc.refresh_token);
-          token = r.access_token;
-          await q(`update tiktok_config set access_token=$2, refresh_token=$3, token_expires_at=$4, updated_at=now() where workspace_id=$1`,
-            [ws, token, r.refresh_token || tc.refresh_token, new Date(Date.now() + r.expires_in * 1000).toISOString()]);
-        }
+        const token = await freshToken(tc,
+          (rt) => tiktok.refreshToken(env.tiktok.clientKey, env.tiktok.clientSecret, rt),
+          async (t, rt, expAt) => { await q(`update tiktok_config set access_token=$2, refresh_token=$3, token_expires_at=$4, updated_at=now() where workspace_id=$1`, [ws, t, rt, expAt]); });
         const r = await tiktok.uploadToInbox(token, await getBuf());
         await q(`insert into tiktok_publish(post_id,external_id,status) values($1,$2,'sent')`, [postId, r.publishId]);
       } else { throw new Error("невідома мережа для рілсів"); }
