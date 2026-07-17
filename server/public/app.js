@@ -61,16 +61,17 @@ function setTheme(t){ document.body.setAttribute('data-theme',t); localStorage.s
 $('themeToggle').onclick=()=>setTheme(document.body.getAttribute('data-theme')==='light'?'dark':'light');
 
 // ---------- навігація ----------
-const PAGES={create:['Створення','Переглянь і затвердь готові пости'],publish:['Публікація','Запланований контент і календар'],brand:['Бренд','Голос і візуальний стиль - вводяться раз, працюють всюди'],strategy:['Стратегія','Рубрики, частота й теми контенту'],analytics:['Аналітика','Ефективність контенту і витрати'],settings:['Налаштування','Профіль, канали публікації та джерела']};
+const PAGES={today:['Сьогодні','Що виходить, що затвердити і що зробити зараз'],create:['Створення','Переглянь і затвердь готові пости'],publish:['Публікація','Запланований контент і календар'],brand:['Бренд і стратегія','Голос, візуал і цілі - вводяться раз, працюють всюди'],analytics:['Аналітика','Ефективність контенту і витрати'],settings:['Налаштування','Профіль, канали публікації та джерела']};
 function selectView(v){
   if(v==='sources'){ v='settings'; setTimeout(()=>setSTab('sources'),0); } // джерела живуть у Налаштуваннях
+  if(v==='strategy'){ v='brand'; setTimeout(()=>setBTab('strat'),0); } // Стратегія злита з Брендом (вкладка «Бриф і цілі»)
   document.querySelectorAll('.navitem').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
   document.querySelectorAll('.viewsec').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
   const p=PAGES[v]||['','']; $('pageTitle').textContent=p[0]; $('pageSub').textContent=p[1];
   $('genPostsBtn').style.display='inline-flex'; // «＋ Додати матеріал» доступна з будь-якого розділу
+  if(v==='today') loadToday();
   if(v==='analytics') loadAnalytics();
   if(v==='publish'){ loadPublish(); loadPlan(); }
-  if(v==='strategy' && PRO) loadChannelPlan();
   if(v==='create') loadStudioPosts();
   if(v==='settings'){ loadAccount(); loadPlans(); }
   if(typeof loadTasks==='function') loadTasks();
@@ -85,8 +86,12 @@ function setBTab(b){
   document.querySelectorAll('#bTabs .tab').forEach(x=>x.classList.toggle('on',x.dataset.btab===b));
   if($('brandVoice')) $('brandVoice').style.display=b==='voice'?'':'none';
   if($('brandVisual')) $('brandVisual').style.display=b==='visual'?'':'none';
+  if($('brandStratHost')) $('brandStratHost').style.display=b==='strat'?'':'none';
   if(b==='visual'){ try{ loadBroll(); }catch(e){} }
 }
+// переселення розділу «Стратегія» у вкладку Бренду (вузол той самий - обробники живі)
+(function(){ const host=$('brandStratHost'), sec=document.querySelector('.viewsec[data-view="strategy"]');
+  if(host&&sec){ while(sec.firstChild) host.appendChild(sec.firstChild); sec.remove(); } })();
 document.querySelectorAll('#bTabs .tab').forEach(x=>x.onclick=()=>setBTab(x.dataset.btab));
 function setSTab(s){
   document.querySelectorAll('#sTabs .tab').forEach(x=>x.classList.toggle('on',x.dataset.stab===s));
@@ -102,6 +107,10 @@ document.querySelectorAll('#sTabs .tab').forEach(x=>x.onclick=()=>setSTab(x.data
   av.onclick=(e)=>{ e.stopPropagation(); um.style.display=um.style.display==='none'?'':'none'; };
   document.addEventListener('click',(e)=>{ if(um.style.display!=='none' && !um.contains(e.target) && e.target!==av) close(); });
   um.querySelectorAll('.umitem[data-um]').forEach(it=>it.onclick=()=>{ close(); selectView('settings'); setSTab({profile:'profile',channels:'channels',sources:'sources'}[it.dataset.um]); });
+  // 🧰 Інструменти: покроковий PRO-конвеєр (переїхав сюди з вкладок Створення, щоб не шуміти щодня)
+  const tools=$('umTools'); if(tools) tools.onclick=()=>{ close();
+    if(!PRO){ flash('Конвеєр - інструмент режиму PRO (перемкни вище)'); return; }
+    selectView('create'); setLayout('pipeline'); };
 })();
 
 // ---------- layout switcher (Студія/Конвеєр/Інбокс) ----------
@@ -134,12 +143,13 @@ function setCTab(t){
   document.querySelectorAll('#cTabs .tab').forEach(x=>x.classList.toggle('on',x.dataset.ctab===t));
   const show=(id,on)=>{ const el=$(id); if(el) el.style.display=on?'':'none'; };
   show('layMaterials',t==='materials');
+  show('layIdeas',t==='ideas');
   const posts=t==='posts';
   show('layStudio',posts&&curLayout==='studio'); show('layPipeline',posts&&curLayout==='pipeline');
-  const lt=$('layoutTabs'); if(lt) lt.style.display=(posts&&PRO)?'':'none';
-  const H={materials:'Стрічка сировини - все, з чого можна зробити пост',posts:'Переглянь, відредагуй, затвердь'};
+  const H={materials:'Стрічка сировини - все, з чого можна зробити пост',posts:'Переглянь, відредагуй, затвердь',ideas:'Банк ідей: з бота, AI-продовжень і твої власні - пост у 1 тап'};
   $('layoutHint').textContent=H[t]||''; if($('pageSub')) $('pageSub').textContent=H[t]||'';
   if(t==='materials') loadMaterials();
+  if(t==='ideas') loadIdeasTab();
 }
 // ---- вкладки Публікації: Календар | План і ритм (layPlan фізично переїздить сюди при старті) ----
 let pTab='cal';
@@ -169,7 +179,7 @@ function updateProUI(){
   if($('avProBadge')) $('avProBadge').style.display=PRO?'':'none';
   if($('umPro')) $('umPro').style.display=PRO?'':'none';
   document.querySelectorAll('.proonly').forEach(el=>el.style.display=PRO?'':'none');
-  const lt=$('layoutTabs'); if(lt) lt.style.display=(cTab==='posts'&&PRO)?'':'none';
+  const lt=$('layoutTabs'); if(lt) lt.style.display='none'; // Конвеєр живе в аватар-меню «🧰 Інструменти», вкладки сховані назавжди
   if(!PRO && curLayout==='pipeline') setLayout('studio');
   if(cTab==='plan' && typeof loadPlan==='function') loadPlan(); // Lite↔PRO змінює канал скелета (all↔telegram) - перезавантажуємо
   // рілс-кнопки (🎬/🎞/▶️/📤) вшиті в розмітку карток - перерендер після перемикання режиму
@@ -185,7 +195,6 @@ $('toStudio').onclick=()=>setLayout('studio');
 
 // ---------- МАТЕРІАЛИ: стрічка сировини ----------
 let Mats=[], MatFilter='Усі', MatFeedFilter=null, MatOpen=null, Ideas=[];
-const BANK_FILTER='💡 Банк ідей';
 const MAT_TYPE={manual:'✍️ Нотатка',rss:'📡 RSS',fireflies:'🎙 Транскрипт',grain:'🎙 Транскрипт',meetgeek:'🎙 Транскрипт',gdrive:'📁 Drive',brand:'✨ Бренд',plan:'📅 План',idea:'💡 Ідея',diary:'📔 Щоденник'};
 async function loadMaterials(){ try{ const r=await api('/materials'); Mats=r.materials||[]; }catch(e){ Mats=[]; } try{ const ib=await api('/ideas'); Ideas=ib.ideas||[]; }catch(e){ Ideas=[]; } renderMaterials(); updateCounts(); }
 function matType(m){ return MAT_TYPE[m.origin]||m.origin; }
@@ -193,15 +202,14 @@ function renderMaterials(){
   const feed=$('matFeed'); if(!feed) return;
   const types=['Усі',...new Set(Mats.map(matType))];
   const ft=$('matFilters'); if(ft){ let html=types.map(t=>{ const n=t==='Усі'?Mats.length:Mats.filter(m=>matType(m)===t).length; return '<div class="ftab'+(MatFilter===t?' on':'')+'" data-mf="'+esc(t)+'">'+esc(t)+' <span style="opacity:.6">'+n+'</span></div>'; }).join('');
-    html+='<div class="ftab'+(MatFilter===BANK_FILTER?' on':'')+'" data-mf="'+esc(BANK_FILTER)+'" style="margin-left:6px">'+esc(BANK_FILTER)+' <span style="opacity:.6">'+Ideas.length+'</span></div>';
+    // (Банк ідей переїхав у власну вкладку «💡 Ідеї» - чіп звідси прибрано)
     // другий ряд: фільтр за КОНКРЕТНОЮ стрічкою («ця інста / ця тема новин / той телеграм»)
     const feeds={}; Mats.forEach(m=>{ if(m.feed_id&&!feeds[m.feed_id]) feeds[m.feed_id]=(typeof rssNiceUrl==='function'&&m.feed_url&&rssNiceUrl({url:m.feed_url})!==m.feed_url)?rssNiceUrl({url:m.feed_url}):(m.feed_title||'стрічка'); });
     if(Object.keys(feeds).length) html+='<div style="flex-basis:100%;height:0"></div>'+Object.entries(feeds).map(([id,t])=>{ const n=Mats.filter(m=>m.feed_id===id).length; const lbl=String(t).length>26?String(t).slice(0,24)+'…':t; return '<div class="ftab'+(MatFeedFilter===id?' on':'')+'" data-mff="'+id+'" title="'+esc(String(t))+'">'+esc(lbl)+' <span style="opacity:.6">'+n+'</span></div>'; }).join('');
     ft.style.flexWrap='wrap';
     ft.innerHTML=html;
     ft.querySelectorAll('[data-mf]').forEach(x=>x.onclick=()=>{ MatFilter=x.dataset.mf; MatFeedFilter=null; renderMaterials(); });
-    ft.querySelectorAll('[data-mff]').forEach(x=>x.onclick=()=>{ MatFeedFilter=MatFeedFilter===x.dataset.mff?null:x.dataset.mff; if(MatFilter===BANK_FILTER) MatFilter='Усі'; renderMaterials(); }); }
-  if(MatFilter===BANK_FILTER){ renderIdeaBank(feed); return; }
+    ft.querySelectorAll('[data-mff]').forEach(x=>x.onclick=()=>{ MatFeedFilter=MatFeedFilter===x.dataset.mff?null:x.dataset.mff; renderMaterials(); }); }
   let show=MatFilter==='Усі'?Mats:Mats.filter(m=>matType(m)===MatFilter);
   if(MatFeedFilter) show=show.filter(m=>m.feed_id===MatFeedFilter);
   if(!show.length){ feed.innerHTML='<div class="empty" style="padding:20px">Порожньо. Додай матеріал кнопкою вище - або підключи RSS/транскрибатор у «Джерелах», нове зʼявиться тут само.</div>'; return; }
@@ -238,7 +246,15 @@ function renderMaterials(){
     });
   });
 }
-function bindIbAdd(){ const b=$('ibAdd'); if(b) b.onclick=async()=>{ const t=prompt('Нова ідея (1 рядок):'); if(!t||!t.trim()) return; try{ await api('/ideas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t.trim()})}); await loadMaterials(); }catch(e){ flash('⚠ '+e.message); } }; }
+// вкладка «💡 Ідеї» (Створення): банк ідей окремою адресою - з бота, AI-продовжень і власних
+async function loadIdeasTab(){
+  const feed=$('ideaBankFeed'); if(!feed) return;
+  try{ const ib=await api('/ideas'); Ideas=ib.ideas||[]; }catch(e){ Ideas=[]; }
+  const cnt=$('ideaTabCount'); if(cnt) cnt.textContent=Ideas.length||'';
+  renderIdeaBank(feed);
+}
+async function refreshIdeaViews(){ await loadMaterials(); if(cTab==='ideas') await loadIdeasTab(); }
+function bindIbAdd(){ const b=$('ibAdd'); if(b) b.onclick=async()=>{ const t=prompt('Нова ідея (1 рядок):'); if(!t||!t.trim()) return; try{ await api('/ideas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t.trim()})}); await refreshIdeaViews(); }catch(e){ flash('⚠ '+e.message); } }; }
 function renderIdeaBank(feed){
   const addBtn='<div style="padding:12px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px"><span style="font-size:12.5px;color:var(--muted)">Готові концепти постів. Витягуються в Telegram-боті командою /idea.</span><button class="ghost" id="ibAdd" style="margin-left:auto">＋ Додати ідею</button></div>';
   if(!Ideas.length){ feed.innerHTML=addBtn+'<div class="empty" style="padding:20px">Банк порожній. Додай ідею вручну - або вони зʼявляться сюди з Telegram-бота.</div>'; bindIbAdd(); return; }
@@ -253,9 +269,9 @@ function renderIdeaBank(feed){
   bindIbAdd();
   feed.querySelectorAll('[data-idea]').forEach(row=>{ const id=row.dataset.idea;
     row.querySelectorAll('[data-ia]').forEach(b=>b.onclick=async()=>{ const a=b.dataset.ia;
-      if(a==='del'){ try{ await api('/ideas/'+id+'/archive',{method:'POST'}); await loadMaterials(); }catch(e){ flash('⚠ '+e.message); } return; }
+      if(a==='del'){ try{ await api('/ideas/'+id+'/archive',{method:'POST'}); await refreshIdeaViews(); }catch(e){ flash('⚠ '+e.message); } return; }
       if(a==='post'){ aiBusy('✨ Створюю пост з ідеї…'); setCTab('posts'); setLayout('studio');
-        try{ await api('/ideas/'+id+'/post',{method:'POST'}); await loadStudioPosts(); await loadMaterials(); flash('Готово - пост у Чорновиках ✓'); }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } return; }
+        try{ await api('/ideas/'+id+'/post',{method:'POST'}); await loadStudioPosts(); await refreshIdeaViews(); flash('Готово - пост у Чорновиках ✓'); }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } return; }
     });
   });
 }
@@ -459,6 +475,66 @@ function updateCounts(){
 $('toCalendar').onclick=()=>go('publish');
 
 // ---------- аналітика ----------
+// ---------- ⚡ СЬОГОДНІ: стан дня одним екраном (той самий зміст, що ранковий дайджест бота) ----------
+async function loadToday(){
+  const w=$('todayWrap'); if(!w) return;
+  let t; try{ t=await api('/today'); }catch(e){ w.innerHTML='<div class="empty" style="padding:24px">⚠ '+esc(e.message)+'</div>'; return; }
+  const slotIcon=(s)=>s.status==='posted'?'✅':(s.status==='failed'?'⚠️':(s.status==='posting'?'⏳':'🕓'));
+  const slots=(t.slots||[]).length
+    ? t.slots.map(s=>'<div class="tdRow" data-slot="'+s.id+'" data-post="'+s.post_id+'" data-at="'+esc(s.scheduled_at)+'" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);cursor:pointer" title="'+esc(s.result||s.status)+' · відкрити в композері">'
+        +'<b style="min-width:52px;font-variant-numeric:tabular-nums">'+locHM(s.scheduled_at)+'</b><span>'+slotIcon(s)+'</span><span style="font-size:14px">'+chanIcons(s.channels)+'</span>'
+        +'<span style="flex:1;min-width:0;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(s.title||'')+'</span></div>').join('')
+    : '<div class="empty" style="padding:14px 0">Сьогодні нічого не заплановано.'+(t.nextSlot?'':' Згенеруй пост або відкрий календар.')+'</div>';
+  const drafts=(t.drafts||[]).length
+    ? t.drafts.map(d=>'<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)">'
+        +(d.rubric?'<span class="ptag" style="flex:none">🏷 '+esc(d.rubric)+'</span>':'')
+        +'<span style="flex:1;min-width:0;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(d.title||'')+'</span>'
+        +'<button class="ghost tdEdit" data-post="'+d.id+'" style="padding:5px 11px;font-size:12px;flex:none">✍ Редагувати</button>'
+        +'<button class="primary tdOk" data-post="'+d.id+'" style="padding:5px 11px;font-size:12px;flex:none">✅ Затвердити</button></div>').join('')
+    : '<div class="empty" style="padding:14px 0">Все затверджено 🙌</div>';
+  const th=t.threads;
+  const tiles=[
+    th?['🔥 Стрік Threads', th.streak+' дн.', th.postedToday?'сьогодні вже є пост ✓':'<span style="color:var(--danger)">сьогодні ще пусто</span>']:null,
+    th?['💬 Коменти','<span id="tdComm"><span class="spin"></span></span>','без відповіді · клік = відповісти']:null,
+    ['💡 Ідеї в банку', String(t.ideas||0), 'клік = відкрити'],
+    ['📝 Чернеток усього', String(t.draftsTotal||0), 'клік = у Чорновики'],
+  ].filter(Boolean);
+  w.innerHTML=
+    '<div class="stat-grid" style="margin-bottom:16px">'+tiles.map((s,i)=>'<div class="stat tdTile" data-tile="'+i+'" style="cursor:pointer"><div class="l">'+s[0]+'</div><div class="v" style="font-size:21px">'+s[1]+'</div><div class="d">'+s[2]+'</div></div>').join('')+'</div>'
+    +'<div class="grid2" style="align-items:start">'
+      +'<div class="panel" style="margin:0"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="font-weight:700;font-size:14.5px">📤 Сьогодні виходить</div><button class="ghost" id="tdCal" style="margin-left:auto;padding:5px 11px;font-size:12px">🗓 Календар</button></div>'+slots+'</div>'
+      +'<div class="panel" style="margin:0"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="font-weight:700;font-size:14.5px">✅ На затвердження</div><button class="ghost" id="tdAll" style="margin-left:auto;padding:5px 11px;font-size:12px">Всі чернетки →</button></div>'+drafts+'</div>'
+    +'</div>'
+    +'<div class="panel" style="margin-top:16px"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
+      +'<div style="flex:1;min-width:220px"><div style="font-weight:700;font-size:14.5px;margin-bottom:3px">⚡ Зробити зараз</div>'
+      +(t.nextSlot?'<div style="font-size:13px;color:var(--ink2)">Наступна тема плану: <b>'+esc(String(t.nextSlot.theme||'').slice(0,90))+'</b> <span style="color:var(--faint)">('+esc(String(t.nextSlot.slot_date).slice(5))+')</span></div>':'<div style="font-size:13px;color:var(--muted)">План порожній - згенеруй скелет у «Публікація → План і ритм».</div>')+'</div>'
+      +(t.nextSlot?'<button class="primary" id="tdGenSlot">✍️ Пост із теми дня</button>':'')
+      +(th?'<button class="ghost" id="tdTakes" title="3 короткі тейки в чернетки - врятувати день у Threads">🧵 3 тейки</button>':'')
+    +'</div></div>';
+  // дії
+  w.querySelectorAll('.tdRow').forEach(r=>r.onclick=()=>openComposer(r.dataset.post,{scheduledAt:r.dataset.at,slotId:r.dataset.slot}));
+  w.querySelectorAll('.tdEdit').forEach(b=>b.onclick=()=>openComposer(b.dataset.post));
+  w.querySelectorAll('.tdOk').forEach(b=>b.onclick=async()=>{ b.disabled=true;
+    try{ await api('/posts/'+b.dataset.post+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'approved'})}); flash('✅ Затверджено'); loadToday(); try{ loadStudioPosts(); }catch(e){} }
+    catch(e){ flash('⚠ '+e.message); b.disabled=false; } });
+  const tCal=$('tdCal'); if(tCal) tCal.onclick=()=>{ selectView('publish'); setPTab('cal'); };
+  const tAll=$('tdAll'); if(tAll) tAll.onclick=()=>{ selectView('create'); setCTab('posts'); };
+  w.querySelectorAll('.tdTile').forEach(el=>el.onclick=()=>{ const lbl=tiles[+el.dataset.tile][0];
+    if(lbl.includes('Коменти')) openThreadsComments();
+    else if(lbl.includes('Ідеї')){ selectView('create'); setCTab('ideas'); }
+    else if(lbl.includes('Чернеток')){ selectView('create'); setCTab('posts'); }
+    else if(lbl.includes('Стрік')) selectView('analytics'); });
+  const tGen=$('tdGenSlot'); if(tGen) tGen.onclick=async()=>{ tGen.disabled=true; aiBusy('✍️ Генерую пост із теми дня…');
+    try{ await api('/plan/slots/'+t.nextSlot.id+'/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:'theme'})}); flash('Чернетка готова ✓'); loadToday(); try{ loadStudioPosts(); }catch(e){} }
+    catch(e){ flash('⚠ '+e.message); tGen.disabled=false; } finally{ aiDone(); } };
+  const tTk=$('tdTakes'); if(tTk) tTk.onclick=async()=>{ tTk.disabled=true; aiBusy('🧵 Пишу тейки…');
+    try{ const r=await api('/posts/threads-takes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:3})}); flash('🧵 +'+r.created+' чернеток'); loadToday(); }
+    catch(e){ flash('⚠ '+e.message); tTk.disabled=false; } finally{ aiDone(); } };
+  // лічильник коментарів - окремо (живі виклики Threads API, не блокують екран)
+  if(th){ api('/threads/comments?countOnly=1').then(r=>{ const el=$('tdComm'); if(el) el.textContent=String(r.count||0); })
+    .catch(()=>{ const el=$('tdComm'); if(el){ el.textContent='—'; el.title='не вдалося прочитати (перепідключи Threads для нових дозволів)'; } }); }
+}
+
 async function loadAnalytics(){
   const box=$('analyticsBox'); if(!box) return;
   // миттєвий скелетон + ПАРАЛЕЛЬНІ локальні запити; повільна статистика мереж підтягується окремо після рендера
@@ -533,10 +609,12 @@ async function loadAnalytics(){
     }
     el.innerHTML='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px"><div style="font-weight:700;font-size:14px">🧵 Threads'+(t.username?(' · @'+esc(t.username)):'')+'</div>'
       +(t.followers!=null?'<span style="font-size:12.5px;color:var(--muted)">підписників: <b style="color:var(--ink)">'+fmt(t.followers)+'</b></span>':'')
-      +'<span style="margin-left:auto;font-size:11px;color:var(--faint)">останні 7 днів vs попередні 7</span></div>'
+      +'<button class="ghost" id="anThComments" style="margin-left:auto;padding:5px 12px;font-size:12.5px" title="Коментарі під твоїми постами + AI-драфти відповідей">💬 Коменти</button>'
+      +'<span style="font-size:11px;color:var(--faint)">останні 7 днів vs попередні 7</span></div>'
       +(t.insightsError?'<div class="hint" style="margin:4px 0 8px">⚠ Інсайти профілю недоступні: '+esc(t.insightsError)+' (можливо, чекаємо схвалення threads_manage_insights)</div>':'')
       +'<div class="stat-grid" style="margin:10px 0 14px">'+tiles.map(s=>'<div class="stat"><div class="l">'+s[0]+'</div><div class="v" style="font-size:19px">'+s[1]+'</div><div class="d">'+(s[2]||'&nbsp;')+'</div></div>').join('')+'</div>'
       +'<div style="font-weight:700;font-size:13px;margin-bottom:6px">Останні пости</div>'+posts+demo;
+    const cb=$('anThComments'); if(cb) cb.onclick=()=>openThreadsComments(cb);
   }).catch(()=>{ /* Threads не підключено - панель лишається схованою */ });
   // мережева статистика довантажується ПІСЛЯ рендера сторінки (Graph API повільний - не блокуємо аналітику)
   api('/integrations/meta/stats').then(m=>{
@@ -705,8 +783,9 @@ if($('thStarter')) $('thStarter').onclick=async()=>{ const b=$('thStarter'); b.d
     ov.querySelector('#spPin').onclick=()=>{ close(); openComposer(r.pinnedId); };
     try{ await loadStudioPosts(); }catch(_){ }
   }catch(e){ flash('⚠ '+e.message); } finally{ b.disabled=false; aiDone(); } };
-// 💬 реплай-коуч: свіжі коменти під нашими постами + AI-драфт відповіді (Мосері: «відповідай більше, ніж постиш»)
-if($('thReplies')) $('thReplies').onclick=async()=>{ const b=$('thReplies'); b.disabled=true; aiBusy('💬 Збираю коментарі і пишу драфти відповідей…');
+// 💬 реплай-коуч: свіжі коменти під нашими постами + AI-драфт відповіді (Мосері: «відповідай більше, ніж постиш»).
+// Викликається з «Сьогодні» (тайл коментарів) і з панелі Threads в Аналітиці.
+async function openThreadsComments(btn){ const b=btn||null; if(b) b.disabled=true; aiBusy('💬 Збираю коментарі і пишу драфти відповідей…');
   try{ const r=await api('/threads/comments');
     const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
     const items=r.items||[];
@@ -728,7 +807,7 @@ if($('thReplies')) $('thReplies').onclick=async()=>{ const b=$('thReplies'); b.d
         try{ await api('/threads/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({commentId:it.commentId,text})});
           m.style.color='var(--brand)'; m.textContent='✓ відповідь у гілці'; card.style.opacity='.55'; }
         catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; sb.disabled=false; } }; });
-  }catch(e){ flash('⚠ '+e.message); } finally{ b.disabled=false; aiDone(); } };
+  }catch(e){ flash('⚠ '+e.message); } finally{ if(b) b.disabled=false; aiDone(); } }
 // 🔍 розбір ніші: формули з хітів топ-авторів → правила голосу + ідеї в Банк
 if($('thNiche')) $('thNiche').onclick=async()=>{ const b=$('thNiche'); b.disabled=true; aiBusy('🔍 Аналізую хіти твоєї ніші в Threads…');
   try{ const r=await api('/threads/niche-review',{method:'POST'});
@@ -2279,9 +2358,9 @@ async function renderObConnect(oc){
     bb.style.cssText='position:fixed;bottom:76px;right:12px;z-index:95;background:#e67e22;color:#fff;font-weight:800;font-size:11px;padding:4px 10px;border-radius:20px;letter-spacing:.06em;box-shadow:0 2px 8px rgba(0,0,0,.25);pointer-events:none';
     document.body.appendChild(bb); }
   // відновлюємо останній відкритий розділ (щоб оновлення сторінки лишало юзера де він був), інакше «Створення»
-  const _views=['create','publish','brand','strategy','sources','analytics','settings'];
+  const _views=['today','create','publish','brand','strategy','sources','analytics','settings'];
   const _lastView=localStorage.getItem('kg_view');
-  selectView(_views.includes(_lastView)?_lastView:'create'); setLayout('studio'); renderCountChips();
+  selectView(_views.includes(_lastView)?_lastView:'today'); setLayout('studio'); renderCountChips();
   renderStudio(); renderInbox(); renderStudioSteps({}); renderSourceCard(null);
   try{ const me=await api('/auth/me'); $('userEmail').textContent=me.email; if(me.email) $('avatar').textContent=(me.email[0]||'О').toUpperCase(); }
   catch(e){ location.href='/login'; return; }

@@ -374,10 +374,10 @@
       <div class="wordmark">socialio</div>
     </div>
     <nav class="topnav-tabs">
-      <div class="navitem active" data-view="create"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L18 10a2.8 2.8 0 00-4-4L4 16v4z"></path><path d="M13 7l4 4"></path></svg><span class="lbl">Створення</span></div>
+      <div class="navitem active" data-view="today"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"></path></svg><span class="lbl">Сьогодні</span></div>
+      <div class="navitem" data-view="create"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L18 10a2.8 2.8 0 00-4-4L4 16v4z"></path><path d="M13 7l4 4"></path></svg><span class="lbl">Створення</span></div>
       <div class="navitem" data-view="publish"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M4 9h16M8 3v3M16 3v3"></path></svg><span class="lbl">Публікація</span></div>
-      <div class="navitem" data-view="brand"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a4 4 0 014 4 3.5 3.5 0 01.5 6.9A4 4 0 0112 21a4 4 0 01-4.5-7.1A3.5 3.5 0 018 7a4 4 0 014-4z"></path><path d="M12 3v18"></path></svg><span class="lbl">Бренд</span></div>
-      <div class="navitem" data-view="strategy"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3"></circle></svg><span class="lbl">Стратегія</span></div>
+      <div class="navitem" data-view="brand"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a4 4 0 014 4 3.5 3.5 0 01.5 6.9A4 4 0 0112 21a4 4 0 01-4.5-7.1A3.5 3.5 0 018 7a4 4 0 014-4z"></path><path d="M12 3v18"></path></svg><span class="lbl">Бренд і стратегія</span></div>
       <div class="navitem" data-view="analytics"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V11M12 20V4M19 20v-6M3 20h18"></path></svg><span class="lbl">Аналітика</span></div>
     </nav>
     <div class="topnav-right">
@@ -395,6 +395,7 @@
           <div class="umitem" data-um="profile">👤 Профіль</div>
           <div class="umitem" data-um="channels">🔗 Канали</div>
           <div class="umitem" data-um="sources">📥 Джерела</div>
+          <div class="umitem" id="umTools" title="Розширені інструменти: покроковий PRO-конвеєр генерації">🧰 Інструменти <span style="font-size:9px;font-weight:800;background:var(--brand);color:var(--brand-ink);border-radius:5px;padding:1px 5px;margin-left:3px">PRO</span></div>
           <div style="height:1px;background:var(--line)"></div>
           <div class="umitem" id="logoutBtn" style="color:var(--danger)">Вийти</div>
         </div>
@@ -404,10 +405,10 @@
 
   <!-- нижня навігація (мобільна): ті самі data-view, підсвітку/кліки веде selectView -->
   <nav class="bottomnav">
-    <div class="navitem active" data-view="create"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L18 10a2.8 2.8 0 00-4-4L4 16v4z"></path><path d="M13 7l4 4"></path></svg><span class="lbl">Створення</span></div>
+    <div class="navitem active" data-view="today"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"></path></svg><span class="lbl">Сьогодні</span></div>
+    <div class="navitem" data-view="create"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L18 10a2.8 2.8 0 00-4-4L4 16v4z"></path><path d="M13 7l4 4"></path></svg><span class="lbl">Створення</span></div>
     <div class="navitem" data-view="publish"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M4 9h16M8 3v3M16 3v3"></path></svg><span class="lbl">Публікація</span></div>
     <div class="navitem" data-view="brand"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a4 4 0 014 4 3.5 3.5 0 01.5 6.9A4 4 0 0112 21a4 4 0 01-4.5-7.1A3.5 3.5 0 018 7a4 4 0 014-4z"></path><path d="M12 3v18"></path></svg><span class="lbl">Бренд</span></div>
-    <div class="navitem" data-view="strategy"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3"></circle></svg><span class="lbl">Стратегія</span></div>
     <div class="navitem" data-view="analytics"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V11M12 20V4M19 20v-6M3 20h18"></path></svg><span class="lbl">Аналітика</span></div>
   </nav>
 
@@ -416,14 +417,21 @@
       <div class="pagehead"><div class="ptitle" id="pageTitle">Створення</div><div class="psub" id="pageSub">Переглянь і затвердь готові пости</div></div>
       <div id="taskStrip" style="display:none"></div>
 
+      <!-- ============ TODAY: стан дня одним екраном (той самий зміст, що ранковий дайджест бота) ============ -->
+      <section class="viewsec active" data-view="today">
+        <div id="todayWrap"><div class="empty" style="padding:24px">Завантажую твій день…</div></div>
+      </section>
+
       <!-- ============ CREATE: конвеєр Матеріали → План → Чорновики ============ -->
-      <section class="viewsec active" data-view="create">
+      <section class="viewsec" data-view="create">
         <!-- закріплений ряд вкладок: тут же живе кнопка наступного кроку («До календаря») -->
         <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;position:sticky;top:52px;z-index:25;background:var(--bg);padding:10px 0 12px;margin-bottom:10px">
           <div class="tabs" id="cTabs">
             <div class="tab" data-ctab="materials">📥 Матеріали <span class="badge" id="matCount" style="margin-left:5px"></span></div>
             <div class="tab on" data-ctab="posts">📝 Чорновики <span class="badge" id="postCount" style="margin-left:5px"></span></div>
+            <div class="tab" data-ctab="ideas">💡 Ідеї <span class="badge" id="ideaTabCount" style="margin-left:5px"></span></div>
           </div>
+          <!-- Конвеєр (PRO-кишка) переїхав у аватар-меню «🧰 Інструменти» - вкладки більше не шумлять -->
           <div class="tabs proonly" id="layoutTabs" style="display:none">
             <div class="tab on" data-lay="studio">Студія</div>
             <div class="tab" data-lay="pipeline">Конвеєр <span id="pipePro" style="display:none;font-size:9px;font-weight:800;background:var(--brand);color:var(--brand-ink);border-radius:5px;padding:1px 5px;margin-left:3px">PRO</span></div>
@@ -439,6 +447,11 @@
             <button class="primary" id="addMaterialBtn" style="margin-left:auto">＋ Додати матеріал</button>
           </div>
           <div class="panel" style="padding:0;overflow:hidden"><div id="matFeed"><div class="empty" style="padding:20px">Завантажую матеріали…</div></div></div>
+        </div>
+
+        <!-- IDEAS: Банк ідей (одна адреса для ідей з бота, AI-продовжень і власних) -->
+        <div id="layIdeas" style="display:none">
+          <div class="panel" style="padding:0;overflow:hidden"><div id="ideaBankFeed"><div class="empty" style="padding:20px">Завантажую ідеї…</div></div></div>
         </div>
 
         <!-- PLAN: скелет + ритм у дві колонки (компактно), довгі пояснення - у «?»-підказках -->
@@ -464,17 +477,8 @@
               <div id="rhythmRows"><span style="font-size:12.5px;color:var(--muted)">…</span></div>
             </div>
           </div>
-          <div class="panel proonly" id="chanPlanPanel" style="display:none">
-            <div class="ph" style="display:flex;align-items:center;gap:6px">📅 Контент-план по каналах<span class="qh" title="Бере стратегічний бриф і будує нативний план під обраний канал (алгоритми 2025-2026).">?</span></div>
-            <div class="btnrow" style="margin-top:8px;align-items:center;flex-wrap:wrap">
-              <select id="cpChannel"><option value="telegram">Telegram</option><option value="instagram">Instagram</option><option value="threads">Threads</option><option value="facebook">Facebook</option></select>
-              <label style="font-size:12px;color:var(--muted)">днів <input id="cpHorizon" class="txt" type="number" value="30" min="7" max="90" style="width:64px;display:inline-block;padding:7px 9px"></label>
-              <label style="font-size:12px;color:var(--muted)">постів/тиж <input id="cpPpw" class="txt" type="number" value="4" min="1" max="14" style="width:56px;display:inline-block;padding:7px 9px"></label>
-              <button class="primary" id="cpGen">Згенерувати план</button>
-              <span id="cpMsg" style="font-size:12px;color:var(--muted)"></span>
-            </div>
-            <div id="cpView" class="out" style="margin-top:10px"></div>
-          </div>
+          <!-- «Контент-план по каналах» (LLM-таблиця) прибрано: дублював скелет+ритм і нікуди не вливався.
+               Код/ендпоінти лишились дормантними (generateChannelPlan) - повернути можна за годину. -->
           <div class="tabs proonly" id="planChanTabs" style="display:none;margin-bottom:12px"></div>
           <div class="panel" style="padding:0;overflow:hidden"><div id="planList"><div class="empty" style="padding:20px">Скелета ще нема - натисни «Згенерувати скелет» (потрібна стратегія з розділу Стратегія).</div></div></div>
         </div>
@@ -574,6 +578,7 @@
         <div class="tabs" id="bTabs" style="margin-bottom:16px">
           <div class="tab on" data-btab="voice">✍️ Голос</div>
           <div class="tab" data-btab="visual">🎨 Візуал</div>
+          <div class="tab" data-btab="strat">🎯 Бриф і цілі</div>
         </div>
         <div id="brandVoice">
           <div class="panel">
@@ -630,6 +635,7 @@
             <div id="brollList" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"></div>
           </div>
         </div>
+        <div id="brandStratHost" style="display:none"></div>
       </section>
 
       <!-- ============ STRATEGY ============ -->
@@ -788,8 +794,8 @@
                 <label>💬 Щоденні тейки <select id="thStTakes" class="txt" style="width:auto;padding:6px 8px;display:inline-block;margin-left:4px"><option value="0">вимкнено</option><option value="3">3 на день</option><option value="5">5 на день</option></select></label>
               </div>
               <div class="hint" style="margin-top:8px">CTA-гілка бере заклик Threads з «📮 Конверсійні заклики» вище (заповни там значення). Тейки - короткі думки з Банку ідей і щоденника: щоранку о 8:00 падають чернетками в Студію, публікуєш у 1 тап.</div>
-              <div class="btnrow" style="margin-top:8px"><button class="ghost" id="thStarter">🚀 Стартовий пакет</button><button class="ghost" id="thNiche">🔍 Розбір ніші</button><button class="ghost" id="thReplies">💬 Коменти</button></div>
-              <div class="hint">Стартовий пакет: 3 варіанти біо + пост-знайомство + закріп-пост (для нового чи «сплячого» акаунта). Розбір ніші: AI шукає формули у хітах топ-авторів твоєї ніші (спершу додай їх Threads-профілі в Джерела).</div>
+              <div class="btnrow" style="margin-top:8px"><button class="ghost" id="thStarter">🚀 Стартовий пакет</button><button class="ghost" id="thNiche">🔍 Розбір ніші</button></div>
+              <div class="hint">Стартовий пакет: 3 варіанти біо + пост-знайомство + закріп-пост (для нового чи «сплячого» акаунта). Розбір ніші: AI шукає формули у хітах топ-авторів твоєї ніші (спершу додай їх Threads-профілі в Джерела). Відповіді на коментарі - на екрані «⚡ Сьогодні».</div>
               <div id="thStMsg" style="font-size:12px;color:var(--brand);min-height:16px"></div>
             </div>
           </div>
