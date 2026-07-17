@@ -36,6 +36,7 @@ import { startDigest } from "./digest.js";
 import { startMetrics, networkBenchmarks } from "./metrics.js";
 import { startDiary } from "./diary.js";
 import { startThreadsAuto } from "./threads-auto.js";
+import { getSettingText } from "./settings.js";
 import { generateImageForPost, imageProviders, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto } from "./images.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername } from "./tgbot.js";
 
@@ -768,6 +769,8 @@ app.get("/api/threads/comments", async (req: any, reply) => {
   if (!items.length && permErr)
     return reply.code(400).send({ error: "Не вдалося прочитати коментарі: " + permErr + ". Якщо пермішен threads_manage_replies щойно увімкнено - перепідключи Threads у Налаштування → Канали (токен отримує нові дозволи лише при повторному підключенні)." });
   items.sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
+  // ?countOnly=1 - дешевий лічильник для екрана «Сьогодні» (без LLM-драфтів)
+  if (String(req.query?.countOnly || "") === "1") return { count: items.length };
   let drafts: Record<string, string> = {};
   try { drafts = await suggestThreadReplies(ws, items.map((it) => ({ commentId: it.commentId, postText: it.postText, comment: it.comment, username: it.username }))); }
   catch { /* без драфтів теж корисно - користувач напише сам */ }
@@ -940,6 +943,53 @@ app.get("/api/lead-magnets", async (req: any) => {
 
 // «Коваль» (самонавчання голосу): правка юзера → постійне правило в tone_of_voice
 // Бенчмарки ×N: медіана переглядів по мережі (норма) + множник кожного поста до неї
+// ⚡ Екран «Сьогодні»: один виклик = стан дня (те саме, що ранковий дайджест бота, але живе в застосунку).
+// Дешевий: лише БД-запити; коменти Threads фронт довантажує окремо (?countOnly=1).
+app.get("/api/today", async (req: any) => {
+  const ws = req.user.workspace_id;
+  const tz = (await getSettingText(ws, "timezone")) || "Europe/Kyiv";
+  const dayStr = (offset: number) => new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(Date.now() - offset * 86400e3));
+  const today = dayStr(0);
+  const [slots, drafts, draftsCount, ideas, nextSlot, thConn, thDays] = await Promise.all([
+    // що виходить/вийшло сьогодні (за таймзоною воркспейсу)
+    q<any>(`select ss.id, ss.scheduled_at, ss.status, ss.result, coalesce(ss.channels, p.channels) as channels,
+                   p.id as post_id, left(regexp_replace(p.content,'\\s+',' ','g'), 90) as title
+              from schedule_slot ss join post p on p.id=ss.post_id
+              join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+            where s.workspace_id=$1 and ss.scheduled_at is not null
+              and to_char(ss.scheduled_at at time zone $2,'YYYY-MM-DD')=$3
+            order by ss.scheduled_at`, [ws, tz, today]),
+    // топ-3 чернетки на затвердження (найсвіжіші, ще не затверджені й не опубліковані)
+    q<any>(`select p.id, left(regexp_replace(p.content,'\\s+',' ','g'), 120) as title, p.rubric
+              from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+            where s.workspace_id=$1 and p.stage='final' and coalesce(p.review,'')not in('approved','archived')
+              and not exists (select 1 from threads_publish tp where tp.post_id=p.id and tp.status='sent')
+              and not exists (select 1 from telegram_publish tg2 where tg2.post_id=p.id and tg2.status='sent')
+              and not exists (select 1 from meta_publish mp where mp.post_id=p.id and mp.status='sent')
+            order by p.created_at desc limit 3`, [ws]),
+    one<{ n: number }>(`select count(*)::int n from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+            where s.workspace_id=$1 and p.stage='final' and coalesce(p.review,'') not in ('approved','archived')`, [ws]),
+    one<{ n: number }>(`select count(*)::int n from idea_bank where workspace_id=$1 and status='new'`, [ws]),
+    one<{ id: string; theme: string; slot_date: string }>(
+      `select id, theme, slot_date::text from plan_slot where workspace_id=$1 and slot_date >= $2 and status in ('empty','matched') order by slot_date limit 1`, [ws, today]),
+    one<{ n: number }>(`select count(*)::int n from threads_config where workspace_id=$1 and access_token is not null`, [ws]),
+    q<{ d: string }>(`select distinct to_char(tp.created_at at time zone $2,'YYYY-MM-DD') as d
+              from threads_publish tp join post p on p.id=tp.post_id
+              join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+            where s.workspace_id=$1 and tp.status='sent' and tp.created_at > now() - interval '60 days'`, [ws, tz]),
+  ]);
+  // стрік Threads: поспіль днів із публікацією (сьогодні ще без поста - стрік живий від учора)
+  const set = new Set(thDays.map((x) => x.d));
+  let streak = 0;
+  for (let i = set.has(today) ? 0 : 1; i < 60; i++) { if (set.has(dayStr(i))) streak++; else break; }
+  return {
+    date: today,
+    slots, drafts, draftsTotal: draftsCount?.n || 0, ideas: ideas?.n || 0,
+    nextSlot: nextSlot || null,
+    threads: (thConn?.n || 0) > 0 ? { streak, postedToday: set.has(today) } : null,
+  };
+});
+
 app.get("/api/analytics/benchmarks", async (req: any) => networkBenchmarks(req.user.workspace_id));
 
 // 🧵 Розширена аналітика Threads: профіль за 7 днів (з дельтами до попередніх 7), підписники,
