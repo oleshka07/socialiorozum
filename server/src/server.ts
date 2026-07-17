@@ -950,7 +950,7 @@ app.get("/api/today", async (req: any) => {
   const tz = (await getSettingText(ws, "timezone")) || "Europe/Kyiv";
   const dayStr = (offset: number) => new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(Date.now() - offset * 86400e3));
   const today = dayStr(0);
-  const [slots, drafts, draftsCount, ideas, nextSlot, thConn, thDays] = await Promise.all([
+  const [slots, drafts, draftsCount, ideas, nextSlot, thConn, thDays, planCount, approvedCount, chanCount] = await Promise.all([
     // що виходить/вийшло сьогодні (за таймзоною воркспейсу)
     q<any>(`select ss.id, ss.scheduled_at, ss.status, ss.result, coalesce(ss.channels, p.channels) as channels,
                    p.id as post_id, left(regexp_replace(p.content,'\\s+',' ','g'), 90) as title
@@ -977,6 +977,15 @@ app.get("/api/today", async (req: any) => {
               from threads_publish tp join post p on p.id=tp.post_id
               join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
             where s.workspace_id=$1 and tp.status='sent' and tp.created_at > now() - interval '60 days'`, [ws, tz]),
+    // швидкий старт: чи є план, чи затверджений хоч один пост, чи підключений хоч один канал
+    one<{ n: number }>(`select count(*)::int n from plan_slot where workspace_id=$1`, [ws]),
+    one<{ n: number }>(`select count(*)::int n from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+            where s.workspace_id=$1 and p.review='approved'`, [ws]),
+    one<{ n: number }>(
+      `select ((exists(select 1 from telegram_config where workspace_id=$1 and bot_token is not null and (channel_chat_id is not null or group_chat_id is not null)))::int
+             + (exists(select 1 from threads_config  where workspace_id=$1 and access_token is not null))::int
+             + (exists(select 1 from meta_config     where workspace_id=$1 and page_token   is not null))::int
+             + (exists(select 1 from linkedin_config where workspace_id=$1 and access_token is not null))::int) as n`, [ws]),
   ]);
   // стрік Threads: поспіль днів із публікацією (сьогодні ще без поста - стрік живий від учора)
   const set = new Set(thDays.map((x) => x.d));
@@ -987,6 +996,7 @@ app.get("/api/today", async (req: any) => {
     slots, drafts, draftsTotal: draftsCount?.n || 0, ideas: ideas?.n || 0,
     nextSlot: nextSlot || null,
     threads: (thConn?.n || 0) > 0 ? { streak, postedToday: set.has(today) } : null,
+    quickstart: { channels: chanCount?.n || 0, plan: planCount?.n || 0, approved: approvedCount?.n || 0 },
   };
 });
 

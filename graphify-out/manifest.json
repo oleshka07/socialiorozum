@@ -5,7 +5,7 @@
     "semantic_hash": ""
   },
   "server/package.json": {
-    "mtime": 1784274148.4996016,
+    "mtime": 1784274488.2236218,
     "ast_hash": "f130cbbe4bda9ff5b73c9179091bf749",
     "semantic_hash": ""
   },
@@ -125,8 +125,8 @@
     "semantic_hash": ""
   },
   "server/src/server.ts": {
-    "mtime": 1784273403.0555573,
-    "ast_hash": "c3118ab9725dcea6fb10cdb5bf2b917c",
+    "mtime": 1784312033.0604217,
+    "ast_hash": "f91ed4238c0f1035fd7dad69b6b9c942",
     "semantic_hash": ""
   },
   "server/src/telegram.ts": {
@@ -155,8 +155,8 @@
     "semantic_hash": "352df4b84f4af2922ccd9adaf8e4608f"
   },
   "CLAUDE.md": {
-    "mtime": 1784274426.8996181,
-    "ast_hash": "e50bf6666fd8dfdd09e87d2eafbb002b",
+    "mtime": 1784314649.147407,
+    "ast_hash": "24a2300b137ad9b6bd1e54a7ac9fbb3e",
     "semantic_hash": ""
   },
   "DEPLOY.md": {
@@ -225,8 +225,8 @@
     "semantic_hash": ""
   },
   "server/public/app.html": {
-    "mtime": 1784273980.2995915,
-    "ast_hash": "a6d4ed224e63abb88e76e6e78300d6dc",
+    "mtime": 1784312084.8484197,
+    "ast_hash": "a8a0a120162e29fbabe8bc31e2548e3d",
     "semantic_hash": ""
   },
   "server/public/auth.html": {
@@ -360,8 +360,8 @@
     "semantic_hash": ""
   },
   "server/.lint/ui-smoke.mjs": {
-    "mtime": 1784274368.9413345,
-    "ast_hash": "fea5edc9944b27eeeeedf935c3a7a29b",
+    "mtime": 1784312239.0564134,
+    "ast_hash": "a78f734a17ae0073b947854b0768a564",
     "semantic_hash": ""
   },
   "server/eslint.config.mjs": {
@@ -370,8 +370,8 @@
     "semantic_hash": ""
   },
   "server/public/app.js": {
-    "mtime": 1784274058.3955963,
-    "ast_hash": "39e636ca393e5f118e2b8a925665cd56",
+    "mtime": 1784312150.892417,
+    "ast_hash": "832425c293a2536336a91922f60876fa",
     "semantic_hash": ""
   },
   "server/src/settings.ts": {
