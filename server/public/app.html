@@ -395,7 +395,7 @@
           <div class="umitem" data-um="profile">👤 Профіль</div>
           <div class="umitem" data-um="channels">🔗 Канали</div>
           <div class="umitem" data-um="sources">📥 Джерела</div>
-          <div class="umitem" id="umTools" title="Розширені інструменти: покроковий PRO-конвеєр генерації">🧰 Інструменти <span style="font-size:9px;font-weight:800;background:var(--brand);color:var(--brand-ink);border-radius:5px;padding:1px 5px;margin-left:3px">PRO</span></div>
+          <div class="umitem" id="umTools" title="Розширені інструменти: конвеєр, промт генерації, Google Drive, транскрибатори">🧰 Інструменти</div>
           <div style="height:1px;background:var(--line)"></div>
           <div class="umitem" id="logoutBtn" style="color:var(--danger)">Вийти</div>
         </div>
@@ -498,7 +498,6 @@
               <div class="disp" style="font-weight:600;font-size:17px">Чорновики</div>
               <div class="ftabs" id="studioFilters"></div>
               <span id="studioTagFilters" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"></span>
-              <button class="ghost" id="viewPrompt" title="Переглянути спільний промт генерації" style="margin-left:auto">👁 Промт</button>
             </div>
             <div class="studio-grid" id="studioGrid"></div>
           </div>
@@ -883,6 +882,20 @@
           <div class="btnrow"><button class="primary" id="ffSave">Зберегти</button><button class="ghost" id="ffTest">Перевірити</button><button class="ghost" id="ffNoSig" type="button">Без підпису</button><span id="ffMsg" style="font-size:12px;color:var(--muted)"></span></div>
         </div>
         </div>
+      </section>
+
+      <!-- ІНСТРУМЕНТИ: розширені й рідко вживані функції (щоденні розділи лишаються чистими) -->
+      <section class="viewsec" data-view="tools">
+        <div class="panel">
+          <div class="ph">🧰 Розширені інструменти</div>
+          <div class="hint">Все, що потрібно не щодня: покроковий конвеєр генерації, службові перегляди й інтеграції для просунутих сценаріїв.</div>
+          <div class="btnrow" style="margin-top:10px;flex-wrap:wrap">
+            <button class="ghost" id="toolsPipeline" title="Покроковий PRO-конвеєр: ідеї → чернетки → тон → формат → де-AI → стратегія">🧪 Конвеєр генерації <span style="font-size:9px;font-weight:800;background:var(--brand);color:var(--brand-ink);border-radius:5px;padding:1px 5px;margin-left:3px">PRO</span></button>
+            <button class="ghost" id="viewPrompt" title="Переглянути спільний промт генерації - що саме бачить AI">👁 Промт генерації</button>
+          </div>
+        </div>
+        <div id="toolsGdriveHost"></div>
+        <div id="toolsTransHost"></div>
       </section>
 
     </div>
