@@ -642,7 +642,7 @@ app.get("/api/channels/status", async (req: any) => {
 
 // повний стан поста для композера (текст, канали, фото)
 app.get("/api/posts/:postId/full", async (req: any, reply) => {
-  const p = await one(`select p.id, p.content, p.review, p.channels, p.headline, p.rubric, p.image_prompt, (p.image_base is not null) as has_base, ma.filename as media_filename
+  const p = await one(`select p.id, p.content, p.review, p.channels, p.headline, p.rubric, p.intent, p.image_prompt, (p.image_base is not null) as has_base, ma.filename as media_filename
      from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      left join media_asset ma on ma.id=p.media_id
      where p.id=$1 and s.workspace_id=$2`, [req.params.postId, req.user.workspace_id]);
@@ -660,13 +660,13 @@ app.post("/api/posts/:postId/channels", async (req: any, reply) => {
 // AI-адаптація під обрані мережі
 app.post("/api/posts/:postId/adapt", async (req: any, reply) => {
   const ws = req.user.workspace_id;
-  const post = await one<{ content: string; channels: any }>(
-    `select p.content, p.channels from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where p.id=$1 and s.workspace_id=$2`,
+  const post = await one<{ content: string; channels: any; intent: string | null }>(
+    `select p.content, p.channels, p.intent from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where p.id=$1 and s.workspace_id=$2`,
     [req.params.postId, ws]);
   if (!post) return reply.code(404).send({ error: "пост не знайдено" });
   const channels: string[] = Array.isArray(req.body?.channels) ? req.body.channels : [];
   try {
-    const variants = await adaptForChannels(ws, post.content, channels);
+    const variants = await adaptForChannels(ws, post.content, channels, post.intent || undefined);
     const cur = post.channels || {};
     for (const ch of channels) cur[ch] = { on: true, text: variants[ch] || (cur[ch] && cur[ch].text) || post.content };
     await q(`update post set channels=$2 where id=$1`, [req.params.postId, JSON.stringify(cur)]);
@@ -1897,6 +1897,8 @@ app.put("/api/posts/:postId", async (req: any, reply) => {
   if (!(await postOwned(req.params.postId, req.user.workspace_id))) return reply.code(404).send({ error: "пост не знайдено" });
   if (typeof req.body?.content === "string") await q(`update post set content=$2 where id=$1`, [req.params.postId, req.body.content]);
   if (typeof req.body?.rubric === "string") await q(`update post set rubric=nullif($2,'') where id=$1`, [req.params.postId, req.body.rubric.slice(0, 60)]);
+  if (typeof req.body?.intent === "string" && ["awareness", "nurture", "sale", ""].includes(req.body.intent))
+    await q(`update post set intent=nullif($2,'') where id=$1`, [req.params.postId, req.body.intent]);
   return { ok: true };
 });
 
@@ -2285,7 +2287,7 @@ app.get("/api/bank", async (req: any) => {
 // усі фінальні пости воркспейсу (Студія/Інбокс - глобальний список, НЕ привʼязаний до активного джерела)
 // + sent: у які мережі пост УЖЕ опубліковано (іконки на картці + фільтр «Опубліковані»)
 app.get("/api/posts/studio", async (req: any) => {
-  const rows = await q<any>(`select p.id, p.content, p.review, p.channels, p.rubric, p.reel_video, p.format, src.origin as source_origin, ma.filename as media_filename, p.created_at, src.title as source_title
+  const rows = await q<any>(`select p.id, p.content, p.review, p.channels, p.rubric, p.intent, p.reel_video, p.format, src.origin as source_origin, ma.filename as media_filename, p.created_at, src.title as source_title
             from post p join pipeline_run r on r.id=p.run_id join source src on src.id=r.source_id
             left join media_asset ma on ma.id=p.media_id
             where src.workspace_id=$1 and p.stage='final' and (p.review is null or p.review <> 'archived')

@@ -67,7 +67,7 @@ export async function alreadySentNetworks(postId: string): Promise<string[]> {
 // Якщо жодної мережі не обрано — нічого не публікує (порожній результат), без тихого fallback.
 export async function publishPostToChannels(ws: string, postId: string, onlyNets?: string[]): Promise<PubResult[]> {
   const post = await one<{ content: string; channels: any; filename: string | null }>(
-    `select p.content, p.channels, ma.filename from post p
+    `select p.content, p.channels, p.intent, ma.filename from post p
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
        left join media_asset ma on ma.id=p.media_id
      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
@@ -82,7 +82,7 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
   const missing = enabled.filter((k) => !sentSet.has(k) && !(ch[k] && String(ch[k].text || "").trim()));
   if (missing.length) {
     try {
-      const variants = await adaptForChannels(ws, post.content, missing);
+      const variants = await adaptForChannels(ws, post.content, missing, (post as any).intent || undefined);
       let changed = false;
       for (const k of missing) if (variants[k]) { ch[k] = { ...(ch[k] || {}), on: true, text: variants[k] }; changed = true; }
       if (changed) await q(`update post set channels=$2 where id=$1`, [postId, JSON.stringify(ch)]);

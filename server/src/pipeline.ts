@@ -443,7 +443,7 @@ export async function rewriteWithStep(workspaceId: string, step: StepKey, text: 
 }
 
 // AI-адаптація поста під кожну соцмережу (один виклик -> JSON {channel: text})
-export async function adaptForChannels(workspaceId: string, content: string, channels: string[]): Promise<Record<string, string>> {
+export async function adaptForChannels(workspaceId: string, content: string, channels: string[], intent?: string): Promise<Record<string, string>> {
   const rules: Record<string, string> = {
     telegram: "Telegram: короткі абзаци, помірні емодзі, 1-2 хештеги.",
     instagram: "Instagram: чіпкий підпис + 5-10 релевантних хештегів наприкінці.",
@@ -476,10 +476,16 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
       : `заклич перейти за посиланням ${v}`;
     return `\n[${c}] ${mech}`;
   }).filter(Boolean).join("");
-  const ctaRule = ctaLines
+  let ctaRule = ctaLines
     ? `\n\nКонверсійний заклик наприкінці кожної версії - ОДИН заклик = ОДНА дія, нативно вплетений:${ctaLines}` +
       "\nЕталон CTA. Погано: «Підписуйся, став лайк і пиши в дірект» (три прохання = нуль дій). Добре: «Напиши в коментарях слово ГАЙД - надішлю шаблон» (одна дія, одна механіка, вимірний результат)."
     : "";
+  // CTA-політика за наміром поста (стандарт «продає ~кожен 5-й»): awareness - НУЛЬ продажу,
+  // nurture - лише мʼяка механіка (кодове слово/лід-магніт), sale - повний CTA як налаштовано.
+  if (intent === "awareness")
+    ctaRule = "\n\nЦе пост-ЗНАЙОМСТВО (awareness): ЖОДНОГО продажного заклику, посилання чи оферу. Завершуй цінністю або питанням до аудиторії - і все.";
+  else if (intent === "nurture")
+    ctaRule += "\n\nЦе пост-ПРОГРІВ (nurture): заклик лише МʼЯКИЙ (питання, кодове слово за корисність, лід-магніт) - без прямого «купи/запишись на платне».";
   const structRules = "\n\nСтруктурні правила: telegram - ПЕРШИЙ рядок має чіпляти до згортання «…ще»; linkedin - скелет утримання: сильний перший рядок (видимий до «…more») → чому це важливо зараз (ставки) → 2-3 блоки, кожен закінчується власним висновком-пейофом → синтез → CTA.";
   // Формат постів під конкретну мережу (settings_block.channel_format): короткий/стандарт/довгий + нотатка стилю.
   // Закриває кейс «Threads під тренди на 50-100 символів» - юзер задає формат один раз у Налаштуваннях.
@@ -534,7 +540,7 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
     : "";
   const n = ideas && ideas.length ? ideas.length : count;
   const v2 = s.prompt_engine !== "legacy";
-  const outputFormat = `Поверни ЛИШЕ валідний JSON-масив обʼєктів: [{"text":"повний текст поста","image_prompt":"короткий опис зображення англійською для генерації - сцена/обʼєкти/настрій, без тексту на зображенні","rubric":"назва рубрики поста${rubs.length ? " (СТРОГО одна з переліку рубрик вище)" : ""}"}, …]. Мова текстів постів: ${lang}.`;
+  const outputFormat = `Поверни ЛИШЕ валідний JSON-масив обʼєктів: [{"text":"повний текст поста","image_prompt":"короткий опис зображення англійською для генерації - сцена/обʼєкти/настрій, без тексту на зображенні","rubric":"назва рубрики поста${rubs.length ? " (СТРОГО одна з переліку рубрик вище)" : ""}","intent":"намір поста: awareness (цінність новій аудиторії, БЕЗ продажу) | nurture (довіра й прогрів, мʼякий заклик) | sale (прямий продаж за сходами офферів)"}, …]. Розподіл намірів у наборі: більшість awareness, частина nurture, sale - не більш як ~1 із 5 (ціль «гроші/ліди» - можна 1 із 4; «ріст/авторитет» - рідше). Мова текстів постів: ${lang}.`;
 
   if (v2) {
     // V2 (бібліотека промтів): XML-структура + multishot (реальні пости автора) + меню гачків +
@@ -587,16 +593,17 @@ export async function generatePostsOnePass(runId: string, count: number, ideas?:
   const n = Math.max(1, Math.min(12, sel.length ? sel.length : (Number(count) || 6)));
   const { system, model } = await buildLitePrompt(workspace_id, n, sel.length ? sel : undefined);
   const out = await chat(model, system, `Вхідний матеріал:\n---\n${transcript}`, { workspaceId: workspace_id, step: "lite" });
-  let posts: { text: string; image_prompt: string; rubric: string }[] = [];
+  const INTENTS = new Set(["awareness", "nurture", "sale"]);
+  let posts: { text: string; image_prompt: string; rubric: string; intent: string }[] = [];
   try {
     posts = extractJsonArray<any>(out).map((x) => typeof x === "string"
-      ? { text: x, image_prompt: "", rubric: "" }
-      : { text: String(x?.text || x?.content || x?.post || ""), image_prompt: String(x?.image_prompt || x?.image || ""), rubric: String(x?.rubric || "") })
-      .map((p) => ({ text: p.text.trim(), image_prompt: p.image_prompt.trim(), rubric: p.rubric.trim().slice(0, 60) })).filter((p) => p.text);
+      ? { text: x, image_prompt: "", rubric: "", intent: "" }
+      : { text: String(x?.text || x?.content || x?.post || ""), image_prompt: String(x?.image_prompt || x?.image || ""), rubric: String(x?.rubric || ""), intent: String(x?.intent || "").toLowerCase() })
+      .map((p) => ({ text: p.text.trim(), image_prompt: p.image_prompt.trim(), rubric: p.rubric.trim().slice(0, 60), intent: INTENTS.has(p.intent) ? p.intent : "awareness" })).filter((p) => p.text);
   } catch { posts = []; }
   if (!posts.length) throw new Error("Не вдалося згенерувати пости (порожня відповідь моделі)");
   await q(`delete from post where run_id=$1 and stage='final'`, [runId]);
-  for (const p of posts) await q(`insert into post(run_id, stage, content, image_prompt, rubric) values($1,'final',$2,$3,$4)`, [runId, p.text, p.image_prompt || null, p.rubric || null]);
+  for (const p of posts) await q(`insert into post(run_id, stage, content, image_prompt, rubric, intent) values($1,'final',$2,$3,$4,$5)`, [runId, p.text, p.image_prompt || null, p.rubric || null, p.intent]);
   return posts.length;
 }
 
@@ -897,6 +904,7 @@ export async function buildLiteSkeleton(workspaceId: string, horizonDays: number
       const themes = Array.isArray(data.monthly_themes) ? data.monthly_themes.filter(Boolean).map(String) : [];
       const system = "Ти контент-стратег. Для кожного слота (рубрика задана) придумай коротку конкретну тему поста (до 12 слів) у ніші бренду." +
         (s.strategy_brief ? `\nБриф: ${s.strategy_brief.slice(0, 1500)}` : (s.marketing_context ? `\nНіша: ${s.marketing_context}` : "")) +
+        goalRule(s) +
         (netHint ? `\nПлатформа: ${netHint}` : "") +
         (topic ? `\n\nВАЖЛИВО - автор ОБОВʼЯЗКОВО хоче висвітлити саме ці теми/напрями (це пріоритет над загальними ідеями): «${topic.slice(0, 800)}». Признач їх до відповідних слотів дослівно чи як конкретні під-теми; лише РЕШТУ слотів доповни власними ідеями за рубриками.` : "") +
         (themes.length ? `\nОрієнтир тем: ${themes.slice(0, 10).join("; ")}` : "") +
