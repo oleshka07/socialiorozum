@@ -2249,7 +2249,7 @@ app.get("/api/tasks", async (req: any) => {
   const ws = req.user.workspace_id;
   const rows = await q<{ key: string; content: string }>(`select key,content from settings_block where workspace_id=$1`, [ws]);
   const S: Record<string, string> = {}; for (const r of rows) S[r.key] = (r.content || "").trim();
-  const [tg, th, mt, gd, trc, src, med, posts, appr, sched, pub, strat] = await Promise.all([
+  const [tg, th, mt, gd, trc, src, med, posts, appr, sched, pub, strat, li, planN, botOwner] = await Promise.all([
     one<any>(`select bot_token,channel_chat_id,group_chat_id from telegram_config where workspace_id=$1`, [ws]),
     one<any>(`select access_token from threads_config where workspace_id=$1`, [ws]),
     one<any>(`select page_token from meta_config where workspace_id=$1`, [ws]),
@@ -2264,24 +2264,35 @@ app.get("/api/tasks", async (req: any) => {
       + (select count(*) from meta_publish mp join post p on p.id=mp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and mp.status='sent')
       + (select count(*) from threads_publish thp join post p on p.id=thp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and thp.status='sent') as n`, [ws]),
     one<{ data: any }>(`select data from strategy where workspace_id=$1`, [ws]),
+    one<any>(`select access_token from linkedin_config where workspace_id=$1`, [ws]),
+    one<{ n: number }>(`select count(*)::int n from plan_slot where workspace_id=$1`, [ws]),
+    one<{ n: number }>(`select count(*)::int n from tg_owner where workspace_id=$1`, [ws]),
   ]);
   const tgOn = !!(tg && tg.bot_token && (tg.channel_chat_id || tg.group_chat_id));
   const igfbOn = !!(mt && mt.page_token);
   const thOn = !!(th && th.access_token);
+  const liOn = !!(li && li.access_token);
+  const chanCnt = [tgOn, igfbOn, thOn, liOn].filter(Boolean).length;
+  // Навчальний шлях = реальний воркфлоу продукту: бренд+позиціонування → стратегія+план →
+  // канали+бот → контент → публікація. Порядок у модалці задає order в openTasksModal.
   const tasks = [
     { id: "brand", section: "brand", points: 15, label: "Заповнити Базу бренду (ніша й аудиторія)", done: !!S.marketing_context },
     { id: "voice", section: "brand", points: 10, label: "Налаштувати голос бренду", done: !!S.tone_of_voice },
-    { id: "chan1", section: "settings", points: 15, label: "Підключити хоча б один канал", done: tgOn || igfbOn || thOn },
-    { id: "chanAll", section: "settings", points: 10, label: "Підключити всі канали (Telegram, IG/FB, Threads)", done: tgOn && igfbOn && thOn },
-    { id: "transcriber", section: "settings", points: 5, label: "Підключити транскрибатор (Fireflies)", done: !!(trc && trc.api_key) },
-    { id: "gdrive", section: "sources", points: 5, label: "Підключити Google Drive", done: !!(gd && gd.refresh_token) },
-    { id: "source", section: "sources", points: 5, label: "Додати джерело контенту", done: (src?.n || 0) > 0 },
+    { id: "pains", section: "strategy", points: 10, label: "Заповнити болі клієнта і тезу «Х для Y» (рушій генерації)", done: !!(S.pain_points || S.brand_thesis) },
+    { id: "goal", section: "strategy", points: 5, label: "Обрати головну ціль контенту", done: !!S.primary_goal },
+    { id: "strategy", section: "strategy", points: 5, label: "Згенерувати стратегію (рубрики й ритм)", done: !!(strat && strat.data && Object.keys(strat.data).length) },
+    { id: "plan", section: "publish", points: 10, label: "Згенерувати контент-план (теми наперед)", done: (planN?.n || 0) > 0 },
+    { id: "chan1", section: "settings", points: 15, label: "Підключити перший канал публікації", done: chanCnt >= 1 },
+    { id: "chan2", section: "settings", points: 5, label: "Підключити другий канал (той самий пост - ширше охоплення)", done: chanCnt >= 2 },
+    { id: "bot", section: "settings", points: 10, label: "Підключити бот-асистент у Telegram (ідеї, щоденник, дайджест)", done: (botOwner?.n || 0) > 0 },
+    { id: "source", section: "sources", points: 5, label: "Додати джерело контенту (тема новин, Telegram-канал, RSS)", done: (src?.n || 0) > 0 },
     { id: "media", section: "sources", points: 5, label: "Завантажити або згенерувати фото", done: (med?.n || 0) > 0 },
-    { id: "strategy", section: "strategy", points: 5, label: "Згенерувати стратегію", done: !!(strat && strat.data && Object.keys(strat.data).length) },
     { id: "gen10", section: "create", points: 10, label: "Згенерувати перші 10 постів", done: (posts?.n || 0) >= 10 },
-    { id: "approve", section: "create", points: 5, label: "Затвердити пости", done: (appr?.n || 0) > 0 },
-    { id: "schedule", section: "publish", points: 5, label: "Запланувати пост у календарі", done: (sched?.n || 0) > 0 },
+    { id: "approve", section: "create", points: 5, label: "Затвердити перший пост", done: (appr?.n || 0) > 0 },
+    { id: "schedule", section: "publish", points: 5, label: "Запланувати пост у календарі (AI-розподіл)", done: (sched?.n || 0) > 0 },
     { id: "publish", section: "publish", points: 10, label: "Зробити першу публікацію", done: Number(pub?.n || 0) > 0 },
+    { id: "transcriber", section: "settings", points: 5, label: "Інструменти: підключити транскрибатор (Fireflies)", done: !!(trc && trc.api_key) },
+    { id: "gdrive", section: "sources", points: 5, label: "Інструменти: підключити Google Drive (банк фото)", done: !!(gd && gd.refresh_token) },
     { id: "plans", section: "settings", points: 5, label: "Ознайомитися з тарифами", done: S.seen_plans === "1" },
   ];
   const total = tasks.reduce((a, t) => a + t.points, 0);
