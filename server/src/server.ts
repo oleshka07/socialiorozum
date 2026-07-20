@@ -459,6 +459,29 @@ app.post("/api/generate/from-brand", async (req: any, reply) => {
   return { runId: run!.id };
 });
 
+// «Написати про конкретну тему»: користувач задає НАПРЯМ, сервіс одразу генерує пости саме про це
+// (закриває фідбек «не вистачає задати про що писати»). channels? - націлити пости на обрані мережі.
+app.post("/api/generate/topic", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const topic = String(req.body?.topic || "").trim();
+  if (!topic) return reply.code(400).send({ error: "Напиши, про що зробити пост" });
+  const count = Math.max(1, Math.min(10, Number(req.body?.count) || 3));
+  const nets: string[] = Array.isArray(req.body?.channels) ? req.body.channels.map((x: any) => String(x)).filter((x: string) => PLAN_NETS.includes(x)) : [];
+  try {
+    const src = await one<{ id: string }>(`insert into source(workspace_id, origin, title, transcript) values($1,'topic',$2,$3) returning id`,
+      [ws, topic.slice(0, 200), `Напрям для постів (пиши САМЕ про це, у голосі бренду): ${topic}`]);
+    const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
+    // кожен пост - інший кут тієї самої теми
+    const ideas = Array.from({ length: count }, (_, i) => count > 1 ? `${topic} (кут ${i + 1}: свіжий ракурс, не повторюй попередні)` : topic);
+    await generatePostsOnePass(run!.id, count, ideas);
+    if (nets.length) {
+      const patch = JSON.stringify(Object.fromEntries(nets.map((n) => [n, { on: true }])));
+      await q(`update post set channels=coalesce(channels,'{}'::jsonb) || $2::jsonb where run_id=$1 and stage='final'`, [run!.id, patch]);
+    }
+    return { ok: true, runId: run!.id, count };
+  } catch (e: any) { await logEvent("error", "gen_topic", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
+});
+
 // ----- контент-джерела (RSS) -----
 app.get("/api/sources/rss", async (req: any) =>
   q(`select id, url, title, kind, active, auto_run, last_pulled_at, last_error from content_source
@@ -1929,41 +1952,41 @@ app.get("/api/channel-plan/:channel", async (req: any) => {
 // ===================== ПЛАН-СКЕЛЕТ (workspace-scoped слоти: що і коли має вийти) =====================
 // Lite (mode='lite', default): ОДИН канало-незалежний скелет (channel='all') детерміновано зі стратегії.
 // PRO (mode='pro', channel=X): багатший план під конкретний канал (LLM, нативні алгоритми) - окрема вкладка.
+const PLAN_NETS = ["telegram", "instagram", "threads", "facebook", "linkedin"];
 app.post("/api/plan/generate", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   try {
-    const mode = req.body?.mode === "pro" ? "pro" : "lite";
     const horizon = Math.max(7, Math.min(90, Number(req.body?.horizon) || 14));
+    const ppw = Math.max(1, Math.min(14, Number(req.body?.posts_per_week) || 4));
+    const topic = String(req.body?.topic || "").trim().slice(0, 1000);
     const anchor = new Date(); anchor.setUTCHours(12, 0, 0, 0);
-    let n = 0;
-    if (mode === "pro") {
-      const channel = String(req.body?.channel || "telegram").trim();
-      const ppw = Math.max(1, Math.min(14, Number(req.body?.posts_per_week) || 4));
-      const rows = await generateChannelPlan(ws, channel, horizon, ppw);
-      if (!rows.length) return reply.code(400).send({ error: "План порожній - спершу згенеруй стратегію (розділ Стратегія)" });
-      await q(`delete from plan_slot where workspace_id=$1 and channel=$2 and status in ('empty','matched')`, [ws, channel]);
-      for (const r of rows) {
-        const day = Math.max(1, Number(r?.day) || (n + 1));
-        const d = new Date(anchor); d.setUTCDate(d.getUTCDate() + day);
-        await q(`insert into plan_slot(workspace_id, slot_date, channel, rubric, theme, hook, cta) values($1,$2,$3,$4,$5,$6,$7)`,
-          [ws, d.toISOString().slice(0, 10), channel, String(r?.pillar || "").slice(0, 60) || null,
-           String(r?.message || r?.hook || "Тема").slice(0, 300), String(r?.hook || "").slice(0, 300) || null, String(r?.cta || "").slice(0, 200) || null]);
-        n++;
-      }
-    } else {
-      const ppw = Math.max(1, Math.min(14, Number(req.body?.posts_per_week) || 4));
-      const slots = await buildLiteSkeleton(ws, horizon, ppw); // кидає чітку помилку, якщо нема стратегії
-      // Lite = ОДИН спільний скелет: прибираємо незаповнені слоти БУДЬ-ЯКОГО каналу (включно з легасі-скелетами до переходу на channel='all')
-      await q(`delete from plan_slot where workspace_id=$1 and status in ('empty','matched')`, [ws]);
+    // мережі, обрані для плану (порожньо = один спільний скелет 'all', легасі-поведінка)
+    const nets: string[] = Array.isArray(req.body?.networks) ? req.body.networks.map((x: any) => String(x)).filter((x: string) => PLAN_NETS.includes(x)) : [];
+    let total = 0; const byNet: Record<string, number> = {};
+    const insertSlots = async (channel: string, slots: { day: number; rubric: string; theme: string; hook: string }[]) => {
       for (const sl of slots) {
         const d = new Date(anchor); d.setUTCDate(d.getUTCDate() + sl.day);
-        await q(`insert into plan_slot(workspace_id, slot_date, channel, rubric, theme, hook) values($1,$2,'all',$3,$4,$5)`,
-          [ws, d.toISOString().slice(0, 10), sl.rubric || null, sl.theme.slice(0, 300), sl.hook.slice(0, 300) || null]);
-        n++;
+        await q(`insert into plan_slot(workspace_id, slot_date, channel, rubric, theme, hook) values($1,$2,$3,$4,$5,$6)`,
+          [ws, d.toISOString().slice(0, 10), channel, sl.rubric || null, sl.theme.slice(0, 300), sl.hook.slice(0, 300) || null]);
+        total++; byNet[channel] = (byNet[channel] || 0) + 1;
       }
+    };
+    if (nets.length) {
+      // окремий скелет НА КОЖНУ мережу: свій набір тем (тон під платформу), channel=<мережа>.
+      // прибираємо старі незаповнені слоти цих мереж + легасі спільні ('all'), щоб не змішувати моделі.
+      await q(`delete from plan_slot where workspace_id=$1 and status in ('empty','matched') and (channel = any($2) or channel='all')`, [ws, nets]);
+      for (const net of nets) {
+        const slots = await buildLiteSkeleton(ws, horizon, ppw, { topic, network: net }); // кидає чітку помилку, якщо нема стратегії
+        await insertSlots(net, slots);
+      }
+    } else {
+      // легасі: ОДИН спільний скелет 'all'
+      const slots = await buildLiteSkeleton(ws, horizon, ppw, { topic });
+      await q(`delete from plan_slot where workspace_id=$1 and status in ('empty','matched')`, [ws]);
+      await insertSlots("all", slots);
     }
     let matched = 0; try { matched = await matchPlanSlots(ws); } catch { /* метчинг не критичний */ }
-    return { ok: true, slots: n, matched };
+    return { ok: true, slots: total, byNet, matched };
   } catch (e: any) { await logEvent("error", "plan", e.message, null, req.user.id); return reply.code(400).send({ error: e.message }); }
 });
 
@@ -2006,9 +2029,10 @@ app.post("/api/plan/slots/:id/generate", async (req: any, reply) => {
     await generatePostsOnePass(run!.id, 1, [idea]);
     const post = await one<{ id: string }>(`select id from post where run_id=$1 and stage='final' limit 1`, [run!.id]);
     if (!post) throw new Error("пост не згенерувався");
-    // привʼязка пост<->слот + рубрика слота + канал слота увімкнений
+    // привʼязка пост<->слот + рубрика слота + канал слота увімкнений (тільки для реальної мережі; 'all' - без примусу каналу)
+    const chanPatch = PLAN_NETS.includes(slot.channel) ? JSON.stringify({ [slot.channel]: { on: true } }) : "{}";
     await q(`update post set rubric=coalesce($2, rubric), channels=coalesce(channels,'{}'::jsonb) || $3::jsonb where id=$1`,
-      [post.id, slot.rubric, JSON.stringify({ [slot.channel]: { on: true } })]);
+      [post.id, slot.rubric, chanPatch]);
     await q(`update plan_slot set status='drafted', post_id=$2 where id=$1`, [slot.id, post.id]);
     return { ok: true, postId: post.id };
   } catch (e: any) { await logEvent("error", "plan_slot", e.message, { slotId: slot.id }, req.user.id); return reply.code(500).send({ error: e.message }); }
@@ -2446,18 +2470,21 @@ app.post("/api/schedule/auto", async (req: any) => {
     }
     rest = units.filter((x) => !slotByPost.has(x.id));
   }
-  // 4) times.length постів/день у дозволені дні (за поясом); надлишок - на наступні тижні
+  // 4) РІВНОМІРНИЙ розподіл: спершу ПО ОДНОМУ посту на кожен дозволений день горизонту,
+  //    і лише коли днів забракло - друге коло (2-й пост/день з іншим часом). Так 9 постів
+  //    лягають на 9 різних днів, а не стосом 6 в один день, коли best_days вузькі, а часів багато.
   const tzToday = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()).split("-").map(Number);
   const cursor = new Date(Date.UTC(tzToday[0], tzToday[1] - 1, tzToday[2], 12, 0, 0)); // календарний курсор (полудень UTC, без DST-стрибків)
-  let off = 1, i = 0;
-  while (i < rest.length && off <= 120) {
+  const dayDates: { Y: number; Mo: number; D: number }[] = [];
+  for (let off = 1; off <= 120 && dayDates.length < Math.max(rest.length, 1); off++) {
     const c = new Date(cursor); c.setUTCDate(c.getUTCDate() + off);
-    const Y = c.getUTCFullYear(), Mo = c.getUTCMonth() + 1, D = c.getUTCDate();
-    if (bestDays.length && !bestDays.includes(c.getUTCDay())) { off++; continue; }
-    for (let k = 0; k < times.length && i < rest.length; k++, i++) {
-      await placePost(rest[i], Y, Mo, D, times[k]);
-    }
-    off++;
+    if (bestDays.length && !bestDays.includes(c.getUTCDay())) continue;
+    dayDates.push({ Y: c.getUTCFullYear(), Mo: c.getUTCMonth() + 1, D: c.getUTCDate() });
+  }
+  for (let idx = 0; idx < rest.length && dayDates.length; idx++) {
+    const day = dayDates[idx % dayDates.length];
+    const pass = Math.floor(idx / dayDates.length); // 0 = перший пост дня, 1 = другий тощо
+    await placePost(rest[idx], day.Y, day.Mo, day.D, times[pass % times.length]);
   }
   return { ok: true, count };
 });

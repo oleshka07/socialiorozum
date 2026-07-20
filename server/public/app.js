@@ -167,7 +167,7 @@ function setPTab(t){
   if($('pubCal')) $('pubCal').style.display=t==='cal'?'':'none';
   const host=$('pubPlanHost'); if(host) host.style.display=t==='plan'?'':'none';
   const lp=$('layPlan'); if(lp) lp.style.display=t==='plan'?'':'none';
-  if(t==='plan'){ loadPlan(); try{ renderRhythm(); }catch(e){} }
+  if(t==='plan'){ loadPlan(); try{ renderRhythm(); }catch(e){} try{ renderPlanNets(); }catch(e){} }
 }
 document.querySelectorAll('#pubTabs .tab').forEach(x=>x.onclick=()=>setPTab(x.dataset.ptab));
 if($('calToPlan')) $('calToPlan').onclick=()=>setPTab('plan');
@@ -285,16 +285,39 @@ function renderIdeaBank(feed){
 }
 function openAddMaterial(){
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
-  ov.innerHTML='<div class="modal-card" style="max-width:560px;padding:20px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">＋ Додати матеріал</b><button class="icon" id="amX" style="margin-left:auto">✕</button></div>'
-    +'<input class="txt" id="amTitle" placeholder="Назва (необовʼязково)" style="margin-bottom:8px">'
-    +'<textarea class="txt" id="amText" rows="7" placeholder="Встав транскрипт, статтю, нотатку чи просто думку…"></textarea>'
-    +'<div class="btnrow" style="margin-top:12px"><button class="primary" id="amSave">Додати у стрічку</button></div></div>';
-  document.body.appendChild(ov); const close=()=>ov.remove();
-  ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#amX').onclick=close;
-  ov.querySelector('#amSave').onclick=async()=>{ const text=ov.querySelector('#amText').value.trim(); if(!text){ flash('Встав текст'); return; }
-    const title=ov.querySelector('#amTitle').value.trim();
-    try{ await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript:text,title:title||undefined})}); close(); await loadMaterials(); try{ await api('/plan/match',{method:'POST'}); await loadMaterials(); }catch(_){} flash('Матеріал додано ✓'); }
-    catch(e){ flash('⚠ '+e.message); } };
+  const card=document.createElement('div'); card.className='modal-card'; card.style.cssText='max-width:560px;padding:20px';
+  ov.appendChild(card); document.body.appendChild(ov); const close=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
+  let mode='topic', topicCount=3;
+  function render(){
+    card.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><b style="font-size:16px">＋ Додати контент</b><button class="icon" id="amX" style="margin-left:auto">✕</button></div>'
+      +'<div class="tabs" style="margin-bottom:14px"><div class="tab'+(mode==='topic'?' on':'')+'" data-m="topic">✍️ Написати про тему</div><div class="tab'+(mode==='material'?' on':'')+'" data-m="material">📥 Додати матеріал</div></div>'
+      +(mode==='topic'
+        ? '<div class="hint" style="margin-bottom:8px">Задай напрям - про що саме зробити пост(и). Ми напишемо у голосі бренду. Це вирішує «AI пише не про те».</div>'
+          +'<textarea class="txt" id="amTopic" rows="4" placeholder="Напр.: чому наш новий тариф вигідніший; помилка, яку роблять новачки в холодних дзвінках; кейс клієнта, що виріс на 25%…"></textarea>'
+          +'<div style="font-size:12.5px;font-weight:600;color:var(--ink2);margin:14px 0 7px">Скільки постів</div>'
+          +'<div style="display:flex;gap:6px" id="amCountChips">'+[1,3,5].map(n=>'<div class="cchip'+(n===topicCount?' on':'')+'" data-n="'+n+'">'+n+'</div>').join('')+'</div>'
+          +'<div class="btnrow" style="margin-top:18px"><button class="primary" id="amGen" style="width:100%">✨ Зробити пост(и) про це</button></div>'
+        : '<div class="hint" style="margin-bottom:8px">Встав сировину (транскрипт/статтю/нотатку) - вона ляже у стрічку Матеріалів, з неї витягнеш ідеї.</div>'
+          +'<input class="txt" id="amTitle" placeholder="Назва (необовʼязково)" style="margin-bottom:8px">'
+          +'<textarea class="txt" id="amText" rows="7" placeholder="Встав транскрипт, статтю, нотатку чи просто думку…"></textarea>'
+          +'<div class="btnrow" style="margin-top:12px"><button class="primary" id="amSave" style="width:100%">Додати у стрічку</button></div>');
+    card.querySelector('#amX').onclick=close;
+    card.querySelectorAll('[data-m]').forEach(t=>t.onclick=()=>{ mode=t.dataset.m; render(); });
+    if(mode==='topic'){
+      card.querySelectorAll('#amCountChips [data-n]').forEach(c=>c.onclick=()=>{ topicCount=+c.dataset.n; render(); });
+      card.querySelector('#amGen').onclick=async()=>{ const topic=card.querySelector('#amTopic').value.trim(); if(!topic){ flash('Напиши, про що зробити пост'); return; }
+        close(); aiBusy('✨ Пишу '+topicCount+' пост(и) про: «'+topic.slice(0,50)+'»…'); selectView('create'); setCTab('posts'); setLayout('studio');
+        try{ const r=await api('/generate/topic',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic,count:topicCount})}); await loadStudioPosts(); flash('Готово - '+(r.count||0)+' пост(ів) ✓'); }
+        catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } };
+    } else {
+      card.querySelector('#amSave').onclick=async()=>{ const text=card.querySelector('#amText').value.trim(); if(!text){ flash('Встав текст'); return; }
+        const title=card.querySelector('#amTitle').value.trim();
+        try{ await api('/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript:text,title:title||undefined})}); close(); await loadMaterials(); try{ await api('/plan/match',{method:'POST'}); await loadMaterials(); }catch(_){} flash('Матеріал додано ✓'); }
+        catch(e){ flash('⚠ '+e.message); } };
+    }
+  }
+  render();
 }
 if($('addMaterialBtn')) $('addMaterialBtn').onclick=openAddMaterial;
 // модалка «Ідеї з матеріалу»: КРОК 1 налаштування генерації -> КРОК 2 обери ідеї -> чернетки постів
@@ -345,24 +368,39 @@ async function openMaterialIdeas(matId){
 }
 
 // ---------- ПЛАН: скелет ----------
-let PlanSlots=[], PlanAll=[], PlanChan='all', PlanChans=[];
-const CP_LBL={telegram:'Telegram',instagram:'Instagram',threads:'Threads',facebook:'Facebook',all:'Спільний'};
+let PlanSlots=[], PlanAll=[], PlanChan='__all', PlanChans=[];
+const CP_LBL={telegram:'Telegram',instagram:'Instagram',threads:'Threads',facebook:'Facebook',linkedin:'LinkedIn',all:'Спільний'};
+const CP_ICON={telegram:'✈️',instagram:'📸',threads:'🧵',facebook:'📘',linkedin:'💼',all:'📋'};
 const SLOT_ST={empty:['⬜ порожньо','var(--faint)','var(--surface2)'],matched:['📎 є матеріал','var(--amber)','var(--amber-soft, #f7ecd8)'],drafted:['✍️ пост','var(--tg)','var(--surface2)'],approved:['✅ затверджено','var(--brand)','var(--brand-soft)'],scheduled:['🗓 у календарі','var(--brand)','var(--brand-soft)'],published:['✈️ вийшло','var(--muted)','var(--surface2)']};
 function planSyncMode(){
-  // Lite: ОДИН спільний список (усі слоти незалежно від каналу - включно зі старими). PRO: вкладки Спільний(якщо є)+4 канали.
+  // вкладки за РЕАЛЬНИМИ мережами плану (не за PRO). Кілька мереж → вкладка «Усі» + по вкладці на мережу.
   const tabs=$('planChanTabs');
-  if(!PRO){ PlanChan='all'; if(tabs) tabs.style.display='none'; }
-  else {
-    const opts=(PlanChans.includes('all')?['all']:[]).concat(['telegram','instagram','threads','facebook']);
-    if(!opts.includes(PlanChan)) PlanChan=opts[0];
-    if(tabs){ tabs.style.display=''; tabs.innerHTML=opts.map(c=>'<div class="tab'+(PlanChan===c?' on':'')+'" data-pc="'+c+'">'+CP_LBL[c]+'</div>').join(''); tabs.querySelectorAll('[data-pc]').forEach(t=>t.onclick=()=>{ PlanChan=t.dataset.pc; applyPlanFilter(); }); }
-    if($('planChannel')&&PlanChan!=='all') $('planChannel').value=PlanChan;
+  const perNet=PlanChans.filter(c=>c&&c!=='all');
+  if(!tabs) return;
+  if(perNet.length<=1 && !(perNet.length===1&&PlanChans.includes('all'))){ // одна модель - без вкладок
+    PlanChan='__all'; tabs.style.display='none'; return;
   }
+  const opts=['__all'].concat(PlanChans.slice().sort());
+  if(!opts.includes(PlanChan)) PlanChan='__all';
+  tabs.style.display='';
+  tabs.innerHTML=opts.map(c=>{ const cnt=c==='__all'?PlanAll.length:PlanAll.filter(s=>s.channel===c).length;
+    return '<div class="tab'+(PlanChan===c?' on':'')+'" data-pc="'+c+'">'+(c==='__all'?'Усі':((CP_ICON[c]||'')+' '+(CP_LBL[c]||c)))+' <span style="opacity:.6">'+cnt+'</span></div>'; }).join('');
+  tabs.querySelectorAll('[data-pc]').forEach(t=>t.onclick=()=>{ PlanChan=t.dataset.pc; applyPlanFilter(); });
 }
 function applyPlanFilter(){
   planSyncMode();
-  PlanSlots = PRO ? PlanAll.filter(s=>s.channel===PlanChan) : PlanAll; // Lite бачить УСЕ (і легасі-слоти конкретних каналів)
+  PlanSlots = PlanChan==='__all' ? PlanAll : PlanAll.filter(s=>s.channel===PlanChan);
   renderPlan(); updateCounts();
+}
+// чекбокси мереж для генерації плану (з підключених каналів; жодної обраної = спільний план)
+async function renderPlanNets(){
+  const box=$('planNets'); if(!box) return;
+  if(!Object.keys(ChanStatus||{}).length){ try{ await loadChanStatus(); }catch(e){} }
+  const conn=NETS.filter(n=>ChanStatus[n[0]]);
+  const list=conn.length?conn:NETS; // якщо нічого не підключено - показуємо всі (план можна будувати наперед)
+  box.innerHTML=list.map(n=>'<label class="rchip'+(ChanStatus[n[0]]?' on':'')+'" style="font-size:12.5px"><input type="checkbox" class="planNet" value="'+n[0]+'"'+(ChanStatus[n[0]]?' checked':'')+'> '+(CP_ICON[n[0]]||'')+' '+esc(n[1])+'</label>').join('')
+    +(conn.length?'':'<div style="font-size:11.5px;color:var(--faint);width:100%;margin-top:4px">Підключи мережі в Налаштування → Канали, щоб націлити план точніше.</div>');
+  box.querySelectorAll('.planNet').forEach(cb=>cb.addEventListener('change',()=>{ cb.closest('.rchip').classList.toggle('on',cb.checked); updPlanEst(); }));
 }
 async function loadPlan(){
   try{ const r=await api('/plan'); PlanAll=r.slots||[]; PlanChans=[...new Set(PlanAll.map(s=>s.channel).filter(Boolean))]; }
@@ -434,7 +472,7 @@ function renderPlan(){
     return '<div data-slot="'+s.id+'" style="display:flex;align-items:center;gap:11px;padding:12px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap">'
       +'<span style="font-size:12px;font-weight:700;color:var(--ink2);background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:5px 10px;min-width:82px;text-align:center;flex:none">'+day+'</span>'
       +(s.rubric?'<span class="ptag" style="color:var(--brand);border-color:var(--brand)">🏷 '+esc(s.rubric)+'</span>':'')
-      +((!PRO&&s.channel&&s.channel!=='all')?'<span class="ptag">'+esc(CP_LBL[s.channel]||s.channel)+'</span>':'')
+      +((s.channel&&s.channel!=='all')?'<span class="ptag">'+(CP_ICON[s.channel]||'')+' '+esc(CP_LBL[s.channel]||s.channel)+'</span>':'')
       +'<div style="flex:1;min-width:200px"><div style="font-size:13.5px;font-weight:600;line-height:1.35">'+esc(s.theme||'')+'</div>'
         +(s.match_note?'<div style="font-size:11.5px;color:var(--amber);margin-top:2px">📎 '+esc(s.match_note)+'</div>':'')+'</div>'
       +'<span style="flex:none;font-size:11.5px;font-weight:700;color:'+st[1]+';background:'+st[2]+';padding:5px 11px;border-radius:20px">'+st[0]+'</span>'
@@ -453,19 +491,21 @@ function renderPlan(){
     });
   });
 }
+function planSelectedNets(){ return [...document.querySelectorAll('#planNets .planNet:checked')].map(c=>c.value); }
 if($('planGenBtn')) $('planGenBtn').onclick=async()=>{
-  const m=$('planMsg'); const mode=PRO?'pro':'lite';
+  const m=$('planMsg'); const nets=planSelectedNets();
   if(PlanSlots.some(s=>s.status==='empty'||s.status==='matched') && !confirm('Незаповнені слоти поточного скелета буде замінено новими. Продовжити?')) return;
-  m.style.color='var(--muted)'; m.textContent='будую скелет…'; aiBusy(mode==='pro'?('📅 Будую план для '+CP_LBL[PlanChan]+'…'):'📅 Будую спільний скелет плану…');
-  const body={mode,horizon:+$('planHorizon').value||14,posts_per_week:+$('planPpw').value||4};
-  if(mode==='pro') body.channel=PlanChan;
+  m.style.color='var(--muted)'; m.textContent='будую скелет…'; aiBusy(nets.length?('📅 Будую план для '+nets.length+' мереж…'):'📅 Будую спільний скелет плану…');
+  const body={horizon:+$('planHorizon').value||14,posts_per_week:+$('planPpw').value||4,networks:nets,topic:($('planTopic')&&$('planTopic').value.trim())||undefined};
   try{ const r=await api('/plan/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    m.style.color='var(--brand)'; m.textContent='готово ✓ '+r.slots+' слотів'+(r.matched?(' · '+r.matched+' метчів'):''); await loadPlan(); }
+    const byNet=r.byNet||{}; const parts=Object.keys(byNet).map(k=>(CP_ICON[k]||'')+(byNet[k]));
+    m.style.color='var(--brand)'; m.textContent='готово ✓ '+r.slots+' слотів'+(parts.length>1?(' ('+parts.join(' ')+')'):'')+(r.matched?(' · '+r.matched+' метчів'):''); await loadPlan(); }
   catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } finally{ aiDone(); }
 };
-// живий підрахунок «скільки постів вийде» з днів × постів/тиждень (та сама формула, що на сервері)
+// живий підрахунок «скільки постів вийде»: днів/7 × постів/тиж × кількість обраних мереж
 function updPlanEst(){ const el=$('planEst'); if(!el) return; const h=+$('planHorizon').value||14, p=+$('planPpw').value||4;
-  el.textContent='≈ '+Math.max(1,Math.min(120,Math.round(h/7*p)))+' постів'; }
+  const nets=Math.max(1,planSelectedNets().length); const per=Math.max(1,Math.min(120,Math.round(h/7*p)));
+  el.textContent='≈ '+(per*nets)+' постів'+(nets>1?(' ('+per+'×'+nets+' мереж)'):''); }
 if($('planHorizon')){ $('planHorizon').addEventListener('input',updPlanEst); $('planPpw').addEventListener('input',updPlanEst); updPlanEst(); }
 if($('planMatchBtn')) $('planMatchBtn').onclick=async()=>{
   const m=$('planMsg'); m.style.color='var(--muted)'; m.textContent='шукаю матеріали під слоти…'; aiBusy('🔗 Підбираю наявні матеріали під теми плану…');
@@ -1278,7 +1318,7 @@ async function openComposer(postId, opts){
   const ov=document.createElement('div'); ov.className='cmp-ov';
   const rubOpts='<option value="">без рубрики</option>'+(Rubrics||[]).map(r=>'<option value="'+esc(r.name)+'"'+(r.name===rubric?' selected':'')+'>'+(r.emoji||'')+' '+esc(r.name)+'</option>').join('');
   ov.innerHTML=
-    '<div class="cmp-top"><b style="font-size:16px">✍ Композер</b><span id="cmpSub" style="font-size:12px;color:var(--muted)"></span><span style="flex:1"></span><button class="icon" id="cmpX" title="Закрити">✕</button></div>'
+    '<div class="cmp-top"><button class="ghost" id="cmpBack" style="padding:6px 12px;font-size:13px">← Назад</button><b style="font-size:16px;margin-left:4px">✍ Композер</b><span id="cmpSub" style="font-size:12px;color:var(--muted)"></span><span style="flex:1"></span><button class="icon" id="cmpX" title="Закрити">✕</button></div>'
     +'<div class="cmp-body">'
       +'<div class="cmp-left">'
         +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Канали</div><div id="cmpChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>'
@@ -1311,6 +1351,7 @@ async function openComposer(postId, opts){
   const msg=ov.querySelector('#cmpMsg'); const txt=ov.querySelector('#cmpText'); txt.value=master;
   const setMsg=(t,c)=>{ msg.textContent=t; msg.style.color=c||'var(--muted)'; };
   ov.querySelector('#cmpX').onclick=close;
+  const backBtn=ov.querySelector('#cmpBack'); if(backBtn) backBtn.onclick=close;
   // 🗑 видалення доступне лише НЕопублікованим (опубліковані - історія й аналітика)
   const delBtn=ov.querySelector('#cmpDel');
   if(delBtn){ delBtn.style.display=sentSet.size?'none':''; delBtn.onclick=()=>deletePost(postId, close); }

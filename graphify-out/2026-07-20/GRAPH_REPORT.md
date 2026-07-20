@@ -1,16 +1,16 @@
-# Graph Report - socialiorozum  (2026-07-20)
+# Graph Report - socialiorozum  (2026-07-17)
 
 ## Corpus Check
-- 63 files · ~140,799 words
+- 63 files · ~139,548 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1241 nodes · 2740 edges · 123 communities (63 shown, 60 thin omitted)
+- 1237 nodes · 2732 edges · 123 communities (63 shown, 60 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 15 edges (avg confidence: 0.86)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `d7d9f769`
+- Built from commit: `e04a5e64`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -132,7 +132,7 @@
 
 ## God Nodes (most connected - your core abstractions)
 1. `q()` - 94 edges
-2. `$()` - 92 edges
+2. `$()` - 91 edges
 3. `$()` - 89 edges
 4. `api()` - 65 edges
 5. `api()` - 62 edges
@@ -147,12 +147,12 @@
   kontentgrov-v2.html → architecture-content-engine.md
 - `renderTaskStrip()` --calls--> `q()`  [INFERRED]
   server/.lint/app.js → server/src/db.ts
+- `openTranscriberModal()` --calls--> `q()`  [INFERRED]
+  server/.lint/app.js → server/src/db.ts
 - `renderTaskStrip()` --calls--> `q()`  [INFERRED]
   server/public/app.js → server/src/db.ts
-- `saveRubrics()` --calls--> `q()`  [EXTRACTED]
-  server/src/server.ts → server/src/db.ts
-- `topPatterns()` --calls--> `networkBenchmarks()`  [INFERRED]
-  server/src/pipeline.ts → server/src/metrics.ts
+- `openTranscriberModal()` --calls--> `q()`  [INFERRED]
+  server/public/app.js → server/src/db.ts
 
 ## Import Cycles
 - None detected.
@@ -168,8 +168,8 @@
 ## Communities (123 total, 60 thin omitted)
 
 ### Community 0 - "Auth, Session & Workers"
-Cohesion: 0.15
-Nodes (21): openTranscriberModal(), openTranscriberModal(), createEmailToken(), createSession(), createUser(), createWorkspaceWithDefaults(), deleteSession(), findOrCreateGoogleUser() (+13 more)
+Cohesion: 0.11
+Nodes (20): createEmailToken(), createSession(), createUser(), createWorkspaceWithDefaults(), deleteSession(), findOrCreateGoogleUser(), hashPassword(), markVerified() (+12 more)
 
 ### Community 2 - "Studio & API Layer"
 Cohesion: 0.07
@@ -181,15 +181,15 @@ Nodes (42): app_log, app_user, content_plan, content_source, email_token, gdrive
 
 ### Community 4 - "Google Drive Integration"
 Cohesion: 0.11
-Nodes (28): Aspect, ASPECT_DIM, attachCroppedImage(), attachStockPhoto(), charFrac(), COSTS, CropRect, escXml() (+20 more)
+Nodes (29): Aspect, ASPECT_DIM, attachCroppedImage(), attachStockPhoto(), charFrac(), COSTS, CropRect, ensureIgSafeImage() (+21 more)
 
 ### Community 5 - "LLM Routing & AI"
 Cohesion: 0.10
-Nodes (61): stockPhotoOptions(), chat(), extractJsonArray(), extractJsonObject(), adaptForChannels(), AI_TRACE_RX, aiAudit(), atomizePost() (+53 more)
+Nodes (60): stockPhotoOptions(), chat(), extractJsonArray(), extractJsonObject(), adaptForChannels(), AI_TRACE_RX, aiAudit(), atomizePost() (+52 more)
 
 ### Community 6 - "Authentication & Users"
 Cohesion: 0.08
-Nodes (36): businessDiscovery(), exchangeCode(), exchangeLongLived(), fbFetch(), FbPage, igStats(), pageStats(), publishPhotoToPage() (+28 more)
+Nodes (40): businessDiscovery(), exchangeCode(), exchangeLongLived(), fbFetch(), FbPage, igStats(), pageStats(), publishPhotoToPage() (+32 more)
 
 ### Community 7 - "Node Dependencies"
 Cohesion: 0.06
@@ -197,7 +197,7 @@ Nodes (35): dependencies, fastify, @fastify/cookie, @fastify/cors, @fastify/mult
 
 ### Community 8 - "Community 8"
 Cohesion: 0.03
-Nodes (64): chanDots(), ChanStatus, CP_ICON, CP_LABEL, CP_LBL, CTA_TYPES, CtaCfg, DAY_LBL (+56 more)
+Nodes (61): chanDots(), ChanStatus, CP_LABEL, CP_LBL, CTA_TYPES, CtaCfg, DAY_LBL, Finals (+53 more)
 
 ### Community 9 - "Community 9"
 Cohesion: 0.03
@@ -220,8 +220,8 @@ Cohesion: 0.67
 Nodes (3): appleboy/ssh-action (CI/CD SSH step), GitHub Actions Deploy Workflow, Hetzner Production Server (178.105.185.67)
 
 ### Community 15 - "Community 15"
-Cohesion: 0.14
-Nodes (20): azureTts(), brollPlan(), buildAss(), buildReelVideo(), download(), Job, parseReelScript(), pexelsClip() (+12 more)
+Cohesion: 0.09
+Nodes (40): button(), send(), sendDeletionScheduledEmail(), sendEmailChangedNotice(), sendInactivityWarningEmail(), sendResetEmail(), sendVerifyEmail(), wrap() (+32 more)
 
 ### Community 16 - "Public Pages & Landing"
 Cohesion: 0.50
@@ -281,27 +281,27 @@ Nodes (7): 03 — Конкурентний аналіз: Echo by ROZUM, Голо
 
 ### Community 39 - "Community 39"
 Cohesion: 0.17
-Nodes (22): isDiaryPending(), transcribeVoice(), weekDiaryText(), buildLiteSkeleton(), generatePostsOnePass(), repeatVariant(), runContext(), attachChannel() (+14 more)
+Nodes (22): isDiaryPending(), transcribeVoice(), weekDiaryText(), buildLiteSkeleton(), generatePostsOnePass(), repeatVariant(), suggestDevelopment(), attachChannel() (+14 more)
 
 ### Community 40 - "Community 40"
-Cohesion: 0.07
-Nodes (47): userByEmail(), userBySession(), startAutopost(), tick(), one(), ensureIgSafeImage(), publishQuestions(), reelCaption() (+39 more)
+Cohesion: 0.11
+Nodes (35): startAutopost(), tick(), pool, q(), Folder, pullFolder(), pullGdriveFolder(), startGdrivePoller() (+27 more)
 
 ### Community 41 - "Community 41"
 Cohesion: 0.09
-Nodes (39): $(), applyState(), buildTzSel(), ensureLangOption(), flyPoints(), loadAnalytics(), loadBroll(), loadChannelPlan() (+31 more)
+Nodes (37): $(), applyState(), buildTzSel(), ensureLangOption(), flyPoints(), loadAccount(), loadAnalytics(), loadBroll() (+29 more)
 
 ### Community 42 - "Community 42"
 Cohesion: 0.27
 Nodes (5): Captions(), Reel(), ReelProps, Seg, wordWindows()
 
 ### Community 43 - "Community 43"
-Cohesion: 0.15
-Nodes (23): api(), esc(), loadAccount(), loadFF(), loadGdrive(), loadGdriveFolders(), loadImageProvider(), loadLinkedin() (+15 more)
+Cohesion: 0.13
+Nodes (27): api(), esc(), flyPoints(), loadAccount(), loadAnalytics(), loadGdrive(), loadGdriveFolders(), loadLinkedin() (+19 more)
 
 ### Community 96 - "Community 96"
 Cohesion: 0.09
-Nodes (42): $(), applyPlanFilter(), bindIbAdd(), buildTzSel(), ensureLangOption(), flyPoints(), loadAnalytics(), loadBroll() (+34 more)
+Nodes (36): $(), applyState(), buildTzSel(), ensureLangOption(), loadBroll(), loadChannelPlan(), loadFF(), loadGoalCta() (+28 more)
 
 ### Community 97 - "Community 97"
 Cohesion: 0.42
@@ -316,20 +316,20 @@ Cohesion: 0.38
 Nodes (3): exchangeCode(), refreshAccessToken(), ytFetch()
 
 ### Community 100 - "Community 100"
-Cohesion: 0.13
-Nodes (26): api(), esc(), flashSaved(), loadAccount(), loadChanStatus(), loadGdrive(), loadGdriveFolders(), loadLinkedin() (+18 more)
+Cohesion: 0.12
+Nodes (27): api(), esc(), flashSaved(), loadFF(), loadGdrive(), loadGdriveFolders(), loadImageProvider(), loadLinkedin() (+19 more)
 
 ### Community 101 - "Community 101"
 Cohesion: 0.22
 Nodes (7): exchangeCode(), exchangeLongLived(), getMe(), publish(), refreshToken(), thFetch(), ThreadReply
 
 ### Community 102 - "Community 102"
-Cohesion: 0.25
-Nodes (19): aiBusy(), aiDone(), bulkDelete(), bulkReview(), deletePost(), developPost(), directorCheck(), expandToThread() (+11 more)
+Cohesion: 0.23
+Nodes (19): aiBusy(), aiDone(), bulkDelete(), bulkReview(), directorCheck(), expandToThread(), flash(), loadPickerApi() (+11 more)
 
 ### Community 103 - "Community 103"
-Cohesion: 0.61
-Nodes (8): button(), send(), sendDeletionScheduledEmail(), sendEmailChangedNotice(), sendInactivityWarningEmail(), sendResetEmail(), sendVerifyEmail(), wrap()
+Cohesion: 0.10
+Nodes (23): userByEmail(), one(), DEFAULT_PROMPTS, StepKey, app, cancelRun, cookieOpts, __dirname (+15 more)
 
 ### Community 104 - "Community 104"
 Cohesion: 0.24
@@ -340,32 +340,32 @@ Cohesion: 0.29
 Nodes (18): appendDiaryText(), attachDiaryMedia(), buildQuestion(), diaryButtons(), DiaryState, ensureDiary(), EVENING_Q, getState() (+10 more)
 
 ### Community 106 - "Community 106"
-Cohesion: 0.40
-Nodes (6): matchPlanSlots(), scoreMaterials(), ingest(), pullFeed(), runPipelines(), tick()
+Cohesion: 0.20
+Nodes (11): applyPlanFilter(), developPost(), loadChanStatus(), loadMaterials(), loadPlan(), planSyncMode(), renderPlan(), renderRhythm() (+3 more)
 
 ### Community 107 - "Community 107"
-Cohesion: 0.15
-Nodes (22): applyState(), badge(), ensureRun(), finishOnboarding(), genIdeas(), genPosts(), go(), ideaOpts() (+14 more)
+Cohesion: 0.23
+Nodes (16): badge(), ensureRun(), finishOnboarding(), genIdeas(), genPosts(), go(), ideaOpts(), refresh() (+8 more)
 
 ### Community 109 - "Community 109"
-Cohesion: 0.40
-Nodes (5): loadRubrics(), renderIdeaRubrics(), renderRubBar(), renderRubrics(), rubSum()
+Cohesion: 0.16
+Nodes (14): applyPlanFilter(), bindIbAdd(), loadChanStatus(), loadIdeasTab(), loadMaterials(), loadPlan(), planSyncMode(), refreshIdeaViews() (+6 more)
 
 ### Community 110 - "Community 110"
 Cohesion: 0.20
 Nodes (16): weekDiary(), findBreakout(), localParts(), plusDay(), sendDigest(), sendDigestNow(), startDigest(), tick() (+8 more)
 
 ### Community 111 - "Community 111"
-Cohesion: 0.25
-Nodes (9): addDaysISO(), calMonday(), isoOf(), loadPublish(), locDate(), locHM(), renderBank(), renderCal() (+1 more)
+Cohesion: 0.29
+Nodes (8): addDaysISO(), calMonday(), deletePost(), isoOf(), loadPublish(), locDate(), renderBank(), renderCal()
 
 ### Community 112 - "Community 112"
 Cohesion: 0.25
 Nodes (9): addDaysISO(), calMonday(), isoOf(), loadPublish(), locDate(), locHM(), renderBank(), renderCal() (+1 more)
 
 ### Community 113 - "Community 113"
-Cohesion: 0.10
-Nodes (28): pool, env, Folder, pullFolder(), pullGdriveFolder(), startGdrivePoller(), tick(), validToken() (+20 more)
+Cohesion: 0.40
+Nodes (5): ChatCtx, GEMINI_PRICES, geminiChat(), OPENAI_PRICES, stripDashes()
 
 ### Community 114 - "Community 114"
 Cohesion: 0.40
@@ -376,32 +376,32 @@ Cohesion: 0.26
 Nodes (15): badge(), ensureRun(), finishOnboarding(), genIdeas(), genPosts(), go(), ideaOpts(), refresh() (+7 more)
 
 ### Community 121 - "Community 121"
-Cohesion: 0.13
-Nodes (17): applyPlanFilter(), bindIbAdd(), loadMaterials(), loadPlan(), planSyncMode(), renderBulkBar(), renderIdeaBank(), renderMaterials() (+9 more)
+Cohesion: 0.22
+Nodes (9): bindIbAdd(), renderBulkBar(), renderIdeaBank(), renderMaterials(), renderStudio(), saveSetting(), saveThStrat(), setMode() (+1 more)
 
 ### Community 122 - "Community 122"
 Cohesion: 0.25
 Nodes (8): flashSaved(), resetPrompt(), saveContent(), savePrompt(), saveSelection(), saveSetting(), saveThStrat(), setMode()
 
 ## Knowledge Gaps
-- **402 isolated node(s):** `Rubrics`, `ChanStatus`, `ThStrat`, `Pub`, `NETS` (+397 more)
+- **400 isolated node(s):** `Rubrics`, `ChanStatus`, `ThStrat`, `Pub`, `NETS` (+395 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **60 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `q()` connect `Auth, Session & Workers` to `Community 96`, `Google Drive Integration`, `LLM Routing & AI`, `Authentication & Users`, `Community 39`, `Community 40`, `Community 41`, `Community 105`, `Community 106`, `Community 110`, `Community 15`, `Community 113`?**
-  _High betweenness centrality (0.322) - this node is a cross-community bridge._
-- **Why does `renderTaskStrip()` connect `Community 96` to `Community 8`, `Auth, Session & Workers`, `Community 43`?**
-  _High betweenness centrality (0.104) - this node is a cross-community bridge._
-- **Why does `renderTaskStrip()` connect `Community 41` to `Auth, Session & Workers`, `Community 9`, `Community 100`?**
-  _High betweenness centrality (0.097) - this node is a cross-community bridge._
+- **Why does `q()` connect `Community 40` to `Auth, Session & Workers`, `Community 100`, `Google Drive Integration`, `LLM Routing & AI`, `Community 39`, `Authentication & Users`, `Community 41`, `Community 105`, `Community 43`, `Community 103`, `Community 110`, `Community 15`, `Community 113`?**
+  _High betweenness centrality (0.311) - this node is a cross-community bridge._
+- **Why does `renderTaskStrip()` connect `Community 43` to `Community 8`, `Community 40`, `Community 96`?**
+  _High betweenness centrality (0.098) - this node is a cross-community bridge._
+- **Why does `renderTaskStrip()` connect `Community 41` to `Community 40`, `Community 9`, `Community 100`?**
+  _High betweenness centrality (0.096) - this node is a cross-community bridge._
 - **Are the 4 inferred relationships involving `q()` (e.g. with `openTranscriberModal()` and `renderTaskStrip()`) actually correct?**
   _`q()` has 4 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `Rubrics`, `ChanStatus`, `ThStrat` to the rest of the system?**
-  _419 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _417 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Auth, Session & Workers` be split into smaller, more focused modules?**
-  _Cohesion score 0.14666666666666667 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.1076923076923077 - nodes in this community are weakly interconnected._
 - **Should `Studio & API Layer` be split into smaller, more focused modules?**
   _Cohesion score 0.06543385490753911 - nodes in this community are weakly interconnected._

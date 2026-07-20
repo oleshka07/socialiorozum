@@ -821,7 +821,16 @@ export async function threadsNicheReview(workspaceId: string): Promise<{ pattern
 
 // ---- Lite-скелет плану: ДЕТЕРМІНОВАНО зі стратегії (рубрики × best_days × теми) ----
 // Канало-незалежний, не залежить від крихкого LLM-плану → порожнім не буде, якщо є стратегія.
-export async function buildLiteSkeleton(workspaceId: string, horizonDays: number, postsPerWeek = 4): Promise<{ day: number; rubric: string; theme: string; hook: string }[]> {
+export async function buildLiteSkeleton(workspaceId: string, horizonDays: number, postsPerWeek = 4, opts?: { topic?: string; network?: string }): Promise<{ day: number; rubric: string; theme: string; hook: string }[]> {
+  const topic = (opts?.topic || "").trim();
+  const NET_HINT: Record<string, string> = {
+    telegram: "Telegram-канал: перший рядок чіпляє до згортання, можна довше й вдумливіше.",
+    instagram: "Instagram: візуальна тема, гачок під першу картинку каруселі/сторіс.",
+    threads: "Threads: коротко й гостро, розмовний тон, теми що провокують відповідь.",
+    facebook: "Facebook: історія/користь для ширшої аудиторії, трохи довший формат.",
+    linkedin: "LinkedIn: професійний кут, інсайт чи кейс, без жаргону.",
+  };
+  const netHint = opts?.network ? NET_HINT[opts.network] : "";
   const strat = await one<{ data: any }>(`select data from strategy where workspace_id=$1`, [workspaceId]);
   const data: any = strat?.data || {};
   const rubrics: { name: string; share?: number }[] = Array.isArray(data.rubrics) ? data.rubrics.filter((r: any) => r?.name) : [];
@@ -874,6 +883,8 @@ export async function buildLiteSkeleton(workspaceId: string, horizonDays: number
       const themes = Array.isArray(data.monthly_themes) ? data.monthly_themes.filter(Boolean).map(String) : [];
       const system = "Ти контент-стратег. Для кожного слота (рубрика задана) придумай коротку конкретну тему поста (до 12 слів) у ніші бренду." +
         (s.strategy_brief ? `\nБриф: ${s.strategy_brief.slice(0, 1500)}` : (s.marketing_context ? `\nНіша: ${s.marketing_context}` : "")) +
+        (netHint ? `\nПлатформа: ${netHint}` : "") +
+        (topic ? `\n\nВАЖЛИВО - автор ОБОВʼЯЗКОВО хоче висвітлити саме ці теми/напрями (це пріоритет над загальними ідеями): «${topic.slice(0, 800)}». Признач їх до відповідних слотів дослівно чи як конкретні під-теми; лише РЕШТУ слотів доповни власними ідеями за рубриками.` : "") +
         (themes.length ? `\nОрієнтир тем: ${themes.slice(0, 10).join("; ")}` : "") +
         (interests ? `\nСлоти з позначкою [ОСОБИСТЕ] - НЕ про нішу, а «людські» теми з інтересів автора (${interests.slice(0, 300)}): особистий погляд, історія чи спостереження, що робить автора живою людиною.` : "") +
         "\nСлоти з позначкою [ЕКСПЕРИМЕНТ] - тема чи формат, яких бренд ще НЕ робив: незвичний кут, інший жанр подачі, сміливіша теза." +
