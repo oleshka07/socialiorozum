@@ -1063,6 +1063,7 @@ function renderFinals(posts){
 }
 async function saveContent(id,v){ try{ await api('/posts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:v})}); flashSaved(); }catch(e){} }
 let StudioFilter='all', StudioRubric='', StudioOrigin='';
+const INTENT_META={awareness:['🌱','знайомство','цінність новій аудиторії, без продажу'],nurture:['🤝','прогрів','будує довіру, мʼякий заклик'],sale:['💰','продаж','прямий оффер за сходами']};
 const ORIGIN_LABEL={manual:'✍️ вручну',rss:'📡 RSS',fireflies:'🎙 транскрипт',grain:'🎙 транскрипт',meetgeek:'🎙 транскрипт',brand:'✨ з бренду',gdrive:'📁 Drive',plan:'📅 з плану',diary:'📔 щоденник',takes:'🧵 тейк',idea:'💡 з ідеї'};
 const SelPosts=new Set(); // масові дії
 // глобальний список усіх фінальних постів воркспейсу (НЕ привʼязаний до активного джерела/прогону)
@@ -1093,7 +1094,8 @@ function renderStudio(){
     const sp=isPub?['✈️ Опубліковано','sp-ok']:statusPill(p.review); const ap=p.review==='approved'; const sel=SelPosts.has(p.id);
     // шапка: опублікований пост показує мережі, КУДИ реально поїхав (✓); інші - обрані канали
     const dots=isPub?sentDots(p.sent):chanDots(p.channels);
-    const tags=(p.format==='reel'?'<span class="ptag" style="color:var(--brand);border-color:var(--brand)">🎬 рілс</span>':'')+(p.rubric?'<span class="ptag">🏷 '+esc(p.rubric)+'</span>':'')+(p.source_origin&&p.source_origin!=='manual'?'<span class="ptag">'+(ORIGIN_LABEL[p.source_origin]||esc(p.source_origin))+'</span>':'');
+    const im=INTENT_META[p.intent];
+    const tags=(p.format==='reel'?'<span class="ptag" style="color:var(--brand);border-color:var(--brand)">🎬 рілс</span>':'')+(im?'<span class="ptag" title="Намір поста: '+im[2]+'">'+im[0]+' '+im[1]+'</span>':'')+(p.rubric?'<span class="ptag">🏷 '+esc(p.rubric)+'</span>':'')+(p.source_origin&&p.source_origin!=='manual'?'<span class="ptag">'+(ORIGIN_LABEL[p.source_origin]||esc(p.source_origin))+'</span>':'');
     return '<div class="pcard'+(ap?' appr':'')+(sel?' selc':'')+'" data-post="'+p.id+'">'
       +'<div class="pcard-h"><input type="checkbox" class="psel" '+(sel?'checked':'')+' title="Обрати для масових дій">'+dots+'<span class="statuspill '+sp[1]+'" style="margin-left:auto">'+sp[0]+'</span></div>'
       +(p.media_filename?'<div class="pcard-img" data-a="image" style="cursor:pointer" title="Редагувати зображення"><img loading="lazy" src="/thumb/'+esc(p.media_filename)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(p.media_filename)+'\'"></div>':'')
@@ -1357,6 +1359,7 @@ async function openComposer(postId, opts){
           +'</div>'
         +'</div>'
         +'<label style="font-size:12px;color:var(--muted);display:inline-block;margin-bottom:12px">Рубрика <select id="cmpRubric" class="txt" style="width:auto;padding:6px 9px;display:inline-block;margin-left:4px">'+rubOpts+'</select></label>'
+    +'<label style="font-size:12px;color:var(--muted);display:inline-block;margin:0 0 12px 10px" title="Намір керує закликом: знайомство - без продажу, прогрів - мʼякий, продаж - повний CTA">Намір <select id="cmpIntent" class="txt" style="width:auto;padding:6px 9px;display:inline-block;margin-left:4px"><option value="">-</option>'+Object.keys(INTENT_META).map(k=>'<option value="'+k+'"'+((full.intent||'')===k?' selected':'')+'>'+INTENT_META[k][0]+' '+INTENT_META[k][1]+'</option>').join('')+'</select></label>'
         +'<textarea id="cmpText" class="txt" style="min-height:240px;font-size:14px;line-height:1.55;resize:vertical"></textarea>'
         +'<div style="font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint);margin-top:12px">🤖 ПОМІЧНИКИ ТЕКСТУ</div>'
         +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="dashbtn" id="cmpRewrite" title="Перепише текст; можна вказати, що саме змінити">✍ Переписати</button><button class="dashbtn" id="cmpHook" title="3 варіанти сильнішого відкриття з кульмінації">🪝 Гачок</button><button class="dashbtn" id="cmpAudit" title="Знайти і точково прибрати сліди AI">🔍 AI-сліди</button><button class="dashbtn" id="cmpHash" title="5-8 релевантних хештегів у кінець тексту"># Хештеги</button></div>'
@@ -1475,7 +1478,7 @@ async function openComposer(postId, opts){
     }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpPhoto').onclick=()=>openPhotoTool(postId, full.image_prompt||'', (f)=>{ mediaFilename=f; renderMedia(); renderPrev(); });
   // ----- зберегти / адаптувати / публікувати / планувати -----
-  async function saveDraft(){ await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master,rubric})}); await api('/posts/'+postId+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:C})}); }
+  async function saveDraft(){ const iv=ov.querySelector('#cmpIntent'); await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master,rubric,intent:iv?iv.value:''})}); await api('/posts/'+postId+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:C})}); }
   ov.querySelector('#cmpSave').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('💾 зберігаю…'); try{ await saveDraft(); setMsg('чернетку збережено ✓','var(--brand)'); try{await loadStudioPosts();}catch(_){} }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; } };
   ov.querySelector('#cmpAdapt').onclick=async(e)=>{ const sel=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!sel.length){ setMsg('немає каналів для адаптації','var(--danger)'); return; } const b=e.target; b.disabled=true; setMsg('✨ AI підлаштовує під канали…'); aiBusy('✨ Підлаштовую під канали (з чернетки)…'); try{ await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master})}); const r=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:sel})}); Object.keys(r.channels||{}).forEach(k=>{ if(!sentSet.has(k)) C[k]=r.channels[k]; }); renderPrev(); setMsg('готово ✓ кожна мережа у своєму форматі','var(--brand)'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpNow').onclick=async(e)=>{ const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('усі обрані канали вже опубліковано','var(--danger)'); return; } const b=e.target; b.disabled=true;

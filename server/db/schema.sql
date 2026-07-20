@@ -411,6 +411,7 @@ alter table source add column if not exists ai_score int;
 alter table source add column if not exists ai_score_why text;
 -- формат контент-одиниці: 'post' (текстовий) чи 'reel' (сценарій/відео) - фундамент рілс-треку (IG/FB/TikTok/YT)
 alter table post add column if not exists format text not null default 'post';
+alter table post add column if not exists intent text; -- намір поста: awareness (знайомство) / nurture (прогрів) / sale (продаж) - керує CTA-політикою
 
 -- LinkedIn-автопостинг (5-та мережа, шаблон Threads): підключення профілю + журнал публікацій
 create table if not exists linkedin_config (
