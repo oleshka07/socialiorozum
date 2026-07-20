@@ -460,10 +460,13 @@
             <div class="panel" style="margin:0">
               <div style="font-weight:700;font-size:14.5px;margin-bottom:7px;display:flex;align-items:center;gap:6px"><span id="planProgressLabel">Скелет плану</span><span class="qh" title="Скелет = теми на майбутні дні за твоєю стратегією (рубрики × найкращі дні). Кожен слот - ще НЕ пост: клік на тему в календарі чи «→ до поста» генерує чернетку.">?</span></div>
               <div style="height:9px;border-radius:6px;background:var(--surface2);overflow:hidden;margin-bottom:10px"><div id="planProgressBar" style="height:100%;background:var(--brand);width:0%;border-radius:6px;transition:width .3s"></div></div>
+              <div style="font-size:12px;font-weight:600;color:var(--ink2);margin:4px 0 6px">Мережі плану <span class="qh" title="Обери, для яких мереж будувати план. Для кожної мережі - свій набір тем під її формат. Не обрав жодної - буде один спільний план на всі.">?</span></div>
+              <div id="planNets" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"><span style="font-size:12px;color:var(--faint)">…</span></div>
+              <label style="font-size:12px;font-weight:600;color:var(--ink2);display:block;margin-bottom:4px">Про що зробити план? <span style="font-weight:400;color:var(--faint)">(необовʼязково)</span></label>
+              <textarea id="planTopic" class="txt" rows="2" placeholder="Теми/напрями, які хочеш висвітлити - впишемо їх у скелет. Напр.: запуск нового тарифу; кейс клієнта; помилки новачків…" style="margin-bottom:10px;font-size:13px"></textarea>
               <div class="btnrow" style="margin:0;align-items:center;flex-wrap:wrap">
-                <label class="proonly" id="planChannelWrap" style="display:none;font-size:12px;color:var(--muted)">канал <select id="planChannel"><option value="telegram">Telegram</option><option value="instagram">Instagram</option><option value="threads">Threads</option><option value="facebook">Facebook</option></select></label>
                 <label style="font-size:12px;color:var(--muted)">днів <input id="planHorizon" class="txt" type="number" value="14" min="7" max="90" style="width:60px;display:inline-block;padding:7px 9px"></label>
-                <label id="planPpwWrap" style="font-size:12px;color:var(--muted)">п/тиж <input id="planPpw" class="txt" type="number" value="4" min="1" max="14" style="width:54px;display:inline-block;padding:7px 9px"></label>
+                <label id="planPpwWrap" style="font-size:12px;color:var(--muted)">постів/тиж <input id="planPpw" class="txt" type="number" value="4" min="1" max="14" style="width:54px;display:inline-block;padding:7px 9px"></label>
                 <span id="planEst" style="font-size:12px;font-weight:700;color:var(--brand)"></span>
               </div>
               <div class="btnrow" style="margin-top:8px">
@@ -479,7 +482,7 @@
           </div>
           <!-- «Контент-план по каналах» (LLM-таблиця) прибрано: дублював скелет+ритм і нікуди не вливався.
                Код/ендпоінти лишились дормантними (generateChannelPlan) - повернути можна за годину. -->
-          <div class="tabs proonly" id="planChanTabs" style="display:none;margin-bottom:12px"></div>
+          <div class="tabs" id="planChanTabs" style="display:none;margin-bottom:12px"></div>
           <div class="panel" style="padding:0;overflow:hidden"><div id="planList"><div class="empty" style="padding:20px">Скелета ще нема - натисни «Згенерувати скелет» (потрібна стратегія з розділу Стратегія).</div></div></div>
         </div>
 
