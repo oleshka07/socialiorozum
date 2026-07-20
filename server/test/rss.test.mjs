@@ -36,3 +36,27 @@ test("parseFeed: Atom-формат", () => {
   assert.equal(items.length, 1);
   assert.equal(items[0].title, "Запис 1");
 });
+
+// --- екстрактор статті: JSON-LD articleBody має пріоритет; <article>-скоуп чистить сміття ---
+const { extractParagraphs } = await import("../dist/rss.js");
+
+test("extractParagraphs: тягне повний текст із JSON-LD articleBody", () => {
+  const body = "Повний текст статті про готельний бізнес. ".repeat(10).trim();
+  const html = `<html><head><script type="application/ld+json">{"@type":"NewsArticle","articleBody":${JSON.stringify(body)}}</script></head><body><p>Тизер меню короткий.</p></body></html>`;
+  const out = extractParagraphs(html);
+  assert.ok(out.includes("Повний текст статті"), "має взяти articleBody");
+  assert.ok(out.length > 300, "тіло повне, не тизер");
+});
+
+test("extractParagraphs: <article>-скоуп відсікає абзаци сайдбару", () => {
+  const para = (t) => `<p>${t} ${"наповнення тексту достатньої довжини для фільтра".repeat(2)}</p>`;
+  const html = `<html><body>${para("САЙДБАР-ТИЗЕР")}<article>${para("ГОЛОВНА-СТАТТЯ")}${para("ДРУГИЙ-АБЗАЦ")}${"x".repeat(600)}</article></body></html>`;
+  const out = extractParagraphs(html);
+  assert.ok(out.includes("ГОЛОВНА-СТАТТЯ"), "стаття присутня");
+  assert.ok(!out.includes("САЙДБАР-ТИЗЕР"), "сайдбар відсічено");
+});
+
+test("extractParagraphs: битий JSON-LD не валить екстракцію", () => {
+  const html = `<script type="application/ld+json">{broken json</script><p>${"Нормальний абзац тексту статті що проходить фільтр довжини. ".repeat(2)}</p>`;
+  assert.ok(extractParagraphs(html).includes("Нормальний абзац"));
+});

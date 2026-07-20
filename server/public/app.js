@@ -584,13 +584,27 @@ async function loadToday(){
         +(s[3]?'':'<button class="primary qsGo" data-i="'+i+'" style="padding:6px 12px;font-size:12.5px;flex:none">'+s[4]+'</button>')+'</div>').join('')
       +'</div>'
     : '';
+  // ⚠ збої публікацій (48г): раніше ховались у тултіпах календаря - тепер видно одразу
+  const fails=(t.failed||[]);
+  const failHtml=fails.length
+    ? '<div class="panel" style="margin:0 0 16px;border:1px solid var(--danger)"><div style="font-weight:700;font-size:14px;color:var(--danger);margin-bottom:4px">⚠ Не опублікувалось ('+fails.length+')</div>'
+      +fails.map(f=>'<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)">'
+        +'<span style="font-size:12px;color:var(--muted);flex:none">'+locDate(f.scheduled_at)+' '+locHM(f.scheduled_at)+'</span>'
+        +'<div style="flex:1;min-width:0"><div style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(f.title||'')+'</div>'
+        +(f.result?'<div style="font-size:11.5px;color:var(--danger);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(f.result)+'</div>':'')+'</div>'
+        +'<button class="ghost tdFix" data-post="'+f.post_id+'" data-slot="'+f.id+'" style="padding:5px 11px;font-size:12px;flex:none">Відкрити й повторити</button></div>').join('')
+      +'</div>'
+    : '';
+  const fm=t.freshMaterials||{};
   const tiles=[
     th?['🔥 Стрік Threads', th.streak+' дн.', th.postedToday?'сьогодні вже є пост ✓':'<span style="color:var(--danger)">сьогодні ще пусто</span>']:null,
     th?['💬 Коменти','<span id="tdComm"><span class="spin"></span></span>','без відповіді · клік = відповісти']:null,
+    ['✈️ Вчора вийшло', String(t.publishedYesterday||0), 'публікацій · клік = аналітика'],
+    (fm.count?['📥 Нові матеріали', String(fm.count), (fm.top?('за 24 год · топ ⭐'+fm.top+'/10'):'за 24 год')+' · клік = відкрити']:null),
     ['💡 Ідеї в банку', String(t.ideas||0), 'клік = відкрити'],
     ['📝 Чернеток усього', String(t.draftsTotal||0), 'клік = у Чорновики'],
   ].filter(Boolean);
-  w.innerHTML=qsHtml
+  w.innerHTML=qsHtml+failHtml
     +'<div class="stat-grid" style="margin-bottom:16px">'+tiles.map((s,i)=>'<div class="stat tdTile" data-tile="'+i+'" style="cursor:pointer"><div class="l">'+s[0]+'</div><div class="v" style="font-size:21px">'+s[1]+'</div><div class="d">'+s[2]+'</div></div>').join('')+'</div>'
     +'<div class="grid2" style="align-items:start">'
       +'<div class="panel" style="margin:0"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="font-weight:700;font-size:14.5px">📤 Сьогодні виходить</div><button class="ghost" id="tdCal" style="margin-left:auto;padding:5px 11px;font-size:12px">🗓 Календар</button></div>'+slots+'</div>'
@@ -611,11 +625,13 @@ async function loadToday(){
     catch(e){ flash('⚠ '+e.message); b.disabled=false; } });
   const tCal=$('tdCal'); if(tCal) tCal.onclick=()=>{ selectView('publish'); setPTab('cal'); };
   const tAll=$('tdAll'); if(tAll) tAll.onclick=()=>{ selectView('create'); setCTab('posts'); };
+  w.querySelectorAll('.tdFix').forEach(b=>b.onclick=()=>openComposer(b.dataset.post,{slotId:b.dataset.slot}));
   w.querySelectorAll('.tdTile').forEach(el=>el.onclick=()=>{ const lbl=tiles[+el.dataset.tile][0];
     if(lbl.includes('Коменти')) openThreadsComments();
     else if(lbl.includes('Ідеї')){ selectView('create'); setCTab('ideas'); }
     else if(lbl.includes('Чернеток')){ selectView('create'); setCTab('posts'); }
-    else if(lbl.includes('Стрік')) selectView('analytics'); });
+    else if(lbl.includes('матеріали')){ selectView('create'); setCTab('materials'); }
+    else if(lbl.includes('Вчора')||lbl.includes('Стрік')) selectView('analytics'); });
   const tGen=$('tdGenSlot'); if(tGen) tGen.onclick=async()=>{ tGen.disabled=true; aiBusy('✍️ Генерую пост із теми дня…');
     try{ await api('/plan/slots/'+t.nextSlot.id+'/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:'theme'})}); flash('Чернетка готова ✓'); loadToday(); try{ loadStudioPosts(); }catch(e){} }
     catch(e){ flash('⚠ '+e.message); tGen.disabled=false; } finally{ aiDone(); } };

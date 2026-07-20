@@ -990,7 +990,7 @@ app.get("/api/today", async (req: any) => {
   const tz = (await getSettingText(ws, "timezone")) || "Europe/Kyiv";
   const dayStr = (offset: number) => new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(Date.now() - offset * 86400e3));
   const today = dayStr(0);
-  const [slots, drafts, draftsCount, ideas, nextSlot, thConn, thDays, planCount, approvedCount, chanCount] = await Promise.all([
+  const [slots, drafts, draftsCount, ideas, nextSlot, thConn, thDays, planCount, approvedCount, chanCount, failed, freshMat, pubYest] = await Promise.all([
     // що виходить/вийшло сьогодні (за таймзоною воркспейсу)
     q<any>(`select ss.id, ss.scheduled_at, ss.status, ss.result, coalesce(ss.channels, p.channels) as channels,
                    p.id as post_id, left(regexp_replace(p.content,'\\s+',' ','g'), 90) as title
@@ -1026,6 +1026,25 @@ app.get("/api/today", async (req: any) => {
              + (exists(select 1 from threads_config  where workspace_id=$1 and access_token is not null))::int
              + (exists(select 1 from meta_config     where workspace_id=$1 and page_token   is not null))::int
              + (exists(select 1 from linkedin_config where workspace_id=$1 and access_token is not null))::int) as n`, [ws]),
+    // ⚠ збої публікацій за 48г - інакше ховаються в тултіпах календаря і юзер їх не бачить
+    q<any>(`select ss.id, ss.scheduled_at, left(coalesce(ss.result,''), 160) as result, p.id as post_id,
+                   left(regexp_replace(p.content,'\\s+',' ','g'), 80) as title
+              from schedule_slot ss join post p on p.id=ss.post_id
+              join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+            where s.workspace_id=$1 and ss.status='failed' and ss.scheduled_at > now() - interval '48 hours'
+            order by ss.scheduled_at desc limit 5`, [ws]),
+    // 📥 нові матеріали з джерел за 24г (без тумбстоунів) + найкраща AI-оцінка
+    one<{ n: number; top: number | null }>(
+      `select count(*)::int n, max(ai_score) as top from source
+        where workspace_id=$1 and archived=false and origin='rss' and created_at > now() - interval '24 hours'`, [ws]),
+    // ✈️ скільки публікацій реально вийшло вчора (за таймзоною) - замикання циклу «зробив → вийшло»
+    one<{ n: number }>(
+      `select count(*)::int n from (
+         select tp.created_at from telegram_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.status='sent'
+         union all select tp.created_at from threads_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.status='sent'
+         union all select tp.created_at from meta_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.status='sent'
+         union all select tp.created_at from linkedin_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.status='sent'
+       ) u where to_char(u.created_at at time zone $2,'YYYY-MM-DD')=$3`, [ws, tz, dayStr(1)]),
   ]);
   // стрік Threads: поспіль днів із публікацією (сьогодні ще без поста - стрік живий від учора)
   const set = new Set(thDays.map((x) => x.d));
@@ -1037,6 +1056,7 @@ app.get("/api/today", async (req: any) => {
     nextSlot: nextSlot || null,
     threads: (thConn?.n || 0) > 0 ? { streak, postedToday: set.has(today) } : null,
     quickstart: { channels: chanCount?.n || 0, plan: planCount?.n || 0, approved: approvedCount?.n || 0 },
+    failed, freshMaterials: { count: freshMat?.n || 0, top: freshMat?.top ?? null }, publishedYesterday: pubYest?.n || 0,
   };
 });
 
