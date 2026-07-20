@@ -130,6 +130,31 @@ async function cleanBrokenItems(): Promise<void> {
   if (rows.length) await logEvent("info", "rss", `почищено сирих HTML-матеріалів: ${rows.length}`);
 }
 
+// разова зачистка СТАРИХ «голих» матеріалів (заголовок + «Джерело: X» + лінк без тіла статті) -
+// на ВСІХ воркспейсах: гейт якості діє лише на нові айтеми, а сміття з минулих тижнів лишалось у стрічці.
+// Архівуємо (не видаляємо): дедуп живий, згенеровані з них пости не чіпаються. Соцджерела
+// (Telegram/Threads RSSHub, Instagram) не чіпаємо - там короткий текст легітимний.
+// Ідемпотентно й дешево: після першого прогону кандидатів ~0.
+async function sweepThinMaterials(): Promise<void> {
+  const rows = await q<{ id: string; title: string; transcript: string }>(
+    `select s.id, coalesce(s.title,'') as title, s.transcript
+       from source s left join content_source cs on cs.id = s.feed_id
+      where s.origin='rss' and s.archived=false and length(s.transcript) < 700
+        and (cs.id is null or (cs.kind <> 'instagram' and cs.url !~* 'rsshub|/telegram/channel/|/threads/'))
+      limit 2000`);
+  let n = 0;
+  for (const r of rows) {
+    // «мʼясо» = транскрипт без заголовка, рядка «Джерело:», URL-ів і пробілів
+    const meat = r.transcript
+      .replace(r.title, " ")
+      .replace(/^\s*Джерело:.*$/gim, " ")
+      .replace(/https?:\/\/\S+/gi, " ")
+      .replace(/\s+/g, " ").trim();
+    if (meat.length < 120) { await q(`update source set archived=true where id=$1`, [r.id]); n++; }
+  }
+  if (n) await logEvent("info", "rss", `зачистка: заархівовано ${n} «голих» матеріалів без тіла статті`);
+}
+
 // разовий бекфіл оцінок для нещодавніх матеріалів без балу (по одному батчу на воркспейс)
 async function scoreBackfill(): Promise<void> {
   const rows = await q<{ workspace_id: string; id: string; title: string; excerpt: string }>(
@@ -146,6 +171,7 @@ async function scoreBackfill(): Promise<void> {
 let running = false;
 export function startRssPoller(): void {
   cleanBrokenItems().catch(() => { /* чистка не критична */ });
+  sweepThinMaterials().catch(() => { /* зачистка не критична */ });
   scoreBackfill().catch(() => { /* бекфіл не критичний */ });
   setInterval(async () => {
     if (running) return;
