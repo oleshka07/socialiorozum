@@ -110,6 +110,20 @@ export function brandDna(s: Record<string, string>): string {
   return dna + st;
 }
 
+// «Позиціонування + болі клієнта» (стандарт топ-СММ: контент анкериться на РЕАЛЬНИЙ біль,
+// а не вигадану тему). Теза «Х для Y» + список болів → problem-match гачок + PAS-агітація.
+// Інʼєктується поруч із brandDna у точки генерації.
+export function painThesis(s: Record<string, string>): string {
+  const parts: string[] = [];
+  if ((s.brand_thesis || "").trim())
+    parts.push(`\n\nПОЗИЦІОНУВАННЯ (тримайся його в кожному пості): ${s.brand_thesis.trim().slice(0, 220)}.`);
+  const pains = (s.pain_points || "").trim();
+  if (pains)
+    parts.push(`\n\nБОЛІ КЛІЄНТА (список «біль → наше рішення → доказ»; ЄДИНЕ джерело проблематики - НЕ вигадуй інших болів):\n${pains.slice(0, 1400)}` +
+      `\n\nПРАВИЛО PROBLEM-MATCH: відкривай пост БОЛЕМ клієнта його словами (як у списку), НЕ регаліями і не темою «про нішу». Далі 1-2 речення агітації: чого це коштує зараз і чим загрожує далі; «лиходій» - стара система/підхід/міф, ніколи не сама людина. І лише тоді - рішення. Кожен пост самодостатній: цінний навіть тому, хто бачить бренд уперше. Прямий продажний заклик - максимум у кожному ~5-му пості (решта - цінність без продажу).`);
+  return parts.join("");
+}
+
 // ХАРДКОД (не редагується юзером): контекст бренду + контракт формату відповіді.
 const STEP_CONTEXT: Record<StepKey, (s: Record<string, string>) => string> = {
   extract_ideas: (s) => (s.marketing_context ? `\n\nКонтекст бренду й аудиторії: ${s.marketing_context}` : ""),
@@ -532,7 +546,7 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
       (brief ? `\n\n<strategy_brief>\nДжерело правди - не суперечити:\n${brief}\n</strategy_brief>` : "") +
       "\n\n<brand>" +
       (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") +
-      (s.tone_of_voice ? `\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) +
+      (s.tone_of_voice ? `\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) + painThesis(s) +
       (s.deai_rules ? `\nПравила «без AI»: ${s.deai_rules}` : "") +
       "\n</brand>" +
       (examples ? `\n\n<voice_examples>\nРЕАЛЬНІ пости автора - еталон голосу. Відтворюй ритм, лексику, звертання й розмір абзаців САМЕ як тут, але НЕ копіюй зміст:\n---\n${examples}\n---\n</voice_examples>` : "") +
@@ -559,7 +573,7 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
     "Ти досвідчений SMM-копірайтер. За вхідним матеріалом нижче згенеруй готові до публікації пости. " +
     "Кожен пост ОДРАЗУ фінальний: у голосі бренду, живою людською мовою без ознак AI (без канцеляризмів, без «варто зазначити/у сучасному світі», без шаблонних списків заради списків), з чітким гачком, користю та мʼяким закликом." +
     (s.marketing_context ? `\n\nБренд і аудиторія: ${s.marketing_context}` : "") +
-    (s.tone_of_voice ? `\n\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) +
+    (s.tone_of_voice ? `\n\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) + painThesis(s) +
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
     rubricsText + ideasText + goalRule(s) + offerLadder(s) + HOOK_RULE + ANTI_AI_RULE + OBJECTION_RULE +
     NO_DASH_RULE + `\n\nЗгенеруй рівно ${n} різних постів. ${outputFormat}`;
@@ -935,7 +949,7 @@ export async function extractIdeasFromText(workspaceId: string, text: string, co
     : "Знайди в матеріалі окремі контент-ідеї для соцмереж, кожна зі своїм кутом подачі. Перша ідея = найсильніша.";
   const system =
     "Ти контент-розвідник. Даєш ТЕЙК, а не тему. " + lead +
-    (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") + brandDna(s) +
+    (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") + brandDna(s) + painThesis(s) +
     goalRule(s) +
     (rubList ? `\nРубрики бренду: ${rubList}. Кожній ідеї признач НАЙБЛИЖЧУ рубрику з цього переліку.` : "") +
     `\n\nЗнайди до ${Math.max(1, Math.min(10, count))} ідей. Для кожної: idea - суть одним реченням; angle - кут 2-4 словами${mode === "story" ? " (почни з типу: урок/контрхід/фреймворк/доказ/релейтбл/шлях/провал)" : ""}; format - якнайкращий формат: "пост" | "карусель" | "рілс"; hook - чорновий перший рядок (з кульмінації, без кліше «СТОП/99% не знають»). Ранжуй за релевантністю цілі й аудиторії, не за гучністю. Поверни ЛИШЕ валідний JSON-масив: [{"idea":"…","angle":"…","format":"…","hook":"…","rubric":"назва рубрики"}]. Мова: ${lang}.`;
@@ -1033,7 +1047,7 @@ export async function rewritePost(workspaceId: string, text: string, instruction
     : "Перепиши цей пост іншими словами, зберігаючи зміст і структуру, у голосі бренду й живою людською мовою (без ознак AI).";
   const system = task +
     (brief ? `\n\nСТРАТЕГІЧНИЙ БРИФ (тримай бренд): ${brief}` : "") +
-    (s.tone_of_voice ? `\n\nГолос бренду: ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) +
+    (s.tone_of_voice ? `\n\nГолос бренду: ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) + painThesis(s) +
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
     goalRule(s) + ANTI_AI_RULE +
     NO_DASH_RULE + `\n\nПоверни лише текст поста. Мова: ${lang}.`;

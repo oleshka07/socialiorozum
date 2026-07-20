@@ -460,8 +460,13 @@
             <div class="panel" style="margin:0">
               <div style="font-weight:700;font-size:14.5px;margin-bottom:7px;display:flex;align-items:center;gap:6px"><span id="planProgressLabel">Скелет плану</span><span class="qh" title="Скелет = теми на майбутні дні за твоєю стратегією (рубрики × найкращі дні). Кожен слот - ще НЕ пост: клік на тему в календарі чи «→ до поста» генерує чернетку.">?</span></div>
               <div style="height:9px;border-radius:6px;background:var(--surface2);overflow:hidden;margin-bottom:10px"><div id="planProgressBar" style="height:100%;background:var(--brand);width:0%;border-radius:6px;transition:width .3s"></div></div>
-              <div style="font-size:12px;font-weight:600;color:var(--ink2);margin:4px 0 6px">Мережі плану <span class="qh" title="Обери, для яких мереж будувати план. Для кожної мережі - свій набір тем під її формат. Не обрав жодної - буде один спільний план на всі.">?</span></div>
-              <div id="planNets" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"><span style="font-size:12px;color:var(--faint)">…</span></div>
+              <div id="planMixWrap" style="margin:4px 0 10px;display:none">
+                <div style="font-size:11.5px;color:var(--muted);margin-bottom:4px">Мікс рубрик за стратегією <span class="qh" title="План будується за пропорцією рубрик зі Стратегії (частки %). Один майстер-план: одна тема на день, при публікації кожна мережа отримує СВОЮ версію тексту (адаптація + ритм каналів).">?</span></div>
+                <div id="planMixBar" style="display:flex;height:10px;border-radius:6px;overflow:hidden;border:1px solid var(--line)"></div>
+                <div id="planMixLegend" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;font-size:11px;color:var(--muted)"></div>
+              </div>
+              <label class="rchip" id="planAdvWrap" style="font-size:12px;margin-bottom:8px"><input type="checkbox" id="planAdv"> 🔬 Окремий план на кожну мережу <span class="qh" title="Розширений режим для агенцій: своя сітка тем під кожну мережу (дорожче, теми не пов'язані між собою). Стандарт індустрії - ОДИН майстер-план з адаптацією, тож зазвичай це не потрібно.">?</span></label>
+              <div id="planNets" style="display:none;flex-wrap:wrap;gap:6px;margin-bottom:10px"><span style="font-size:12px;color:var(--faint)">…</span></div>
               <label style="font-size:12px;font-weight:600;color:var(--ink2);display:block;margin-bottom:4px">Про що зробити план? <span style="font-weight:400;color:var(--faint)">(необовʼязково)</span></label>
               <textarea id="planTopic" class="txt" rows="2" placeholder="Теми/напрями, які хочеш висвітлити - впишемо їх у скелет. Напр.: запуск нового тарифу; кейс клієнта; помилки новачків…" style="margin-bottom:10px;font-size:13px"></textarea>
               <div class="btnrow" style="margin:0;align-items:center;flex-wrap:wrap">
@@ -648,6 +653,19 @@
           <div id="goalChips" style="display:flex;gap:6px;flex-wrap:wrap"></div>
           <label class="fl" style="margin-top:10px">Метрика і строк цілі</label>
           <input id="goalMetric" class="txt" placeholder="напр.: 300 заявок у воронку за квартал">
+        </div>
+        <div class="panel">
+          <div class="ph" style="margin:0 0 6px">🧭 Позиціонування і болі клієнта</div>
+          <div class="hint" style="margin-bottom:8px">Найсильніший рушій контенту (так працюють топ-СММ): пост відкривається БОЛЕМ клієнта його словами, а не темою «про нішу». Заповниш - AI перестане «писати не про те».</div>
+          <label class="fl">Теза бренду: «Х для Y» - одним реченням</label>
+          <input id="brandThesis" class="txt" placeholder="напр.: системи продажів для власників малого бізнесу, що втомилися від хаосу у відділі" style="margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px">
+            <label class="fl" style="margin:0">Болі клієнта → твоє рішення → доказ</label>
+            <button class="ghost" id="painsSuggest" style="margin-left:auto;padding:5px 12px;font-size:12.5px" title="AI складе чорновий список із твого брифу - відредагуй під себе">✨ Підказати</button>
+            <span id="painsMsg" style="font-size:12px;color:var(--muted)"></span>
+          </div>
+          <textarea id="painPoints" rows="7" placeholder="Один рядок = один біль. Формат: біль (словами клієнта) → що робиш ти → чому тобі вірити.&#10;напр.: «Реклама працює, а прибуток не росте» → аудит воронки за 3 дні → 40+ відділів продажу навели лад"></textarea>
+          <div class="hint">Генерація бере пости ЗВІДСИ: гачок = біль дослівно, далі агітація проблеми (лиходій - стара система, не людина), тоді рішення. Збереження автоматичне.</div>
         </div>
         <div class="panel">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">

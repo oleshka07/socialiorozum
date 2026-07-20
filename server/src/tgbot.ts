@@ -17,6 +17,23 @@ let BOT_USERNAME = env.telegram.botUsername;
 export const botEnabled = (): boolean => !!env.telegram.botToken;
 export const botUsername = (): string => BOT_USERNAME;
 
+// Токен бота для ПРОАКТИВНИХ повідомлень воркспейсу (дайджест/щоденник/живі меседжі):
+// власний бот воркспейсу (введений у Налаштуваннях), якщо він відрізняється від спільного; інакше спільний.
+export async function wsBotToken(workspaceId: string): Promise<string> {
+  const r = await one<{ bot_token: string | null }>(`select bot_token from telegram_config where workspace_id=$1`, [workspaceId]);
+  return (r?.bot_token && r.bot_token !== env.telegram.botToken) ? r.bot_token : env.telegram.botToken;
+}
+
+// Власний бот воркспейсу отримує СВІЙ вебхук → усі DM-фічі (щоденник, дайджест, ідеї) працюють
+// через нього, а не лише публікація. У вебхук-URL кладемо id бота (?bot=), щоб роут знав, чиїм
+// токеном відповідати. Повертає username бота для підказки в UI.
+export async function registerOwnBotWebhook(token: string): Promise<string> {
+  const me = await tg.getMe(token);
+  const url = `${env.appBaseUrl}/api/webhooks/telegram/${env.telegram.webhookSecret}?bot=${me.id}`;
+  await tg.setWebhook(token, url, env.telegram.webhookSecret);
+  return me.username || String(me.id);
+}
+
 export async function initTelegramBot(): Promise<void> {
   if (!env.telegram.botToken) { console.log("[tgbot] TELEGRAM_BOT_TOKEN не заданий - спільний бот вимкнено"); return; }
   try {
@@ -35,24 +52,30 @@ export async function initTelegramBot(): Promise<void> {
 }
 
 export async function createConnectLink(workspaceId: string): Promise<string> {
-  if (!env.telegram.botToken) throw new Error("Спільний бот не налаштований на сервері");
+  const token = await wsBotToken(workspaceId);
+  if (!token) throw new Error("Спільний бот не налаштований на сервері");
+  // deep-link веде на бота, який реально обслуговує цей воркспейс (власний або спільний)
+  let username = BOT_USERNAME;
+  if (token !== env.telegram.botToken) { try { username = (await tg.getMe(token)).username || username; } catch { /* фолбек на спільного */ } }
   const code = randomBytes(8).toString("hex");
   await q(`delete from tg_connect where workspace_id=$1`, [workspaceId]); // один активний код на воркспейс
   await q(`insert into tg_connect(code, workspace_id) values($1,$2)`, [code, workspaceId]);
-  return `https://t.me/${BOT_USERNAME}?start=${code}`;
+  return `https://t.me/${username}?start=${code}`;
 }
 
-async function attachChannel(fromId: number, chatId: number, title: string): Promise<string> {
+async function attachChannel(fromId: number, chatId: number, title: string, token: string): Promise<string> {
   const row = await one<{ workspace_id: string }>(`select workspace_id from tg_connect where tg_user_id=$1 order by created_at desc limit 1`, [fromId]);
   if (!row) return "Спершу відкрий посилання підключення з кабінету socialio (кнопка «Підключити наш бот»).";
+  // перевіряємо членство ТИМ ботом, якому переслали пост (власний або спільний); id бота = префікс токена
+  const botId = Number(token.split(":")[0]) || BOT_ID;
   let member: { status: string };
-  try { member = await tg.getChatMember(env.telegram.botToken, String(chatId), BOT_ID); }
+  try { member = await tg.getChatMember(token, String(chatId), botId); }
   catch { return "Не бачу цього каналу. Додай мене адміном у канал і спробуй ще раз."; }
   if (!["administrator", "creator"].includes(member.status)) return "Додай мене АДМІНОМ у канал (з правом публікувати), тоді перешли пост ще раз.";
   await q(`insert into telegram_config(workspace_id, bot_token, channel_chat_id, channel_title, updated_at)
            values($1,$2,$3,$4,now())
            on conflict (workspace_id) do update set bot_token=excluded.bot_token, channel_chat_id=excluded.channel_chat_id, channel_title=excluded.channel_title, updated_at=now()`,
-    [row.workspace_id, env.telegram.botToken, String(chatId), title || null]);
+    [row.workspace_id, token, String(chatId), title || null]);
   await q(`delete from tg_connect where workspace_id=$1`, [row.workspace_id]);
   await logEvent("info", "tgbot", `канал підключено: ${title || chatId}`);
   return `✅ Канал «${title || chatId}» підключено! Пости з кабінету тепер публікуватимуться сюди.`;
@@ -74,7 +97,7 @@ async function setOwner(fromId: number, workspaceId: string, chatId: string): Pr
 
 // «один живий меседж на категорію»: гасить попереднє повідомлення категорії, шле нове, зберігає message_id.
 export async function liveSend(workspaceId: string, chatId: string, category: string, text: string, buttons?: tg.TgButton[][]): Promise<void> {
-  const token = env.telegram.botToken;
+  const token = await wsBotToken(workspaceId); // власний бот воркспейсу, якщо задано
   const prev = await one<{ message_id: string }>(`select message_id from tg_message where workspace_id=$1 and category=$2`, [workspaceId, category]);
   if (prev?.message_id) await tg.deleteMessage(token, chatId, Number(prev.message_id));
   const r = await tg.sendMessage(token, chatId, text, buttons);
@@ -149,11 +172,11 @@ async function sendIdeaList(workspaceId: string, chatId: string): Promise<void> 
   await liveSend(workspaceId, chatId, "idea_list", `💡 Твої ідеї (${rows.length}). Тапни, щоб зробити пост:`, buttons);
 }
 
-// обробка апдейту від Telegram (виклик із вебхука)
-export async function handleUpdate(update: any): Promise<void> {
-  const token = env.telegram.botToken; if (!token) return;
+// обробка апдейту від Telegram (виклик із вебхука); tokenOverride = власний бот воркспейсу (?bot= у URL)
+export async function handleUpdate(update: any, tokenOverride?: string): Promise<void> {
+  const token = tokenOverride || env.telegram.botToken; if (!token) return;
   try {
-    if (update?.callback_query) { await handleCallback(update.callback_query); return; }
+    if (update?.callback_query) { await handleCallback(update.callback_query, token); return; }
     const msg = update?.message; if (!msg || !msg.from) return;
     const fromId = msg.from.id; const chatId = String(msg.chat?.id ?? fromId); const text = String(msg.text || "").trim();
 
@@ -228,12 +251,12 @@ export async function handleUpdate(update: any): Promise<void> {
 
     // переслали пост із каналу -> підключення каналу (як було)
     if (msg.forward_from_chat && msg.forward_from_chat.type === "channel") {
-      await tg.sendMessage(token, chatId, await attachChannel(fromId, msg.forward_from_chat.id, msg.forward_from_chat.title));
+      await tg.sendMessage(token, chatId, await attachChannel(fromId, msg.forward_from_chat.id, msg.forward_from_chat.title, token));
       return;
     }
     // @username каналу -> підключення каналу; якщо не канал — впаде в захоплення ідеї
     if (text.startsWith("@")) {
-      try { const chat = await tg.getChat(token, text); if (chat.type === "channel") { await tg.sendMessage(token, chatId, await attachChannel(fromId, chat.id, chat.title || text)); return; } } catch { /* не канал */ }
+      try { const chat = await tg.getChat(token, text); if (chat.type === "channel") { await tg.sendMessage(token, chatId, await attachChannel(fromId, chat.id, chat.title || text, token)); return; } } catch { /* не канал */ }
     }
 
     // будь-який інший текст: відповідь на відкрите питання щоденника → запис дня; інакше → ідея в Банк
@@ -255,9 +278,9 @@ const draftButtons = (postId: string): tg.TgButton[][] => [
   [{ text: "✍️ Переробити", data: `rw:${postId}` }, { text: "📋 Ще ідеї", data: "idea_list" }],
 ];
 
-// натискання inline-кнопок
-async function handleCallback(cbq: any): Promise<void> {
-  const token = env.telegram.botToken;
+// натискання inline-кнопок (tokenOverride = власний бот воркспейсу)
+async function handleCallback(cbq: any, tokenOverride?: string): Promise<void> {
+  const token = tokenOverride || env.telegram.botToken;
   const fromId = cbq.from?.id; const chatId = String(cbq.message?.chat?.id ?? fromId); const data = String(cbq.data || "");
   const ws = await ownerWorkspace(fromId);
   if (!ws) { await tg.answerCallbackQuery(token, cbq.id, "Спершу під'єднай кабінет socialio"); return; }
