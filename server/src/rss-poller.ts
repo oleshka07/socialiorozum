@@ -36,6 +36,7 @@ async function ingest(feed: Feed): Promise<string[]> {
     throw e;
   }
   const runIds: string[] = [];
+  let skipped = 0; // новини без тіла статті - пропущені (тумбстоун), щоб у Матеріали не падали голі заголовки
   const created: { id: string; title: string; excerpt: string }[] = [];
   for (const it of items) {
     if (runIds.length >= MAX_NEW_PER_TICK) break;
@@ -45,16 +46,23 @@ async function ingest(feed: Feed): Promise<string[]> {
     // «тонкий» айтем (Google News: лише заголовок+джерело) → догрузити текст статті за посиланням;
     // не вийшло (сайт закритий/JS-only) → матеріалом стає заголовок, Розвідник дасть кут з нього
     let content = it.content || "";
-    // догрузка статті - лише для класичних фідів (IG-підписи самодостатні, а instagram.com ботів не пускає)
-    if (feed.kind !== "instagram" && content.replace(/\s+/g, " ").length < 180 && it.link) {
+    // соцджерела (Telegram/Threads через RSSHub, Instagram): пост САМОДОСТАТНІЙ - короткий текст легітимний,
+    // догрузка/гейт не застосовуються. Для новин/статей - навпаки: без тіла статті матеріал безглуздий.
+    const isSocial = feed.kind === "instagram" || /rsshub|\/telegram\/channel\/|\/threads\//i.test(feed.url || "");
+    if (!isSocial && content.replace(/\s+/g, " ").length < 180 && it.link) {
       // google-лінк спершу розкодовуємо у URL видавця: і стаття тягнеться з нього, і у фолбеку лінк людський
       const real = /news\.google\.com/i.test(it.link) ? await resolveGoogleNewsUrl(it.link).catch(() => "") : it.link;
       const art = real ? await fetchArticleText(real).catch(() => "") : "";
-      if (art) content = `${it.title}\n\n${art}\n\n${real}`;
+      if (art && art.replace(/\s+/g, " ").length >= 220) content = `${it.title}\n\n${art}\n\n${real}`;
       else {
-        // видавець закритий від ботів → заголовок ОДИН раз + видавець + чисте посилання (без сирого google-URL)
-        const publisher = (it.content || "").startsWith(it.title) ? (it.content || "").slice(it.title.length).trim() : "";
-        content = [it.title, publisher ? `Джерело: ${publisher}` : "", real || it.link].filter(Boolean).join("\n");
+        // СТАТТЯ НЕ ВИТЯГНУЛАСЬ (видавець закритий від ботів / JS-only) → в Матеріали НЕ додаємо:
+        // «заголовок + посилання» - не контент. Тумбстоун (archived=true) - щоб дедуп не пробував
+        // цей айтем щотіка знову, а юзер його не бачив.
+        await q(`insert into source(workspace_id,origin,title,transcript,external_id,feed_id,archived)
+                 values($1,'rss',$2,$3,$4,$5,true)`,
+          [feed.workspace_id, (it.title || feed.url).slice(0, 200), `[стаття недоступна] ${real || it.link || ""}`.slice(0, 500), it.externalId, feed.id]);
+        skipped++;
+        continue;
       }
     }
     if (!content.trim()) content = it.title;
@@ -66,6 +74,7 @@ async function ingest(feed: Feed): Promise<string[]> {
     runIds.push(run!.id);
   }
   await q(`update content_source set last_error=null, last_pulled_at=now(), error_count=0 where id=$1`, [feed.id]);
+  if (skipped) await logEvent("info", "rss", `${feed.url}: пропущено ${skipped} без тіла статті (видавець закритий)`);
   if (runIds.length) {
     await logEvent("info", "rss", `${feed.url}: +${runIds.length} нових`);
     try { await matchPlanSlots(feed.workspace_id); } catch { /* метчинг не критичний */ }

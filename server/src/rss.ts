@@ -61,12 +61,30 @@ export async function fetchFeed(url: string): Promise<RssItem[]> {
 
 // ---- догрузка тексту статті за посиланням (для «тонких» фідів: Google News дає лише заголовок+джерело) ----
 // Легка readability-евристика без залежностей: og:description + найбільші <p>-абзаци.
-function extractParagraphs(html: string): string {
-  // прибираємо script/style/nav цілком, щоб їх текст не потрапив у «статтю»
+export function extractParagraphs(html: string): string {
+  // 1) JSON-LD articleBody: чимало видавців кладуть ПОВНИЙ текст статті у <script type="application/ld+json">
+  //    (NewsArticle schema) - працює навіть коли розмітка сторінки закрита чи захаращена.
+  for (const m of html.matchAll(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
+    try {
+      const flat = (o: any): string => {
+        if (!o) return "";
+        if (Array.isArray(o)) { for (const x of o) { const t = flat(x); if (t) return t; } return ""; }
+        if (typeof o === "object") return typeof o.articleBody === "string" && o.articleBody.length > 200 ? o.articleBody : flat(o["@graph"]);
+        return "";
+      };
+      const body = flat(JSON.parse(m[1]));
+      if (body) return decode(body.replace(/<[^>]+>/g, " ")).slice(0, 6000).trim();
+    } catch { /* битий JSON-LD - далі звичайний шлях */ }
+  }
+  // 2) прибираємо script/style/nav цілком, щоб їх текст не потрапив у «статтю»
   const clean = html.replace(/<(script|style|nav|header|footer|aside|form|noscript)[\s\S]*?<\/\1>/gi, " ");
   const ogd = clean.match(/property=["']og:description["'][^>]*content=["']([^"']{40,})["']/i)
-    || clean.match(/content=["']([^"']{40,})["'][^>]*property=["']og:description["']/i);
-  const ps = (clean.match(/<p[^>]*>[\s\S]*?<\/p>/gi) || [])
+    || clean.match(/content=["']([^"']{40,})["'][^>]*property=["']og:description["']/i)
+    || clean.match(/name=["']description["'][^>]*content=["']([^"']{40,})["']/i);
+  // 3) якщо є <article> - абзаци беремо ЗВІДТИ (менше сміття з сайдбарів/тизерів)
+  const artM = clean.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
+  const scope = artM && artM[1].length > 500 ? artM[1] : clean;
+  const ps = ((scope.match(/<p[^>]*>[\s\S]*?<\/p>/gi) || []))
     .map((p) => decode(p))
     .filter((t) => t.length >= 60 && !/cookie|javascript|підпис(атися|уйся)|реклам/i.test(t));
   const body = ps.join("\n\n").slice(0, 6000);
