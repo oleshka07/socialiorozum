@@ -38,7 +38,8 @@ import { startDiary } from "./diary.js";
 import { startThreadsAuto } from "./threads-auto.js";
 import { getSettingText } from "./settings.js";
 import { generateImageForPost, imageProviders, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto } from "./images.js";
-import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername } from "./tgbot.js";
+import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook } from "./tgbot.js";
+import { chat } from "./openrouter.js";
 
 // ============================================================================
 // ЗМІСТ ФАЙЛУ (182 роути; шукай за банером «===== НАЗВА =====» або шляхом роуту)
@@ -457,6 +458,22 @@ app.post("/api/generate/from-brand", async (req: any, reply) => {
   const src = await one<{ id: string }>(`insert into source(workspace_id, origin, title, transcript) values($1,'brand','Згенеровано з Бази бренду',$2) returning id`, [ws, brief]);
   const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
   return { runId: run!.id };
+});
+
+// ✨ чорновий список болів клієнта з брифу/ніші (юзер редагує; НЕ зберігає сам - лише пропозиція)
+app.post("/api/brand/suggest-pains", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  try {
+    const rows = await q<{ key: string; content: string }>(`select key, content from settings_block where workspace_id=$1 and key in ('marketing_context','strategy_brief','brand_thesis')`, [ws]);
+    const s: Record<string, string> = {}; for (const r of rows) s[r.key] = r.content || "";
+    const ctx = (s.strategy_brief || s.marketing_context || "").trim();
+    if (!ctx) return reply.code(400).send({ error: "Спершу заповни Базу бренду (ніша й аудиторія)" });
+    const raw = await chat(env.cheapModel,
+      "Ти маркетолог-практик. Склади список з 8-10 РЕАЛЬНИХ болів ідеального клієнта цього бренду. Кожен рядок СТРОГО у форматі: «біль дослівно словами клієнта» → що бренд робить із цим → доказ/цифра (якщо з контексту невідомо - постав [доказ?]). Болі - конкретні й побутові, не абстракції. Мова - мова бренду. Поверни ЛИШЕ рядки списку, без вступу і нумерації.",
+      `Бренд: ${ctx.slice(0, 2500)}${s.brand_thesis ? `\nТеза: ${s.brand_thesis}` : ""}`,
+      { workspaceId: ws, step: "pains" });
+    return { pains: raw.trim().slice(0, 3000) };
+  } catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
 
 // «Написати про конкретну тему»: користувач задає НАПРЯМ, сервіс одразу генерує пости саме про це
@@ -1470,6 +1487,18 @@ app.put("/api/integrations/telegram", async (req: any) => {
        updated_at = now()`,
     [ws, token, channel, group]
   );
+  // ВЛАСНИЙ бот (токен відрізняється від спільного): реєструємо йому вебхук - тоді через нього
+  // працює НЕ лише публікація, а всі DM-фічі (щоденник, дайджест, банк ідей, кнопки).
+  if (token && token !== env.telegram.botToken) {
+    try {
+      const username = await registerOwnBotWebhook(token);
+      await logEvent("info", "tgbot", `власний бот @${username} підключено (webhook + DM-фічі)`, null, req.user.id);
+      return { ok: true, ownBot: username, dmReady: true };
+    } catch (e: any) {
+      await logEvent("warn", "tgbot", "власний бот: вебхук не зареєструвався: " + e.message, null, req.user.id);
+      return { ok: true, warn: "Токен збережено, але вебхук не зареєструвався: " + String(e.message).slice(0, 150) + ". Публікація працюватиме, DM-фічі - ні." };
+    }
+  }
   return { ok: true };
 });
 
@@ -2551,11 +2580,21 @@ app.post("/api/transcription/import", async (req: any, reply) => {
 
 // вебхук Fireflies: «зустріч готова» -> автоімпорт джерела (+ опційно автопілот).
 // Поза auth: маршрутизація через per-workspace токен у URL, автентичність - HMAC-підпис.
-// вебхук спільного Telegram-бота (auth-exempt; секрет у шляху + у заголовку)
+// вебхук Telegram-ботів (auth-exempt; секрет у шляху + у заголовку).
+// Без ?bot= - спільний бот. З ?bot=<id> - ВЛАСНИЙ бот воркспейсу (токен шукаємо за префіксом id:
+// токени Telegram мають формат "<botId>:<hash>") - усі DM-фічі працюють через нього.
 app.post("/api/webhooks/telegram/:secret", async (req: any, reply) => {
   if (req.params.secret !== env.telegram.webhookSecret) return reply.code(404).send({ error: "not found" });
   const hdr = req.headers["x-telegram-bot-api-secret-token"];
   if (hdr && hdr !== env.telegram.webhookSecret) return reply.code(403).send({ error: "bad secret" });
+  const botId = String(req.query?.bot || "").replace(/\D/g, "");
+  if (botId) {
+    const own = await one<{ bot_token: string }>(
+      `select bot_token from telegram_config where bot_token like $1 limit 1`, [`${botId}:%`]);
+    if (!own) return { ok: true, ignored: true }; // бот відв'язаний - апдейт нікому обробляти
+    handleUpdate(req.body, own.bot_token).catch(() => {});
+    return { ok: true };
+  }
   handleUpdate(req.body).catch(() => {});
   return { ok: true };
 });

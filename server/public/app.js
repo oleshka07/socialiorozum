@@ -16,7 +16,7 @@ const NETS=[['telegram','Telegram'],['instagram','Instagram'],['facebook','Faceb
 const CP_LABEL={telegram:'Telegram',instagram:'Instagram',threads:'Threads',facebook:'Facebook'};
 const STEP  = {1:'extract_ideas',3:'drafts',4:'tone',5:'format',6:'deai',7:'strategy'};
 const ORDER = [1,3,4,5,6,7];
-const SET = {mkt:'marketing_context', tov:'tone_of_voice', deai:'deai_rules', strat:'content_strategy', voiceExamples:'voice_examples', imgStyle:'image_style', vSign:'voice_signature', vStop:'voice_stoplist', goalMetric:'goal_metric', bAssoc:'brand_assoc', bAntiAssoc:'brand_antiassoc', bStory:'brand_story', bInterests:'brand_interests', offerLow:'offer_low', offerMid:'offer_mid', offerHigh:'offer_high'};
+const SET = {mkt:'marketing_context', tov:'tone_of_voice', deai:'deai_rules', strat:'content_strategy', voiceExamples:'voice_examples', imgStyle:'image_style', vSign:'voice_signature', vStop:'voice_stoplist', goalMetric:'goal_metric', bAssoc:'brand_assoc', bAntiAssoc:'brand_antiassoc', bStory:'brand_story', bInterests:'brand_interests', offerLow:'offer_low', offerMid:'offer_mid', offerHigh:'offer_high', brandThesis:'brand_thesis', painPoints:'pain_points'};
 const AUTORUN_WARN='Авто-прогін запускатиме повну AI-генерацію постів на КОЖНУ нову статтю/зустріч - це витрачає кошти на AI. Увімкнути?';
 // час: усе планування рахуємо в поясі TZ (обирається в Налаштуваннях); у БД - UTC
 let TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Kyiv';
@@ -392,7 +392,8 @@ function applyPlanFilter(){
   PlanSlots = PlanChan==='__all' ? PlanAll : PlanAll.filter(s=>s.channel===PlanChan);
   renderPlan(); updateCounts();
 }
-// чекбокси мереж для генерації плану (з підключених каналів; жодної обраної = спільний план)
+// 🔬 розширений режим «окремий план на мережу» (дефолт ВИМКНЕНО - стандарт CORE: один майстер-план
+// з адаптацією при публікації). Чекбокси мереж показуються лише в розширеному режимі.
 async function renderPlanNets(){
   const box=$('planNets'); if(!box) return;
   if(!Object.keys(ChanStatus||{}).length){ try{ await loadChanStatus(); }catch(e){} }
@@ -401,6 +402,31 @@ async function renderPlanNets(){
   box.innerHTML=list.map(n=>'<label class="rchip'+(ChanStatus[n[0]]?' on':'')+'" style="font-size:12.5px"><input type="checkbox" class="planNet" value="'+n[0]+'"'+(ChanStatus[n[0]]?' checked':'')+'> '+(CP_ICON[n[0]]||'')+' '+esc(n[1])+'</label>').join('')
     +(conn.length?'':'<div style="font-size:11.5px;color:var(--faint);width:100%;margin-top:4px">Підключи мережі в Налаштування → Канали, щоб націлити план точніше.</div>');
   box.querySelectorAll('.planNet').forEach(cb=>cb.addEventListener('change',()=>{ cb.closest('.rchip').classList.toggle('on',cb.checked); updPlanEst(); }));
+  const adv=$('planAdv');
+  if(adv&&!adv._wired){ adv._wired=true; adv.checked=localStorage.getItem('kg_plan_adv')==='1';
+    adv.addEventListener('change',()=>{ localStorage.setItem('kg_plan_adv',adv.checked?'1':'0'); box.style.display=adv.checked?'flex':'none'; updPlanEst(); }); }
+  box.style.display=(adv&&adv.checked)?'flex':'none';
+  renderPlanMix();
+}
+// ✨ чорнові болі клієнта з брифу (в textarea, юзер редагує; автосейв спрацює через SET)
+if($('painsSuggest')) $('painsSuggest').onclick=async()=>{
+  const ta=$('painPoints'), m=$('painsMsg');
+  if(ta.value.trim() && !confirm('Поточний список болів буде замінено чорновиком від AI. Продовжити?')) return;
+  m.textContent='думаю…'; $('painsSuggest').disabled=true;
+  try{ const r=await api('/brand/suggest-pains',{method:'POST'}); ta.value=r.pains||''; ta.dispatchEvent(new Event('input')); m.textContent='готово ✓ відредагуй під себе (особливо [доказ?])'; }
+  catch(e){ m.textContent='⚠ '+e.message; } finally{ $('painsSuggest').disabled=false; }
+};
+
+// 📊 видима пропорція рубрик (частки зі Стратегії): план явно будується за цим міксом
+function renderPlanMix(){
+  const wrap=$('planMixWrap'), bar=$('planMixBar'), leg=$('planMixLegend'); if(!wrap||!bar) return;
+  const rubs=(Rubrics||[]).filter(r=>r.name);
+  if(!rubs.length){ wrap.style.display='none'; return; }
+  const total=rubs.reduce((s,r)=>s+(+r.share||0),0)||rubs.length*25;
+  const COLORS=['var(--brand)','var(--tg)','var(--amber)','var(--th, #999)','#8e6bbf','#5a9e6f'];
+  wrap.style.display='';
+  bar.innerHTML=rubs.map((r,i)=>{ const pct=Math.round(((+r.share||25)/total)*100); return '<div style="width:'+pct+'%;background:'+COLORS[i%COLORS.length]+';opacity:.8" title="'+esc(r.name)+' '+pct+'%"></div>'; }).join('');
+  leg.innerHTML=rubs.map((r,i)=>{ const pct=Math.round(((+r.share||25)/total)*100); return '<span><span style="display:inline-block;width:8px;height:8px;border-radius:3px;background:'+COLORS[i%COLORS.length]+';margin-right:3px"></span>'+(r.emoji||'')+esc(r.name)+' '+pct+'%</span>'; }).join('');
 }
 async function loadPlan(){
   try{ const r=await api('/plan'); PlanAll=r.slots||[]; PlanChans=[...new Set(PlanAll.map(s=>s.channel).filter(Boolean))]; }
@@ -491,11 +517,12 @@ function renderPlan(){
     });
   });
 }
-function planSelectedNets(){ return [...document.querySelectorAll('#planNets .planNet:checked')].map(c=>c.value); }
+// мережі для генерації: ЛИШЕ в розширеному режимі; дефолт [] = один майстер-план (CORE)
+function planSelectedNets(){ const adv=$('planAdv'); if(!adv||!adv.checked) return []; return [...document.querySelectorAll('#planNets .planNet:checked')].map(c=>c.value); }
 if($('planGenBtn')) $('planGenBtn').onclick=async()=>{
   const m=$('planMsg'); const nets=planSelectedNets();
   if(PlanSlots.some(s=>s.status==='empty'||s.status==='matched') && !confirm('Незаповнені слоти поточного скелета буде замінено новими. Продовжити?')) return;
-  m.style.color='var(--muted)'; m.textContent='будую скелет…'; aiBusy(nets.length?('📅 Будую план для '+nets.length+' мереж…'):'📅 Будую спільний скелет плану…');
+  m.style.color='var(--muted)'; m.textContent='будую скелет…'; aiBusy(nets.length?('📅 Будую окремі плани для '+nets.length+' мереж…'):'📅 Будую майстер-план (адаптація під мережі - при публікації)…');
   const body={horizon:+$('planHorizon').value||14,posts_per_week:+$('planPpw').value||4,networks:nets,topic:($('planTopic')&&$('planTopic').value.trim())||undefined};
   try{ const r=await api('/plan/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const byNet=r.byNet||{}; const parts=Object.keys(byNet).map(k=>(CP_ICON[k]||'')+(byNet[k]));
@@ -1807,7 +1834,7 @@ function renderCal(){
       const g=document.createElement('div'); g.className='pchip ghost';
       const drafted=p.status==='drafted';
       g.title=drafted?'Чернетка готова - відкрити в композері':'Тема з плану (пост ще не створено). Клік = згенерувати пост'+(p.status==='matched'?' зі зметченого матеріалу':'');
-      g.innerHTML='<b>'+(drafted?'✍️ чернетка':'📋 тема')+'</b> '+esc(String(p.theme||p.rubric||'').replace(/\n+/g,' ').slice(0,maxTxt));
+      g.innerHTML='<b>'+(drafted?'✍️ чернетка':'📋 тема')+'</b> '+((p.channel&&p.channel!=='all')?(CP_ICON[p.channel]||'')+' ':'')+esc(String(p.theme||p.rubric||'').replace(/\n+/g,' ').slice(0,maxTxt));
       g.onclick=async(ev)=>{ ev.stopPropagation();
         if(drafted&&p.post_id){ openComposer(p.post_id); return; }
         const from=p.match_source_id?'material':'theme';
@@ -1849,7 +1876,7 @@ function renderWeekGrid(wrap, days, byDay, todayIso){
       ghosts[iso].forEach(p=>{ const drafted=p.status==='drafted';
         const g=document.createElement('div'); g.className='pchip ghost'; g.style.position='static';
         g.title=drafted?'Чернетка готова - відкрити в композері':'Тема з плану (пост ще не створено). Клік = згенерувати пост'+(p.status==='matched'?' зі зметченого матеріалу':'');
-        g.innerHTML='<b>'+(drafted?'✍️':'📋')+'</b> '+esc(String(p.theme||p.rubric||'').replace(/\n+/g,' ').slice(0,26));
+        g.innerHTML='<b>'+(drafted?'✍️':'📋')+'</b> '+((p.channel&&p.channel!=='all')?(CP_ICON[p.channel]||'')+' ':'')+esc(String(p.theme||p.rubric||'').replace(/\n+/g,' ').slice(0,26));
         g.onclick=async(ev)=>{ ev.stopPropagation();
           if(drafted&&p.post_id){ openComposer(p.post_id); return; }
           const from=p.match_source_id?'material':'theme';
@@ -2035,7 +2062,10 @@ async function loadMetaPages(){ const sel=$('mtPage'); if(!sel) return; try{ con
 $('mtPage').onchange=async(e)=>{ try{ await api('/integrations/meta/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pageId:e.target.value})}); await loadMeta(); flashSaved(); }catch(err){ flash('Не вдалося змінити акаунт: '+err.message); } };
 $('mtStats').onclick=async()=>{ const o=$('mtStatsOut'); o.innerHTML='<div class="empty"><span class="spin"></span> завантаження…</div>';
   try{ const s=await api('/integrations/meta/stats'); o.innerHTML=(s.facebook?('<div class="card">📘 <b>'+esc(s.facebook.name||'FB')+'</b>: '+(s.facebook.followers_count||s.facebook.fan_count||0)+' підписників</div>'):'')+(s.instagram?('<div class="card">📸 <b>@'+esc(s.instagram.username||'')+'</b>: '+(s.instagram.followers_count||0)+' підписників · '+(s.instagram.media_count||0)+' постів</div>'):'')+(!s.facebook&&!s.instagram?'<div class="empty">Немає даних.</div>':''); }catch(e){ o.innerHTML='<div class="card" style="color:var(--danger)">⚠ '+esc(e.message)+'</div>'; } };
-$('tgSave').onclick=async()=>{ try{ await api('/integrations/telegram',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({botToken:$('tgToken').value,channelChatId:$('tgChannel').value,groupChatId:$('tgGroup').value})}); $('tgToken').value=''; $('tgToken').placeholder='•••••••• (токен збережено)'; $('tgResult').innerHTML='<div class="card" style="color:var(--brand)">Збережено ✓</div>'; }catch(e){ $('tgResult').innerHTML='<div class="card" style="color:var(--danger)">⚠ '+esc(e.message)+'</div>'; } };
+$('tgSave').onclick=async()=>{ try{ const r=await api('/integrations/telegram',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({botToken:$('tgToken').value,channelChatId:$('tgChannel').value,groupChatId:$('tgGroup').value})}); $('tgToken').value=''; $('tgToken').placeholder='•••••••• (токен збережено)';
+  $('tgResult').innerHTML=r.dmReady?('<div class="card" style="color:var(--brand)">✅ Власний бот <b>@'+esc(r.ownBot)+'</b> підключено повністю: публікація + асистент у DM (щоденник, дайджест, ідеї). Напиши боту /start із посилання «Підключити бот».</div>')
+    :(r.warn?('<div class="card" style="color:var(--amber)">⚠ '+esc(r.warn)+'</div>'):'<div class="card" style="color:var(--brand)">Збережено ✓</div>'); }
+  catch(e){ $('tgResult').innerHTML='<div class="card" style="color:var(--danger)">⚠ '+esc(e.message)+'</div>'; } };
 $('tgTest').onclick=async()=>{ $('tgResult').innerHTML='<div class="empty"><span class="spin"></span> перевіряю…</div>';
   try{ const r=await api('/integrations/telegram/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({botToken:$('tgToken').value,channelChatId:$('tgChannel').value,groupChatId:$('tgGroup').value})});
     const line=(label,c)=>{ if(!c) return '<div class="card"><b>'+label+':</b> <span style="color:var(--muted)">не вказано</span></div>'; if(!c.ok) return '<div class="card"><b>'+label+':</b> <span style="color:var(--danger)">⚠ '+esc(c.error||'недоступно')+'</span></div>'; return '<div class="card"><b>'+label+':</b> <span style="color:var(--brand)">✓ '+esc(c.title)+'</span> '+(c.isAdmin?'<span style="color:var(--brand)">· бот адмін</span>':'<span style="color:var(--amber)">· бот НЕ адмін</span>')+'</div>'; };
