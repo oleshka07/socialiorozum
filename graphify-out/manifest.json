@@ -1,6 +1,6 @@
 {
   "server/db/schema.sql": {
-    "mtime": 1784752729.573169,
+    "mtime": 1784753289.3211563,
     "ast_hash": "3123c509fb49b784f336879fa0284851",
     "semantic_hash": ""
   },
@@ -125,7 +125,7 @@
     "semantic_hash": ""
   },
   "server/src/server.ts": {
-    "mtime": 1784752798.1811674,
+    "mtime": 1784753289.3211563,
     "ast_hash": "f9dfcd7455e95e80278cc6ef2851d98e",
     "semantic_hash": ""
   },
@@ -155,8 +155,8 @@
     "semantic_hash": "352df4b84f4af2922ccd9adaf8e4608f"
   },
   "CLAUDE.md": {
-    "mtime": 1784753230.271257,
-    "ast_hash": "d10d4f430688064cb0b881c44110b4f3",
+    "mtime": 1784755023.7171166,
+    "ast_hash": "981288477e0593c0a9aa706a1af0dfcc",
     "semantic_hash": ""
   },
   "DEPLOY.md": {
@@ -225,8 +225,8 @@
     "semantic_hash": ""
   },
   "server/public/app.html": {
-    "mtime": 1784753011.3331625,
-    "ast_hash": "cdd561eaabbc8b680889beeb389f4b84",
+    "mtime": 1784754916.573119,
+    "ast_hash": "5380bd4710c2ce3104d4397b0d49fdf7",
     "semantic_hash": ""
   },
   "server/public/auth.html": {
@@ -360,8 +360,8 @@
     "semantic_hash": ""
   },
   "server/.lint/ui-smoke.mjs": {
-    "mtime": 1784753165.8141434,
-    "ast_hash": "d3acc148dc6ba123a619c2ee4af47b88",
+    "mtime": 1784754678.2451246,
+    "ast_hash": "303239a38ecb2cef8394d8c49b0db6a5",
     "semantic_hash": ""
   },
   "server/eslint.config.mjs": {
@@ -370,8 +370,8 @@
     "semantic_hash": ""
   },
   "server/public/app.js": {
-    "mtime": 1784753136.0091598,
-    "ast_hash": "815dff7142648d0eee4f0deb0bb71d19",
+    "mtime": 1784754936.7411187,
+    "ast_hash": "3b880043af786d4542852f32cc57d78a",
     "semantic_hash": ""
   },
   "server/src/settings.ts": {

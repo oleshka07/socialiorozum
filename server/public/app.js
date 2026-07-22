@@ -80,7 +80,7 @@ function selectView(v){
   curView=v; if(typeof renderTaskStrip==='function') renderTaskStrip(v);
   try{ localStorage.setItem('kg_view', v); }catch(e){} // памʼятаємо розділ між оновленнями сторінки
   // сова перепозиціонується під поточну ціль підказки після зміни розділу (макет змінився)
-  try{ if(Guide&&Guide.on&&Guide.tips.length&&owlEl()&&owlEl().style.display!=='none'){ const t=Guide.tips[Guide.i]; if(t&&$('owlBubble').style.display!=='none'){ const p=owlPosition(t.target); owlPerch(p==='corner'); $('owlBubble').classList.toggle('below',p==='below'); } } }catch(e){}
+  try{ if(Guide&&Guide.on&&Guide.tips.length&&owlEl()&&owlEl().style.display!=='none'){ const t=Guide.tips[Guide.i]; if(t&&$('owlBubble').style.display!=='none'){ const p=owlPosition(t.target); $('owlBubble').classList.toggle('below',p==='below'); } } }catch(e){}
 }
 function go(v){ selectView(v); }
 document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>selectView(n.dataset.view));
@@ -626,7 +626,7 @@ async function loadToday(){
   w.querySelectorAll('.tdRow').forEach(r=>r.onclick=()=>openComposer(r.dataset.post,{scheduledAt:r.dataset.at,slotId:r.dataset.slot}));
   w.querySelectorAll('.tdEdit').forEach(b=>b.onclick=()=>openComposer(b.dataset.post));
   w.querySelectorAll('.tdOk').forEach(b=>b.onclick=async()=>{ b.disabled=true;
-    try{ await api('/posts/'+b.dataset.post+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'approved'})}); flash('✅ Затверджено'); loadToday(); try{ loadStudioPosts(); }catch(e){} }
+    try{ await api('/posts/'+b.dataset.post+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'approved'})}); flash('✅ Затверджено'); loadToday(); try{ loadStudioPosts(); }catch(e){} try{loadGuide(true);}catch(e){} }
     catch(e){ flash('⚠ '+e.message); b.disabled=false; } });
   const tCal=$('tdCal'); if(tCal) tCal.onclick=()=>{ selectView('publish'); setPTab('cal'); };
   const tAll=$('tdAll'); if(tAll) tAll.onclick=()=>{ selectView('create'); setCTab('posts'); };
@@ -1175,7 +1175,7 @@ async function bulkReview(status){
   try{
     const res=await Promise.allSettled(ids.map(id=>api('/posts/'+id+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})})));
     const ok=res.filter(r=>r.status==='fulfilled').length;
-    SelPosts.clear(); await loadStudioPosts(); flash('Готово: '+ok+'/'+ids.length);
+    SelPosts.clear(); await loadStudioPosts(); try{loadGuide(true);}catch(e){} flash('Готово: '+ok+'/'+ids.length);
   }finally{ aiDone(); }
 }
 // редактор зображення поста = той самий двокроковий фото-інструмент, що і в композері
@@ -1416,7 +1416,7 @@ async function openComposer(postId, opts){
   if(apBtn){ const cur=(Finals||[]).find(x=>x.id===postId);
     const setAp=(on)=>{ apBtn.textContent=on?'✅ Затверджено':'✅ Затвердити'; apBtn.style.color=on?'var(--brand)':''; };
     setAp(cur&&cur.review==='approved');
-    apBtn.onclick=async()=>{ apBtn.disabled=true; try{ await saveDraft(); await api('/posts/'+postId+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'approved'})}); setAp(true); try{ await loadStudioPosts(); }catch(_){ } flash('✅ Затверджено - пост готовий до календаря'); close(); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); apBtn.disabled=false; } }; }
+    apBtn.onclick=async()=>{ apBtn.disabled=true; try{ await saveDraft(); await api('/posts/'+postId+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'approved'})}); setAp(true); try{ await loadStudioPosts(); }catch(_){ } try{loadGuide(true);}catch(e){} flash('✅ Затверджено - пост готовий до календаря'); close(); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); apBtn.disabled=false; } }; }
   // ----- канали (надіслані = заблоковані з ✓) -----
   function renderChips(){ const box=ov.querySelector('#cmpChips'); const thOn=!!(C.threads&&C.threads.on&&C.threads.thread);
     box.innerHTML=NETS.map(n=>{ const k=n[0]; const on=C[k]&&C[k].on; const conn=ChanStatus[k]; const sent=sentSet.has(k);
@@ -1653,7 +1653,7 @@ async function openPhotoTool(postId, initPrompt, onDone){
     const setPrev=()=>{ card.querySelector('#ptPrev').innerHTML=prevHtml(); };
     const err=(e)=>{ msg.style.color='var(--danger)'; msg.textContent='⚠ '+e.message; };
     card.querySelector('#ptBack').onclick=()=>step1();
-    card.querySelector('#ptDone').onclick=()=>{ if(onDone)onDone(fn); close(); };
+    card.querySelector('#ptDone').onclick=()=>{ if(onDone)onDone(fn); close(); try{loadGuide(true);}catch(e){} };
     card.querySelector('#ptSuggest').onclick=async(e)=>{ const b=e.target; b.disabled=true; msg.style.color='var(--muted)'; msg.textContent='✨ добираю заголовок…';
       try{ const r=await api('/posts/'+postId+'/headline',{method:'POST'}); if(r.headline){ card.querySelector('#ptHead').value=r.headline; msg.style.color='var(--brand)'; msg.textContent='заголовок доповнює пост, не дублює ✓'; } else msg.textContent=''; }
       catch(e2){ err(e2); } finally{ b.disabled=false; } };
@@ -2514,28 +2514,68 @@ function owlEmote(e){ const o=owlEl(); if(o) o.dataset.emote=e||'idle'; }
 function owlBlink(){ const o=owlEl(); if(!o||o.dataset.emote==='sleep') return; o.classList.add('owl-blink'); setTimeout(()=>o.classList.remove('owl-blink'),140); }
 function owlSpecs(on){ const o=owlEl(); if(o) o.classList.toggle('owl-specs',on!==false); }
 function owlPerch(on){ const o=owlEl(); if(o) o.classList.toggle('owl-perch',!!on); }
-function owlPosition(sel){ const o=owlEl(); if(!o) return 'corner';
-  const el=sel&&document.querySelector(sel);
-  if(!el||!el.offsetParent){ o.style.left='auto'; o.style.right='20px'; o.style.top='auto'; o.style.bottom='84px'; return 'corner'; }
-  const r=el.getBoundingClientRect(), ow=76, oh=84;
-  let left=Math.max(10,Math.min(window.innerWidth-ow-10, r.left+r.width/2-ow/2));
-  let top=Math.max(10,Math.min(window.innerHeight-oh-10, r.bottom+8));
+// координати гнізда (домашня точка) - завжди ліворуч-внизу, над мобільною нижньою навігацією
+function owlNestXY(){ const mobile=window.innerWidth<=700; const mx=mobile?12:20, mb=mobile?74:84;
+  return { left:mx, top:window.innerHeight-mb-84 }; }
+// підбір боку бульбашки (щоб не вилазила за екран, коли сова близько до краю)
+function owlUpdateBubbleSide(leftPx){ const b=$('owlBubble'); if(!b) return;
+  const bw=window.innerWidth<=700?210:250;
+  b.classList.toggle('flip', leftPx+76+bw > window.innerWidth-10); }
+// пряме позиціювання (без польоту) - для першої появи й під час перетягування
+function owlMoveTo(left,top){ const o=owlEl(); if(!o) return;
   o.style.right='auto'; o.style.bottom='auto'; o.style.left=left+'px'; o.style.top=top+'px';
-  return top<170?'below':'above';
+  owlUpdateBubbleSide(left);
+  const b=$('owlBubble'); if(b) b.classList.toggle('below', top<170);
 }
-function owlHideBubble(){ const b=$('owlBubble'); if(b) b.style.display='none'; }
+// короткий політ (розправлені крила, активний змах) від поточної точки до нової
+function owlFlyTo(left,top,cb){ const o=owlEl(); if(!o) return;
+  o.classList.add('owl-flying'); owlMoveTo(left,top);
+  clearTimeout(o._flyT); o._flyT=setTimeout(()=>{ o.classList.remove('owl-flying'); if(cb) cb(); },620);
+}
+// координати цілі для селектора кнопки (з відступами від країв екрана)
+function owlTargetXY(sel){ const el=sel&&document.querySelector(sel);
+  if(!el||!el.offsetParent) return null;
+  const r=el.getBoundingClientRect(), ow=76, oh=84;
+  const left=Math.max(10,Math.min(window.innerWidth-ow-10, r.left+r.width/2-ow/2));
+  const top=Math.max(10,Math.min(window.innerHeight-oh-10, r.bottom+8));
+  return { left, top };
+}
+// долетіти до цілі селектора (чи в гніздо, якщо цілі нема на екрані) - не літає повторно в ту саму точку
+function owlPosition(sel){ const o=owlEl(); const t=owlTargetXY(sel); const xy=t||owlNestXY();
+  if(o){ o.dataset.atHome=t?'0':'1';
+    const curL=parseFloat(o.style.left)||0, curT=parseFloat(o.style.top)||0;
+    if(Math.round(curL)!==Math.round(xy.left)||Math.round(curT)!==Math.round(xy.top)) owlFlyTo(xy.left,xy.top);
+  }
+  owlPerch(!t);
+  return xy.top<170?'below':'above';
+}
+// повернутися в гніздо (самостійно): якщо вже вдома - просто сідає, інакше короткий політ назад
+function owlGoHome(after){ const o=owlEl(); if(!o){ if(after) after(); return; }
+  if(o.dataset.atHome==='1'){ owlPerch(true); if(after) after(); return; }
+  const n=owlNestXY(); owlFlyTo(n.left,n.top,()=>{ o.dataset.atHome='1'; owlPerch(true); if(after) after(); });
+}
+function owlHideBubble(fly){ const b=$('owlBubble'); if(b) b.style.display='none'; if(fly!==false) owlGoHome(); }
 function owlShowTip(idx){ const o=owlEl(); if(!o||!Guide.tips.length) return;
   Guide.i=((idx==null?Guide.i:idx)%Guide.tips.length+Guide.tips.length)%Guide.tips.length;
-  const t=Guide.tips[Guide.i]; o.style.display='block';
-  const pos=owlPosition(t.target); owlPerch(pos==='corner'); owlEmote(t.emote);
+  const t=Guide.tips[Guide.i];
+  const firstReveal = (o.style.display==='none'||!o.style.display);
   const b=$('owlBubble'), tx=$('owlText'), acts=$('owlActs');
-  b.classList.toggle('below',pos==='below');
-  tx.textContent=t.text;
-  const a=t.action||{};
-  acts.innerHTML='<button id="owlDo">'+esc(a.label||'Гаразд')+'</button>'+(Guide.tips.length>1?'':'');
-  b.style.display='block'; Guide.shownAt=Date.now(); owlLog(t.id,'shown');
-  const doBtn=$('owlDo'); if(doBtn) doBtn.onclick=()=>owlAct(t);
-  $('owlNext').style.display=Guide.tips.length>1?'':'none';
+  const reveal=()=>{
+    owlEmote(t.emote);
+    const pos=owlPosition(t.target);
+    b.classList.toggle('below',pos==='below');
+    tx.textContent=t.text;
+    const a=t.action||{};
+    acts.innerHTML='<button id="owlDo">'+esc(a.label||'Гаразд')+'</button>';
+    b.style.display='block'; Guide.shownAt=Date.now(); owlLog(t.id,'shown');
+    const doBtn=$('owlDo'); if(doBtn) doBtn.onclick=()=>owlAct(t);
+    $('owlNext').style.display=Guide.tips.length>1?'':'none';
+  };
+  if(firstReveal){
+    // перша поява: матеріалізується в гнізді, даємо браузеру намалювати кадр - і аж тоді летить (інакше «телепорт» без анімації)
+    const n=owlNestXY(); owlMoveTo(n.left,n.top); o.dataset.atHome='1'; o.style.display='block'; owlPerch(true);
+    requestAnimationFrame(()=>requestAnimationFrame(reveal));
+  } else reveal();
 }
 async function owlAct(t){ const a=t.action||{}; owlLog(t.id,'clicked'); owlHop();
   if(a.do==='takes'){ owlHideBubble(); if($('genTakes')){ selectView('create'); setCTab('posts'); setTimeout(()=>$('genTakes').click(),200); } return; }
@@ -2545,32 +2585,76 @@ async function owlAct(t){ const a=t.action||{}; owlLog(t.id,'clicked'); owlHop()
     else if(a.tab&&a.view==='publish') setTimeout(()=>setPTab(a.tab),60);
     else if(a.tab&&a.view==='create') setTimeout(()=>setCTab(a.tab),60);
   }
-  owlHideBubble(); setTimeout(()=>loadGuide(),700); // після дії - перерахувати наступний крок
+  owlHideBubble(); setTimeout(()=>loadGuide(),900); // спершу летить у гніздо, тоді - до наступного кроку
 }
 function owlHop(){ const o=owlEl(); if(!o) return; o.classList.add('owl-hop'); setTimeout(()=>o.classList.remove('owl-hop'),500); }
-async function loadGuide(){ if(!Guide.on) return;
-  try{ const r=await api('/guide/next'); if(r.off){ Guide.on=false; const o=owlEl(); if(o)o.style.display='none'; return; } Guide.tips=r.tips||[]; }
-  catch(e){ return; }
-  if(!Guide.tips.length){ const o=owlEl(); if(o){ o.style.display='block'; owlPosition(null); owlPerch(true); owlEmote('sleep'); } return; }
+// silent=true: тихо освіжити дані з сервера (після дій юзера поза совою - затвердив/додав фото/запланував),
+// без непроханого вильоту; якщо зараз показана підказка, що вже нерелевантна - тихо перейти на актуальну чи сховати.
+async function loadGuide(silent){ if(!Guide.on) return;
+  const prevId=Guide.tips[Guide.i]&&Guide.tips[Guide.i].id;
+  let r; try{ r=await api('/guide/next'); }catch(e){ return; }
+  if(r.off){ Guide.on=false; const o=owlEl(); if(o&&!silent) o.style.display='none'; return; }
+  Guide.tips=r.tips||[];
+  const b=$('owlBubble'), bubbleOpen=b&&b.style.display!=='none';
+  if(silent){
+    if(!bubbleOpen) return; // нічого не показано - просто освіжили масив на майбутнє
+    if(!Guide.tips.length){ owlHideBubble(); return; }
+    if(!Guide.tips.some(t=>t.id===prevId)){ Guide.i=0; owlShowTip(0); }
+    return;
+  }
+  if(!Guide.tips.length){ const o=owlEl(); if(!o) return;
+    if(o.style.display==='none'||!o.style.display){ const n=owlNestXY(); owlMoveTo(n.left,n.top); o.dataset.atHome='1'; o.style.display='block'; }
+    else owlGoHome();
+    owlEmote('sleep'); return; }
   Guide.i=0; owlShowTip(0);
 }
-// idle-петлі: кліпання, окуляри, рідкісний жарт (лише коли підказки нема)
+// idle-петлі: кліпання, окуляри, рідкісний жарт (лише коли підказки нема й сова вдома)
 function owlIdleLoops(){
   setInterval(owlBlink, 4200+Math.random()*2600);
   setInterval(()=>{ const o=owlEl(); if(o&&o.style.display!=='none') owlSpecs(!o.classList.contains('owl-specs')); }, 22000);
-  setInterval(()=>{ const b=$('owlBubble'); if(b&&b.style.display==='none'&&owlEl().style.display!=='none'&&Math.random()<0.5){
-    const tx=$('owlText'), acts=$('owlActs'); tx.textContent=GUIDE_JOKES[Math.floor(Math.random()*GUIDE_JOKES.length)]; acts.innerHTML=''; owlHop();
-    b.classList.remove('below'); owlPosition(null); owlPerch(true); b.style.display='block'; $('owlNext').style.display='none';
-    setTimeout(()=>{ if(b) b.style.display='none'; },6000);
-  } }, 45000);
+  setInterval(()=>{ const o=owlEl(), b=$('owlBubble'); if(!o||o.style.display==='none'||o.dataset.atHome!=='1') return;
+    if(b&&b.style.display==='none'&&Math.random()<0.5){
+      const tx=$('owlText'), acts=$('owlActs'); tx.textContent=GUIDE_JOKES[Math.floor(Math.random()*GUIDE_JOKES.length)]; acts.innerHTML=''; owlHop();
+      b.classList.remove('below'); owlUpdateBubbleSide(owlNestXY().left); b.style.display='block'; $('owlNext').style.display='none';
+      setTimeout(()=>{ if(b) b.style.display='none'; },6000);
+    } }, 45000);
+}
+// перетягування: пороговий рух відрізняє drag від кліку (клік лишається на toggle бульбашки)
+function owlEnableDrag(){
+  const body=$('owlBody'), o=owlEl(); if(!body||!o) return;
+  let sx=0,sy=0,ol=0,ot=0,active=false,moved=false;
+  const xy=(e)=>({x:e.clientX,y:e.clientY});
+  const onMove=(e)=>{ if(!active) return; const p=xy(e); const dx=p.x-sx, dy=p.y-sy;
+    if(!moved&&(Math.abs(dx)>6||Math.abs(dy)>6)){ moved=true; o.classList.add('owl-dragging'); clearTimeout(o._flyT); o.classList.remove('owl-flying'); }
+    if(!moved) return;
+    const nl=Math.max(6,Math.min(window.innerWidth-82,ol+dx)), nt=Math.max(6,Math.min(window.innerHeight-90,ot+dy));
+    owlMoveTo(nl,nt); o.dataset.atHome='0';
+  };
+  const onUp=()=>{ active=false; o.classList.remove('owl-dragging'); document.removeEventListener('pointermove',onMove); document.removeEventListener('pointerup',onUp);
+    if(moved){ o._suppressClick=true; setTimeout(()=>{ o._suppressClick=false; },80); } };
+  body.addEventListener('pointerdown',(e)=>{ if(e.button!=null&&e.button!==0) return;
+    const r=o.getBoundingClientRect(); sx=e.clientX; sy=e.clientY; ol=r.left; ot=r.top; active=true; moved=false;
+    document.addEventListener('pointermove',onMove); document.addEventListener('pointerup',onUp);
+  });
 }
 function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
-  $('owlBody').onclick=()=>{ const b=$('owlBubble'); if(b.style.display==='none'){ if(Guide.tips.length) owlShowTip(Guide.i); else loadGuide(); } else owlHideBubble(); };
-  $('owlBubbleX').onclick=owlHideBubble;
+  $('owlBody').onclick=()=>{ if(o._suppressClick) return; const b=$('owlBubble'); if(b.style.display==='none'){ if(Guide.tips.length) owlShowTip(Guide.i); else loadGuide(); } else owlHideBubble(); };
+  $('owlBubbleX').onclick=()=>owlHideBubble();
   $('owlNext').onclick=()=>owlShowTip(Guide.i+1);
-  $('owlOff').onclick=()=>{ owlLog('menu','off'); Guide.on=false; o.style.display='none'; api('/guide/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tip:'menu',event:'off'})}); flash('Помічника вимкнено. Увімкнути знову - в меню аватара.'); };
-  const umg=$('umGuide'); if(umg) umg.onclick=()=>{ const um=$('userMenu'); if(um) um.style.display='none'; Guide.on=true; o.style.display='block'; api('/guide/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tip:'menu',event:'on'})}).catch(()=>{}); loadGuide(); flash('🦉 Помічник Розум увімкнено'); };
-  owlSpecs(true); owlIdleLoops();
+  // єдиний перемикач увімк/вимк лишився в меню аватара (по кліку на саму сову вона просто ховається в гніздо, не вимикається)
+  const umgState=$('umGuideState');
+  const setGuideState=(on)=>{ if(umgState) umgState.textContent=on?'увімк.':'вимк.'; };
+  const umg=$('umGuide'); if(umg) umg.onclick=()=>{ const um=$('userMenu'); if(um) um.style.display='none';
+    if(Guide.on){ Guide.on=false; owlHideBubble(false); o.style.display='none'; setGuideState(false);
+      api('/guide/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tip:'menu',event:'off'})}).catch(()=>{}); flash('Помічника вимкнено. Увімкнути знову - в меню аватара.'); }
+    else{ Guide.on=true; const n=owlNestXY(); owlMoveTo(n.left,n.top); o.dataset.atHome='1'; o.style.display='block'; setGuideState(true);
+      api('/guide/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tip:'menu',event:'on'})}).catch(()=>{}); loadGuide(); flash('🦉 Помічник Розум увімкнено'); }
+  };
+  owlSpecs(true); owlEnableDrag(); owlIdleLoops();
+  window.addEventListener('resize',()=>{ if(o.style.display==='none') return;
+    if(Guide.tips.length&&$('owlBubble').style.display!=='none'){ const t=Guide.tips[Guide.i]; if(t) owlMoveTo((owlTargetXY(t.target)||owlNestXY()).left,(owlTargetXY(t.target)||owlNestXY()).top); return; }
+    if(o.dataset.atHome==='1'){ const n=owlNestXY(); owlMoveTo(n.left,n.top); }
+  });
 }
 
 // ---------- init ----------
@@ -2603,7 +2687,7 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
   await loadChanStatus();
   let _onb=true; try{ const st=await api('/settings'); if(!st.some(r=>r.key==='onboarded')){ _onb=false; showOnboarding(); } }catch(e){}
   // 🦉 сова-провідник (лише після онбордингу; не заважає першому налаштуванню)
-  if(_onb){ try{ owlInit(); setTimeout(loadGuide,1500); window.addEventListener('resize',()=>{ try{ if(Guide.tips.length&&$('owlBubble').style.display!=='none') owlPosition(Guide.tips[Guide.i].target); }catch(e){} }); }catch(e){} }
+  if(_onb){ try{ owlInit(); setTimeout(loadGuide,1500); }catch(e){} }
   updRunLabel();
   if(runId){ try{ await refresh(); }catch(e){ runId=null; localStorage.removeItem('kg_run'); updRunLabel(); } }
   loadPublish();

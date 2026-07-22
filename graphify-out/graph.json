@@ -353,7 +353,7 @@
       "source_location": "L62",
       "_origin": "ast",
       "id": "server_lint_app_selectview",
-      "community": 102,
+      "community": 41,
       "norm_label": "selectview()"
     },
     {
@@ -393,7 +393,7 @@
       "source_location": "L107",
       "_origin": "ast",
       "id": "server_lint_app_loadtasks",
-      "community": 102,
+      "community": 41,
       "norm_label": "loadtasks()"
     },
     {
@@ -403,7 +403,7 @@
       "source_location": "L108",
       "_origin": "ast",
       "id": "server_lint_app_flypoints",
-      "community": 102,
+      "community": 41,
       "norm_label": "flypoints()"
     },
     {
@@ -463,7 +463,7 @@
       "source_location": "L117",
       "_origin": "ast",
       "id": "server_lint_app_rendertaskstrip",
-      "community": 102,
+      "community": 41,
       "norm_label": "rendertaskstrip()"
     },
     {
@@ -473,7 +473,7 @@
       "source_location": "L118",
       "_origin": "ast",
       "id": "server_lint_app_loadplans",
-      "community": 102,
+      "community": 41,
       "norm_label": "loadplans()"
     },
     {
@@ -503,7 +503,7 @@
       "source_location": "L156",
       "_origin": "ast",
       "id": "server_lint_app_setlayout",
-      "community": 101,
+      "community": 41,
       "norm_label": "setlayout()"
     },
     {
@@ -723,7 +723,7 @@
       "source_location": "L350",
       "_origin": "ast",
       "id": "server_lint_app_renderrhythm",
-      "community": 41,
+      "community": 100,
       "norm_label": "renderrhythm()"
     },
     {
@@ -763,7 +763,7 @@
       "source_location": "L459",
       "_origin": "ast",
       "id": "server_lint_app_loadanalytics",
-      "community": 102,
+      "community": 41,
       "norm_label": "loadanalytics()"
     },
     {
@@ -803,7 +803,7 @@
       "source_location": "L587",
       "_origin": "ast",
       "id": "server_lint_app_flashsaved",
-      "community": 122,
+      "community": 100,
       "norm_label": "flashsaved()"
     },
     {
@@ -853,7 +853,7 @@
       "source_location": "L604",
       "_origin": "ast",
       "id": "server_lint_app_stepel",
-      "community": 41,
+      "community": 101,
       "norm_label": "stepel()"
     },
     {
@@ -863,7 +863,7 @@
       "source_location": "L605",
       "_origin": "ast",
       "id": "server_lint_app_applystate",
-      "community": 41,
+      "community": 101,
       "norm_label": "applystate()"
     },
     {
@@ -873,7 +873,7 @@
       "source_location": "L626",
       "_origin": "ast",
       "id": "server_lint_app_renderideas",
-      "community": 41,
+      "community": 101,
       "norm_label": "renderideas()"
     },
     {
@@ -883,7 +883,7 @@
       "source_location": "L635",
       "_origin": "ast",
       "id": "server_lint_app_saveselection",
-      "community": 122,
+      "community": 100,
       "norm_label": "saveselection()"
     },
     {
@@ -893,7 +893,7 @@
       "source_location": "L636",
       "_origin": "ast",
       "id": "server_lint_app_renderposts",
-      "community": 41,
+      "community": 101,
       "norm_label": "renderposts()"
     },
     {
@@ -1053,7 +1053,7 @@
       "source_location": "L768",
       "_origin": "ast",
       "id": "server_lint_app_openvideomodal",
-      "community": 120,
+      "community": 100,
       "norm_label": "openvideomodal()"
     },
     {
@@ -1143,7 +1143,7 @@
       "source_location": "L873",
       "_origin": "ast",
       "id": "server_lint_app_loadchanstatus",
-      "community": 41,
+      "community": 100,
       "norm_label": "loadchanstatus()"
     },
     {
@@ -1193,7 +1193,7 @@
       "source_location": "L885",
       "_origin": "ast",
       "id": "server_lint_app_renderfinals",
-      "community": 41,
+      "community": 101,
       "norm_label": "renderfinals()"
     },
     {
@@ -1203,7 +1203,7 @@
       "source_location": "L890",
       "_origin": "ast",
       "id": "server_lint_app_savecontent",
-      "community": 122,
+      "community": 100,
       "norm_label": "savecontent()"
     },
     {
@@ -1293,7 +1293,7 @@
       "source_location": "L983",
       "_origin": "ast",
       "id": "server_lint_app_loadimageprovider",
-      "community": 41,
+      "community": 100,
       "norm_label": "loadimageprovider()"
     },
     {
@@ -1323,7 +1323,7 @@
       "source_location": "L1002",
       "_origin": "ast",
       "id": "server_lint_app_renderstudiosteps",
-      "community": 41,
+      "community": 101,
       "norm_label": "renderstudiosteps()"
     },
     {
@@ -1333,7 +1333,7 @@
       "source_location": "L1009",
       "_origin": "ast",
       "id": "server_lint_app_rendersourcecard",
-      "community": 41,
+      "community": 101,
       "norm_label": "rendersourcecard()"
     },
     {
@@ -1613,7 +1613,7 @@
       "source_location": "L1561",
       "_origin": "ast",
       "id": "server_lint_app_renderlegacyplan",
-      "community": 41,
+      "community": 101,
       "norm_label": "renderlegacyplan()"
     },
     {
@@ -1823,7 +1823,7 @@
       "source_location": "L1911",
       "_origin": "ast",
       "id": "server_lint_app_saveprompt",
-      "community": 122,
+      "community": 100,
       "norm_label": "saveprompt()"
     },
     {
@@ -1833,7 +1833,7 @@
       "source_location": "L1912",
       "_origin": "ast",
       "id": "server_lint_app_resetprompt",
-      "community": 122,
+      "community": 100,
       "norm_label": "resetprompt()"
     },
     {
@@ -1933,7 +1933,7 @@
       "source_location": "L2075",
       "_origin": "ast",
       "id": "server_lint_app_loadff",
-      "community": 41,
+      "community": 100,
       "norm_label": "loadff()"
     },
     {
@@ -1943,7 +1943,7 @@
       "source_location": "L2095",
       "_origin": "ast",
       "id": "server_lint_app_loadaccount",
-      "community": 100,
+      "community": 41,
       "norm_label": "loadaccount()"
     },
     {
@@ -1983,7 +1983,7 @@
       "source_location": "L2129",
       "_origin": "ast",
       "id": "server_lint_app_saveschedule",
-      "community": 41,
+      "community": 100,
       "norm_label": "saveschedule()"
     },
     {
@@ -2003,7 +2003,7 @@
       "source_location": "L2140",
       "_origin": "ast",
       "id": "server_lint_app_renderchannelplan",
-      "community": 102,
+      "community": 41,
       "norm_label": "renderchannelplan()"
     },
     {
@@ -2013,7 +2013,7 @@
       "source_location": "L2146",
       "_origin": "ast",
       "id": "server_lint_app_loadchannelplan",
-      "community": 102,
+      "community": 41,
       "norm_label": "loadchannelplan()"
     },
     {
@@ -3283,7 +3283,7 @@
       "source_location": "L67",
       "_origin": "ast",
       "id": "server_public_app_selectview",
-      "community": 107,
+      "community": 43,
       "norm_label": "selectview()"
     },
     {
@@ -3293,7 +3293,7 @@
       "source_location": "L85",
       "_origin": "ast",
       "id": "server_public_app_go",
-      "community": 96,
+      "community": 102,
       "norm_label": "go()"
     },
     {
@@ -3303,7 +3303,7 @@
       "source_location": "L89",
       "_origin": "ast",
       "id": "server_public_app_setbtab",
-      "community": 8,
+      "community": 96,
       "norm_label": "setbtab()"
     },
     {
@@ -3323,7 +3323,7 @@
       "source_location": "L132",
       "_origin": "ast",
       "id": "server_public_app_loadtasks",
-      "community": 107,
+      "community": 43,
       "norm_label": "loadtasks()"
     },
     {
@@ -3333,7 +3333,7 @@
       "source_location": "L133",
       "_origin": "ast",
       "id": "server_public_app_flypoints",
-      "community": 107,
+      "community": 43,
       "norm_label": "flypoints()"
     },
     {
@@ -3393,7 +3393,7 @@
       "source_location": "L142",
       "_origin": "ast",
       "id": "server_public_app_rendertaskstrip",
-      "community": 107,
+      "community": 43,
       "norm_label": "rendertaskstrip()"
     },
     {
@@ -3403,7 +3403,7 @@
       "source_location": "L143",
       "_origin": "ast",
       "id": "server_public_app_loadplans",
-      "community": 107,
+      "community": 43,
       "norm_label": "loadplans()"
     },
     {
@@ -3433,7 +3433,7 @@
       "source_location": "L182",
       "_origin": "ast",
       "id": "server_public_app_setlayout",
-      "community": 96,
+      "community": 111,
       "norm_label": "setlayout()"
     },
     {
@@ -3443,7 +3443,7 @@
       "source_location": "L189",
       "_origin": "ast",
       "id": "server_public_app_updateproui",
-      "community": 96,
+      "community": 111,
       "norm_label": "updateproui()"
     },
     {
@@ -3453,7 +3453,7 @@
       "source_location": "L203",
       "_origin": "ast",
       "id": "server_public_app_setmode",
-      "community": 43,
+      "community": 111,
       "norm_label": "setmode()"
     },
     {
@@ -3513,7 +3513,7 @@
       "source_location": "L214",
       "_origin": "ast",
       "id": "server_public_app_rendermaterials",
-      "community": 96,
+      "community": 111,
       "norm_label": "rendermaterials()"
     },
     {
@@ -3643,7 +3643,7 @@
       "source_location": "L380",
       "_origin": "ast",
       "id": "server_public_app_plansyncmode",
-      "community": 111,
+      "community": 96,
       "norm_label": "plansyncmode()"
     },
     {
@@ -3653,7 +3653,7 @@
       "source_location": "L395",
       "_origin": "ast",
       "id": "server_public_app_applyplanfilter",
-      "community": 111,
+      "community": 96,
       "norm_label": "applyplanfilter()"
     },
     {
@@ -3713,7 +3713,7 @@
       "source_location": "L487",
       "_origin": "ast",
       "id": "server_public_app_renderplan",
-      "community": 111,
+      "community": 96,
       "norm_label": "renderplan()"
     },
     {
@@ -3743,7 +3743,7 @@
       "source_location": "L548",
       "_origin": "ast",
       "id": "server_public_app_updatecounts",
-      "community": 111,
+      "community": 96,
       "norm_label": "updatecounts()"
     },
     {
@@ -3753,7 +3753,7 @@
       "source_location": "L559",
       "_origin": "ast",
       "id": "server_public_app_loadtoday",
-      "community": 107,
+      "community": 43,
       "norm_label": "loadtoday()"
     },
     {
@@ -3763,7 +3763,7 @@
       "source_location": "L651",
       "_origin": "ast",
       "id": "server_public_app_loadanalytics",
-      "community": 107,
+      "community": 43,
       "norm_label": "loadanalytics()"
     },
     {
@@ -3813,7 +3813,7 @@
       "source_location": "L782",
       "_origin": "ast",
       "id": "server_public_app_savesetting",
-      "community": 43,
+      "community": 111,
       "norm_label": "savesetting()"
     },
     {
@@ -3843,7 +3843,7 @@
       "source_location": "L797",
       "_origin": "ast",
       "id": "server_public_app_badge",
-      "community": 96,
+      "community": 102,
       "norm_label": "badge()"
     },
     {
@@ -3953,7 +3953,7 @@
       "source_location": "L842",
       "_origin": "ast",
       "id": "server_public_app_rendergoal",
-      "community": 8,
+      "community": 96,
       "norm_label": "rendergoal()"
     },
     {
@@ -3963,7 +3963,7 @@
       "source_location": "L845",
       "_origin": "ast",
       "id": "server_public_app_rendercta",
-      "community": 8,
+      "community": 96,
       "norm_label": "rendercta()"
     },
     {
@@ -3993,7 +3993,7 @@
       "source_location": "L857",
       "_origin": "ast",
       "id": "server_public_app_renderfmt",
-      "community": 8,
+      "community": 96,
       "norm_label": "renderfmt()"
     },
     {
@@ -4003,7 +4003,7 @@
       "source_location": "L867",
       "_origin": "ast",
       "id": "server_public_app_loadgoalcta",
-      "community": 8,
+      "community": 96,
       "norm_label": "loadgoalcta()"
     },
     {
@@ -4013,7 +4013,7 @@
       "source_location": "L874",
       "_origin": "ast",
       "id": "server_public_app_renderthstrat",
-      "community": 8,
+      "community": 96,
       "norm_label": "renderthstrat()"
     },
     {
@@ -4023,7 +4023,7 @@
       "source_location": "L877",
       "_origin": "ast",
       "id": "server_public_app_savethstrat",
-      "community": 43,
+      "community": 111,
       "norm_label": "savethstrat()"
     },
     {
@@ -4063,7 +4063,7 @@
       "source_location": "L963",
       "_origin": "ast",
       "id": "server_public_app_openvideomodal",
-      "community": 43,
+      "community": 104,
       "norm_label": "openvideomodal()"
     },
     {
@@ -4523,7 +4523,7 @@
       "source_location": "L1705",
       "_origin": "ast",
       "id": "server_public_app_updrunlabel",
-      "community": 96,
+      "community": 102,
       "norm_label": "updrunlabel()"
     },
     {
@@ -4533,7 +4533,7 @@
       "source_location": "L1706",
       "_origin": "ast",
       "id": "server_public_app_refresh",
-      "community": 96,
+      "community": 102,
       "norm_label": "refresh()"
     },
     {
@@ -4543,7 +4543,7 @@
       "source_location": "L1707",
       "_origin": "ast",
       "id": "server_public_app_ensurerun",
-      "community": 96,
+      "community": 102,
       "norm_label": "ensurerun()"
     },
     {
@@ -4553,7 +4553,7 @@
       "source_location": "L1713",
       "_origin": "ast",
       "id": "server_public_app_setbusy",
-      "community": 96,
+      "community": 102,
       "norm_label": "setbusy()"
     },
     {
@@ -4563,7 +4563,7 @@
       "source_location": "L1714",
       "_origin": "ast",
       "id": "server_public_app_ideaopts",
-      "community": 96,
+      "community": 102,
       "norm_label": "ideaopts()"
     },
     {
@@ -4583,7 +4583,7 @@
       "source_location": "L1716",
       "_origin": "ast",
       "id": "server_public_app_run",
-      "community": 96,
+      "community": 102,
       "norm_label": "run()"
     },
     {
@@ -4593,7 +4593,7 @@
       "source_location": "L1724",
       "_origin": "ast",
       "id": "server_public_app_runfrom",
-      "community": 96,
+      "community": 102,
       "norm_label": "runfrom()"
     },
     {
@@ -4603,7 +4603,7 @@
       "source_location": "L1732",
       "_origin": "ast",
       "id": "server_public_app_genposts",
-      "community": 96,
+      "community": 102,
       "norm_label": "genposts()"
     },
     {
@@ -4613,7 +4613,7 @@
       "source_location": "L1743",
       "_origin": "ast",
       "id": "server_public_app_genideas",
-      "community": 96,
+      "community": 102,
       "norm_label": "genideas()"
     },
     {
@@ -4623,7 +4623,7 @@
       "source_location": "L1752",
       "_origin": "ast",
       "id": "server_public_app_renderidealist",
-      "community": 96,
+      "community": 102,
       "norm_label": "renderidealist()"
     },
     {
@@ -4783,7 +4783,7 @@
       "source_location": "L2068",
       "_origin": "ast",
       "id": "server_public_app_loadbroll",
-      "community": 8,
+      "community": 96,
       "norm_label": "loadbroll()"
     },
     {
@@ -4943,7 +4943,7 @@
       "source_location": "L2276",
       "_origin": "ast",
       "id": "server_public_app_opentranscribermodal",
-      "community": 43,
+      "community": 0,
       "norm_label": "opentranscribermodal()"
     },
     {
@@ -4963,7 +4963,7 @@
       "source_location": "L2313",
       "_origin": "ast",
       "id": "server_public_app_loadaccount",
-      "community": 107,
+      "community": 43,
       "norm_label": "loadaccount()"
     },
     {
@@ -5003,7 +5003,7 @@
       "source_location": "L2347",
       "_origin": "ast",
       "id": "server_public_app_saveschedule",
-      "community": 43,
+      "community": 96,
       "norm_label": "saveschedule()"
     },
     {
@@ -5123,7 +5123,7 @@
       "source_location": "L2425",
       "_origin": "ast",
       "id": "server_public_app_finishonboarding",
-      "community": 96,
+      "community": 102,
       "norm_label": "finishonboarding()"
     },
     {
@@ -5133,7 +5133,7 @@
       "source_location": "L2448",
       "_origin": "ast",
       "id": "server_public_app_runonbprogress",
-      "community": 96,
+      "community": 102,
       "norm_label": "runonbprogress()"
     },
     {
@@ -5217,20 +5217,80 @@
       "norm_label": "owlperch()"
     },
     {
+      "label": "owlNestXY()",
+      "file_type": "code",
+      "source_file": "server/public/app.js",
+      "source_location": "L2518",
+      "_origin": "ast",
+      "id": "server_public_app_owlnestxy",
+      "community": 107,
+      "norm_label": "owlnestxy()"
+    },
+    {
+      "label": "owlUpdateBubbleSide()",
+      "file_type": "code",
+      "source_file": "server/public/app.js",
+      "source_location": "L2521",
+      "_origin": "ast",
+      "id": "server_public_app_owlupdatebubbleside",
+      "community": 107,
+      "norm_label": "owlupdatebubbleside()"
+    },
+    {
+      "label": "owlMoveTo()",
+      "file_type": "code",
+      "source_file": "server/public/app.js",
+      "source_location": "L2525",
+      "_origin": "ast",
+      "id": "server_public_app_owlmoveto",
+      "community": 107,
+      "norm_label": "owlmoveto()"
+    },
+    {
+      "label": "owlFlyTo()",
+      "file_type": "code",
+      "source_file": "server/public/app.js",
+      "source_location": "L2531",
+      "_origin": "ast",
+      "id": "server_public_app_owlflyto",
+      "community": 107,
+      "norm_label": "owlflyto()"
+    },
+    {
+      "label": "owlTargetXY()",
+      "file_type": "code",
+      "source_file": "server/public/app.js",
+      "source_location": "L2536",
+      "_origin": "ast",
+      "id": "server_public_app_owltargetxy",
+      "community": 107,
+      "norm_label": "owltargetxy()"
+    },
+    {
       "label": "owlPosition()",
       "file_type": "code",
       "source_file": "server/public/app.js",
-      "source_location": "L2517",
+      "source_location": "L2544",
       "_origin": "ast",
       "id": "server_public_app_owlposition",
       "community": 107,
       "norm_label": "owlposition()"
     },
     {
+      "label": "owlGoHome()",
+      "file_type": "code",
+      "source_file": "server/public/app.js",
+      "source_location": "L2553",
+      "_origin": "ast",
+      "id": "server_public_app_owlgohome",
+      "community": 107,
+      "norm_label": "owlgohome()"
+    },
+    {
       "label": "owlHideBubble()",
       "file_type": "code",
       "source_file": "server/public/app.js",
-      "source_location": "L2526",
+      "source_location": "L2557",
       "_origin": "ast",
       "id": "server_public_app_owlhidebubble",
       "community": 107,
@@ -5240,7 +5300,7 @@
       "label": "owlShowTip()",
       "file_type": "code",
       "source_file": "server/public/app.js",
-      "source_location": "L2527",
+      "source_location": "L2558",
       "_origin": "ast",
       "id": "server_public_app_owlshowtip",
       "community": 107,
@@ -5250,7 +5310,7 @@
       "label": "owlAct()",
       "file_type": "code",
       "source_file": "server/public/app.js",
-      "source_location": "L2540",
+      "source_location": "L2580",
       "_origin": "ast",
       "id": "server_public_app_owlact",
       "community": 107,
@@ -5260,7 +5320,7 @@
       "label": "owlHop()",
       "file_type": "code",
       "source_file": "server/public/app.js",
-      "source_location": "L2550",
+      "source_location": "L2590",
       "_origin": "ast",
       "id": "server_public_app_owlhop",
       "community": 107,
@@ -5270,7 +5330,7 @@
       "label": "loadGuide()",
       "file_type": "code",
       "source_file": "server/public/app.js",
-      "source_location": "L2551",
+      "source_location": "L2593",
       "_origin": "ast",
       "id": "server_public_app_loadguide",
       "community": 107,
@@ -5280,17 +5340,27 @@
       "label": "owlIdleLoops()",
       "file_type": "code",
       "source_file": "server/public/app.js",
-      "source_location": "L2558",
+      "source_location": "L2612",
       "_origin": "ast",
       "id": "server_public_app_owlidleloops",
       "community": 107,
       "norm_label": "owlidleloops()"
     },
     {
+      "label": "owlEnableDrag()",
+      "file_type": "code",
+      "source_file": "server/public/app.js",
+      "source_location": "L2623",
+      "_origin": "ast",
+      "id": "server_public_app_owlenabledrag",
+      "community": 107,
+      "norm_label": "owlenabledrag()"
+    },
+    {
       "label": "owlInit()",
       "file_type": "code",
       "source_file": "server/public/app.js",
-      "source_location": "L2567",
+      "source_location": "L2640",
       "_origin": "ast",
       "id": "server_public_app_owlinit",
       "community": 107,
@@ -5493,7 +5563,7 @@
       "source_location": "L78",
       "_origin": "ast",
       "id": "server_src_auth_userbyemail",
-      "community": 0,
+      "community": 12,
       "norm_label": "userbyemail()"
     },
     {
@@ -5533,7 +5603,7 @@
       "source_location": "L97",
       "_origin": "ast",
       "id": "server_src_auth_userbysession",
-      "community": 0,
+      "community": 12,
       "norm_label": "userbysession()"
     },
     {
@@ -5633,7 +5703,7 @@
       "source_location": "L52",
       "_origin": "ast",
       "id": "server_src_autopost_startautopost",
-      "community": 40,
+      "community": 12,
       "norm_label": "startautopost()"
     },
     {
@@ -5653,7 +5723,7 @@
       "source_location": "L4",
       "_origin": "ast",
       "id": "server_src_db_pool",
-      "community": 0,
+      "community": 113,
       "norm_label": "pool"
     },
     {
@@ -5663,7 +5733,7 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "server_src_db_q",
-      "community": 40,
+      "community": 0,
       "norm_label": "q()"
     },
     {
@@ -5893,7 +5963,7 @@
       "source_location": "L176",
       "_origin": "ast",
       "id": "server_src_diary_weekdiary",
-      "community": 18,
+      "community": 39,
       "norm_label": "weekdiary()"
     },
     {
@@ -5933,7 +6003,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_digest",
-      "community": 18,
+      "community": 39,
       "norm_label": "digest.ts"
     },
     {
@@ -5943,7 +6013,7 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "server_src_digest_findbreakout",
-      "community": 18,
+      "community": 39,
       "norm_label": "findbreakout()"
     },
     {
@@ -5953,7 +6023,7 @@
       "source_location": "L49",
       "_origin": "ast",
       "id": "server_src_digest_localparts",
-      "community": 18,
+      "community": 39,
       "norm_label": "localparts()"
     },
     {
@@ -5963,7 +6033,7 @@
       "source_location": "L55",
       "_origin": "ast",
       "id": "server_src_digest_plusday",
-      "community": 18,
+      "community": 39,
       "norm_label": "plusday()"
     },
     {
@@ -5973,7 +6043,7 @@
       "source_location": "L59",
       "_origin": "ast",
       "id": "server_src_digest_senddigest",
-      "community": 18,
+      "community": 39,
       "norm_label": "senddigest()"
     },
     {
@@ -5983,7 +6053,7 @@
       "source_location": "L141",
       "_origin": "ast",
       "id": "server_src_digest_senddigestnow",
-      "community": 18,
+      "community": 39,
       "norm_label": "senddigestnow()"
     },
     {
@@ -5993,7 +6063,7 @@
       "source_location": "L147",
       "_origin": "ast",
       "id": "server_src_digest_tick",
-      "community": 18,
+      "community": 39,
       "norm_label": "tick()"
     },
     {
@@ -6003,7 +6073,7 @@
       "source_location": "L165",
       "_origin": "ast",
       "id": "server_src_digest_startdigest",
-      "community": 18,
+      "community": 39,
       "norm_label": "startdigest()"
     },
     {
@@ -6163,7 +6233,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_gdrive_poller",
-      "community": 113,
+      "community": 103,
       "norm_label": "gdrive-poller.ts"
     },
     {
@@ -6173,7 +6243,7 @@
       "source_location": "L11",
       "_origin": "ast",
       "id": "server_src_gdrive_poller_folder",
-      "community": 113,
+      "community": 103,
       "norm_label": "folder"
     },
     {
@@ -6183,7 +6253,7 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "server_src_gdrive_poller_validtoken",
-      "community": 113,
+      "community": 103,
       "norm_label": "validtoken()"
     },
     {
@@ -6193,7 +6263,7 @@
       "source_location": "L30",
       "_origin": "ast",
       "id": "server_src_gdrive_poller_pullfolder",
-      "community": 113,
+      "community": 103,
       "norm_label": "pullfolder()"
     },
     {
@@ -6203,7 +6273,7 @@
       "source_location": "L52",
       "_origin": "ast",
       "id": "server_src_gdrive_poller_tick",
-      "community": 113,
+      "community": 103,
       "norm_label": "tick()"
     },
     {
@@ -6213,7 +6283,7 @@
       "source_location": "L61",
       "_origin": "ast",
       "id": "server_src_gdrive_poller_pullgdrivefolder",
-      "community": 113,
+      "community": 103,
       "norm_label": "pullgdrivefolder()"
     },
     {
@@ -6223,7 +6293,7 @@
       "source_location": "L68",
       "_origin": "ast",
       "id": "server_src_gdrive_poller_startgdrivepoller",
-      "community": 113,
+      "community": 103,
       "norm_label": "startgdrivepoller()"
     },
     {
@@ -6753,7 +6823,7 @@
       "source_location": "L92",
       "_origin": "ast",
       "id": "server_src_lifecycle_startlifecycleworker",
-      "community": 109,
+      "community": 12,
       "norm_label": "startlifecycleworker()"
     },
     {
@@ -6853,7 +6923,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_log",
-      "community": 40,
+      "community": 109,
       "norm_label": "log.ts"
     },
     {
@@ -6863,7 +6933,7 @@
       "source_location": "L3",
       "_origin": "ast",
       "id": "server_src_log_loglevel",
-      "community": 40,
+      "community": 109,
       "norm_label": "loglevel"
     },
     {
@@ -6873,7 +6943,7 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "server_src_log_logevent",
-      "community": 40,
+      "community": 109,
       "norm_label": "logevent()"
     },
     {
@@ -6883,7 +6953,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_media",
-      "community": 109,
+      "community": 15,
       "norm_label": "media.ts"
     },
     {
@@ -6893,7 +6963,7 @@
       "source_location": "L12",
       "_origin": "ast",
       "id": "server_src_media_dirname",
-      "community": 109,
+      "community": 15,
       "norm_label": "__dirname"
     },
     {
@@ -6903,7 +6973,7 @@
       "source_location": "L13",
       "_origin": "ast",
       "id": "server_src_media_media_dir",
-      "community": 109,
+      "community": 15,
       "norm_label": "media_dir"
     },
     {
@@ -6913,7 +6983,7 @@
       "source_location": "L15",
       "_origin": "ast",
       "id": "server_src_media_thumb_dir",
-      "community": 109,
+      "community": 15,
       "norm_label": "thumb_dir"
     },
     {
@@ -6923,7 +6993,7 @@
       "source_location": "L19",
       "_origin": "ast",
       "id": "server_src_media_getthumb",
-      "community": 109,
+      "community": 15,
       "norm_label": "getthumb()"
     },
     {
@@ -6953,7 +7023,7 @@
       "source_location": "L65",
       "_origin": "ast",
       "id": "server_src_media_convertallheif",
-      "community": 109,
+      "community": 15,
       "norm_label": "convertallheif()"
     },
     {
@@ -7263,7 +7333,7 @@
       "source_location": "L93",
       "_origin": "ast",
       "id": "server_src_metrics_networkbenchmarks",
-      "community": 18,
+      "community": 39,
       "norm_label": "networkbenchmarks()"
     },
     {
@@ -7273,7 +7343,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_migrate",
-      "community": 0,
+      "community": 113,
       "norm_label": "migrate.ts"
     },
     {
@@ -7283,7 +7353,7 @@
       "source_location": "L7",
       "_origin": "ast",
       "id": "server_src_migrate_dirname",
-      "community": 0,
+      "community": 113,
       "norm_label": "__dirname"
     },
     {
@@ -7293,7 +7363,7 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "server_src_migrate_main",
-      "community": 0,
+      "community": 113,
       "norm_label": "main()"
     },
     {
@@ -7303,7 +7373,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_openrouter",
-      "community": 5,
+      "community": 113,
       "norm_label": "openrouter.ts"
     },
     {
@@ -7313,7 +7383,7 @@
       "source_location": "L4",
       "_origin": "ast",
       "id": "server_src_openrouter_chatctx",
-      "community": 5,
+      "community": 113,
       "norm_label": "chatctx"
     },
     {
@@ -7323,7 +7393,7 @@
       "source_location": "L8",
       "_origin": "ast",
       "id": "server_src_openrouter_stripdashes",
-      "community": 5,
+      "community": 113,
       "norm_label": "stripdashes()"
     },
     {
@@ -7333,7 +7403,7 @@
       "source_location": "L11",
       "_origin": "ast",
       "id": "server_src_openrouter_openai_prices",
-      "community": 5,
+      "community": 113,
       "norm_label": "openai_prices"
     },
     {
@@ -7343,7 +7413,7 @@
       "source_location": "L18",
       "_origin": "ast",
       "id": "server_src_openrouter_gemini_prices",
-      "community": 5,
+      "community": 113,
       "norm_label": "gemini_prices"
     },
     {
@@ -7353,7 +7423,7 @@
       "source_location": "L21",
       "_origin": "ast",
       "id": "server_src_openrouter_geminichat",
-      "community": 5,
+      "community": 113,
       "norm_label": "geminichat()"
     },
     {
@@ -8083,7 +8153,7 @@
       "source_location": "L1433",
       "_origin": "ast",
       "id": "server_src_pipeline_nextinsight",
-      "community": 18,
+      "community": 39,
       "norm_label": "nextinsight()"
     },
     {
@@ -8373,7 +8443,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_remotion_render",
-      "community": 15,
+      "community": 113,
       "norm_label": "remotion-render.ts"
     },
     {
@@ -8383,7 +8453,7 @@
       "source_location": "L10",
       "_origin": "ast",
       "id": "server_src_remotion_render_dirname",
-      "community": 15,
+      "community": 113,
       "norm_label": "__dirname"
     },
     {
@@ -8393,7 +8463,7 @@
       "source_location": "L12",
       "_origin": "ast",
       "id": "server_src_remotion_render_reelseg",
-      "community": 15,
+      "community": 113,
       "norm_label": "reelseg"
     },
     {
@@ -8403,7 +8473,7 @@
       "source_location": "L13",
       "_origin": "ast",
       "id": "server_src_remotion_render_reelprops",
-      "community": 15,
+      "community": 113,
       "norm_label": "reelprops"
     },
     {
@@ -8413,7 +8483,7 @@
       "source_location": "L16",
       "_origin": "ast",
       "id": "server_src_remotion_render_chromepath",
-      "community": 15,
+      "community": 113,
       "norm_label": "chromepath()"
     },
     {
@@ -8423,7 +8493,7 @@
       "source_location": "L28",
       "_origin": "ast",
       "id": "server_src_remotion_render_getbundle",
-      "community": 15,
+      "community": 113,
       "norm_label": "getbundle()"
     },
     {
@@ -8433,7 +8503,7 @@
       "source_location": "L39",
       "_origin": "ast",
       "id": "server_src_remotion_render_renderreelremotion",
-      "community": 15,
+      "community": 113,
       "norm_label": "renderreelremotion()"
     },
     {
@@ -8443,7 +8513,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_rss_poller",
-      "community": 6,
+      "community": 109,
       "norm_label": "rss-poller.ts"
     },
     {
@@ -8453,7 +8523,7 @@
       "source_location": "L12",
       "_origin": "ast",
       "id": "server_src_rss_poller_feed",
-      "community": 6,
+      "community": 109,
       "norm_label": "feed"
     },
     {
@@ -8463,7 +8533,7 @@
       "source_location": "L16",
       "_origin": "ast",
       "id": "server_src_rss_poller_fetchinstagramitems",
-      "community": 6,
+      "community": 109,
       "norm_label": "fetchinstagramitems()"
     },
     {
@@ -8473,7 +8543,7 @@
       "source_location": "L31",
       "_origin": "ast",
       "id": "server_src_rss_poller_ingest",
-      "community": 6,
+      "community": 109,
       "norm_label": "ingest()"
     },
     {
@@ -8483,7 +8553,7 @@
       "source_location": "L91",
       "_origin": "ast",
       "id": "server_src_rss_poller_runpipelines",
-      "community": 6,
+      "community": 109,
       "norm_label": "runpipelines()"
     },
     {
@@ -8493,7 +8563,7 @@
       "source_location": "L98",
       "_origin": "ast",
       "id": "server_src_rss_poller_tick",
-      "community": 6,
+      "community": 109,
       "norm_label": "tick()"
     },
     {
@@ -8503,7 +8573,7 @@
       "source_location": "L117",
       "_origin": "ast",
       "id": "server_src_rss_poller_pullfeed",
-      "community": 6,
+      "community": 109,
       "norm_label": "pullfeed()"
     },
     {
@@ -8513,7 +8583,7 @@
       "source_location": "L126",
       "_origin": "ast",
       "id": "server_src_rss_poller_cleanbrokenitems",
-      "community": 6,
+      "community": 109,
       "norm_label": "cleanbrokenitems()"
     },
     {
@@ -8523,7 +8593,7 @@
       "source_location": "L138",
       "_origin": "ast",
       "id": "server_src_rss_poller_notifytopmaterials",
-      "community": 6,
+      "community": 109,
       "norm_label": "notifytopmaterials()"
     },
     {
@@ -8533,7 +8603,7 @@
       "source_location": "L157",
       "_origin": "ast",
       "id": "server_src_rss_poller_sweepstalenews",
-      "community": 40,
+      "community": 109,
       "norm_label": "sweepstalenews()"
     },
     {
@@ -8543,7 +8613,7 @@
       "source_location": "L177",
       "_origin": "ast",
       "id": "server_src_rss_poller_sweepthinmaterials",
-      "community": 6,
+      "community": 109,
       "norm_label": "sweepthinmaterials()"
     },
     {
@@ -8553,7 +8623,7 @@
       "source_location": "L198",
       "_origin": "ast",
       "id": "server_src_rss_poller_scorebackfill",
-      "community": 6,
+      "community": 109,
       "norm_label": "scorebackfill()"
     },
     {
@@ -8563,7 +8633,7 @@
       "source_location": "L211",
       "_origin": "ast",
       "id": "server_src_rss_poller_startrsspoller",
-      "community": 6,
+      "community": 109,
       "norm_label": "startrsspoller()"
     },
     {
@@ -9023,7 +9093,7 @@
       "source_location": "L2293",
       "_origin": "ast",
       "id": "server_src_server_saverubrics",
-      "community": 40,
+      "community": 12,
       "norm_label": "saverubrics()"
     },
     {
@@ -10050,7 +10120,7 @@
       "label": "graphify",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L133",
+      "source_location": "L134",
       "_origin": "ast",
       "id": "claude_graphify",
       "community": 33,
@@ -21001,7 +21071,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2551",
+      "source_location": "L2593",
       "weight": 1.0,
       "source": "server_public_app",
       "target": "server_public_app_loadguide",
@@ -21571,7 +21641,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2540",
+      "source_location": "L2580",
       "weight": 1.0,
       "source": "server_public_app",
       "target": "server_public_app_owlact",
@@ -21611,7 +21681,37 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2526",
+      "source_location": "L2623",
+      "weight": 1.0,
+      "source": "server_public_app",
+      "target": "server_public_app_owlenabledrag",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2531",
+      "weight": 1.0,
+      "source": "server_public_app",
+      "target": "server_public_app_owlflyto",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2553",
+      "weight": 1.0,
+      "source": "server_public_app",
+      "target": "server_public_app_owlgohome",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2557",
       "weight": 1.0,
       "source": "server_public_app",
       "target": "server_public_app_owlhidebubble",
@@ -21621,7 +21721,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2550",
+      "source_location": "L2590",
       "weight": 1.0,
       "source": "server_public_app",
       "target": "server_public_app_owlhop",
@@ -21631,7 +21731,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2558",
+      "source_location": "L2612",
       "weight": 1.0,
       "source": "server_public_app",
       "target": "server_public_app_owlidleloops",
@@ -21641,7 +21741,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2567",
+      "source_location": "L2640",
       "weight": 1.0,
       "source": "server_public_app",
       "target": "server_public_app_owlinit",
@@ -21661,6 +21761,26 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
+      "source_location": "L2525",
+      "weight": 1.0,
+      "source": "server_public_app",
+      "target": "server_public_app_owlmoveto",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2518",
+      "weight": 1.0,
+      "source": "server_public_app",
+      "target": "server_public_app_owlnestxy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
       "source_location": "L2516",
       "weight": 1.0,
       "source": "server_public_app",
@@ -21671,7 +21791,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2517",
+      "source_location": "L2544",
       "weight": 1.0,
       "source": "server_public_app",
       "target": "server_public_app_owlposition",
@@ -21681,7 +21801,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2527",
+      "source_location": "L2558",
       "weight": 1.0,
       "source": "server_public_app",
       "target": "server_public_app_owlshowtip",
@@ -21695,6 +21815,26 @@
       "weight": 1.0,
       "source": "server_public_app",
       "target": "server_public_app_owlspecs",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2536",
+      "weight": 1.0,
+      "source": "server_public_app",
+      "target": "server_public_app_owltargetxy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2521",
+      "weight": 1.0,
+      "source": "server_public_app",
+      "target": "server_public_app_owlupdatebubbleside",
       "confidence_score": 1.0
     },
     {
@@ -22934,6 +23074,17 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
+      "source_location": "L2598",
+      "weight": 1.0,
+      "source": "server_public_app_loadguide",
+      "target": "home_user_socialiorozum_server_public_app",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
       "source_location": "L264",
       "weight": 1.0,
       "source": "server_public_app_loadideastab",
@@ -23121,7 +23272,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2541",
+      "source_location": "L2581",
       "weight": 1.0,
       "source": "server_public_app_owlact",
       "target": "home_user_socialiorozum_server_public_app",
@@ -23143,7 +23294,18 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2526",
+      "source_location": "L2624",
+      "weight": 1.0,
+      "source": "server_public_app_owlenabledrag",
+      "target": "home_user_socialiorozum_server_public_app",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2557",
       "weight": 1.0,
       "source": "server_public_app_owlhidebubble",
       "target": "home_user_socialiorozum_server_public_app",
@@ -23154,7 +23316,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2568",
+      "source_location": "L2641",
       "weight": 1.0,
       "source": "server_public_app_owlinit",
       "target": "home_user_socialiorozum_server_public_app",
@@ -23165,9 +23327,31 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2531",
+      "source_location": "L2528",
+      "weight": 1.0,
+      "source": "server_public_app_owlmoveto",
+      "target": "home_user_socialiorozum_server_public_app",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2562",
       "weight": 1.0,
       "source": "server_public_app_owlshowtip",
+      "target": "home_user_socialiorozum_server_public_app",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2521",
+      "weight": 1.0,
+      "source": "server_public_app_owlupdatebubbleside",
       "target": "home_user_socialiorozum_server_public_app",
       "confidence_score": 1.0
     },
@@ -23946,17 +24130,6 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2535",
-      "weight": 1.0,
-      "source": "server_public_app_owlshowtip",
-      "target": "server_public_app_esc",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "server/public/app.js",
       "source_location": "L779",
       "weight": 1.0,
       "source": "server_public_app_renderbrief",
@@ -24133,7 +24306,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2552",
+      "source_location": "L2596",
       "weight": 1.0,
       "source": "server_public_app_loadguide",
       "target": "server_public_app_owlel",
@@ -24166,7 +24339,40 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2550",
+      "source_location": "L2624",
+      "weight": 1.0,
+      "source": "server_public_app_owlenabledrag",
+      "target": "server_public_app_owlel",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2531",
+      "weight": 1.0,
+      "source": "server_public_app_owlflyto",
+      "target": "server_public_app_owlel",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2553",
+      "weight": 1.0,
+      "source": "server_public_app_owlgohome",
+      "target": "server_public_app_owlel",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2590",
       "weight": 1.0,
       "source": "server_public_app_owlhop",
       "target": "server_public_app_owlel",
@@ -24177,9 +24383,20 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2567",
+      "source_location": "L2640",
       "weight": 1.0,
       "source": "server_public_app_owlinit",
+      "target": "server_public_app_owlel",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2525",
+      "weight": 1.0,
+      "source": "server_public_app_owlmoveto",
       "target": "server_public_app_owlel",
       "confidence_score": 1.0
     },
@@ -24199,7 +24416,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2517",
+      "source_location": "L2544",
       "weight": 1.0,
       "source": "server_public_app_owlposition",
       "target": "server_public_app_owlel",
@@ -24210,7 +24427,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2527",
+      "source_location": "L2558",
       "weight": 1.0,
       "source": "server_public_app_owlshowtip",
       "target": "server_public_app_owlel",
@@ -24441,7 +24658,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2552",
+      "source_location": "L2595",
       "weight": 1.0,
       "source": "server_public_app_loadguide",
       "target": "server_public_app_api",
@@ -25519,7 +25736,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2541",
+      "source_location": "L2581",
       "weight": 1.0,
       "source": "server_public_app_owlact",
       "target": "server_public_app_selectview",
@@ -25611,17 +25828,6 @@
       "weight": 1.0,
       "source": "server_public_app_selectview",
       "target": "server_public_app_loadtoday",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "server/public/app.js",
-      "source_location": "L83",
-      "weight": 1.0,
-      "source": "server_public_app_selectview",
-      "target": "server_public_app_owlperch",
       "confidence_score": 1.0
     },
     {
@@ -25750,7 +25956,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2541",
+      "source_location": "L2581",
       "weight": 1.0,
       "source": "server_public_app_owlact",
       "target": "server_public_app_setctab",
@@ -26014,7 +26220,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2542",
+      "source_location": "L2582",
       "weight": 1.0,
       "source": "server_public_app_owlact",
       "target": "server_public_app_openaddmaterial",
@@ -26619,6 +26825,17 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
+      "source_location": "L1178",
+      "weight": 1.0,
+      "source": "server_public_app_bulkreview",
+      "target": "server_public_app_loadguide",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
       "source_location": "L1183",
       "weight": 1.0,
       "source": "server_public_app_openimageeditor",
@@ -27092,7 +27309,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2540",
+      "source_location": "L2580",
       "weight": 1.0,
       "source": "server_public_app_owlact",
       "target": "server_public_app_owllog",
@@ -27103,18 +27320,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2536",
-      "weight": 1.0,
-      "source": "server_public_app_owlshowtip",
-      "target": "server_public_app_owllog",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "server/public/app.js",
-      "source_location": "L2554",
+      "source_location": "L2608",
       "weight": 1.0,
       "source": "server_public_app_loadguide",
       "target": "server_public_app_owlemote",
@@ -27125,18 +27331,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2530",
-      "weight": 1.0,
-      "source": "server_public_app_owlshowtip",
-      "target": "server_public_app_owlemote",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "server/public/app.js",
-      "source_location": "L2573",
+      "source_location": "L2653",
       "weight": 1.0,
       "source": "server_public_app_owlinit",
       "target": "server_public_app_owlspecs",
@@ -27149,7 +27344,7 @@
       "source_file": "server/public/app.js",
       "source_location": "L2554",
       "weight": 1.0,
-      "source": "server_public_app_loadguide",
+      "source": "server_public_app_owlgohome",
       "target": "server_public_app_owlperch",
       "confidence_score": 1.0
     },
@@ -27158,7 +27353,18 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2530",
+      "source_location": "L2549",
+      "weight": 1.0,
+      "source": "server_public_app_owlposition",
+      "target": "server_public_app_owlperch",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2576",
       "weight": 1.0,
       "source": "server_public_app_owlshowtip",
       "target": "server_public_app_owlperch",
@@ -27169,10 +27375,10 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2554",
+      "source_location": "L2606",
       "weight": 1.0,
       "source": "server_public_app_loadguide",
-      "target": "server_public_app_owlposition",
+      "target": "server_public_app_owlnestxy",
       "confidence_score": 1.0
     },
     {
@@ -27180,10 +27386,32 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2530",
+      "source_location": "L2555",
+      "weight": 1.0,
+      "source": "server_public_app_owlgohome",
+      "target": "server_public_app_owlnestxy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2544",
+      "weight": 1.0,
+      "source": "server_public_app_owlposition",
+      "target": "server_public_app_owlnestxy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2576",
       "weight": 1.0,
       "source": "server_public_app_owlshowtip",
-      "target": "server_public_app_owlposition",
+      "target": "server_public_app_owlnestxy",
       "confidence_score": 1.0
     },
     {
@@ -27191,7 +27419,117 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2541",
+      "source_location": "L2527",
+      "weight": 1.0,
+      "source": "server_public_app_owlmoveto",
+      "target": "server_public_app_owlupdatebubbleside",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2606",
+      "weight": 1.0,
+      "source": "server_public_app_loadguide",
+      "target": "server_public_app_owlmoveto",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2532",
+      "weight": 1.0,
+      "source": "server_public_app_owlflyto",
+      "target": "server_public_app_owlmoveto",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2576",
+      "weight": 1.0,
+      "source": "server_public_app_owlshowtip",
+      "target": "server_public_app_owlmoveto",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2555",
+      "weight": 1.0,
+      "source": "server_public_app_owlgohome",
+      "target": "server_public_app_owlflyto",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2547",
+      "weight": 1.0,
+      "source": "server_public_app_owlposition",
+      "target": "server_public_app_owlflyto",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2544",
+      "weight": 1.0,
+      "source": "server_public_app_owlposition",
+      "target": "server_public_app_owltargetxy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2607",
+      "weight": 1.0,
+      "source": "server_public_app_loadguide",
+      "target": "server_public_app_owlgohome",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2557",
+      "weight": 1.0,
+      "source": "server_public_app_owlhidebubble",
+      "target": "server_public_app_owlgohome",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2601",
+      "weight": 1.0,
+      "source": "server_public_app_loadguide",
+      "target": "server_public_app_owlhidebubble",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2581",
       "weight": 1.0,
       "source": "server_public_app_owlact",
       "target": "server_public_app_owlhidebubble",
@@ -27202,7 +27540,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2555",
+      "source_location": "L2602",
       "weight": 1.0,
       "source": "server_public_app_loadguide",
       "target": "server_public_app_owlshowtip",
@@ -27213,7 +27551,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2540",
+      "source_location": "L2580",
       "weight": 1.0,
       "source": "server_public_app_owlact",
       "target": "server_public_app_owlhop",
@@ -27224,10 +27562,21 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "server/public/app.js",
-      "source_location": "L2573",
+      "source_location": "L2653",
       "weight": 1.0,
       "source": "server_public_app_owlinit",
       "target": "server_public_app_owlidleloops",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "server/public/app.js",
+      "source_location": "L2653",
+      "weight": 1.0,
+      "source": "server_public_app_owlinit",
+      "target": "server_public_app_owlenabledrag",
       "confidence_score": 1.0
     },
     {
@@ -41072,7 +41421,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CLAUDE.md",
-      "source_location": "L133",
+      "source_location": "L134",
       "weight": 1.0,
       "source": "claude_socialio_\u043a\u043e\u043d\u0442\u0435\u043d\u0442\u0433\u0440\u043e\u0432_project_memory_single_source_of_truth",
       "target": "claude_graphify",
@@ -43241,5 +43590,5 @@
       "source_file": "server/public/app.html"
     }
   ],
-  "built_at_commit": "4b3f2d81b82aedba229d04ed85202fd10b7f09c8"
+  "built_at_commit": "4aadca0db55e1c5c869e8463ee93a693d91b353c"
 }
