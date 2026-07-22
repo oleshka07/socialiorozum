@@ -1060,6 +1060,72 @@ app.get("/api/today", async (req: any) => {
   };
 });
 
+// укр. відмінок числівника: 1 чернетка / 2 чернетки / 5 чернеток
+function plural(n: number, one: string, few: string, many: string): string {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+  return many;
+}
+// 🦉 Помічник-провідник (сова Rozum): «твій наступний крок». Обчислює стан воркспейсу і повертає
+// пріоритезований список порад - кожна з ціллю (куди летіти) і дією (кнопка). Фронт логує показ/клік.
+app.get("/api/guide/next", async (req: any) => {
+  const ws = req.user.workspace_id;
+  const off = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='guide_off'`, [ws]);
+  if (off?.content === "1") return { off: true, tips: [] };
+  const S: Record<string, string> = {};
+  for (const r of await q<{ key: string; content: string }>(`select key, content from settings_block where workspace_id=$1`, [ws])) S[r.key] = (r.content || "").trim();
+  const [chan, plan, drafts, approvedUnsched, noImg, src, thConn, thToday, ideas] = await Promise.all([
+    one<{ n: number }>(
+      `select ((exists(select 1 from telegram_config where workspace_id=$1 and bot_token is not null and (channel_chat_id is not null or group_chat_id is not null)))::int
+             + (exists(select 1 from threads_config where workspace_id=$1 and access_token is not null))::int
+             + (exists(select 1 from meta_config where workspace_id=$1 and page_token is not null))::int
+             + (exists(select 1 from linkedin_config where workspace_id=$1 and access_token is not null))::int) as n`, [ws]),
+    one<{ n: number }>(`select count(*)::int n from plan_slot where workspace_id=$1`, [ws]),
+    // чернетки на затвердження (не затверджені, не опубліковані)
+    one<{ n: number }>(`select count(*)::int n from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+       where s.workspace_id=$1 and p.stage='final' and coalesce(p.review,'')not in('approved','archived')
+         and not exists(select 1 from telegram_publish t where t.post_id=p.id and t.status='sent')
+         and not exists(select 1 from threads_publish t where t.post_id=p.id and t.status='sent')
+         and not exists(select 1 from meta_publish t where t.post_id=p.id and t.status='sent')`, [ws]),
+    // затверджені, але ще не в календарі й не опубліковані
+    one<{ n: number }>(`select count(*)::int n from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+       where s.workspace_id=$1 and p.review='approved'
+         and not exists(select 1 from schedule_slot ss where ss.post_id=p.id and ss.status in('planned','posting','posted'))
+         and not exists(select 1 from telegram_publish t where t.post_id=p.id and t.status='sent')`, [ws]),
+    // затверджені без зображення
+    one<{ n: number }>(`select count(*)::int n from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+       where s.workspace_id=$1 and p.review='approved' and p.media_id is null`, [ws]),
+    one<{ n: number }>(`select count(*)::int n from source where workspace_id=$1 and archived=false`, [ws]),
+    one<{ n: number }>(`select count(*)::int n from threads_config where workspace_id=$1 and access_token is not null`, [ws]),
+    one<{ n: number }>(`select count(*)::int n from threads_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+       where s.workspace_id=$1 and tp.status='sent' and tp.created_at > now() - interval '20 hours'`, [ws]),
+    one<{ n: number }>(`select count(*)::int n from idea_bank where workspace_id=$1 and status='new'`, [ws]),
+  ]);
+  type Tip = { id: string; text: string; emote: string; target: string; action?: { label: string; view?: string; tab?: string; do?: string } };
+  const tips: Tip[] = [];
+  // порядок = реальний воркфлоу; беремо перші незакриті кроки
+  if (!S.marketing_context) tips.push({ id: "brand", text: "Почнемо з бренду - розкажи, чим займаєшся і для кого. Це контекст для кожного поста.", emote: "point", target: '.navitem[data-view="brand"]', action: { label: "Заповнити бренд", view: "brand" } });
+  if ((chan?.n || 0) === 0) tips.push({ id: "channel", text: "Підключи хоч один канал публікації - інакше постам нікуди виходити.", emote: "point", target: "#avatar", action: { label: "Підключити канал", view: "settings", tab: "channels" } });
+  if (!S.pain_points && !S.brand_thesis && S.marketing_context) tips.push({ id: "pains", text: "Заповни болі клієнта - і AI перестане «писати не про те», а бере теми з реального болю.", emote: "think", target: '.navitem[data-view="brand"]', action: { label: "Додати болі", view: "strategy" } });
+  if ((plan?.n || 0) === 0) tips.push({ id: "plan", text: "Згенеруй контент-план - я розкладу теми на тижні вперед за твоєю стратегією.", emote: "point", target: '.navitem[data-view="publish"]', action: { label: "Створити план", view: "publish", tab: "plan" } });
+  if ((src?.n || 0) === 0 && (plan?.n || 0) > 0) tips.push({ id: "source", text: "Додай джерело контенту (тема новин, Telegram-канал чи просто думку) - буде з чого робити пости.", emote: "point", target: "#genPostsBtn", action: { label: "Додати матеріал", do: "addmaterial" } });
+  if ((drafts?.n || 0) > 0) tips.push({ id: "approve", text: `У тебе ${drafts!.n} ${plural(drafts!.n, "чернетка", "чернетки", "чернеток")} на затвердження - переглянь і затверди, щоб пости вийшли вчасно.`, emote: "happy", target: '.navitem[data-view="create"]', action: { label: `Переглянути (${drafts!.n})`, view: "create", tab: "posts" } });
+  if ((approvedUnsched?.n || 0) > 0) tips.push({ id: "schedule", text: `${approvedUnsched!.n} затверджених ${plural(approvedUnsched!.n, "пост", "пости", "постів")} ще не в календарі. Додай їх - і публікація піде автоматично.`, emote: "point", target: '.navitem[data-view="publish"]', action: { label: "У календар", view: "publish", tab: "cal" } });
+  if ((noImg?.n || 0) > 0) tips.push({ id: "image", text: `${noImg!.n} затверджених ${plural(noImg!.n, "пост", "пости", "постів")} без зображення - з картинкою охоплення помітно більше.`, emote: "think", target: '.navitem[data-view="create"]', action: { label: "До постів", view: "create", tab: "posts" } });
+  if ((thConn?.n || 0) > 0 && (thToday?.n || 0) === 0) tips.push({ id: "takes", text: "Сьогодні ще нема поста в Threads. Зроблю 3 короткі тейки з Банку ідей - публікуєш у 1 тап.", emote: "point", target: '.navitem[data-view="create"]', action: { label: "3 тейки", do: "takes" } });
+  if (!tips.length) tips.push({ id: "allgood", text: (ideas?.n || 0) > 0 ? `Все під контролем 🦉 У Банку ${ideas!.n} ${plural(ideas!.n, "ідея", "ідеї", "ідей")} - можу зробити з них пости.` : "Все під контролем 🦉 Гарна робота! Зазирни в Аналітику - подивись, що спрацювало.", emote: "sleep", target: '.navitem[data-view="today"]', action: (ideas?.n || 0) > 0 ? { label: "До ідей", view: "create", tab: "ideas" } : { label: "Аналітика", view: "analytics" } });
+  return { off: false, tips: tips.slice(0, 4) };
+});
+app.post("/api/guide/log", async (req: any) => {
+  const tip = String(req.body?.tip || "").slice(0, 60);
+  const event = String(req.body?.event || "").slice(0, 20);
+  if (tip && event) { try { await q(`insert into guide_log(workspace_id, tip, event) values($1,$2,$3)`, [req.user.workspace_id, tip, event]); } catch { /* лог не критичний */ } }
+  if (event === "off") { try { await q(`insert into settings_block(workspace_id,key,content) values($1,'guide_off','1') on conflict (workspace_id,key) do update set content='1'`, [req.user.workspace_id]); } catch { /* ignore */ } }
+  if (event === "on") { try { await q(`delete from settings_block where workspace_id=$1 and key='guide_off'`, [req.user.workspace_id]); } catch { /* ignore */ } }
+  return { ok: true };
+});
+
 app.get("/api/analytics/benchmarks", async (req: any) => networkBenchmarks(req.user.workspace_id));
 
 // 🧵 Розширена аналітика Threads: профіль за 7 днів (з дельтами до попередніх 7), підписники,

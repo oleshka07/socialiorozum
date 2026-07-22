@@ -40,6 +40,8 @@ let S = {plan:[], schedule:{}};
 let busy = false;
 let curView = 'create';
 let Finals = [];
+let Guide={tips:[],i:0,on:true,busy:false,shownAt:0}; // 🦉 сова-провідник (стан угорі - selectView його читає)
+function owlEl(){ return $('owl'); } // hoisted - безпечно з selectView вище
 
 async function api(path, opts){
   const r = await fetch('/api'+path, opts||{});
@@ -77,6 +79,8 @@ function selectView(v){
   if(typeof loadTasks==='function') loadTasks();
   curView=v; if(typeof renderTaskStrip==='function') renderTaskStrip(v);
   try{ localStorage.setItem('kg_view', v); }catch(e){} // памʼятаємо розділ між оновленнями сторінки
+  // сова перепозиціонується під поточну ціль підказки після зміни розділу (макет змінився)
+  try{ if(Guide&&Guide.on&&Guide.tips.length&&owlEl()&&owlEl().style.display!=='none'){ const t=Guide.tips[Guide.i]; if(t&&$('owlBubble').style.display!=='none'){ const p=owlPosition(t.target); owlPerch(p==='corner'); $('owlBubble').classList.toggle('below',p==='below'); } } }catch(e){}
 }
 function go(v){ selectView(v); }
 document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>selectView(n.dataset.view));
@@ -109,6 +113,7 @@ document.querySelectorAll('#sTabs .tab').forEach(x=>x.onclick=()=>setSTab(x.data
   um.querySelectorAll('.umitem[data-um]').forEach(it=>it.onclick=()=>{ close(); selectView('settings'); setSTab({profile:'profile',channels:'channels',sources:'sources'}[it.dataset.um]); });
   // 🧰 Інструменти: окремий розділ з розширеними функціями (конвеєр, промт, GDrive, транскрибатори)
   const tools=$('umTools'); if(tools) tools.onclick=()=>{ close(); selectView('tools'); };
+  // 🦉 «Помічник Розум» у меню - обробник навішується в owlInit (щоб не викликати до визначення)
 })();
 
 // ---------- розділ «Інструменти»: переселення розширених панелей з Джерел (вузли ті самі - обробники живі) ----------
@@ -2500,6 +2505,74 @@ async function renderObConnect(oc){
   });
 })();
 
+// ---------- 🦉 Розум: сова-провідник ----------
+// Обчислює «наступний крок» (сервер), летить до потрібної кнопки, показує репліку з дією.
+// Idle: сидить на «R», кліпає, вдягає/знімає окуляри, інколи жартує. Реагує на зміну розділу й дії.
+const GUIDE_JOKES=['🦉 Мудра сова не постить у неділю ввечері. Ну, майже.','🦉 Кажуть, я схожа на логотип. Це комплімент?','🦉 Пораджу як друг: спершу цінність, потім продаж.','🦉 *поправляє окуляри* Готовий до контенту?','🦉 Пам-пам… я тут, якщо загубишся.'];
+function owlLog(tip,event){ try{ api('/guide/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tip,event})}); }catch(e){} }
+function owlEmote(e){ const o=owlEl(); if(o) o.dataset.emote=e||'idle'; }
+function owlBlink(){ const o=owlEl(); if(!o||o.dataset.emote==='sleep') return; o.classList.add('owl-blink'); setTimeout(()=>o.classList.remove('owl-blink'),140); }
+function owlSpecs(on){ const o=owlEl(); if(o) o.classList.toggle('owl-specs',on!==false); }
+function owlPerch(on){ const o=owlEl(); if(o) o.classList.toggle('owl-perch',!!on); }
+function owlPosition(sel){ const o=owlEl(); if(!o) return 'corner';
+  const el=sel&&document.querySelector(sel);
+  if(!el||!el.offsetParent){ o.style.left='auto'; o.style.right='20px'; o.style.top='auto'; o.style.bottom='84px'; return 'corner'; }
+  const r=el.getBoundingClientRect(), ow=76, oh=84;
+  let left=Math.max(10,Math.min(window.innerWidth-ow-10, r.left+r.width/2-ow/2));
+  let top=Math.max(10,Math.min(window.innerHeight-oh-10, r.bottom+8));
+  o.style.right='auto'; o.style.bottom='auto'; o.style.left=left+'px'; o.style.top=top+'px';
+  return top<170?'below':'above';
+}
+function owlHideBubble(){ const b=$('owlBubble'); if(b) b.style.display='none'; }
+function owlShowTip(idx){ const o=owlEl(); if(!o||!Guide.tips.length) return;
+  Guide.i=((idx==null?Guide.i:idx)%Guide.tips.length+Guide.tips.length)%Guide.tips.length;
+  const t=Guide.tips[Guide.i]; o.style.display='block';
+  const pos=owlPosition(t.target); owlPerch(pos==='corner'); owlEmote(t.emote);
+  const b=$('owlBubble'), tx=$('owlText'), acts=$('owlActs');
+  b.classList.toggle('below',pos==='below');
+  tx.textContent=t.text;
+  const a=t.action||{};
+  acts.innerHTML='<button id="owlDo">'+esc(a.label||'Гаразд')+'</button>'+(Guide.tips.length>1?'':'');
+  b.style.display='block'; Guide.shownAt=Date.now(); owlLog(t.id,'shown');
+  const doBtn=$('owlDo'); if(doBtn) doBtn.onclick=()=>owlAct(t);
+  $('owlNext').style.display=Guide.tips.length>1?'':'none';
+}
+async function owlAct(t){ const a=t.action||{}; owlLog(t.id,'clicked'); owlHop();
+  if(a.do==='takes'){ owlHideBubble(); if($('genTakes')){ selectView('create'); setCTab('posts'); setTimeout(()=>$('genTakes').click(),200); } return; }
+  if(a.do==='addmaterial'){ owlHideBubble(); if(typeof openAddMaterial==='function') openAddMaterial(); return; }
+  if(a.view){ selectView(a.view);
+    if(a.tab&&a.view==='settings') setTimeout(()=>setSTab(a.tab),60);
+    else if(a.tab&&a.view==='publish') setTimeout(()=>setPTab(a.tab),60);
+    else if(a.tab&&a.view==='create') setTimeout(()=>setCTab(a.tab),60);
+  }
+  owlHideBubble(); setTimeout(()=>loadGuide(),700); // після дії - перерахувати наступний крок
+}
+function owlHop(){ const o=owlEl(); if(!o) return; o.classList.add('owl-hop'); setTimeout(()=>o.classList.remove('owl-hop'),500); }
+async function loadGuide(){ if(!Guide.on) return;
+  try{ const r=await api('/guide/next'); if(r.off){ Guide.on=false; const o=owlEl(); if(o)o.style.display='none'; return; } Guide.tips=r.tips||[]; }
+  catch(e){ return; }
+  if(!Guide.tips.length){ const o=owlEl(); if(o){ o.style.display='block'; owlPosition(null); owlPerch(true); owlEmote('sleep'); } return; }
+  Guide.i=0; owlShowTip(0);
+}
+// idle-петлі: кліпання, окуляри, рідкісний жарт (лише коли підказки нема)
+function owlIdleLoops(){
+  setInterval(owlBlink, 4200+Math.random()*2600);
+  setInterval(()=>{ const o=owlEl(); if(o&&o.style.display!=='none') owlSpecs(!o.classList.contains('owl-specs')); }, 22000);
+  setInterval(()=>{ const b=$('owlBubble'); if(b&&b.style.display==='none'&&owlEl().style.display!=='none'&&Math.random()<0.5){
+    const tx=$('owlText'), acts=$('owlActs'); tx.textContent=GUIDE_JOKES[Math.floor(Math.random()*GUIDE_JOKES.length)]; acts.innerHTML=''; owlHop();
+    b.classList.remove('below'); owlPosition(null); owlPerch(true); b.style.display='block'; $('owlNext').style.display='none';
+    setTimeout(()=>{ if(b) b.style.display='none'; },6000);
+  } }, 45000);
+}
+function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
+  $('owlBody').onclick=()=>{ const b=$('owlBubble'); if(b.style.display==='none'){ if(Guide.tips.length) owlShowTip(Guide.i); else loadGuide(); } else owlHideBubble(); };
+  $('owlBubbleX').onclick=owlHideBubble;
+  $('owlNext').onclick=()=>owlShowTip(Guide.i+1);
+  $('owlOff').onclick=()=>{ owlLog('menu','off'); Guide.on=false; o.style.display='none'; api('/guide/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tip:'menu',event:'off'})}); flash('Помічника вимкнено. Увімкнути знову - в меню аватара.'); };
+  const umg=$('umGuide'); if(umg) umg.onclick=()=>{ const um=$('userMenu'); if(um) um.style.display='none'; Guide.on=true; o.style.display='block'; api('/guide/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tip:'menu',event:'on'})}).catch(()=>{}); loadGuide(); flash('🦉 Помічник Розум увімкнено'); };
+  owlSpecs(true); owlIdleLoops();
+}
+
 // ---------- init ----------
 (async()=>{
   try{ const _q=new URLSearchParams(location.search); if(window.opener && window.opener!==window && (_q.has('meta')||_q.has('threads')||_q.has('gdrive')||_q.has('linkedin')||_q.has('youtube')||_q.has('tiktok'))){ window.opener.postMessage({oauth:true, meta:_q.get('meta'), threads:_q.get('threads'), gdrive:_q.get('gdrive'), linkedin:_q.get('linkedin'), youtube:_q.get('youtube'), tiktok:_q.get('tiktok')}, location.origin); document.body.innerHTML='<div style="padding:40px;text-align:center;font-family:sans-serif;color:#333">Готово ✓ Можна закрити це вікно.</div>'; try{window.close();}catch(e){} return; } }catch(e){}
@@ -2528,7 +2601,9 @@ async function renderObConnect(oc){
   loadMaterials(); // стрічка + лічильник
   loadPlan().then(()=>{ const _ct=localStorage.getItem('kg_ctab'); setCTab(_ct==='materials'?'materials':'posts'); }); // План живе в Публікації; тут лише Матеріали/Чорновики
   await loadChanStatus();
-  try{ const st=await api('/settings'); if(!st.some(r=>r.key==='onboarded')) showOnboarding(); }catch(e){}
+  let _onb=true; try{ const st=await api('/settings'); if(!st.some(r=>r.key==='onboarded')){ _onb=false; showOnboarding(); } }catch(e){}
+  // 🦉 сова-провідник (лише після онбордингу; не заважає першому налаштуванню)
+  if(_onb){ try{ owlInit(); setTimeout(loadGuide,1500); window.addEventListener('resize',()=>{ try{ if(Guide.tips.length&&$('owlBubble').style.display!=='none') owlPosition(Guide.tips[Guide.i].target); }catch(e){} }); }catch(e){} }
   updRunLabel();
   if(runId){ try{ await refresh(); }catch(e){ runId=null; localStorage.removeItem('kg_run'); updRunLabel(); } }
   loadPublish();

@@ -533,3 +533,13 @@ create table if not exists tg_message (
   updated_at   timestamptz not null default now(),
   primary key (workspace_id, category)
 );
+
+-- 🦉 Помічник-провідник (сова Rozum): лог показаних порад/дій - для навчання й персоналізації
+create table if not exists guide_log (
+  id           uuid primary key default gen_random_uuid(),
+  workspace_id uuid references workspace(id) on delete cascade,
+  tip          text not null,
+  event        text not null,          -- shown|clicked|dismissed|snoozed|off
+  created_at   timestamptz not null default now()
+);
+create index if not exists idx_guidelog_ws on guide_log(workspace_id, created_at desc);
