@@ -125,7 +125,7 @@
     "semantic_hash": ""
   },
   "server/src/server.ts": {
-    "mtime": 1784583606.5538118,
+    "mtime": 1784583504.094227,
     "ast_hash": "8da2746e8bbf490f966da5070a073d79",
     "semantic_hash": ""
   },
@@ -155,8 +155,8 @@
     "semantic_hash": "352df4b84f4af2922ccd9adaf8e4608f"
   },
   "CLAUDE.md": {
-    "mtime": 1784738028.1150553,
-    "ast_hash": "7b9882f989b0de78aa903cf2b8ee5cb6",
+    "mtime": 1784583587.4483263,
+    "ast_hash": "6be0f1ef0fb87681bb88fe51f3c90412",
     "semantic_hash": ""
   },
   "DEPLOY.md": {
@@ -225,8 +225,8 @@
     "semantic_hash": ""
   },
   "server/public/app.html": {
-    "mtime": 1784737834.820568,
-    "ast_hash": "d5a0ca3728536a280416d4564894743d",
+    "mtime": 1784580661.1423812,
+    "ast_hash": "5100db5666e1ecda3bd69865ddf5ed49",
     "semantic_hash": ""
   },
   "server/public/auth.html": {
@@ -360,8 +360,8 @@
     "semantic_hash": ""
   },
   "server/.lint/ui-smoke.mjs": {
-    "mtime": 1784737968.4713254,
-    "ast_hash": "c05a587f629430e64971a108c1189879",
+    "mtime": 1784582770.8456588,
+    "ast_hash": "ff3386ba2175aaa29925e6e79045f38d",
     "semantic_hash": ""
   },
   "server/eslint.config.mjs": {
@@ -370,8 +370,8 @@
     "semantic_hash": ""
   },
   "server/public/app.js": {
-    "mtime": 1784737834.8072684,
-    "ast_hash": "f07658b6f10188059d8ab47e15146078",
+    "mtime": 1784583525.0681217,
+    "ast_hash": "0d9cf3d32ee8c4023e3a191a1fa7a0ea",
     "semantic_hash": ""
   },
   "server/src/settings.ts": {

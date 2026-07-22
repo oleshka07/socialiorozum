@@ -1086,10 +1086,15 @@ const SelPosts=new Set(); // масові дії
 async function loadStudioPosts(){ try{ Finals=(await api('/posts/studio'))||[]; }catch(e){} SelPosts.clear(); renderStudio(); renderInbox(); if(typeof updateCounts==='function') updateCounts(); }
 function renderStudio(){
   const grid=$('studioGrid'); if(!grid) return;
-  const all=Finals; const appr=all.filter(p=>p.review==='approved').length; const rev=all.length-appr;
-  const pub=all.filter(p=>p.sent&&p.sent.length).length;
+  const all=Finals;
+  // опубліковані АВТОМАТИЧНО ховаються з робочих вкладок (вони - історія, не робота):
+  // живуть лише у вкладці «✈️ Опубліковані» (фідбек Олега: «висять, створюють шум»)
+  const isSent=(p)=>!!(p.sent&&p.sent.length);
+  const act=all.filter(p=>!isSent(p));
+  const appr=act.filter(p=>p.review==='approved').length; const rev=act.length-appr;
+  const pub=all.length-act.length;
   const tc=$('toCalendar'); if(tc){ tc.style.display=appr>0?'':'none'; tc.textContent='До календаря ('+appr+') →'; }
-  const ft=$('studioFilters'); if(ft){ ft.innerHTML=[['all','Усі',all.length],['review','На перегляд',rev],['approved','Затверджені',appr],['published','✈️ Опубліковані',pub]].map(f=>'<div class="ftab'+(StudioFilter===f[0]?' on':'')+'" data-sf="'+f[0]+'">'+f[1]+' <span style="opacity:.6">'+f[2]+'</span></div>').join(''); ft.querySelectorAll('[data-sf]').forEach(t=>t.onclick=()=>{ StudioFilter=t.dataset.sf; renderStudio(); }); }
+  const ft=$('studioFilters'); if(ft){ ft.innerHTML=[['all','Активні',act.length],['review','На перегляд',rev],['approved','Затверджені',appr],['published','✈️ Опубліковані',pub]].map(f=>'<div class="ftab'+(StudioFilter===f[0]?' on':'')+'" data-sf="'+f[0]+'">'+f[1]+' <span style="opacity:.6">'+f[2]+'</span></div>').join(''); ft.querySelectorAll('[data-sf]').forEach(t=>t.onclick=()=>{ StudioFilter=t.dataset.sf; renderStudio(); }); }
   // рубрика × джерело - компактні дропдауни (було: два ряди чіпів = візуальний шум)
   const tf=$('studioTagFilters');
   if(tf){
@@ -1100,8 +1105,8 @@ function renderStudio(){
     const rs=$('stRubSel'); if(rs) rs.onchange=(e)=>{ StudioRubric=e.target.value; renderStudio(); };
     const os=$('stOrgSel'); if(os) os.onchange=(e)=>{ StudioOrigin=e.target.value; renderStudio(); };
   }
-  let show=all; if(StudioFilter==='review') show=all.filter(p=>p.review!=='approved'); if(StudioFilter==='approved') show=all.filter(p=>p.review==='approved');
-  if(StudioFilter==='published') show=all.filter(p=>p.sent&&p.sent.length);
+  let show=act; if(StudioFilter==='review') show=act.filter(p=>p.review!=='approved'); if(StudioFilter==='approved') show=act.filter(p=>p.review==='approved');
+  if(StudioFilter==='published') show=all.filter(isSent);
   if(StudioRubric) show=show.filter(p=>p.rubric===StudioRubric);
   if(StudioOrigin) show=show.filter(p=>p.source_origin===StudioOrigin);
   renderBulkBar();
@@ -1747,6 +1752,7 @@ function renderIdeaList(ideas){
 }
 if($('genIdeas')) $('genIdeas').onclick=genIdeas;
 // 🧵 тейки для Threads: N коротких чернеток з Банку ідей/щоденника (падають у глобальний пул Студії)
+if($('takesCfg')) $('takesCfg').onclick=()=>{ selectView('settings'); setSTab('channels'); };
 if($('genTakes')) $('genTakes').onclick=async()=>{ const b=$('genTakes'), m=$('takesMsg'); b.disabled=true; m.style.color='var(--muted)'; m.textContent='пишу тейки…'; aiBusy('🧵 Пишу тейки для Threads…');
   try{ const r=await api('/posts/threads-takes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:5})});
     m.style.color='var(--brand)'; m.textContent='+'+r.created+' чернеток ✓'; try{ await loadStudioPosts(); }catch(_){ } }
@@ -2476,6 +2482,22 @@ async function renderObConnect(oc){
   if($('obIgSel')) $('obIgSel').onchange=async(e)=>{ const m=$('obIgMsg'); if(m)m.textContent='Перемикаю акаунт…'; try{ await api('/integrations/meta/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pageId:e.target.value})}); obVoiceImported=true; await doImport(); }catch(err){ if(m)m.textContent='⚠ '+err.message; } };
   if(!obVoiceImported){ obVoiceImported=true; await doImport(); }
 }
+
+// ---------- прогресивне розкриття: другорядні «професійні» панелі згорнуті ----------
+// Фідбек Олега «сервіс виглядає важким»: просунуті панелі (ДНК, паспорт голосу, магніти, сходи,
+// CTA, формат, b-roll) за замовчуванням - один рядок-заголовок; клік розгортає. Дані не чіпаються.
+(function(){
+  const FOLD=['🧬','🪪','🧲','🪜','📮 Конверсійні','📏','🎥'];
+  document.querySelectorAll('.panel .ph').forEach(ph=>{
+    const t=(ph.textContent||'').trim();
+    if(!FOLD.some(f=>t.startsWith(f))) return;
+    const panel=ph.closest('.panel'); if(!panel||panel.querySelector('.pfh')) return;
+    const sum=document.createElement('div'); sum.className='pfh';
+    sum.innerHTML='<span>'+esc(t.split('\n')[0].slice(0,60))+'</span><span style="margin-left:auto;color:var(--faint);font-size:12px;font-weight:400">налаштувати ▾</span>';
+    sum.onclick=()=>{ panel.classList.remove('folded'); sum.style.display='none'; };
+    panel.prepend(sum); panel.classList.add('folded');
+  });
+})();
 
 // ---------- init ----------
 (async()=>{
