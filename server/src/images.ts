@@ -7,7 +7,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { saveMedia, MEDIA_DIR } from "./media.js";
+import { saveMedia, MEDIA_DIR, deleteMediaFile } from "./media.js";
 import { chat, extractJsonArray } from "./openrouter.js";
 
 export type ImgProvider = "openai" | "fal" | "gemini";
@@ -260,9 +260,39 @@ export async function generateImageForPost(ws: string, postId: string, opts?: { 
   let buf = img.buffer, mime = img.mime;
   if (headline) { try { const r = await overlayHeadline(buf, headline); buf = r.buffer; mime = r.mime; } catch { /* оверлей не критичний */ } }
   const saved = await saveMedia(ws, { buffer: buf, mime, name: `ai.${mime.includes("png") ? "png" : "jpg"}`, source: "ai" });
+  const prevG = await prevMedia(postId);
   await q(`update post set media_id=$2, image_base=$3, headline=$4 where id=$1`, [postId, saved.id, baseSaved.filename, headline || null]);
+  cleanupDerivedMedia(ws, postId, prevG).catch(() => { /* зачистка не критична */ });
   return saved.filename;
 }
+
+// Підміна фото поста БЕЗ засмічення галереї (фідбек: «після кожної зміни тексту зберігаються
+// великими пачками»): старе ПОХІДНЕ медіа поста (ai/crop/pexels/ai-base) видаляється, якщо ним
+// не користується інший пост. Юзерські завантаження (upload/gdrive/diary/broll) не чіпаємо ніколи.
+async function cleanupDerivedMedia(ws: string, postId: string, prev: { media_id: string | null; image_base: string | null } | null): Promise<void> {
+  if (!prev) return;
+  const cur = await one<{ media_id: string | null; image_base: string | null }>(`select media_id, image_base from post where id=$1`, [postId]);
+  const DERIVED = ["ai", "crop", "pexels", "ai-base"];
+  // старе головне фото
+  if (prev.media_id && prev.media_id !== cur?.media_id) {
+    const m = await one<{ id: string; filename: string; source: string }>(
+      `select id, filename, source from media_asset where id=$1 and workspace_id=$2`, [prev.media_id, ws]);
+    if (m && DERIVED.includes(m.source)) {
+      const used = await one(`select 1 from post where (media_id=$1 or image_base=$2) and id<>$3 limit 1`, [m.id, m.filename, postId]);
+      if (!used) { await q(`delete from media_asset where id=$1`, [m.id]); await deleteMediaFile(m.filename); }
+    }
+  }
+  // стара базова картинка (без тексту), якщо базу замінили
+  if (prev.image_base && prev.image_base !== cur?.image_base) {
+    const b = await one<{ id: string; filename: string; source: string }>(
+      `select id, filename, source from media_asset where filename=$1 and workspace_id=$2`, [prev.image_base, ws]);
+    if (b && DERIVED.includes(b.source)) {
+      const used = await one(`select 1 from post where (media_id=$1 or image_base=$2) limit 1`, [b.id, b.filename]);
+      if (!used) { await q(`delete from media_asset where id=$1`, [b.id]); await deleteMediaFile(b.filename); }
+    }
+  }
+}
+const prevMedia = (postId: string) => one<{ media_id: string | null; image_base: string | null }>(`select media_id, image_base from post where id=$1`, [postId]);
 
 // перенакласти текст на ВЖЕ згенероване базове зображення (дешево, без нової генерації)
 export async function overlayForPost(ws: string, postId: string, headline: string, overlayOn: boolean, style?: OverlayStyle): Promise<string> {
@@ -276,7 +306,9 @@ export async function overlayForPost(ws: string, postId: string, headline: strin
   if (overlayOn && hl) { const r = await overlayHeadline(baseBuf, hl, style); buf = r.buffer; mime = r.mime; }
   else { buf = await sharp(baseBuf).jpeg({ quality: 88 }).toBuffer(); }
   const saved = await saveMedia(ws, { buffer: buf, mime, name: "ai.jpg", source: "ai" });
+  const prevO = await prevMedia(postId);
   await q(`update post set media_id=$2, headline=$3 where id=$1`, [postId, saved.id, overlayOn ? (hl || null) : null]);
+  cleanupDerivedMedia(ws, postId, prevO).catch(() => { /* зачистка не критична */ });
   return saved.filename;
 }
 
@@ -308,7 +340,9 @@ export async function attachCroppedImage(ws: string, postId: string, mediaId: st
   }
   const out = await img.resize(w, h, crop ? { fit: "fill" } : { fit: "cover", position: "attention" }).jpeg({ quality: 90 }).toBuffer();
   const saved = await saveMedia(ws, { buffer: out, mime: "image/jpeg", name: "crop.jpg", source: "crop" });
+  const prevC = await prevMedia(postId);
   await q(`update post set media_id=$2, image_base=$3, headline=null where id=$1`, [postId, saved.id, saved.filename]);
+  cleanupDerivedMedia(ws, postId, prevC).catch(() => { /* зачистка не критична */ });
   return { id: saved.id, filename: saved.filename };
 }
 

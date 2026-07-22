@@ -78,8 +78,11 @@ async function ingest(feed: Feed): Promise<string[]> {
   if (runIds.length) {
     await logEvent("info", "rss", `${feed.url}: +${runIds.length} нових`);
     try { await matchPlanSlots(feed.workspace_id); } catch { /* метчинг не критичний */ }
-    // ⭐ оцінка цікавості для аудиторії - один виклик безкоштовного Gemini на весь батч, у фоні
-    scoreMaterials(feed.workspace_id, created).catch(() => { /* оцінка не критична */ });
+    // ⭐ оцінка цікавості для аудиторії - один виклик безкоштовного Gemini на весь батч, у фоні;
+    // після оцінки: топ-матеріал (≥9/10) → сповіщення власнику в Telegram з кнопкою «зробити чорновик»
+    scoreMaterials(feed.workspace_id, created)
+      .then(() => notifyTopMaterials(feed.workspace_id, created.map((c) => c.id)))
+      .catch(() => { /* оцінка не критична */ });
   }
   return runIds;
 }
@@ -130,6 +133,42 @@ async function cleanBrokenItems(): Promise<void> {
   if (rows.length) await logEvent("info", "rss", `почищено сирих HTML-матеріалів: ${rows.length}`);
 }
 
+// 🔥 топ-матеріал (оцінка ≥9/10 від AI за брифом бренду) → живе сповіщення власнику в Telegram
+// з кнопкою «зробити чорновик» (фідбек Олега: «якщо оцінка 5 з 5 - сповіщай і пропонуй чорновик»)
+async function notifyTopMaterials(ws: string, ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  const owner = await one<{ chat_id: string }>(`select chat_id from tg_owner where workspace_id=$1 limit 1`, [ws]);
+  if (!owner) return; // бот-асистент не підключений
+  const tops = await q<{ id: string; title: string; ai_score: number; ai_score_why: string | null }>(
+    `select id, coalesce(title,'') as title, ai_score, ai_score_why from source
+      where id = any($1) and ai_score >= 9 and archived=false order by ai_score desc limit 2`, [ids]);
+  const { liveSend } = await import("./tgbot.js");
+  for (const t of tops) {
+    await liveSend(ws, owner.chat_id, "topmat",
+      `🔥 Топ-матеріал ⭐${t.ai_score}/10:\n«${t.title.slice(0, 150)}»${t.ai_score_why ? `\n\n${String(t.ai_score_why).slice(0, 200)}` : ""}`,
+      [[{ text: "✨ Зробити чорновик", data: `mat_post:${t.id}` }]]);
+  }
+}
+
+// 🌙 нічна ретенція новин: раз на добу архівуємо вчорашні новини з низькою оцінкою цінності
+// (ai_score < 6; оцінює безкоштовний Gemini за брифом бренду). Щоденники (origin='diary') і
+// соцджерела НЕ чіпаємо ніколи; неоцінені теж лишаються. Архів, не видалення - повернути можна.
+let lastNewsSweep = "";
+async function sweepStaleNews(): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+  if (lastNewsSweep === today) return;
+  lastNewsSweep = today;
+  const rows = await q<{ id: string }>(
+    `update source s set archived=true
+       from content_source cs
+      where cs.id = s.feed_id and s.origin='rss' and s.archived=false
+        and s.created_at < now() - interval '24 hours'
+        and s.ai_score is not null and s.ai_score < 6
+        and cs.kind <> 'instagram' and cs.url !~* 'rsshub|/telegram/channel/|/threads/'
+      returning s.id`);
+  if (rows.length) await logEvent("info", "rss", `нічна ретенція: заархівовано ${rows.length} неактуальних новин (оцінка < 6)`);
+}
+
 // разова зачистка СТАРИХ «голих» матеріалів (заголовок + «Джерело: X» + лінк без тіла статті) -
 // на ВСІХ воркспейсах: гейт якості діє лише на нові айтеми, а сміття з минулих тижнів лишалось у стрічці.
 // Архівуємо (не видаляємо): дедуп живий, згенеровані з них пости не чіпаються. Соцджерела
@@ -176,7 +215,7 @@ export function startRssPoller(): void {
   setInterval(async () => {
     if (running) return;
     running = true;
-    try { await tick(); }
+    try { await tick(); await sweepStaleNews(); }
     catch (e: any) { await logEvent("error", "rss", "tick: " + e.message); }
     finally { running = false; }
   }, POLL_MS);
