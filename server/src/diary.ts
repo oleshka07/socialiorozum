@@ -9,6 +9,7 @@ import { logEvent } from "./log.js";
 import { liveSend } from "./tgbot.js";
 import * as tg from "./telegram.js";
 import { saveMedia } from "./media.js";
+import { chat, extractJsonArray } from "./openrouter.js";
 
 // ---- стан щоденника на воркспейс (settings_block key='diary_state') ----
 type DiaryState = { answered?: string; skip?: string; lunch?: string; evening?: string; pending?: boolean; misses?: number };
@@ -72,15 +73,6 @@ const uaDate = (date: string): string => {
   const M = ["січня", "лютого", "березня", "квітня", "травня", "червня", "липня", "серпня", "вересня", "жовтня", "листопада", "грудня"];
   return `${Number(date.slice(8, 10))} ${M[Number(date.slice(5, 7)) - 1]} ${date.slice(0, 4)}`;
 };
-async function ensureDiary(ws: string, date: string): Promise<{ id: string; transcript: string }> {
-  const title = `📔 Щоденник, ${uaDate(date)}`;
-  const ex = await one<{ id: string; transcript: string }>(
-    `select id, transcript from source where workspace_id=$1 and origin='diary' and title=$2`, [ws, title]);
-  if (ex) return ex;
-  const r = await one<{ id: string }>(
-    `insert into source(workspace_id, origin, title, transcript) values($1,'diary',$2,'') returning id`, [ws, title]);
-  return { id: r!.id, transcript: "" };
-}
 
 // кнопки під підтвердженням запису: міст від сирої історії до контенту в 1 тап
 async function diaryButtons(ws: string, srcId: string): Promise<tg.TgButton[][]> {
@@ -92,27 +84,55 @@ async function diaryButtons(ws: string, srcId: string): Promise<tg.TgButton[][]>
   return rows;
 }
 
-// текст (набраний чи розшифрований з голосу) → у запис дня
+// текст (набраний чи розшифрований з голосу) → ОКРЕМЕ джерело на кожен запис
+// (фідбек Олега: кілька аудіо зливались в один чорновик-«кашу»). Довгий запис із кількома
+// темами фоново РОЗБИРАЄТЬСЯ на окремі матеріали (splitDiaryTopics).
 export async function appendDiaryText(ws: string, chatId: string, text: string, voice = false): Promise<void> {
   const { date, time } = localParts(await wsTz(ws));
-  const d = await ensureDiary(ws, date);
-  const entry = `[${time}]${voice ? " 🎙" : ""} ${text.trim()}`;
-  await q(`update source set transcript = case when coalesce(transcript,'')='' then $2 else transcript || E'\\n\\n' || $2 end where id=$1`, [d.id, entry.slice(0, 8000)]);
+  const title = `📔 Щоденник, ${uaDate(date)} · ${time}${voice ? " 🎙" : ""}`;
+  const d = await one<{ id: string }>(
+    `insert into source(workspace_id, origin, title, transcript) values($1,'diary',$2,$3) returning id`,
+    [ws, title, text.trim().slice(0, 8000)]);
   await setState(ws, { answered: date, pending: false, misses: 0 });
   await liveSend(ws, chatId, "diary_ok",
-    `📔 Записав у щоденник (${uaDate(date)}):\n«${text.trim().slice(0, 160)}»\n\nЗнайдеш у Матеріалах з міткою 📔. Можна докинути ще - просто пиши чи диктуй.`,
-    await diaryButtons(ws, d.id));
+    `📔 Записав у щоденник (${uaDate(date)}, ${time}):\n«${text.trim().slice(0, 160)}»\n\nКожен запис - окремий матеріал (мітка 📔). Довгий запис із кількома темами сам розкладеться на окремі.`,
+    await diaryButtons(ws, d!.id));
+  splitDiaryTopics(ws, d!.id, title).catch(() => { /* розбір тем не критичний */ });
+}
+
+// довгий запис із КІЛЬКОМА темами → окремі матеріали (зустріч з інвестором ≠ будівництво ≠ рефлексія):
+// один рілс/пост на одну тему виходить звʼязним, а не «про все потроху». Дешева модель, у фоні.
+async function splitDiaryTopics(ws: string, srcId: string, baseTitle: string): Promise<void> {
+  const src = await one<{ transcript: string }>(`select transcript from source where id=$1`, [srcId]);
+  const text = (src?.transcript || "").trim();
+  if (text.length < 400) return; // короткий запис = одна тема
+  const raw = await chat(env.cheapModel,
+    "Ти редактор щоденника. Якщо в записі КІЛЬКА самостійних тем (різні події/сфери: зустріч, обʼєкт, рефлексія...) - розбий його. " +
+    "Кожна тема = самостійний фрагмент ДОСЛІВНИМ текстом автора (нічого не переписуй і не додавай), з короткою назвою до 6 слів. " +
+    'Якщо тема ОДНА - поверни []. Поверни ЛИШЕ валідний JSON-масив: [{"title":"назва теми","text":"дослівний фрагмент"}].',
+    text.slice(0, 8000), { workspaceId: ws, step: "diary_split" });
+  let parts: { title: string; text: string }[] = [];
+  try { parts = extractJsonArray<any>(raw).map((x: any) => ({ title: String(x?.title || "").trim(), text: String(x?.text || "").trim() })).filter((p) => p.text.length > 80); } catch { return; }
+  if (parts.length < 2) return;
+  // перша тема займає місце оригіналу (та сама картка, кнопки бота лишаються робочими), решта - нові матеріали
+  await q(`update source set title=$2, transcript=$3 where id=$1`, [srcId, `${baseTitle} · ${parts[0].title}`.slice(0, 200), parts[0].text.slice(0, 8000)]);
+  for (const pt of parts.slice(1))
+    await q(`insert into source(workspace_id, origin, title, transcript) values($1,'diary',$2,$3)`,
+      [ws, `${baseTitle} · ${pt.title}`.slice(0, 200), pt.text.slice(0, 8000)]);
+  await logEvent("info", "diary", `запис розкладено на ${parts.length} тем`);
 }
 
 // фото/відео → галерея (source='diary') + позначка в записі дня
 export async function attachDiaryMedia(ws: string, chatId: string, buffer: Buffer, mime: string, name: string, caption?: string): Promise<void> {
   const { date, time } = localParts(await wsTz(ws));
-  const d = await ensureDiary(ws, date);
-  const m = await saveMedia(ws, { buffer, mime, name, source: "diary", externalId: d.id });
-  const note = `[${time}] 📎 ${m.kind === "video" ? "відео" : "фото"} дня${caption ? `: ${caption.trim().slice(0, 300)}` : ""}`;
-  await q(`update source set transcript = case when coalesce(transcript,'')='' then $2 else transcript || E'\\n\\n' || $2 end where id=$1`, [d.id, note]);
+  const title = `📔 Щоденник, ${uaDate(date)} · ${time} 📎`;
+  const d = await one<{ id: string }>(
+    `insert into source(workspace_id, origin, title, transcript) values($1,'diary',$2,'') returning id`, [ws, title]);
+  const m = await saveMedia(ws, { buffer, mime, name, source: "diary", externalId: d!.id });
+  const note = `📎 ${m.kind === "video" ? "відео" : "фото"} дня${caption ? `: ${caption.trim().slice(0, 300)}` : ""}`;
+  await q(`update source set transcript=$2 where id=$1`, [d!.id, note]);
   await setState(ws, { answered: date, pending: false, misses: 0 });
-  const buttons = await diaryButtons(ws, d.id);
+  const buttons = await diaryButtons(ws, d!.id);
   if (m.kind === "video") buttons.push([{ text: "🎥 У вставки для рілсів (b-roll)", data: `dbroll:${m.id}` }]);
   await liveSend(ws, chatId, "diary_ok",
     `📔 ${m.kind === "video" ? "Відео" : "Фото"} в галереї з міткою «щоденник» і привʼязане до запису за ${uaDate(date)} ✓`, buttons);

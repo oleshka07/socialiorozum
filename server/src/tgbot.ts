@@ -338,6 +338,18 @@ async function handleCallback(cbq: any, tokenOverride?: string): Promise<void> {
       if (mid) await tg.editMessageText(token, chatId, mid, "📔 Сьогодні без запису 🙌 Побачимось завтра.");
       return;
     }
+    if (data.startsWith("mat_post:")) {
+      // 🔥 топ-матеріал (оцінка ≥9/10) → чернетка в 1 тап прямо зі сповіщення
+      await tg.answerCallbackQuery(token, cbq.id, "Генерую чернетку з матеріалу…");
+      const src = await one<{ id: string; transcript: string }>(`select id, transcript from source where id=$1 and workspace_id=$2`, [data.slice("mat_post:".length), ws]);
+      if (!src || !(src.transcript || "").trim()) { await tg.sendMessage(token, chatId, "Матеріал порожній або не знайдений."); return; }
+      const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src.id]);
+      await generatePostsOnePass(run!.id, 1);
+      const post = await one<{ id: string; content: string }>(`select id, content from post where run_id=$1 and stage='final' limit 1`, [run!.id]);
+      if (!post) { await tg.sendMessage(token, chatId, "Не вдалося згенерувати - спробуй у застосунку (Матеріали)."); return; }
+      await tg.sendMessage(token, chatId, `✅ Чернетка з топ-матеріалу:\n\n${post.content.slice(0, 3500)}`, draftButtons(post.id));
+      return;
+    }
     if (data.startsWith("dpost:")) {
       // запис дня → готова чернетка поста (той самий Lite-шлях, що й у матеріалів)
       await tg.answerCallbackQuery(token, cbq.id, "Генерую пост із щоденника…");

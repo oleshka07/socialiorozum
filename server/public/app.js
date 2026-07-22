@@ -1518,7 +1518,7 @@ async function openComposer(postId, opts){
 // крок 2 - текст на фото (шрифт/місце/фон, безкоштовне перенакладання) + перегенерація з коментарем
 async function openPhotoTool(postId, initPrompt, onDone){
   let full={}; try{ full=await api('/posts/'+postId+'/full'); }catch(e){}
-  let aspect='1:1', fn=full.media_filename||null, hasBase=!!full.has_base, headline=full.headline||'';
+  let aspect='4:5', fn=full.media_filename||null, hasBase=!!full.has_base, headline=full.headline||'';
   let lastPrompt=(initPrompt||full.image_prompt||'').trim();
   let canRegen=!!(fn&&hasBase&&lastPrompt); // «перегенерувати» має сенс лише коли є промт
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='90';
@@ -1531,7 +1531,8 @@ async function openPhotoTool(postId, initPrompt, onDone){
 
   function step1(){
     card.innerHTML=header('🖼 Фото · крок 1: джерело')
-      +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Формат</div><div style="display:flex;gap:6px" id="ptAsp">'+[['1:1','1:1 квадрат'],['4:5','4:5 вертикаль'],['16:9','16:9 горизонт']].map(a=>'<button class="aspchip'+(a[0]===aspect?' on':'')+'" data-a="'+a[0]+'">'+a[1]+'</button>').join('')+'</div>'
+      +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Формат зображення <span class="qh" title="Один формат працює в усіх мережах - різні розміри вручну не потрібні. 4:5 рекомендуємо: він займає найбільше місця в стрічці Instagram/Facebook і коректно виглядає всюди.">?</span></div>'
+      +'<div style="display:flex;gap:6px" id="ptAsp">'+[['4:5','📱 Для стрічки','вертикальне, займає найбільше місця (рекоменд.)'],['1:1','⬛ Квадрат','універсальне, компактне'],['16:9','🖥 Широке','для обкладинок/десктопу']].map(a=>'<button class="aspchip'+(a[0]===aspect?' on':'')+'" data-a="'+a[0]+'" title="'+a[2]+'" style="flex:1;min-width:96px;display:flex;flex-direction:column;gap:1px;padding:8px 6px;line-height:1.2"><span>'+a[1]+'</span><span style="font-size:10px;opacity:.6">'+a[0]+'</span></button>').join('')+'</div>'
       +'<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="ghost" id="ptGallery" style="flex:1;min-width:110px">📎 З галереї</button><button class="ghost" id="ptUpload" style="flex:1;min-width:110px">⬆ Завантажити</button><button class="ghost" id="ptStock" style="flex:1;min-width:110px" title="Безкоштовні фото Pexels під тему поста">🖼 Зі стоку</button><button class="primary" id="ptGenBtn" style="flex:1;min-width:110px">🎨 Згенерувати</button></div>'
       +'<input type="file" id="ptFile" accept="image/*" style="display:none">'
       +'<div id="ptGenBox" style="display:none;margin-top:12px"><label class="fl">Опис зображення (промт)</label><textarea id="ptPrompt" class="txt" rows="3" placeholder="Що на зображенні…">'+esc(lastPrompt)+'</textarea><div class="btnrow" style="margin-top:10px"><button class="primary" id="ptGen">🎨 Малювати (коштує)</button></div></div>'

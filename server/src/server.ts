@@ -574,7 +574,7 @@ app.post("/api/media", async (req: any, reply) => {
 // вони дублювали кожне опубліковане фото і засмічували медіатеку
 app.get("/api/media", async (req: any) =>
   q(`select id, kind, mime, original_name, filename, size, source, created_at from media_asset
-     where workspace_id=$1 and source <> 'ig-safe' order by created_at desc limit 200`, [req.user.workspace_id]));
+     where workspace_id=$1 and source not in ('ig-safe','ai-base') order by created_at desc limit 200`, [req.user.workspace_id]));
 
 app.delete("/api/media/:id", async (req: any, reply) => {
   const m = await one<{ filename: string }>(`select filename from media_asset where id=$1 and workspace_id=$2`, [req.params.id, req.user.workspace_id]);
@@ -2100,7 +2100,7 @@ app.get("/api/materials", async (req: any) => {
      left join content_source cs on cs.id = s.feed_id
      left join plan_slot ps on ps.match_source_id = s.id and ps.status='matched'
      where s.workspace_id=$1 and s.archived=false and coalesce(s.transcript,'') <> ''
-     order by s.created_at desc limit 60`, [req.user.workspace_id]);
+     order by (s.origin='diary') desc, s.created_at desc limit 200`, [req.user.workspace_id]);
   return { materials: rows };
 });
 app.get("/api/materials/:id", async (req: any, reply) => {
