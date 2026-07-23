@@ -705,12 +705,16 @@ export async function generateThreadsTakes(workspaceId: string, count: number): 
     (s.tone_of_voice ? `\nГолос бренду (суворо): ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) +
     `\n\nПравила тейків: кожен ≤280 символів; ОДНА самостійна думка; перший рядок чіпляє; розмовно, як думка вголос у курилці, не «пост із стрічки бренду»; міксуй типи - спостереження з життя/роботи, контр-теза до загальноприйнятого, пряме питання до аудиторії, факт із конкретною цифрою, чесне зізнання. Без хештегів, без емодзі-декору, без закликів лайкнути/підписатися.` +
     goalRule(s) + NO_DASH_RULE + HOOK_RULE + ANTI_AI_RULE +
-    `\n\nЗгенеруй рівно ${n} різних тейків. Поверни ЛИШЕ валідний JSON-масив рядків: ["тейк 1",…]. Мова: ${lang}.`;
-  const raw = await chat("openai/gpt-4o", system, fuel, { workspaceId, step: "threads_takes" });
+    `\n\nЗгенеруй рівно ${n} різних тейків. Поверни ЛИШЕ валідний JSON-обʼєкт формату {"takes":["тейк 1","тейк 2",…]}. Мова: ${lang}.`;
+  // без примусового JSON-режиму модель інколи ігнорує інструкцію й відповідає прозою (уточнення/відмова,
+  // особливо коли нема палива) - звідси «порожня відповідь»; json-режим + один ретрай прибирають це майже завжди
   let takes: string[] = [];
-  try { takes = extractJsonArray<any>(raw).map((x) => String(x || "").trim()).filter(Boolean).slice(0, n); } catch { takes = []; }
+  for (let attempt = 0; attempt < 2 && !takes.length; attempt++) {
+    const raw = await chat("openai/gpt-4o", system, fuel, { workspaceId, step: "threads_takes", json: true });
+    try { takes = extractJsonObject<{ takes: any[] }>(raw).takes.map((x) => String(x || "").trim()).filter(Boolean).slice(0, n); } catch { takes = []; }
+  }
   takes = takes.map((t) => (t.length <= 495 ? t : t.slice(0, 494).replace(/\s+\S*$/, "") + "…"));
-  if (!takes.length) throw new Error("Не вдалося згенерувати тейки (порожня відповідь моделі)");
+  if (!takes.length) throw new Error("Не вдалося згенерувати тейки (порожня відповідь моделі) - спробуй ще раз за хвилину");
   const src = await one<{ id: string }>(
     `insert into source(workspace_id, origin, title, transcript) values($1,'takes',$2,$3) returning id`,
     [workspaceId, "🧵 Тейки для Threads", takes.join("\n\n")]);

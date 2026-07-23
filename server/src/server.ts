@@ -990,7 +990,7 @@ app.get("/api/today", async (req: any) => {
   const tz = (await getSettingText(ws, "timezone")) || "Europe/Kyiv";
   const dayStr = (offset: number) => new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(Date.now() - offset * 86400e3));
   const today = dayStr(0);
-  const [slots, drafts, draftsCount, ideas, nextSlot, thConn, thDays, planCount, approvedCount, chanCount, failed, freshMat, pubYest] = await Promise.all([
+  const [slots, drafts, draftsCount, ideas, nextSlot, thConn, thDays, planCount, approvedCount, chanCount, failed, freshMat, pubYest, netToday] = await Promise.all([
     // що виходить/вийшло сьогодні (за таймзоною воркспейсу)
     q<any>(`select ss.id, ss.scheduled_at, ss.status, ss.result, coalesce(ss.channels, p.channels) as channels,
                    p.id as post_id, left(regexp_replace(p.content,'\\s+',' ','g'), 90) as title
@@ -1045,11 +1045,22 @@ app.get("/api/today", async (req: any) => {
          union all select tp.created_at from meta_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.status='sent'
          union all select tp.created_at from linkedin_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.status='sent'
        ) u where to_char(u.created_at at time zone $2,'YYYY-MM-DD')=$3`, [ws, tz, dayStr(1)]),
+    // 📡 funnel/канали-віджет «Сьогодні»: скільки пішло СЬОГОДНІ по кожній мережі окремо
+    q<{ net: string; n: number }>(
+      `select net, count(*)::int n from (
+         select 'telegram' as net, tp.created_at from telegram_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.status='sent'
+         union all select 'threads', tp.created_at from threads_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.status='sent'
+         union all select 'instagram', tp.created_at from meta_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.channel='instagram' and tp.status='sent'
+         union all select 'facebook', tp.created_at from meta_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.channel='facebook' and tp.status='sent'
+         union all select 'linkedin', tp.created_at from linkedin_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.status='sent'
+       ) u where to_char(u.created_at at time zone $2,'YYYY-MM-DD')=$3 group by net`, [ws, tz, today]),
   ]);
   // стрік Threads: поспіль днів із публікацією (сьогодні ще без поста - стрік живий від учора)
   const set = new Set(thDays.map((x) => x.d));
   let streak = 0;
   for (let i = set.has(today) ? 0 : 1; i < 60; i++) { if (set.has(dayStr(i))) streak++; else break; }
+  const netTodayMap: Record<string, number> = {};
+  for (const r of netToday) netTodayMap[r.net] = r.n;
   return {
     date: today,
     slots, drafts, draftsTotal: draftsCount?.n || 0, ideas: ideas?.n || 0,
@@ -1057,6 +1068,8 @@ app.get("/api/today", async (req: any) => {
     threads: (thConn?.n || 0) > 0 ? { streak, postedToday: set.has(today) } : null,
     quickstart: { channels: chanCount?.n || 0, plan: planCount?.n || 0, approved: approvedCount?.n || 0 },
     failed, freshMaterials: { count: freshMat?.n || 0, top: freshMat?.top ?? null }, publishedYesterday: pubYest?.n || 0,
+    netToday: netTodayMap,
+    publishedToday: Object.values(netTodayMap).reduce((a, b) => a + b, 0),
   };
 });
 
