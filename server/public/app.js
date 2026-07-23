@@ -13,6 +13,8 @@ let ThStrat={};                // threads_strategy JSON {thread,cta_min,takes}
 let Pub={ bank: [], slots: [] };   // банк затверджених + слоти календаря
 let obVoiceImported=false;     // онбординг: чи вже тягнули голос з IG
 const NETS=[['telegram','Telegram'],['instagram','Instagram'],['facebook','Facebook'],['threads','Threads'],['linkedin','LinkedIn']];
+const NETVAR={telegram:'--tg',instagram:'--ig',facebook:'--fb',threads:'--th',linkedin:'--li'};
+const NETICON={telegram:'M22 4L2 11l6 2 2 6 3-4 5 4 4-15z',instagram:'M7 3h10a4 4 0 014 4v10a4 4 0 01-4 4H7a4 4 0 01-4-4V7a4 4 0 014-4zm5 5a4 4 0 100 8 4 4 0 000-8z',facebook:'M14 9V7c0-1 .5-1.5 1.5-1.5H17V2h-3c-2.5 0-4 1.5-4 4v3H7v3h3v9h4v-9h3l.5-3H14z',threads:'M12 3c5 0 8 3 8 9s-3 9-8 9-8-3-8-9c0-2 .5-3.5 1.5-4.5',linkedin:'M4 4h4v16H4V4zm2-1a2 2 0 110-4 2 2 0 010 4zm5 5h4v2c.8-1.3 2.2-2.3 4-2.3 3 0 5 2 5 5.3V20h-4v-8c0-1.5-.8-2.5-2-2.5s-2 1-2 2.5v8h-5V8z'};
 const CP_LABEL={telegram:'Telegram',instagram:'Instagram',threads:'Threads',facebook:'Facebook'};
 const STEP  = {1:'extract_ideas',3:'drafts',4:'tone',5:'format',6:'deai',7:'strategy'};
 const ORDER = [1,3,4,5,6,7];
@@ -559,6 +561,7 @@ $('toCalendar').onclick=()=>go('publish');
 async function loadToday(){
   const w=$('todayWrap'); if(!w) return;
   let t; try{ t=await api('/today'); }catch(e){ w.innerHTML='<div class="empty" style="padding:24px">⚠ '+esc(e.message)+'</div>'; return; }
+  if(!Object.keys(ChanStatus||{}).length){ try{ await loadChanStatus(); }catch(e){} }
   const slotIcon=(s)=>s.status==='posted'?'✅':(s.status==='failed'?'⚠️':(s.status==='posting'?'⏳':'🕓'));
   const slots=(t.slots||[]).length
     ? t.slots.map(s=>'<div class="tdRow" data-slot="'+s.id+'" data-post="'+s.post_id+'" data-at="'+esc(s.scheduled_at)+'" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);cursor:pointer" title="'+esc(s.result||s.status)+' · відкрити в композері">'
@@ -601,15 +604,34 @@ async function loadToday(){
       +'</div>'
     : '';
   const fm=t.freshMaterials||{};
+  // 🔀 воркфлоу-лійка (підглянуто в конкурентів): Новини → Чернетки → Опубліковано, клікабельно
+  const funnel=[
+    ['📥 Новини', String(fm.count||0), (fm.top?('за 24г · топ ⭐'+fm.top+'/10'):'нових за 24г'), ()=>{ selectView('create'); setCTab('materials'); }],
+    ['📝 Чернетки', String(t.draftsTotal||0), 'на перегляд', ()=>{ selectView('create'); setCTab('posts'); }],
+    ['✅ Опубліковано', String(t.publishedToday||0), 'сьогодні', ()=>selectView('analytics')],
+  ];
+  const funnelHtml='<div class="panel" style="margin:0 0 16px"><div style="display:flex;align-items:stretch;gap:6px;flex-wrap:wrap">'
+    +funnel.map((f,i)=>(i?'<div style="display:flex;align-items:center;color:var(--faint);font-size:20px;padding:0 2px">→</div>':'')
+      +'<div class="stat tdFn" data-fn="'+i+'" style="flex:1;min-width:120px;cursor:pointer"><div class="l">'+f[0]+'</div><div class="v">'+f[1]+'</div><div class="d">'+f[2]+'</div></div>').join('')
+    +'</div></div>';
+  // 📡 канали публікації: статус підключення + скільки пішло сьогодні, клік = Налаштування→Канали
+  const chStatus=ChanStatus||{}, netT=t.netToday||{};
+  const chanHtml='<div class="panel" style="margin-top:16px"><div style="font-weight:700;font-size:14.5px;margin-bottom:10px">📡 Канали публікації</div>'
+    +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
+    +NETS.map(([k,label])=>{ const on=!!chStatus[k]; const n=netT[k]||0;
+      return '<div class="tdChan" data-net="'+k+'" style="flex:1;min-width:130px;border:1px solid var(--line);border-radius:var(--r);padding:12px;cursor:pointer'+(on?'':';opacity:.75')+'">'
+        +'<div style="display:flex;align-items:center;gap:8px"><span style="width:26px;height:26px;border-radius:50%;flex:none;display:grid;place-items:center;background:'+(on?'var('+NETVAR[k]+')':'var(--line2)')+'"><svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="'+NETICON[k]+'"></path></svg></span><b style="font-size:13.5px">'+label+'</b></div>'
+        +(on?'<div style="font-size:12px;color:var(--muted);margin-top:6px">'+n+' сьогодні · <span style="color:var(--brand)">✓ підключено</span></div>'
+            :'<div style="font-size:12px;color:var(--muted);margin-top:6px">не підключено</div><button class="ghost tdChanGo" style="margin-top:6px;padding:4px 10px;font-size:11.5px;width:100%">Підключити →</button>')
+        +'</div>'; }).join('')
+    +'</div></div>';
   const tiles=[
     th?['🔥 Стрік Threads', th.streak+' дн.', th.postedToday?'сьогодні вже є пост ✓':'<span style="color:var(--danger)">сьогодні ще пусто</span>']:null,
     th?['💬 Коменти','<span id="tdComm"><span class="spin"></span></span>','без відповіді · клік = відповісти']:null,
     ['✈️ Вчора вийшло', String(t.publishedYesterday||0), 'публікацій · клік = аналітика'],
-    (fm.count?['📥 Нові матеріали', String(fm.count), (fm.top?('за 24 год · топ ⭐'+fm.top+'/10'):'за 24 год')+' · клік = відкрити']:null),
     ['💡 Ідеї в банку', String(t.ideas||0), 'клік = відкрити'],
-    ['📝 Чернеток усього', String(t.draftsTotal||0), 'клік = у Чорновики'],
   ].filter(Boolean);
-  w.innerHTML=qsHtml+failHtml
+  w.innerHTML=funnelHtml+qsHtml+failHtml
     +'<div class="stat-grid" style="margin-bottom:16px">'+tiles.map((s,i)=>'<div class="stat tdTile" data-tile="'+i+'" style="cursor:pointer"><div class="l">'+s[0]+'</div><div class="v" style="font-size:21px">'+s[1]+'</div><div class="d">'+s[2]+'</div></div>').join('')+'</div>'
     +'<div class="grid2" style="align-items:start">'
       +'<div class="panel" style="margin:0"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="font-weight:700;font-size:14.5px">📤 Сьогодні виходить</div><button class="ghost" id="tdCal" style="margin-left:auto;padding:5px 11px;font-size:12px">🗓 Календар</button></div>'+slots+'</div>'
@@ -620,8 +642,11 @@ async function loadToday(){
       +(t.nextSlot?'<div style="font-size:13px;color:var(--ink2)">Наступна тема плану: <b>'+esc(String(t.nextSlot.theme||'').slice(0,90))+'</b> <span style="color:var(--faint)">('+esc(String(t.nextSlot.slot_date).slice(5))+')</span></div>':'<div style="font-size:13px;color:var(--muted)">План порожній - згенеруй скелет у «Публікація → План і ритм».</div>')+'</div>'
       +(t.nextSlot?'<button class="primary" id="tdGenSlot">✍️ Пост із теми дня</button>':'')
       +(th?'<button class="ghost" id="tdTakes" title="3 короткі тейки в чернетки - врятувати день у Threads">🧵 3 тейки</button>':'')
-    +'</div></div>';
+    +'</div></div>'
+    +chanHtml;
   // дії
+  w.querySelectorAll('.tdFn').forEach(el=>el.onclick=()=>funnel[+el.dataset.fn][3]());
+  w.querySelectorAll('.tdChan').forEach(el=>el.onclick=(ev)=>{ ev.stopPropagation(); selectView('settings'); setSTab('channels'); });
   w.querySelectorAll('.qsGo').forEach(b=>b.onclick=()=>qsSteps[+b.dataset.i][5]());
   w.querySelectorAll('.tdRow').forEach(r=>r.onclick=()=>openComposer(r.dataset.post,{scheduledAt:r.dataset.at,slotId:r.dataset.slot}));
   w.querySelectorAll('.tdEdit').forEach(b=>b.onclick=()=>openComposer(b.dataset.post));
@@ -834,7 +859,6 @@ function renderPosts(oid,posts,emptyTxt){ const o=$(oid); if(!o) return; if(!pos
 function clientThreadSplit(text){ const parts=[]; const paras=String(text||'').split(/\n{2,}/).map(p=>p.trim()).filter(Boolean); let cur='';
   for(const p of paras){ if((cur?cur+'\n\n'+p:p).length<=450) cur=cur?cur+'\n\n'+p:p; else { if(cur) parts.push(cur); cur=p.length<=450?p:p.slice(0,449); } }
   if(cur) parts.push(cur); return (parts.length?parts:[String(text||'').slice(0,450)]).slice(0,8); }
-const NETVAR={telegram:'--tg',instagram:'--ig',facebook:'--fb',threads:'--th',linkedin:'--li'};
 // ---------- 🎯 головна ціль («Директор») + 📮 CTA-конфіг («Дистриб'ютор») ----------
 const GOALS=[['money','💰 Гроші / продажі'],['leads','📩 Ліди / заявки'],['growth','📈 Зростання аудиторії'],['authority','🎓 Авторитет'],['quality','💎 Якість аудиторії']];
 const CTA_TYPES=[['link','🔗 Посилання'],['keyword','🔑 Кодове слово'],['action','👉 Дія']];
@@ -1064,7 +1088,6 @@ async function directorCheck(id){ aiBusy('🎯 Директор перевіря
         await loadStudioPosts(); flash('Пост загострено під ціль ✓'); } }
     else alert(msg);
   }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } }
-const NETICON={telegram:'M22 4L2 11l6 2 2 6 3-4 5 4 4-15z',instagram:'M7 3h10a4 4 0 014 4v10a4 4 0 01-4 4H7a4 4 0 01-4-4V7a4 4 0 014-4zm5 5a4 4 0 100 8 4 4 0 000-8z',facebook:'M14 9V7c0-1 .5-1.5 1.5-1.5H17V2h-3c-2.5 0-4 1.5-4 4v3H7v3h3v9h4v-9h3l.5-3H14z',threads:'M12 3c5 0 8 3 8 9s-3 9-8 9-8-3-8-9c0-2 .5-3.5 1.5-4.5',linkedin:'M4 4h4v16H4V4zm2-1a2 2 0 110-4 2 2 0 010 4zm5 5h4v2c.8-1.3 2.2-2.3 4-2.3 3 0 5 2 5 5.3V20h-4v-8c0-1.5-.8-2.5-2-2.5s-2 1-2 2.5v8h-5V8z'};
 async function loadChanStatus(){ try{ ChanStatus=await api('/channels/status'); }catch(e){ ChanStatus={}; } }
 function chanDots(ch){ if(!ch) return ''; return NETS.filter(n=>ch[n[0]]&&ch[n[0]].on).map(n=>'<span class="cdot" title="'+n[1]+'" style="background:var('+NETVAR[n[0]]+')"><svg width="11" height="11" viewBox="0 0 24 24" fill="#fff"><path d="'+NETICON[n[0]]+'"></path></svg></span>').join(''); }
 function chanIcons(ch){ if(!ch) return ''; const I={telegram:'✈️',instagram:'📸',facebook:'📘',threads:'🧵',linkedin:'💼'}; return Object.keys(I).filter(k=>ch[k]&&ch[k].on).map(k=>I[k]).join(''); }

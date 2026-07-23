@@ -1,7 +1,7 @@
 import { env } from "./env.js";
 import { q } from "./db.js";
 
-export type ChatCtx = { workspaceId: string; step?: string };
+export type ChatCtx = { workspaceId: string; step?: string; json?: boolean };
 
 // «—»/«–» - найстійкіший AI-маркер: промпти просять їх не вживати, але моделі однаково їх вставляють.
 // Гарантію дає лише зачистка КОДОМ на виході кожного виклику (безпечно і для JSON-відповідей).
@@ -69,6 +69,9 @@ export async function chat(model: string, system: string, user: string, ctx?: Ch
   const body: any = { model: apiModel, temperature: 0.7, max_tokens: 1500,
     messages: [{ role: "system", content: system }, { role: "user", content: user }] };
   if (!useOpenAI) body.usage = { include: true }; // OpenRouter-специфічне
+  // примусовий JSON-режим - без нього модель інколи ігнорує «поверни лише JSON» і відповідає прозою
+  // (уточнююче питання, відмова), і extractJsonArray/Object лишається ні з чим
+  if (ctx?.json) body.response_format = { type: "json_object" };
 
   // timeout: інакше крок назавжди лишиться у статусі running
   const controller = new AbortController();
