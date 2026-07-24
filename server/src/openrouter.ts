@@ -1,7 +1,7 @@
 import { env } from "./env.js";
 import { q } from "./db.js";
 
-export type ChatCtx = { workspaceId: string; step?: string; json?: boolean };
+export type ChatCtx = { workspaceId: string; step?: string; json?: boolean; maxTokens?: number };
 
 // «—»/«–» - найстійкіший AI-маркер: промпти просять їх не вживати, але моделі однаково їх вставляють.
 // Гарантію дає лише зачистка КОДОМ на виході кожного виклику (безпечно і для JSON-відповідей).
@@ -66,7 +66,9 @@ export async function chat(model: string, system: string, user: string, ctx?: Ch
     if (env.openrouter.referer) headers["HTTP-Referer"] = env.openrouter.referer;
     if (env.openrouter.title) headers["X-Title"] = env.openrouter.title;
   }
-  const body: any = { model: apiModel, temperature: 0.7, max_tokens: 1500,
+  // presence_penalty: дешевий і надійніший важіль проти шаблонних фраз/повторів, ніж лише regex-заборони
+  // в промпті (AI_TRACE_RX). Помірне значення - не ламає структуровані JSON-відповіді.
+  const body: any = { model: apiModel, temperature: 0.7, max_tokens: ctx?.maxTokens || 1500, presence_penalty: 0.3,
     messages: [{ role: "system", content: system }, { role: "user", content: user }] };
   if (!useOpenAI) body.usage = { include: true }; // OpenRouter-специфічне
   // примусовий JSON-режим - без нього модель інколи ігнорує «поверни лише JSON» і відповідає прозою

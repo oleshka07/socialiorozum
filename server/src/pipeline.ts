@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { q, one } from "./db.js";
 import { chat, extractJsonArray, extractJsonObject } from "./openrouter.js";
 import { env } from "./env.js";
+import { getSetting } from "./settings.js";
 
 // порядок кроків кишки (strategy = v2)
 export const STEP_ORDER = ["extract_ideas", "drafts", "tone", "format", "deai", "strategy"] as const;
@@ -42,7 +43,7 @@ export const DEFAULT_PROMPTS: Record<StepKey, { model: string; content: string }
 const NO_DASH_RULE = "\n\nПунктуація: НІКОЛИ не використовуй широке тире («—») чи середнє тире («–») у тексті. Замінюй їх комою, двокрапкою, дефісом або розбивай на окремі речення.";
 
 // Бан хук-кліше + принцип кульмінації («Хук-майстер»): відкриття з найсильнішого моменту, не зі штучної інтриги.
-const HOOK_RULE = "\n\nГачки-кліше ЗАБОРОНЕНІ (штучна інтрига): «СТОП», «не гортай», «зупинись», «99% не знають», «шок», «ти не повіриш», «зараз розкажу», «УВАГА». Натомість знайди КУЛЬМІНАЦІЮ матеріалу (найсильніший факт, цифру, момент чи висновок) і відкрий пост прямо з неї.";
+const HOOK_RULE = "\n\nГачки-кліше ЗАБОРОНЕНІ (штучна інтрига): «СТОП», «не гортай», «зупинись», «99% не знають», «шок», «ти не повіриш», «зараз розкажу», «УВАГА». За замовчуванням знайди КУЛЬМІНАЦІЮ матеріалу (найсильніший факт, цифру, момент чи висновок) і відкрий пост прямо з неї - це ПРІОРИТЕТНИЙ спосіб відкриття, якщо в матеріалі є конкретний факт/цифра/момент. (Якщо болі клієнта задані окремо - там своя інструкція про пріоритет.)";
 
 // Компактний каталог AI-слідів для української («Антидетектор»): детерміновані заборони поверх deai_rules юзера.
 const ANTI_AI_RULE = "\n\nAI-сліди, які ЗАБОРОНЕНО вживати: конструкція «не просто X, а Y»; канцелярит («здійснювати», «забезпечувати», «варто зазначити», «наразі», «даний»); пусті вступи («у сучасному світі», «давайте розберемось», «як відомо»); фінальні підсумки («отже, підсумуємо», «сподіваюсь, було корисно»); симетричні парні речення; слова-паразити «ключовий», «важливо розуміти», «варто памʼятати»; три однорідні прикметники поспіль.";
@@ -120,7 +121,7 @@ export function painThesis(s: Record<string, string>): string {
   const pains = (s.pain_points || "").trim();
   if (pains)
     parts.push(`\n\nБОЛІ КЛІЄНТА (список «біль → наше рішення → доказ»; ЄДИНЕ джерело проблематики - НЕ вигадуй інших болів):\n${pains.slice(0, 1400)}` +
-      `\n\nПРАВИЛО PROBLEM-MATCH: відкривай пост БОЛЕМ клієнта його словами (як у списку), НЕ регаліями і не темою «про нішу». Далі 1-2 речення агітації: чого це коштує зараз і чим загрожує далі; «лиходій» - стара система/підхід/міф, ніколи не сама людина. І лише тоді - рішення. Кожен пост самодостатній: цінний навіть тому, хто бачить бренд уперше. Прямий продажний заклик - максимум у кожному ~5-му пості (решта - цінність без продажу).`);
+      `\n\nПРАВИЛО PROBLEM-MATCH (ПРІОРИТЕТ гачка над правилом кульмінації нижче): якщо вхідний матеріал НЕ дає сильного конкретного факту/цифри/моменту для гачка - відкривай пост БОЛЕМ клієнта його словами (як у списку), НЕ регаліями і не темою «про нішу»; якщо ж матеріал такий факт дає - користуйся ним (правило кульмінації), а біль клієнта звучить у 2-му реченні як контекст, навіщо це читачу. Далі 1-2 речення агітації: чого це коштує зараз і чим загрожує далі; «лиходій» - стара система/підхід/міф, ніколи не сама людина. І лише тоді - рішення. Кожен пост самодостатній: цінний навіть тому, хто бачить бренд уперше. Прямий продажний заклик - максимум у кожному ~5-му пості (решта - цінність без продажу).`);
   return parts.join("");
 }
 
@@ -525,6 +526,33 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
   return out;
 }
 
+// ---- Памʼять між постами: короткий дайджест «що вже було» (гачки/цифри/CTA), щоб наступна генерація
+// не повторювала їх дослівно. Обсяг малий (10-15 останніх постів) - звичайний SQL-запит по вже наявних
+// publish-таблицях + один дешевий виклик-стиснення, БЕЗ векторної БД чи RAG-інфраструктури (overkill
+// для цього масштабу; якщо колись знадобиться семантичний пошук по тисячах постів - природний наступний
+// крок це pgvector як розширення вже наявного Postgres, а не окремий сервіс). Нема опублікованих - порожньо.
+async function recentContentDigest(workspaceId: string): Promise<string> {
+  const rows = await q<{ pid: string; content: string }>(
+    `select p.id as pid, p.content from (
+       select tp.post_id as pid, tp.created_at as at from telegram_publish tp where tp.status='sent'
+       union all select tp.post_id, tp.created_at from threads_publish tp where tp.status='sent'
+       union all select tp.post_id, tp.created_at from meta_publish tp where tp.status='sent'
+       union all select tp.post_id, tp.created_at from linkedin_publish tp where tp.status='sent'
+     ) u join post p on p.id=u.pid join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+     where s.workspace_id=$1 order by u.at desc limit 60`, [workspaceId]);
+  const seen = new Set<string>(); const posts: string[] = [];
+  for (const r of rows) { if (seen.has(r.pid)) continue; seen.add(r.pid); posts.push(r.content); if (posts.length >= 15) break; }
+  if (!posts.length) return "";
+  try {
+    const raw = await chat(env.cheapModel,
+      "Ось останні опубліковані пости бренду. Виведи КОРОТКИЙ список (до 8 пунктів) - які гачки (перші рядки), конкретні цифри-приклади й заклики до дії вже використані, щоб наступні пости НЕ повторювали їх дослівно чи майже дослівно. Лише буллети, без пояснень і вступів.",
+      posts.map((p, i) => `${i + 1}. ${p.slice(0, 400)}`).join("\n---\n"),
+      { workspaceId, step: "recent_digest" });
+    const text = raw.trim().slice(0, 1200);
+    return text ? `\n\nВЖЕ ВИКОРИСТАНО в останніх постах (НЕ повторюй дослівно чи майже дослівно ці гачки/цифри/заклики):\n${text}` : "";
+  } catch { return ""; } // дайджест не критичний - генерація йде і без нього
+}
+
 // ---- LITE: один зібраний промт (усі кроки кишки в одному) ----
 // Зібрати спільний системний промт Lite-генерації (для самої генерації + для перегляду користувачем).
 export async function buildLitePrompt(workspaceId: string, count: number, ideas?: string[]): Promise<{ system: string; model: string }> {
@@ -540,11 +568,17 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
     : "";
   const n = ideas && ideas.length ? ideas.length : count;
   const v2 = s.prompt_engine !== "legacy";
+  // памʼять між постами - лише v2 (legacy лишається незмінним для миттєвого відкату); нема опублікованих - без зайвого виклику
+  const recentDigest = v2 ? await recentContentDigest(workspaceId) : "";
   const outputFormat = `Поверни ЛИШЕ валідний JSON-масив обʼєктів: [{"text":"повний текст поста","image_prompt":"короткий опис зображення англійською для генерації - сцена/обʼєкти/настрій, без тексту на зображенні","rubric":"назва рубрики поста${rubs.length ? " (СТРОГО одна з переліку рубрик вище)" : ""}","intent":"намір поста: awareness (цінність новій аудиторії, БЕЗ продажу) | nurture (довіра й прогрів, мʼякий заклик) | sale (прямий продаж за сходами офферів)"}, …]. Розподіл намірів у наборі: більшість awareness, частина nurture, sale - не більш як ~1 із 5 (ціль «гроші/ліди» - можна 1 із 4; «ріст/авторитет» - рідше). Мова текстів постів: ${lang}.`;
 
   if (v2) {
-    // V2 (бібліотека промтів): XML-структура + multishot (реальні пости автора) + меню гачків +
-    // фреймворк під воронку + само-критика. Порядок секцій: роль → бриф → бренд → зразки → правила → задача → формат.
+    // V2 (бібліотека промтів): XML-структура + multishot (реальні пости автора) - гачок вчиться з ВЛАСНИХ
+    // прикладів голосу (не з фіксованого меню типів - інакше всі бренди сходяться на тих самих 6 гачках) +
+    // фреймворк під воронку + памʼять про останні пости (без повторів гачків/CTA/цифр). Само-критика прибрана -
+    // «критика в тому ж проході» була театром без реальної перевірки; реальну перевірку дають опційні
+    // ворота якості (Директор/AI-сліди/Сторителлінг, settings_block.qa_gates) після генерації.
+    // Порядок секцій: роль → бриф → бренд → зразки → правила → задача → формат.
     const brief = (s.strategy_brief || "").trim();
     const examples = (s.voice_examples || "").trim().slice(0, 3000);
     const system =
@@ -561,15 +595,17 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
       "\n- Кожен пост ОДРАЗУ фінальний: жива людська мова, без канцеляризмів, без «варто зазначити/у сучасному світі», без шаблонних списків заради списків." +
       "\n- Фреймворк під стадію воронки поста: AIDA або PAS - холодна аудиторія (awareness); BAB - короткі залучальні пости; FAB/4P - тепла аудиторія (consideration/conversion); СТОРІ - для постів-історій: гачок з кульмінації → проблема зі ставками (читач бачить у ній себе) → шлях з «брудною серединою» (реальні сумніви, помилки, невизначеність - НЕ суцільні перемоги) → урок з конкретними кроками → мʼякий CTA." +
       "\n- Конкретика замість епітетів: не «я працьовитий», а історія чи цифра, що це ДОВОДИТЬ (не «винахідливий», а «стіл зробив із дверей»). Прогрес резонує сильніше за перфектність; невдачі будують довіру сильніше за перемоги - але бери їх ЛИШЕ з матеріалу чи історії бренду, не вигадуй." +
-      "\n- Гачок (перший рядок вирішує все): подумки склади 3 варіанти різних типів (цікавісний розрив, патерн-перебій, контр-теза, попередження про помилку, число/список, пряма обіцянка) і залиш у пості НАЙСИЛЬНІШИЙ." +
+      (examples
+        ? "\n- Гачок (перший рядок вирішує все): вивчи, ЯК САМЕ автор відкриває пости у &lt;voice_examples&gt; вище (довжина першого рядка, характерні слова, чи задає питання чи стверджує) і склади 3 варіанти гачка САМЕ в його манері - не з готового списку типів, а з його власного почерку. Залиш найсильніший."
+        : "\n- Гачок (перший рядок вирішує все): подумки склади 3 варіанти різних типів (цікавісний розрив, патерн-перебій, контр-теза, попередження про помилку, число/список, пряма обіцянка) і залиш у пості НАЙСИЛЬНІШИЙ - своїх прикладів голосу ще нема, тому цей список лише орієнтир, а не шаблон під копіювання формулювань.") +
       "\n- Один чіткий мʼякий заклик на пост, не більше." +
-      rubricsText +
+      rubricsText + recentDigest.replace(/^\n+/, "\n- ") +
       NO_DASH_RULE.replace(/^\n+/, "\n- ") +
       HOOK_RULE.replace(/^\n+/, "\n- ") +
       ANTI_AI_RULE.replace(/^\n+/, "\n- ") +
       OBJECTION_RULE.replace(/^\n+/, "\n- ") +
       "\n</rules>" +
-      `\n\n<task>\nЗгенеруй рівно ${n} різних постів за вхідним матеріалом.${ideasText}\nПеред видачею САМО-КРИТИКА кожного поста за 5 критеріями: (а) гачок зупиняє скрол; (б) голос як у зразках; (в) один чіткий CTA; (г) нативний формат; (д) реальна користь для читача. Усе, що слабке, перепиши до видачі.\n</task>` +
+      `\n\n<task>\nЗгенеруй рівно ${n} різних постів за вхідним матеріалом.${ideasText}\n</task>` +
       `\n\n<output_format>\n${outputFormat}\n</output_format>`;
     return { system, model: "openai/gpt-4o" };
   }
@@ -587,12 +623,38 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
 }
 
 // Lite-генерація: ОДИН виклик LLM -> N готових постів (замість 5 кроків кишки).
+// «Ворота якості» (опційно, settings_block.qa_gates {director,aiaudit,storytelling}, дефолт вимкнено -
+// трохи довше й дорожче за прогін, зате перевірено): щойно згенеровані пости автоматично проходять
+// увімкнені перевірки, короткий підсумок лягає в post.qa (лише для бейджа в Студії - повну деталь юзер
+// бачить, натиснувши на бейдж, який відкриває той самий існуючий модал live). Нічого не переписується
+// мовчки - ворота лише ДІАГНОСТУЮТЬ, як і кнопки Директор/AI-сліди/Сторителлінг завжди робили.
+async function runQaGates(workspaceId: string, postIds: string[]): Promise<void> {
+  if (!postIds.length) return;
+  let gates: { director?: boolean; aiaudit?: boolean; storytelling?: boolean } = {};
+  try { gates = await getSetting(workspaceId, "qa_gates", {}); } catch { return; }
+  if (!gates.director && !gates.aiaudit && !gates.storytelling) return;
+  await Promise.allSettled(postIds.map(async (id) => {
+    const row = await one<{ content: string }>(`select content from post where id=$1`, [id]);
+    if (!row) return;
+    const qa: Record<string, unknown> = {};
+    await Promise.allSettled([
+      gates.director ? directorVerdict(workspaceId, row.content).then((r) => { qa.director = r.verdict; }).catch(() => {}) : Promise.resolve(),
+      gates.aiaudit ? aiAudit(workspaceId, row.content).then((f) => { qa.aiaudit = f.length; }).catch(() => {}) : Promise.resolve(),
+      gates.storytelling ? storytellingVerdict(workspaceId, row.content).then((r) => { qa.storytelling = r.score; }).catch(() => {}) : Promise.resolve(),
+    ]);
+    if (Object.keys(qa).length) await q(`update post set qa=$2 where id=$1`, [id, JSON.stringify(qa)]);
+  }));
+}
+
 export async function generatePostsOnePass(runId: string, count: number, ideas?: string[]): Promise<number> {
   const { workspace_id, transcript } = await runContext(runId);
   const sel = (ideas || []).map((t) => String(t).trim()).filter(Boolean);
   const n = Math.max(1, Math.min(12, sel.length ? sel.length : (Number(count) || 6)));
   const { system, model } = await buildLitePrompt(workspace_id, n, sel.length ? sel : undefined);
-  const out = await chat(model, system, `Вхідний матеріал:\n---\n${transcript}`, { workspaceId: workspace_id, step: "lite" });
+  // max_tokens масштабується від к-сті постів - інакше дефолтний ліміт 1500 (openrouter.ts) на 8-12
+  // постів або обрізає JSON (пости мовчки губляться), або примушує модель стискати кожен пост до куцого
+  // варіанту ЧЕРЕЗ БРАК МІСЦЯ, а не тому що це найкращий текст.
+  const out = await chat(model, system, `Вхідний матеріал:\n---\n${transcript}`, { workspaceId: workspace_id, step: "lite", maxTokens: Math.min(8000, 700 + n * 500) });
   const INTENTS = new Set(["awareness", "nurture", "sale"]);
   let posts: { text: string; image_prompt: string; rubric: string; intent: string }[] = [];
   try {
@@ -603,7 +665,14 @@ export async function generatePostsOnePass(runId: string, count: number, ideas?:
   } catch { posts = []; }
   if (!posts.length) throw new Error("Не вдалося згенерувати пости (порожня відповідь моделі)");
   await q(`delete from post where run_id=$1 and stage='final'`, [runId]);
-  for (const p of posts) await q(`insert into post(run_id, stage, content, image_prompt, rubric, intent) values($1,'final',$2,$3,$4,$5)`, [runId, p.text, p.image_prompt || null, p.rubric || null, p.intent]);
+  const ids: string[] = [];
+  for (const p of posts) {
+    const row = await one<{ id: string }>(
+      `insert into post(run_id, stage, content, image_prompt, rubric, intent) values($1,'final',$2,$3,$4,$5) returning id`,
+      [runId, p.text, p.image_prompt || null, p.rubric || null, p.intent]);
+    if (row) ids.push(row.id);
+  }
+  await runQaGates(workspace_id, ids);
   return posts.length;
 }
 
@@ -617,6 +686,8 @@ const CHANNEL_PLAYBOOK: Record<string, string> = {
     "Threads (доказова база 2025-26): ліміт 500 символів; підписники майже не важать - кожен пост змагається з нуля, алгоритм важить РАННЄ залучення і швидкість/якість відповідей (розмова > трансляція; Мосері: «відповідай більше, ніж постиш»). Пиши як розмову в курилці: одна думка = один пост, короткі речення, повітря між абзацами, перший рядок = гачок (без нього - скрол повз). Робочі формати: короткий тейк/спостереження з життя, питання до аудиторії, нумерований список/чек-лист (збирає сейви), особиста історія чи чесний провал з уроком, факт із конкретною цифрою, контр-теза до загальноприйнятого. Сейви й репости важать більше за лайки - давай те, що хочеться зберегти собі. CTA: кодове слово у відповідь АБО питання, що провокує відповіді; НІКОЛИ «постав лайк / підпишись / тегни друга» (engagement-bait алгоритм ріже). Без хештегів. Посилання не штрафуються, але сильніше працює окремою відповіддю, коли пост уже розганяється.",
   facebook:
     "Facebook: усе відео тепер Reels (охоплення поза підписниками); зберігання/поширення > лайки; фото добре заходять у стрічці (підписи 40-80 символів). Групи дають значно більше органіки, ніж сторінки - спільнота в групі, анонси на сторінці. Оригінальність винагороджується.",
+  linkedin:
+    "LinkedIn: алгоритм важить ЧАС НА ПОСТІ (dwell time) і РАННІ коментарі в перші 60-90 хв сильніше за лайки - перший рядок має зупинити скрол І бути видимим ДО «…more» (це ~140 симв., рахуй буквально). Формати, що працюють: особистий інсайт чи урок з конкретного кейсу (не загальна порада «з повітря»), контр-теза до прийнятої в ніші думки, короткий кейс-стори з цифрою результату, професійний провал + що з нього зрозуміло. Пиши від першої особи, розмовно, БЕЗ корпоративного жаргону («синергія», «екосистема рішень») - LinkedIn 2025-26 винагороджує людяність, а не прес-реліз. Наприкінці - питання, що провокує коментар (коментарі важать більше за реакції), не «підписуйтесь». Хештеги 3-5, у кінці, не в тексті. Формат: короткі абзаци з переносами рядків (не суцільна стіна тексту) - легше сканується на мобільному.",
 };
 
 export async function generateChannelPlan(workspaceId: string, channel: string, horizonDays: number, postsPerWeek: number): Promise<any[]> {
@@ -906,12 +977,14 @@ export async function buildLiteSkeleton(workspaceId: string, horizonDays: number
     try {
       const lang = (s.output_language || "Українська").trim();
       const themes = Array.isArray(data.monthly_themes) ? data.monthly_themes.filter(Boolean).map(String) : [];
+      const recentDigest = await recentContentDigest(workspaceId);
       const system = "Ти контент-стратег. Для кожного слота (рубрика задана) придумай коротку конкретну тему поста (до 12 слів) у ніші бренду." +
         (s.strategy_brief ? `\nБриф: ${s.strategy_brief.slice(0, 1500)}` : (s.marketing_context ? `\nНіша: ${s.marketing_context}` : "")) +
         goalRule(s) +
         (netHint ? `\nПлатформа: ${netHint}` : "") +
         (topic ? `\n\nВАЖЛИВО - автор ОБОВʼЯЗКОВО хоче висвітлити саме ці теми/напрями (це пріоритет над загальними ідеями): «${topic.slice(0, 800)}». Признач їх до відповідних слотів дослівно чи як конкретні під-теми; лише РЕШТУ слотів доповни власними ідеями за рубриками.` : "") +
         (themes.length ? `\nОрієнтир тем: ${themes.slice(0, 10).join("; ")}` : "") +
+        recentDigest.replace("ВЖЕ ВИКОРИСТАНО в останніх постах", "ВЖЕ ВИСВІТЛЕНО в останніх постах - НЕ признач ту саму тему знову") +
         (interests ? `\nСлоти з позначкою [ОСОБИСТЕ] - НЕ про нішу, а «людські» теми з інтересів автора (${interests.slice(0, 300)}): особистий погляд, історія чи спостереження, що робить автора живою людиною.` : "") +
         "\nСлоти з позначкою [ЕКСПЕРИМЕНТ] - тема чи формат, яких бренд ще НЕ робив: незвичний кут, інший жанр подачі, сміливіша теза." +
         `\n\nПоверни ЛИШЕ валідний JSON-масив рівно з ${slots.length} рядків-тем, у тому ж порядку, що рубрики нижче. Мова: ${lang}.`;

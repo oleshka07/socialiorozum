@@ -543,3 +543,8 @@ create table if not exists guide_log (
   created_at   timestamptz not null default now()
 );
 create index if not exists idx_guidelog_ws on guide_log(workspace_id, created_at desc);
+
+-- «Ворота якості» (settings_block.qa_gates {director,aiaudit,storytelling}): опційний авто-прогін
+-- Директора/AI-слідів/Сторителлінга одразу після генерації. Компактний підсумок, лише для бейджа
+-- в Студії - повну деталь юзер бачить, клікнувши на бейдж (той самий live-виклик, що й раніше).
+alter table post add column if not exists qa jsonb;
