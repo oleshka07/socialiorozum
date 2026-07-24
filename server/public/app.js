@@ -794,6 +794,10 @@ async function loadSettings(){
     if($('vAddr')) $('vAddr').value=map.voice_address||'';
     if($('reelRend')) $('reelRend').value=map.reel_renderer||'classic';
     if($('vEmoji')) $('vEmoji').value=map.voice_emoji||'';
+    { let qg={}; try{ qg=JSON.parse(map.qa_gates||'{}'); }catch(e){ qg={}; }
+      if($('qgDirector')) $('qgDirector').checked=!!qg.director;
+      if($('qgAiaudit')) $('qgAiaudit').checked=!!qg.aiaudit;
+      if($('qgStorytelling')) $('qgStorytelling').checked=!!qg.storytelling; }
     // чесний бейдж: голос НЕ відкалібрований, поки нема ані ToV, ані прикладів постів
     if($('voiceCalBadge')) $('voiceCalBadge').style.display=((map.tone_of_voice||'').trim()||(map.voice_examples||'').trim())?'none':'inline';
     window._v2 = (map.prompt_engine!=='legacy'); // v2 - дефолтний рушій
@@ -810,6 +814,8 @@ $('langSel').onchange=()=>saveSetting('output_language',$('langSel').value);
 if($('vAddr')) $('vAddr').onchange=()=>saveSetting('voice_address',$('vAddr').value);
 if($('reelRend')) $('reelRend').onchange=()=>saveSetting('reel_renderer',$('reelRend').value);
 if($('vEmoji')) $('vEmoji').onchange=()=>saveSetting('voice_emoji',$('vEmoji').value);
+function saveQaGates(){ saveSetting('qa_gates',JSON.stringify({director:!!($('qgDirector')&&$('qgDirector').checked),aiaudit:!!($('qgAiaudit')&&$('qgAiaudit').checked),storytelling:!!($('qgStorytelling')&&$('qgStorytelling').checked)})); }
+['qgDirector','qgAiaudit','qgStorytelling'].forEach(id=>{ const el=$(id); if(el) el.onchange=saveQaGates; });
 function ensureLangOption(lang){ const sel=$('langSel'); if(!sel||!lang) return; if(![].some.call(sel.options,o=>o.value===lang||o.text===lang)){ const o=document.createElement('option'); o.textContent=lang; sel.appendChild(o); } }
 buildTzSel(); if($('tzSel')) $('tzSel').onchange=()=>{ TZ=$('tzSel').value; saveSetting('timezone',TZ); buildTzSel(); try{ if(curView==='publish') loadPublish(); }catch(e){} };
 function renderDerived(text){
@@ -1170,11 +1176,18 @@ function renderStudio(){
     const dots=isPub?sentDots(p.sent):chanDots(p.channels);
     const im=INTENT_META[p.intent];
     const tags=(p.format==='reel'?'<span class="ptag" style="color:var(--brand);border-color:var(--brand)">🎬 рілс</span>':'')+(im?'<span class="ptag" title="Намір поста: '+im[2]+'">'+im[0]+' '+im[1]+'</span>':'')+(p.rubric?'<span class="ptag">🏷 '+esc(p.rubric)+'</span>':'')+(p.source_origin&&p.source_origin!=='manual'?'<span class="ptag">'+(ORIGIN_LABEL[p.source_origin]||esc(p.source_origin))+'</span>':'');
+    // 🛡 бейджі автоперевірок (settings_block.qa_gates) - показуються ЛИШЕ якщо перевірка знайшла слабке місце
+    const qa=p.qa||{}; const qaBad=[];
+    if(qa.director&&qa.director!=='yes') qaBad.push(['qad','🎯 '+(qa.director==='no'?'Директор: не веде до цілі':'Директор: частково веде до цілі')]);
+    if(qa.aiaudit>0) qaBad.push(['qaa','🔍 AI-сліди: '+qa.aiaudit]);
+    if(qa.storytelling!=null&&qa.storytelling<7) qaBad.push(['qas','📖 Сторителлінг: '+qa.storytelling+'/10']);
+    const qaHtml=qaBad.length?'<div style="display:flex;gap:5px;flex-wrap:wrap;padding:0 14px 4px">'+qaBad.map(b=>'<span class="ptag qabadge" data-qa="'+b[0]+'" style="cursor:pointer;color:var(--amber);border-color:var(--amber)">'+b[1]+'</span>').join('')+'</div>':'';
     return '<div class="pcard'+(ap?' appr':'')+(sel?' selc':'')+'" data-post="'+p.id+'">'
       +'<div class="pcard-h"><input type="checkbox" class="psel" '+(sel?'checked':'')+' title="Обрати для масових дій">'+dots+'<span class="statuspill '+sp[1]+'" style="margin-left:auto">'+sp[0]+'</span></div>'
       +(p.media_filename?'<div class="pcard-img" data-a="image" style="cursor:pointer" title="Редагувати зображення"><img loading="lazy" src="/thumb/'+esc(p.media_filename)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(p.media_filename)+'\'"></div>':'')
       +'<div class="pcard-text pcontent" contenteditable="true">'+esc(p.content)+'</div>'
       +(tags?'<div style="display:flex;gap:5px;flex-wrap:wrap;padding:0 14px 4px">'+tags+'</div>':'')
+      +qaHtml
       +'<div class="pcard-f"><span class="chars">'+(p.content||'').replace(/\n/g,'').length+' симв.</span><span style="flex:1"></span>'
         +(PRO&&p.reel_video?'<button class="icon" data-a="reelplay" data-rv="'+esc(p.reel_video)+'" title="▶ Дивитися зібраний рілс">▶️</button>':'')
         +(!isPub?'<button class="icon" data-a="del" title="Видалити пост" style="color:var(--danger)">🗑</button>':'')
@@ -1190,6 +1203,7 @@ function renderStudio(){
       if(a==='menu'){ const p=Finals.find(x=>x.id===id); if(p) openCardMenu(p,b,card); return; }
       if(a==='del'){ deletePost(id); return; }
       postAction(card,id,a); });
+    card.querySelectorAll('.qabadge').forEach(b=>b.onclick=()=>{ const qa=b.dataset.qa; if(qa==='qad') directorCheck(id); else if(qa==='qas') storytellingCheck(id); else openComposer(id); });
   });
 }
 // панель масових дій (зʼявляється коли є обрані пости)
