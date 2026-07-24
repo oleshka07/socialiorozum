@@ -1088,6 +1088,31 @@ async function directorCheck(id){ aiBusy('🎯 Директор перевіря
         await loadStudioPosts(); flash('Пост загострено під ціль ✓'); } }
     else alert(msg);
   }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } }
+// 📖 Сторителлінг-редактор: оцінка поста як історії (12 прийомів) + до 5 правок «Було→Пропоную→Чому»
+async function storytellingCheck(id){ aiBusy('📖 Оцінюю пост як історію…');
+  let r; try{ r=await api('/posts/'+id+'/storytelling',{method:'POST'}); }catch(e){ flash('⚠ '+e.message); aiDone(); return; } finally{ aiDone(); }
+  const fixes=r.fixes||[], checklist=r.checklist||[];
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
+  ov.innerHTML='<div class="modal-card" style="max-width:600px;max-height:80vh;overflow:auto;padding:20px">'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:16px">📖 Сторителлінг</b>'
+    +'<span class="ptag" style="margin-left:auto;font-weight:700">'+esc(String(r.score||'?'))+'/10</span><button class="icon" id="stX">✕</button></div>'
+    +'<div style="font-size:13px;color:var(--ink2);line-height:1.5;margin-bottom:14px">'+esc(r.verdict||'')+'</div>'
+    +(fixes.length?fixes.map(f=>'<div class="card" style="margin-bottom:8px"><b style="font-size:12.5px;color:var(--brand)">🔹 '+esc(f.technique||'')+'</b>'
+      +'<div style="font-size:12.5px;color:var(--muted);margin-top:5px"><b>Було:</b> «'+esc(f.was||'')+'»</div>'
+      +'<div style="font-size:12.5px;margin-top:4px"><b>Пропоную:</b> «'+esc(f.suggest||'')+'»</div>'
+      +'<div style="font-size:11.5px;color:var(--faint);margin-top:4px">'+esc(f.why||'')+'</div></div>').join('')
+      :'<div class="empty" style="padding:10px 0">Правок нема - текст уже сильний як історія.</div>')
+    +(checklist.length?'<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 14px;margin:12px 0;font-size:12px;color:var(--muted)">'
+      +checklist.map(c=>'<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-bottom:1px solid var(--line)"><span>'+esc(c.name||'')+'</span><span>'+esc(c.status||'—')+'</span></div>').join('')
+      +'</div>':'')
+    +(fixes.length?'<button class="primary" id="stApply" style="width:100%;margin-top:8px">✍ Застосувати правки (перепише пост)</button>':'')
+    +'</div>';
+  document.body.appendChild(ov); const close=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#stX').onclick=close;
+  const apBtn=ov.querySelector('#stApply'); if(apBtn) apBtn.onclick=async()=>{ apBtn.disabled=true; close(); aiBusy('✍ Переписую пост із правками сторителлінгу…');
+    const instruction='Застосуй ці правки сторителлінгу:\n'+fixes.map((f,i)=>(i+1)+'. '+f.technique+': '+f.suggest).join('\n');
+    try{ await api('/posts/'+id+'/regenerate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instruction})}); await loadStudioPosts(); flash('Історію підсилено ✓'); }
+    catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } }; }
 async function loadChanStatus(){ try{ ChanStatus=await api('/channels/status'); }catch(e){ ChanStatus={}; } }
 function chanDots(ch){ if(!ch) return ''; return NETS.filter(n=>ch[n[0]]&&ch[n[0]].on).map(n=>'<span class="cdot" title="'+n[1]+'" style="background:var('+NETVAR[n[0]]+')"><svg width="11" height="11" viewBox="0 0 24 24" fill="#fff"><path d="'+NETICON[n[0]]+'"></path></svg></span>').join(''); }
 function chanIcons(ch){ if(!ch) return ''; const I={telegram:'✈️',instagram:'📸',facebook:'📘',threads:'🧵',linkedin:'💼'}; return Object.keys(I).filter(k=>ch[k]&&ch[k].on).map(k=>I[k]).join(''); }
@@ -1261,7 +1286,7 @@ function openCardMenu(p, btn, card){
   ];
   // розширені - у складеному блоці
   const G=[];
-  G.push(['Покращити',[['🎯','Перевірка Директора','чи веде пост до твоєї цілі',()=>directorCheck(id)]]]);
+  G.push(['Покращити',[['🎯','Перевірка Директора','чи веде пост до твоєї цілі',()=>directorCheck(id)],['📖','Сторителлінг','12 прийомів - чи чіпляє і тримає до кінця',()=>storytellingCheck(id)]]]);
   const dev=[['🧲','Лід-магніт під тему','що віддати аудиторії за контакт',()=>postMagnet(id)]];
   if((p.sent||[]).includes('threads')){
     dev.push(['🔁','Повторити хіт (через 48 год)','дубль зі свіжим гачком - покажеться іншій аудиторії',()=>repeatHit(id)]);
