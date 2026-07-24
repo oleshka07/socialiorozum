@@ -131,7 +131,7 @@ create table if not exists schedule_slot (
   plan_item_id  uuid not null references plan_item(id) on delete cascade,
   channel_type  text not null default 'telegram',
   scheduled_at  timestamptz,
-  status        text not null default 'planned' -- planned|posted|failed
+  status        text not null default 'planned' -- planned|posting|posted|failed
 );
 
 -- інтеграція Telegram (per-workspace; bot token лише на сервері, не в git)
@@ -548,3 +548,31 @@ create index if not exists idx_guidelog_ws on guide_log(workspace_id, created_at
 -- Директора/AI-слідів/Сторителлінга одразу після генерації. Компактний підсумок, лише для бейджа
 -- в Студії - повну деталь юзер бачить, клікнувши на бейдж (той самий live-виклик, що й раніше).
 alter table post add column if not exists qa jsonb;
+
+-- 🔒 Технічний аудит, Рівень 1 (надійність публікації).
+-- ① unique-індекси на *_publish: захист від подвійної публікації НА РІВНІ БД (раніше дедуп був лише
+-- SELECT-потім-INSERT у коді - гонка при подвійному кліку чи збігу ручної публікації з автопостом
+-- могла все одно проскочити). publisher.ts тепер РЕЗЕРВУЄ рядок (INSERT...ON CONFLICT DO NOTHING)
+-- ПЕРЕД зовнішнім викликом мережі, а не пише його вже ПІСЛЯ успіху. Дедуп-DELETE перед створенням
+-- індексу самолікує старі дублі, якщо такі лишились із задокументованих багів double-post (безпечно
+-- повторювати на кожному деплої - після першого разу дублів уже нема, запит просто нічого не знайде).
+delete from telegram_publish where id in (
+  select id from (select id, row_number() over (partition by post_id, target order by created_at, id) rn from telegram_publish) t where rn > 1
+);
+create unique index if not exists uq_tgpub_post_target on telegram_publish(post_id, target);
+delete from threads_publish where id in (
+  select id from (select id, row_number() over (partition by post_id order by created_at, id) rn from threads_publish) t where rn > 1
+);
+create unique index if not exists uq_thpub_post on threads_publish(post_id);
+delete from meta_publish where id in (
+  select id from (select id, row_number() over (partition by post_id, channel order by created_at, id) rn from meta_publish) t where rn > 1
+);
+create unique index if not exists uq_metapub_post_channel on meta_publish(post_id, channel);
+delete from linkedin_publish where id in (
+  select id from (select id, row_number() over (partition by post_id order by created_at, id) rn from linkedin_publish) t where rn > 1
+);
+create unique index if not exists uq_lipub_post on linkedin_publish(post_id);
+-- ② `updated_at` на schedule_slot - без нього неможливо відрізнити слот, що ЗАВИС у 'posting'
+-- (процес упав посеред публікації - деплой, OOM) від того, що просто зараз публікується; такий
+-- слот раніше випадав із автопосту І з /api/schedule/auto НАЗАВЖДИ без жодної помилки в UI.
+alter table schedule_slot add column if not exists updated_at timestamptz not null default now();

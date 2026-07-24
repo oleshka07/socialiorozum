@@ -1,7 +1,7 @@
 # Graph Report - socialiorozum  (2026-07-24)
 
 ## Corpus Check
-- 63 files · ~152,950 words
+- 63 files · ~153,876 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `7e4e1744`
+- Built from commit: `70bba6d1`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -122,6 +122,7 @@
 - [[_COMMUNITY_Community 105|Community 105]]
 - [[_COMMUNITY_Community 106|Community 106]]
 - [[_COMMUNITY_Community 107|Community 107]]
+- [[_COMMUNITY_Community 108|Community 108]]
 - [[_COMMUNITY_Community 109|Community 109]]
 - [[_COMMUNITY_Community 110|Community 110]]
 - [[_COMMUNITY_Community 114|Community 114]]
@@ -196,11 +197,11 @@ Nodes (35): dependencies, fastify, @fastify/cookie, @fastify/cors, @fastify/mult
 
 ### Community 8 - "Community 8"
 Cohesion: 0.03
-Nodes (72): addDaysISO(), calMonday(), chanDots(), ChanStatus, CP_ICON, CP_LABEL, CP_LBL, CTA_TYPES (+64 more)
+Nodes (65): chanDots(), ChanStatus, CP_ICON, CP_LABEL, CP_LBL, CTA_TYPES, CtaCfg, DAY_LBL (+57 more)
 
 ### Community 9 - "Community 9"
 Cohesion: 0.03
-Nodes (61): chanDots(), ChanStatus, CP_LABEL, CP_LBL, CTA_TYPES, CtaCfg, DAY_LBL, Finals (+53 more)
+Nodes (66): chanDots(), ChanStatus, CP_LABEL, CP_LBL, CTA_TYPES, CtaCfg, DAY_LBL, Finals (+58 more)
 
 ### Community 10 - "TypeScript Config"
 Cohesion: 0.15
@@ -235,8 +236,8 @@ Cohesion: 0.50
 Nodes (4): Meta App Review Submission, App Icon 1024px, Meta App Review Assets Folder, socialio / КонтентГров Brand
 
 ### Community 18 - "Community 18"
-Cohesion: 0.28
-Nodes (13): badge(), ensureRun(), genIdeas(), genPosts(), go(), ideaOpts(), refresh(), renderIdeaList() (+5 more)
+Cohesion: 0.23
+Nodes (16): badge(), ensureRun(), finishOnboarding(), genIdeas(), genPosts(), go(), ideaOpts(), refresh() (+8 more)
 
 ### Community 26 - "Community 26"
 Cohesion: 0.08
@@ -295,24 +296,24 @@ Cohesion: 0.13
 Nodes (39): appendDiaryText(), attachDiaryMedia(), buildQuestion(), diaryButtons(), DiaryState, EVENING_Q, getState(), isDiaryPending() (+31 more)
 
 ### Community 40 - "Community 40"
-Cohesion: 0.07
-Nodes (38): startAutopost(), tick(), one(), DEFAULT_PROMPTS, STEP_ORDER, StepKey, alreadySentNetworks(), freshToken() (+30 more)
+Cohesion: 0.06
+Nodes (40): startAutopost(), tick(), one(), startDiary(), startLifecycleWorker(), DEFAULT_PROMPTS, STEP_ORDER, StepKey (+32 more)
 
 ### Community 41 - "Community 41"
-Cohesion: 0.08
-Nodes (43): $(), applyPlanFilter(), applyState(), bindIbAdd(), flyPoints(), loadAnalytics(), loadBroll(), loadChannelPlan() (+35 more)
+Cohesion: 0.11
+Nodes (31): $(), applyState(), buildTzSel(), ensureLangOption(), flyPoints(), loadAccount(), loadAnalytics(), loadBroll() (+23 more)
 
 ### Community 42 - "Community 42"
 Cohesion: 0.27
 Nodes (5): Captions(), Reel(), ReelProps, Seg, wordWindows()
 
 ### Community 43 - "Community 43"
-Cohesion: 0.30
-Nodes (13): logEvent(), cleanBrokenItems(), Feed, fetchInstagramItems(), ingest(), notifyTopMaterials(), pullFeed(), runPipelines() (+5 more)
+Cohesion: 0.33
+Nodes (12): logEvent(), cleanBrokenItems(), Feed, fetchInstagramItems(), ingest(), pullFeed(), runPipelines(), scoreBackfill() (+4 more)
 
 ### Community 96 - "Community 96"
-Cohesion: 0.08
-Nodes (44): $(), applyPlanFilter(), applyState(), buildTzSel(), ensureLangOption(), loadBroll(), loadChannelPlan(), loadGoalCta() (+36 more)
+Cohesion: 0.10
+Nodes (33): $(), applyState(), buildTzSel(), ensureLangOption(), loadBroll(), loadChannelPlan(), loadGoalCta(), loadSettings() (+25 more)
 
 ### Community 97 - "Community 97"
 Cohesion: 0.42
@@ -327,36 +328,40 @@ Cohesion: 0.38
 Nodes (3): exchangeCode(), refreshAccessToken(), ytFetch()
 
 ### Community 100 - "Community 100"
-Cohesion: 0.14
-Nodes (25): api(), esc(), flashSaved(), loadAccount(), loadChanStatus(), loadGdrive(), loadGdriveFolders(), loadLinkedin() (+17 more)
+Cohesion: 0.11
+Nodes (30): api(), esc(), flashSaved(), loadChanStatus(), loadFF(), loadGdrive(), loadGdriveFolders(), loadImageProvider() (+22 more)
 
 ### Community 101 - "Community 101"
-Cohesion: 0.10
-Nodes (35): api(), deletePost(), esc(), flyPoints(), loadAccount(), loadAnalytics(), loadChanStatus(), loadFF() (+27 more)
+Cohesion: 0.09
+Nodes (38): api(), esc(), flashSaved(), flyPoints(), loadAccount(), loadAnalytics(), loadChanStatus(), loadFF() (+30 more)
 
 ### Community 102 - "Community 102"
-Cohesion: 0.22
-Nodes (9): flashSaved(), resetPrompt(), saveContent(), savePrompt(), saveQaGates(), saveSelection(), saveSetting(), saveThStrat() (+1 more)
+Cohesion: 0.27
+Nodes (14): badge(), ensureRun(), finishOnboarding(), genIdeas(), genPosts(), go(), ideaOpts(), refresh() (+6 more)
 
 ### Community 104 - "Community 104"
-Cohesion: 0.15
-Nodes (32): aiBusy(), aiDone(), badge(), bulkDelete(), directorCheck(), ensureRun(), expandToThread(), finishOnboarding() (+24 more)
+Cohesion: 0.25
+Nodes (20): aiBusy(), aiDone(), bulkDelete(), bulkReview(), deletePost(), developPost(), directorCheck(), expandToThread() (+12 more)
 
 ### Community 105 - "Community 105"
 Cohesion: 0.27
 Nodes (9): runQaGates(), thValidToken(), getSetting(), getSettingText(), setSetting(), localParts(), processDailyTakes(), processReplyJobs() (+1 more)
 
 ### Community 106 - "Community 106"
-Cohesion: 0.33
-Nodes (7): bindIbAdd(), developPost(), loadIdeasTab(), loadMaterials(), refreshIdeaViews(), renderIdeaBank(), setCTab()
+Cohesion: 0.11
+Nodes (21): applyPlanFilter(), bindIbAdd(), loadIdeasTab(), loadMaterials(), loadPlan(), planSyncMode(), refreshIdeaViews(), renderIdeaBank() (+13 more)
 
 ### Community 107 - "Community 107"
-Cohesion: 0.16
-Nodes (23): bulkReview(), loadGuide(), openAddMaterial(), owlAct(), owlBlink(), owlEl(), owlEmote(), owlEnableDrag() (+15 more)
+Cohesion: 0.17
+Nodes (22): loadGuide(), openAddMaterial(), owlAct(), owlBlink(), owlEl(), owlEmote(), owlEnableDrag(), owlFlyTo() (+14 more)
+
+### Community 108 - "Community 108"
+Cohesion: 0.25
+Nodes (9): addDaysISO(), calMonday(), isoOf(), loadPublish(), locDate(), locHM(), renderBank(), renderCal() (+1 more)
 
 ### Community 109 - "Community 109"
-Cohesion: 0.17
-Nodes (21): q(), env, Folder, pullFolder(), pullGdriveFolder(), startGdrivePoller(), tick(), validToken() (+13 more)
+Cohesion: 0.18
+Nodes (20): q(), env, Folder, pullFolder(), pullGdriveFolder(), startGdrivePoller(), tick(), validToken() (+12 more)
 
 ### Community 110 - "Community 110"
 Cohesion: 0.22
@@ -367,16 +372,16 @@ Cohesion: 0.40
 Nodes (4): checks, errors, srv, STUB
 
 ### Community 120 - "Community 120"
-Cohesion: 0.25
-Nodes (19): aiBusy(), aiDone(), bulkDelete(), bulkReview(), deletePost(), developPost(), directorCheck(), expandToThread() (+11 more)
+Cohesion: 0.27
+Nodes (18): aiBusy(), aiDone(), bulkDelete(), bulkReview(), deletePost(), developPost(), directorCheck(), expandToThread() (+10 more)
 
 ### Community 121 - "Community 121"
 Cohesion: 0.61
 Nodes (8): button(), send(), sendDeletionScheduledEmail(), sendEmailChangedNotice(), sendInactivityWarningEmail(), sendResetEmail(), sendVerifyEmail(), wrap()
 
 ### Community 122 - "Community 122"
-Cohesion: 0.12
-Nodes (17): buildTzSel(), ensureLangOption(), finishOnboarding(), loadRubrics(), loadSettings(), loadStrategy(), renderBrief(), renderDerived() (+9 more)
+Cohesion: 0.13
+Nodes (17): applyPlanFilter(), bindIbAdd(), loadMaterials(), loadPlan(), planSyncMode(), renderBulkBar(), renderIdeaBank(), renderMaterials() (+9 more)
 
 ## Knowledge Gaps
 - **406 isolated node(s):** `Rubrics`, `ChanStatus`, `ThStrat`, `Pub`, `NETS` (+401 more)
