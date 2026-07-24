@@ -98,7 +98,7 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
   const [tgc, thTok, mt, li] = await Promise.all([
     one<{ bot_token: string | null; channel_chat_id: string | null; group_chat_id: string | null }>(`select bot_token, channel_chat_id, group_chat_id from telegram_config where workspace_id=$1`, [ws]),
     thValidToken(ws),
-    one<{ page_id: string | null; page_token: string | null; ig_user_id: string | null }>(`select page_id, page_token, ig_user_id from meta_config where workspace_id=$1`, [ws]),
+    one<{ page_id: string | null; page_token: string | null; ig_user_id: string | null; token_expires_at: string | null }>(`select page_id, page_token, ig_user_id, token_expires_at from meta_config where workspace_id=$1`, [ws]),
     one<{ member_urn: string; access_token: string; token_expires_at: string | null }>(`select member_urn, access_token, token_expires_at from linkedin_config where workspace_id=$1`, [ws]),
   ]);
   for (const k of enabled) {
@@ -113,15 +113,26 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
           if (!chat) continue;
           if (sentChats.has(chat)) continue; // той самий chat_id в обох полях → пропускаємо повтор
           sentChats.add(chat);
-          let r: { message_id: number };
-          if (imageUrl) {
-            r = await tg.sendPhoto(tgc.bot_token, chat, imageUrl, cap.length <= 1024 ? cap : "");
-            if (cap.length > 1024) await tg.sendMessage(tgc.bot_token, chat, cap); // підпис > ліміту Telegram → текст окремо
-          } else {
-            r = await tg.sendMessage(tgc.bot_token, chat, cap);
+          // атомарна резервація ПЕРЕД викликом Telegram - захист від гонки (подвійний клік, збіг
+          // ручної публікації з автопостом). Хтось інший уже зарезервував/надіслав цю ціль → пропускаємо.
+          const reserved = await one<{ id: string }>(
+            `insert into telegram_publish(post_id,target,chat_id,status) values($1,$2,$3,'sending')
+             on conflict (post_id,target) do nothing returning id`, [postId, t, chat]);
+          if (!reserved) continue;
+          try {
+            let r: { message_id: number };
+            if (imageUrl) {
+              r = await tg.sendPhoto(tgc.bot_token, chat, imageUrl, cap.length <= 1024 ? cap : "");
+              if (cap.length > 1024) await tg.sendMessage(tgc.bot_token, chat, cap); // підпис > ліміту Telegram → текст окремо
+            } else {
+              r = await tg.sendMessage(tgc.bot_token, chat, cap);
+            }
+            await q(`update telegram_publish set message_id=$2, status='sent' where id=$1`, [reserved.id, r.message_id]);
+            any = true;
+          } catch (e: any) {
+            await q(`delete from telegram_publish where id=$1`, [reserved.id]); // звільняємо резервацію - можна повторити пізніше
+            throw e;
           }
-          await q(`insert into telegram_publish(post_id,target,chat_id,message_id,status) values($1,$2,$3,$4,'sent')`, [postId, t, chat, r.message_id]);
-          any = true;
         }
         if (!any) throw new Error("Не вказано канал/групу");
       } else if (k === "threads") {
@@ -131,31 +142,40 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
         const perPost = ch[k] || {};
         // гілка: явний прапорець на пості АБО авто-режим для майстер-текстів понад ліміт (500)
         const wantThread = perPost.thread === true || (strat.thread === "auto" && perPost.thread !== false && post.content.length > 500);
+        // резервація ОДИН раз для всього поста (root) - гілка/ветки нижче лише розвивають цей root
+        const reserved = await one<{ id: string }>(
+          `insert into threads_publish(post_id,status) values($1,'sending') on conflict (post_id) do nothing returning id`, [postId]);
+        if (!reserved) { results.push({ channel: k, status: "skipped" }); continue; }
         let rootId: string;
-        if (wantThread) {
-          // гілка пакує ПОВНИЙ майстер-текст (а не скорочену 500-символьну версію) - у цьому її сенс
-          const parts = await threadsSplit(ws, post.content, perPost.number !== false);
-          const first = await threads.publish(thTok.token, thTok.userId, parts[0], imageUrl || undefined);
-          rootId = first.mediaId;
-          // root УЖЕ в мережі → фіксуємо sent ОДРАЗУ: якщо якась ветка впаде, повторна публікація
-          // не задублює root (дедуп «раз на мережу» побачить sent)
-          await q(`insert into threads_publish(post_id,media_id,status) values($1,$2,'sent')`, [postId, rootId]);
-          let prev = rootId;
-          for (const part of parts.slice(1)) {
-            await new Promise((res) => setTimeout(res, 3000)); // пауза: root/попередня ветка мають «доїхати»
-            try {
-              const rr = await threads.publish(thTok.token, thTok.userId, part, undefined, prev);
-              prev = rr.mediaId;
-            } catch (e: any) {
-              // ветка не доїхала - не валимо публікацію (root уже живий), лишаємо слід у логах
-              await logEvent("error", "threads-thread", `ветка гілки не опублікувалась: ${e.message}`, { ws, postId });
-              break;
+        try {
+          if (wantThread) {
+            // гілка пакує ПОВНИЙ майстер-текст (а не скорочену 500-символьну версію) - у цьому її сенс
+            const parts = await threadsSplit(ws, post.content, perPost.number !== false);
+            const first = await threads.publish(thTok.token, thTok.userId, parts[0], imageUrl || undefined);
+            rootId = first.mediaId;
+            // root УЖЕ в мережі → фіксуємо sent ОДРАЗУ: якщо якась ветка впаде, повторна публікація
+            // не задублює root (дедуп «раз на мережу» побачить sent)
+            await q(`update threads_publish set media_id=$2, status='sent' where id=$1`, [reserved.id, rootId]);
+            let prev = rootId;
+            for (const part of parts.slice(1)) {
+              await new Promise((res) => setTimeout(res, 3000)); // пауза: root/попередня ветка мають «доїхати»
+              try {
+                const rr = await threads.publish(thTok.token, thTok.userId, part, undefined, prev);
+                prev = rr.mediaId;
+              } catch (e: any) {
+                // ветка не доїхала - не валимо публікацію (root уже живий), лишаємо слід у логах
+                await logEvent("error", "threads-thread", `ветка гілки не опублікувалась: ${e.message}`, { ws, postId });
+                break;
+              }
             }
+          } else {
+            const r = await threads.publish(thTok.token, thTok.userId, textOf(k), imageUrl || undefined);
+            rootId = r.mediaId;
+            await q(`update threads_publish set media_id=$2, status='sent' where id=$1`, [reserved.id, rootId]);
           }
-        } else {
-          const r = await threads.publish(thTok.token, thTok.userId, textOf(k), imageUrl || undefined);
-          rootId = r.mediaId;
-          await q(`insert into threads_publish(post_id,media_id,status) values($1,$2,'sent')`, [postId, rootId]);
+        } catch (e: any) {
+          await q(`delete from threads_publish where id=$1`, [reserved.id]);
+          throw e;
         }
         // CTA-гілка з затримкою: лінк/кодове слово доклеюємо, коли пост уже розганяється
         const delayMin = Number(strat.cta_min || 0);
@@ -168,24 +188,43 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
         }
       } else if (k === "facebook") {
         if (!mt?.page_id || !mt.page_token) throw new Error("Facebook не підключено");
-        const r = imageUrl ? await meta.publishPhotoToPage(mt.page_id, mt.page_token, textOf(k), imageUrl) : await meta.publishToPage(mt.page_id, mt.page_token, textOf(k));
-        await q(`insert into meta_publish(post_id,channel,external_id,status) values($1,'facebook',$2,'sent')`, [postId, (r as any).post_id || r.id]);
+        if (mt.token_expires_at && new Date(mt.token_expires_at).getTime() < Date.now())
+          throw new Error("Токен Meta (Facebook/Instagram) протух - перепідключи у Налаштування → Канали");
+        const reserved = await one<{ id: string }>(
+          `insert into meta_publish(post_id,channel,status) values($1,'facebook','sending') on conflict (post_id,channel) do nothing returning id`, [postId]);
+        if (!reserved) { results.push({ channel: k, status: "skipped" }); continue; }
+        try {
+          const r = imageUrl ? await meta.publishPhotoToPage(mt.page_id, mt.page_token, textOf(k), imageUrl) : await meta.publishToPage(mt.page_id, mt.page_token, textOf(k));
+          await q(`update meta_publish set external_id=$2, status='sent' where id=$1`, [reserved.id, (r as any).post_id || r.id]);
+        } catch (e: any) { await q(`delete from meta_publish where id=$1`, [reserved.id]); throw e; }
       } else if (k === "instagram") {
         if (!mt?.ig_user_id || !mt.page_token) throw new Error("Instagram не підключено");
         if (!post.filename) throw new Error("Instagram потребує фото");
-        // IG приймає лише JPEG з пропорціями 0.8-1.91 → за потреби готуємо сумісну копію (PNG з AI-генерації падав)
-        const safe = await ensureIgSafeImage(ws, post.filename);
-        const r = await meta.publishToInstagram(mt.ig_user_id, mt.page_token, `${env.appBaseUrl}/media/${safe}`, textOf(k));
-        await q(`insert into meta_publish(post_id,channel,external_id,status) values($1,'instagram',$2,'sent')`, [postId, r.mediaId]);
+        if (mt.token_expires_at && new Date(mt.token_expires_at).getTime() < Date.now())
+          throw new Error("Токен Meta (Facebook/Instagram) протух - перепідключи у Налаштування → Канали");
+        const reserved = await one<{ id: string }>(
+          `insert into meta_publish(post_id,channel,status) values($1,'instagram','sending') on conflict (post_id,channel) do nothing returning id`, [postId]);
+        if (!reserved) { results.push({ channel: k, status: "skipped" }); continue; }
+        try {
+          // IG приймає лише JPEG з пропорціями 0.8-1.91 → за потреби готуємо сумісну копію (PNG з AI-генерації падав)
+          const safe = await ensureIgSafeImage(ws, post.filename);
+          const r = await meta.publishToInstagram(mt.ig_user_id, mt.page_token, `${env.appBaseUrl}/media/${safe}`, textOf(k));
+          await q(`update meta_publish set external_id=$2, status='sent' where id=$1`, [reserved.id, r.mediaId]);
+        } catch (e: any) { await q(`delete from meta_publish where id=$1`, [reserved.id]); throw e; }
       } else if (k === "linkedin") {
         if (!li?.access_token || !li.member_urn) throw new Error("LinkedIn не підключено");
         if (li.token_expires_at && new Date(li.token_expires_at).getTime() < Date.now())
           throw new Error("Токен LinkedIn протух (живе 60 днів) - перепідключи у Налаштування → Канали");
-        // зображення LinkedIn приймає лише через власний upload (не за URL) - читаємо локальний файл
-        let imgBuf: Buffer | undefined;
-        if (post.filename) { try { imgBuf = await readFile(join(MEDIA_DIR, post.filename)); } catch { /* без фото */ } }
-        const r = await linkedin.publish(li.access_token, li.member_urn, textOf(k), imgBuf);
-        await q(`insert into linkedin_publish(post_id,external_id,status) values($1,$2,'sent')`, [postId, r.postId || null]);
+        const reserved = await one<{ id: string }>(
+          `insert into linkedin_publish(post_id,status) values($1,'sending') on conflict (post_id) do nothing returning id`, [postId]);
+        if (!reserved) { results.push({ channel: k, status: "skipped" }); continue; }
+        try {
+          // зображення LinkedIn приймає лише через власний upload (не за URL) - читаємо локальний файл
+          let imgBuf: Buffer | undefined;
+          if (post.filename) { try { imgBuf = await readFile(join(MEDIA_DIR, post.filename)); } catch { /* без фото */ } }
+          const r = await linkedin.publish(li.access_token, li.member_urn, textOf(k), imgBuf);
+          await q(`update linkedin_publish set external_id=$2, status='sent' where id=$1`, [reserved.id, r.postId || null]);
+        } catch (e: any) { await q(`delete from linkedin_publish where id=$1`, [reserved.id]); throw e; }
       }
       results.push({ channel: k, status: "sent" });
     } catch (e: any) { results.push({ channel: k, status: "error", error: e.message }); }
