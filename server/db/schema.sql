@@ -576,3 +576,10 @@ create unique index if not exists uq_lipub_post on linkedin_publish(post_id);
 -- (процес упав посеред публікації - деплой, OOM) від того, що просто зараз публікується; такий
 -- слот раніше випадав із автопосту І з /api/schedule/auto НАЗАВЖДИ без жодної помилки в UI.
 alter table schedule_slot add column if not exists updated_at timestamptz not null default now();
+
+-- 🎨 ФОРМАТ як повноцінний вимір плану (post|carousel|reel|story).
+-- Формат ортогональний рубриці: рубрика = ПРО ЩО, формат = ЯК УПАКОВАНО, канал = КУДИ. Так це
+-- влаштовано в усіх професійних контент-календарях (в Airtable це поле `Content Type`, у шаблоні
+-- Later - окремі колонки `content type` і `content pillars`). До цього формат жив лише на пості
+-- ('post'|'reel'), а план узагалі не міг сказати «цей слот - карусель».
+alter table plan_slot add column if not exists format text not null default 'post';

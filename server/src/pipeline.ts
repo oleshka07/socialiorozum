@@ -63,6 +63,42 @@ export function offerLadder(s: Record<string, string>): string {
 // - хороший пост знімає головний скепсис у самому тексті, а не лишає його на коментарі.
 const OBJECTION_RULE = "\n\nСкепсис читача: подумки, НЕ в тексті, визнач ГОЛОВНЕ заперечення аудиторії до цієї тези (типу «чому цьому вірити?», «а в моєму випадку спрацює?», «що мені з цього?») і зніми його ФАКТОМ, прикладом чи цифрою прямо в тексті поста. Саме питання чи майже дослівний його переказ виводити в готовий текст ЗАБОРОНЕНО - лише готова відповідь на нього. Без фраз на кшталт «ви можете подумати» чи «багато хто скаже».";
 
+// ---- 🎨 ФОРМАТ контент-одиниці: третій вимір планування поруч із рубрикою (про що) і каналом (куди) ----
+// Формат = ЯК упаковано. Так це влаштовано в усіх професійних контент-календарях (окрема колонка
+// Content Type / Format, незалежна від пілерів). Мікс форматів свідомо НЕ має «зашитих» відсотків:
+// усі цифри на кшталт «60% рілс / 25% карусель», що гуляють по блогах, - фольклор без методології
+// (джерела розходяться на 20 п.п.), тож пропорцію задає САМ юзер, а дефолт = лише текстові пости
+// (тобто поведінка не змінюється, поки він не налаштує мікс явно).
+export const FORMATS = ["post", "carousel", "reel", "story"] as const;
+export type ContentFormat = (typeof FORMATS)[number];
+export const FORMAT_LABELS: Record<string, string> = {
+  post: "звичайний текстовий пост",
+  carousel: "карусель (кілька слайдів, які читач перегортає)",
+  reel: "короткий вертикальний відео-сценарій",
+  story: "сторіс (ефемерний кадр на 24 години)",
+};
+export const normFormat = (f: unknown): ContentFormat =>
+  (FORMATS as readonly string[]).includes(String(f)) ? (String(f) as ContentFormat) : "post";
+// Формат, який Розвідник повертає українською («пост»/«карусель»/«рілс») → внутрішній ключ.
+const FORMAT_FROM_UA: Record<string, ContentFormat> = { "пост": "post", "карусель": "carousel", "рілс": "reel", "сторіс": "story" };
+export const formatFromUa = (s: unknown): ContentFormat => FORMAT_FROM_UA[String(s || "").trim().toLowerCase()] || "post";
+
+// Зважений «мішок» форматів для розкладки слотів плану. Джерело пропорції: channel_rhythm[net].formats
+// (мікс саме ПО МЕРЕЖАХ - це доказова частина: LinkedIn виграє документами-каруселями, IG рілсами
+// по охвату, і той самий формат в різних мережах працює по-різному), інакше глобальний format_mix,
+// інакше - лише пости. Порожній/битий конфіг завжди дає ['post'], тож план ніколи не ламається.
+function formatBag(rhythm: any, globalMix: any, network?: string): ContentFormat[] {
+  const pick = (network && rhythm && rhythm[network] && rhythm[network].formats) || globalMix;
+  const rows: any[] = Array.isArray(pick) ? pick : [];
+  const bag: ContentFormat[] = [];
+  for (const r of rows) {
+    const f = normFormat(typeof r === "string" ? r : r?.f);
+    const share = Math.max(0, Math.min(100, Number(typeof r === "string" ? 25 : r?.share) || 0));
+    for (let i = 0; i < Math.max(1, Math.round(share / 10)); i++) bag.push(f);
+  }
+  return bag.length ? bag : ["post"];
+}
+
 // «Директор»: головна бізнес-ціль контенту - фільтр «веде до цілі чи контент заради контенту».
 export const GOAL_LABELS: Record<string, string> = {
   money: "продажі та гроші (контент має підводити до покупки)",
@@ -555,7 +591,7 @@ async function recentContentDigest(workspaceId: string): Promise<string> {
 
 // ---- LITE: один зібраний промт (усі кроки кишки в одному) ----
 // Зібрати спільний системний промт Lite-генерації (для самої генерації + для перегляду користувачем).
-export async function buildLitePrompt(workspaceId: string, count: number, ideas?: string[]): Promise<{ system: string; model: string }> {
+export async function buildLitePrompt(workspaceId: string, count: number, ideas?: string[], formats?: string[]): Promise<{ system: string; model: string }> {
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
   const rubs = await q<{ name: string; share: number; description: string }>(
@@ -563,8 +599,22 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
   const rubricsText = rubs.length
     ? "\n\nРубрики (орієнтир тем і пропорцій у наборі): " + rubs.map((r) => `${r.name} ~${r.share}%${r.description ? ` (${r.description})` : ""}`).join("; ") + "."
     : "";
+  const fmts = (formats || []).map(normFormat);
   const ideasText = (ideas && ideas.length)
-    ? "\n\nНапиши рівно по ОДНОМУ посту на кожну з цих тем (у тому ж порядку):\n" + ideas.map((t, i) => `${i + 1}. ${t}`).join("\n")
+    ? "\n\nНапиши рівно по ОДНОМУ посту на кожну з цих тем (у тому ж порядку):\n" +
+      ideas.map((t, i) => `${i + 1}. ${t}${fmts[i] && fmts[i] !== "post" ? ` [ФОРМАТ: ${fmts[i]}]` : ""}`).join("\n")
+    : "";
+  // Правила під формат: інакше слот-«карусель» дає звичайну суцільну простиню, і сам сенс планування
+  // формату зникає. Структурне правило слайда 2 - єдине тут із реальним доказом: Мосері підтвердив, що
+  // Instagram пересервує ДРУГИЙ слайд тим, хто не свайпнув, тож слайд 2 має продавати обіцянку сам.
+  const FORMAT_RULES: Record<string, string> = {
+    carousel: "[carousel] КАРУСЕЛЬ: розбий текст на слайди рядками «Слайд N: …». Слайд 1 - обкладинка: одна чітка обіцянка, коротко й крупно. Слайд 2 - ДРУГА обкладинка: перекажи обіцянку інакше й самодостатньо (Instagram показує саме слайд 2 тим, хто не свайпнув - він мусить чіпляти сам). Далі - одна думка на слайд, найцінніше СПОЧАТКУ (алгоритм важить доглядання до кінця). Останній слайд - заклик зберегти чи поділитись. Разом 8-10 слайдів.",
+    reel: "[reel] РІЛС: це сценарій для зйомки, не текст поста. Формат: рядок «ХУК:» (0-2 сек, чіпляє), далі 3-5 рядків «БІТ:» (одна думка кожен, причинно звʼязані), у кінці «CTA:». Пиши те, що можна ВИМОВИТИ вголос за 30-60 секунд, і лише те, що видно в кадрі - без абстракцій.",
+    story: "[story] СТОРІС: 3-5 коротких кадрів, кожен рядком «Кадр N: …», по 1-2 речення. Розмовно, «тут і зараз», ефемерно. В останньому кадрі - питання до аудиторії або стікер-опитування.",
+  };
+  const usedFmt = [...new Set(fmts.filter((f) => f !== "post"))];
+  const formatRules = usedFmt.length
+    ? "\n\nФОРМАТИ (у темі вказано [ФОРМАТ: …] - пиши САМЕ в цій структурі, це не звичайний пост):\n" + usedFmt.map((f) => FORMAT_RULES[f]).filter(Boolean).join("\n")
     : "";
   const n = ideas && ideas.length ? ideas.length : count;
   const v2 = s.prompt_engine !== "legacy";
@@ -599,7 +649,7 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
         ? "\n- Гачок (перший рядок вирішує все): вивчи, ЯК САМЕ автор відкриває пости у &lt;voice_examples&gt; вище (довжина першого рядка, характерні слова, чи задає питання чи стверджує) і склади 3 варіанти гачка САМЕ в його манері - не з готового списку типів, а з його власного почерку. Залиш найсильніший."
         : "\n- Гачок (перший рядок вирішує все): подумки склади 3 варіанти різних типів (цікавісний розрив, патерн-перебій, контр-теза, попередження про помилку, число/список, пряма обіцянка) і залиш у пості НАЙСИЛЬНІШИЙ - своїх прикладів голосу ще нема, тому цей список лише орієнтир, а не шаблон під копіювання формулювань.") +
       "\n- Один чіткий мʼякий заклик на пост, не більше." +
-      rubricsText + recentDigest.replace(/^\n+/, "\n- ") +
+      rubricsText + formatRules + recentDigest.replace(/^\n+/, "\n- ") +
       NO_DASH_RULE.replace(/^\n+/, "\n- ") +
       HOOK_RULE.replace(/^\n+/, "\n- ") +
       ANTI_AI_RULE.replace(/^\n+/, "\n- ") +
@@ -617,7 +667,7 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
     (s.marketing_context ? `\n\nБренд і аудиторія: ${s.marketing_context}` : "") +
     (s.tone_of_voice ? `\n\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) + painThesis(s) +
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
-    rubricsText + ideasText + goalRule(s) + offerLadder(s) + HOOK_RULE + ANTI_AI_RULE + OBJECTION_RULE +
+    rubricsText + formatRules + ideasText + goalRule(s) + offerLadder(s) + HOOK_RULE + ANTI_AI_RULE + OBJECTION_RULE +
     NO_DASH_RULE + `\n\nЗгенеруй рівно ${n} різних постів. ${outputFormat}`;
   return { system, model: "openai/gpt-4o" };
 }
@@ -646,11 +696,13 @@ async function runQaGates(workspaceId: string, postIds: string[]): Promise<void>
   }));
 }
 
-export async function generatePostsOnePass(runId: string, count: number, ideas?: string[]): Promise<number> {
+// formats (опційно): формат на КОЖНУ ідею у тому ж порядку - слот плану / вибрана ідея Розвідника
+// вже знають, який формат замовлено, і цей вибір має доїхати до post.format, а не губитись.
+export async function generatePostsOnePass(runId: string, count: number, ideas?: string[], formats?: string[]): Promise<number> {
   const { workspace_id, transcript } = await runContext(runId);
   const sel = (ideas || []).map((t) => String(t).trim()).filter(Boolean);
   const n = Math.max(1, Math.min(12, sel.length ? sel.length : (Number(count) || 6)));
-  const { system, model } = await buildLitePrompt(workspace_id, n, sel.length ? sel : undefined);
+  const { system, model } = await buildLitePrompt(workspace_id, n, sel.length ? sel : undefined, formats);
   // max_tokens масштабується від к-сті постів - інакше дефолтний ліміт 1500 (openrouter.ts) на 8-12
   // постів або обрізає JSON (пости мовчки губляться), або примушує модель стискати кожен пост до куцого
   // варіанту ЧЕРЕЗ БРАК МІСЦЯ, а не тому що це найкращий текст.
@@ -666,10 +718,11 @@ export async function generatePostsOnePass(runId: string, count: number, ideas?:
   if (!posts.length) throw new Error("Не вдалося згенерувати пости (порожня відповідь моделі)");
   await q(`delete from post where run_id=$1 and stage='final'`, [runId]);
   const ids: string[] = [];
-  for (const p of posts) {
+  for (let i = 0; i < posts.length; i++) {
+    const p = posts[i];
     const row = await one<{ id: string }>(
-      `insert into post(run_id, stage, content, image_prompt, rubric, intent) values($1,'final',$2,$3,$4,$5) returning id`,
-      [runId, p.text, p.image_prompt || null, p.rubric || null, p.intent]);
+      `insert into post(run_id, stage, content, image_prompt, rubric, intent, format) values($1,'final',$2,$3,$4,$5,$6) returning id`,
+      [runId, p.text, p.image_prompt || null, p.rubric || null, p.intent, normFormat(formats?.[i])]);
     if (row) ids.push(row.id);
   }
   await runQaGates(workspace_id, ids);
@@ -917,7 +970,7 @@ export async function threadsNicheReview(workspaceId: string): Promise<{ pattern
 
 // ---- Lite-скелет плану: ДЕТЕРМІНОВАНО зі стратегії (рубрики × best_days × теми) ----
 // Канало-незалежний, не залежить від крихкого LLM-плану → порожнім не буде, якщо є стратегія.
-export async function buildLiteSkeleton(workspaceId: string, horizonDays: number, postsPerWeek = 4, opts?: { topic?: string; network?: string }): Promise<{ day: number; rubric: string; theme: string; hook: string }[]> {
+export async function buildLiteSkeleton(workspaceId: string, horizonDays: number, postsPerWeek = 4, opts?: { topic?: string; network?: string }): Promise<{ day: number; rubric: string; theme: string; hook: string; format: ContentFormat }[]> {
   const topic = (opts?.topic || "").trim();
   const NET_HINT: Record<string, string> = {
     telegram: "Telegram-канал: перший рядок чіпляє до згортання, можна довше й вдумливіше.",
@@ -961,14 +1014,18 @@ export async function buildLiteSkeleton(workspaceId: string, horizonDays: number
     days.push(pick);
   }
   days.sort((a, b) => a - b);
-  const slots: { day: number; rubric: string; theme: string; hook: string }[] = [];
+  const slots: { day: number; rubric: string; theme: string; hook: string; format: ContentFormat }[] = [];
   const s = await loadSettings(workspaceId);
   // Контент-мікс (курс-фреймворки 80/20 і 70/20/10):
   //  - ~20% слотів «Особисте» (interest stacking): інтереси автора поза нішею - точки дотику з аудиторією;
   //  - ~10% слотів «🧪 експеримент»: формат/тема, яких бренд ще не робив (без експериментів - плато).
   const interests = (s.brand_interests || "").trim();
-  let bi = 0;
-  for (const day of days) slots.push({ day, rubric: bag[bi++ % bag.length], theme: "", hook: "" });
+  // мікс форматів: свій для мережі (channel_rhythm[net].formats) → глобальний (format_mix) → лише пости
+  let rhythmCfg: any = {}; try { rhythmCfg = JSON.parse(s.channel_rhythm || "{}") || {}; } catch { rhythmCfg = {}; }
+  let globalMix: any = []; try { globalMix = JSON.parse(s.format_mix || "[]") || []; } catch { globalMix = []; }
+  const fbag = formatBag(rhythmCfg, globalMix, opts?.network);
+  let bi = 0, fi = 0;
+  for (const day of days) slots.push({ day, rubric: bag[bi++ % bag.length], theme: "", hook: "", format: fbag[fi++ % fbag.length] });
   const isInterest = (i: number) => !!interests && slots.length >= 5 && i % 5 === 2;
   const isExperiment = (i: number) => slots.length >= 8 && i % 10 === 6 && !isInterest(i);
   slots.forEach((x, i) => { if (isInterest(i)) x.rubric = "Особисте"; });
@@ -985,10 +1042,14 @@ export async function buildLiteSkeleton(workspaceId: string, horizonDays: number
         (topic ? `\n\nВАЖЛИВО - автор ОБОВʼЯЗКОВО хоче висвітлити саме ці теми/напрями (це пріоритет над загальними ідеями): «${topic.slice(0, 800)}». Признач їх до відповідних слотів дослівно чи як конкретні під-теми; лише РЕШТУ слотів доповни власними ідеями за рубриками.` : "") +
         (themes.length ? `\nОрієнтир тем: ${themes.slice(0, 10).join("; ")}` : "") +
         recentDigest.replace("ВЖЕ ВИКОРИСТАНО в останніх постах", "ВЖЕ ВИСВІТЛЕНО в останніх постах - НЕ признач ту саму тему знову") +
+        // формат слота вказаний у дужках: тема має пасувати саме йому (карусель ≠ рілс ≠ пост за природою)
+        (fbag.some((f) => f !== "post")
+          ? "\nУ дужках після рубрики - ФОРМАТ слота, тема має пасувати саме йому: [carousel] - тема, яку природно розкласти на 6-10 послідовних кроків/пунктів; [reel] - тема з видимою дією чи демонстрацією (є що показати в кадрі), не абстракція; [story] - коротка тема «тут і зараз» (закулісся, питання до аудиторії); [post] - тема на суцільний текст-роздум."
+          : "") +
         (interests ? `\nСлоти з позначкою [ОСОБИСТЕ] - НЕ про нішу, а «людські» теми з інтересів автора (${interests.slice(0, 300)}): особистий погляд, історія чи спостереження, що робить автора живою людиною.` : "") +
         "\nСлоти з позначкою [ЕКСПЕРИМЕНТ] - тема чи формат, яких бренд ще НЕ робив: незвичний кут, інший жанр подачі, сміливіша теза." +
         `\n\nПоверни ЛИШЕ валідний JSON-масив рівно з ${slots.length} рядків-тем, у тому ж порядку, що рубрики нижче. Мова: ${lang}.`;
-      const user = slots.map((x, i) => `${i + 1}. [${x.rubric}]${isInterest(i) ? " [ОСОБИСТЕ]" : ""}${isExperiment(i) ? " [ЕКСПЕРИМЕНТ]" : ""}`).join("\n");
+      const user = slots.map((x, i) => `${i + 1}. [${x.rubric}]${x.format !== "post" ? ` [${x.format}]` : ""}${isInterest(i) ? " [ОСОБИСТЕ]" : ""}${isExperiment(i) ? " [ЕКСПЕРИМЕНТ]" : ""}`).join("\n");
       const raw = await chat(env.cheapModel, system, user, { workspaceId, step: "plan_themes" });
       const arr = extractJsonArray<any>(raw).map((x: any) => String(x?.theme || x || "").trim());
       slots.forEach((x, i) => { x.theme = ((isExperiment(i) ? "🧪 " : "") + ((arr[i] || "").slice(0, 300) || `${x.rubric}: ідея дня`)).slice(0, 300); });
@@ -1021,7 +1082,7 @@ export async function atomizePost(workspaceId: string, content: string, channels
 // ---- Стрічка матеріалів: витягнути ідеї з одного матеріалу (модалка «Ідеї з матеріалу») ----
 // «Розвідник»: не тема, а ТЕЙК (кут + чорновий гачок). mode за походженням матеріалу:
 // 'signal' (стороння новина/RSS - що бренд каже від себе), 'story' (власний кейс - кути подачі), default - універсальний.
-export async function extractIdeasFromText(workspaceId: string, text: string, count = 6, rubricsFilter?: string[], mode?: "signal" | "story"): Promise<{ idea: string; angle: string; hook: string; rubric: string }[]> {
+export async function extractIdeasFromText(workspaceId: string, text: string, count = 6, rubricsFilter?: string[], mode?: "signal" | "story"): Promise<{ idea: string; angle: string; hook: string; rubric: string; format?: string; fmt: ContentFormat }[]> {
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
   const rubs = await q<{ name: string }>(`select name from rubric where workspace_id=$1 order by idx`, [workspaceId]);
@@ -1039,12 +1100,15 @@ export async function extractIdeasFromText(workspaceId: string, text: string, co
     (rubList ? `\nРубрики бренду: ${rubList}. Кожній ідеї признач НАЙБЛИЖЧУ рубрику з цього переліку.` : "") +
     `\n\nЗнайди до ${Math.max(1, Math.min(10, count))} ідей. Для кожної: idea - суть одним реченням; angle - кут 2-4 словами${mode === "story" ? " (почни з типу: урок/контрхід/фреймворк/доказ/релейтбл/шлях/провал)" : ""}; format - якнайкращий формат: "пост" | "карусель" | "рілс"; hook - чорновий перший рядок (з кульмінації, без кліше «СТОП/99% не знають»). Ранжуй за релевантністю цілі й аудиторії, не за гучністю. Поверни ЛИШЕ валідний JSON-масив: [{"idea":"…","angle":"…","format":"…","hook":"…","rubric":"назва рубрики"}]. Мова: ${lang}.`;
   const raw = await chat(env.cheapModel, system, `Матеріал:\n---\n${(text || "").slice(0, 20000)}`, { workspaceId, step: "ideas" });
-  let out: { idea: string; angle: string; hook: string; rubric: string; format?: string }[] = [];
+  let out: { idea: string; angle: string; hook: string; rubric: string; format?: string; fmt: ContentFormat }[] = [];
   try {
     out = extractJsonArray<any>(raw).map((x) => ({
       idea: String(x?.idea || x || "").trim(), angle: String(x?.angle || "").trim(),
       hook: String(x?.hook || "").trim(), rubric: String(x?.rubric || "").trim(),
+      // формат: лишаємо укр. мітку для бейджа В UI + внутрішній ключ (fmt), який раніше просто губився,
+      // хоч модель його вже й радила - тепер він доїжджає до post.format
       format: ["пост", "карусель", "рілс"].includes(String(x?.format || "")) ? String(x.format) : undefined,
+      fmt: formatFromUa(x?.format),
     })).filter((x) => x.idea);
   } catch { out = []; }
   return out;
