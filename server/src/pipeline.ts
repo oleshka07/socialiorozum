@@ -1101,6 +1101,15 @@ export async function atomizePost(workspaceId: string, content: string, channels
   return { atoms: Array.isArray(o.atoms) ? o.atoms : [], matrix: Array.isArray(o.matrix) ? o.matrix : [] };
 }
 
+// Режим Розвідника за походженням матеріалу - одна точка правди (раніше цей вибір був продубльований
+// у двох роутах, тож новий origin легко забути додати в одному з них).
+// 'dialog' (власні діалоги з Claude/ChatGPT) - це той самий власний матеріал, що щоденник → 'story'.
+export function ideaMode(origin: string): "signal" | "story" | undefined {
+  if (origin === "rss") return "signal";
+  if (["manual", "idea", "diary", "dialog"].includes(origin)) return "story";
+  return undefined;
+}
+
 // ---- Стрічка матеріалів: витягнути ідеї з одного матеріалу (модалка «Ідеї з матеріалу») ----
 // «Розвідник»: не тема, а ТЕЙК (кут + чорновий гачок). mode за походженням матеріалу:
 // 'signal' (стороння новина/RSS - що бренд каже від себе), 'story' (власний кейс - кути подачі), default - універсальний.

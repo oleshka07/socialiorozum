@@ -105,8 +105,8 @@
     "semantic_hash": ""
   },
   "server/src/pipeline.ts": {
-    "mtime": 1784982095.9233832,
-    "ast_hash": "220590abe107c5cdaa6f0bd979fa29cc",
+    "mtime": 1784990946.646261,
+    "ast_hash": "cf5d14b4a928423ab1fd5272569df8ad",
     "semantic_hash": ""
   },
   "server/src/publisher.ts": {
@@ -125,8 +125,8 @@
     "semantic_hash": ""
   },
   "server/src/server.ts": {
-    "mtime": 1784982100.8913834,
-    "ast_hash": "d228e6326c849083802e1ea9417b721e",
+    "mtime": 1784990971.1182623,
+    "ast_hash": "3e4fd22d9d32366c9edd827f92dadda4",
     "semantic_hash": ""
   },
   "server/src/telegram.ts": {
@@ -155,8 +155,8 @@
     "semantic_hash": "352df4b84f4af2922ccd9adaf8e4608f"
   },
   "CLAUDE.md": {
-    "mtime": 1784982679.6074023,
-    "ast_hash": "da3da74a9571a220261bf03d1a929978",
+    "mtime": 1784991585.5182989,
+    "ast_hash": "a61380d07a1e7e893f2c2916b9c35275",
     "semantic_hash": ""
   },
   "DEPLOY.md": {
@@ -225,8 +225,8 @@
     "semantic_hash": ""
   },
   "server/public/app.html": {
-    "mtime": 1784975626.0502381,
-    "ast_hash": "a505a6f0064028c3c269bd81986a4ee0",
+    "mtime": 1784991238.4862783,
+    "ast_hash": "d5b2ac76c09edca752f01c514d1b21b4",
     "semantic_hash": ""
   },
   "server/public/auth.html": {
@@ -360,18 +360,18 @@
     "semantic_hash": ""
   },
   "server/.lint/ui-smoke.mjs": {
-    "mtime": 1784975473.1742291,
-    "ast_hash": "0c5c3fe066fbf278f9bd29cee41b9970",
+    "mtime": 1784991428.9117749,
+    "ast_hash": "96573f4d98b7ea523f3b5020c6af3e03",
     "semantic_hash": ""
   },
   "server/eslint.config.mjs": {
-    "mtime": 1784238990.0613172,
-    "ast_hash": "190e9baa674b42a31eef16cdc25e6179",
+    "mtime": 1784991509.4462943,
+    "ast_hash": "db3f7be6ee9f2a742a1a945457a306e9",
     "semantic_hash": ""
   },
   "server/public/app.js": {
-    "mtime": 1784975626.054238,
-    "ast_hash": "5ec88d5625f5c1ffa308f9eb401e0f86",
+    "mtime": 1784991226.7989404,
+    "ast_hash": "68bb709c54e216d8ffcfc7cd690be43c",
     "semantic_hash": ""
   },
   "server/src/settings.ts": {
@@ -402,6 +402,16 @@
   ".github/workflows/ci.yml": {
     "mtime": 1784238990.0613172,
     "ast_hash": "a5c757b70dce49bad750989806ba3751",
+    "semantic_hash": ""
+  },
+  "server/test/dialog-sync.test.mjs": {
+    "mtime": 1784991398.4302878,
+    "ast_hash": "78081812faf0c65f5e5a087a6cc2f325",
+    "semantic_hash": ""
+  },
+  "server/tools/dialog-sync.mjs": {
+    "mtime": 1784991320.9702833,
+    "ast_hash": "da17f775257f2a54e771a84df7faa1e1",
     "semantic_hash": ""
   }
 }

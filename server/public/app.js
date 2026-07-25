@@ -140,6 +140,7 @@ function selectView(v){
   if(v==='publish'){ loadPublish(); loadPlan(); }
   if(v==='create') loadStudioPosts();
   if(v==='settings'){ loadAccount(); loadPlans(); }
+  if(v==='tools' && typeof loadDialog==='function') loadDialog();
   if(typeof loadTasks==='function') loadTasks();
   curView=v; if(typeof renderTaskStrip==='function') renderTaskStrip(v);
   try{ localStorage.setItem('kg_view', v); }catch(e){} // памʼятаємо розділ між оновленнями сторінки
@@ -189,6 +190,48 @@ document.querySelectorAll('#sTabs .tab').forEach(x=>x.onclick=()=>setSTab(x.data
     if(!PRO){ flash('Конвеєр - інструмент режиму PRO (перемкни в меню акаунта)'); return; }
     selectView('create'); setLayout('pipeline'); };
 })();
+
+// ---------- 🗣 Власні діалоги (Claude Code) як джерело ----------
+// Історію claude.ai/ChatGPT публічним API прочитати НЕМОЖЛИВО, тому наповнення - PUSH:
+// скрипт на машині юзера (server/tools/dialog-sync.mjs) шле сюди дистилят своїх сесій.
+// Тут лише персональна адреса вебхука + інструкція, як поставити щовечірній запуск.
+async function loadDialog(){
+  const st=$('dlgState'); if(!st) return;
+  try{
+    const d=await api('/integrations/dialog');
+    const has=!!d.url;
+    $('dlgUrlWrap').style.display=has?'block':'none';
+    $('dlgCopy').style.display=has?'inline-flex':'none';
+    if(has) $('dlgUrl').value=d.url;
+    $('dlgRotate').textContent=has?'🔑 Створити нову адресу':'🔑 Створити адресу';
+    st.innerHTML=has
+      ? '✅ Адреса готова. Імпортовано матеріалів: <b>'+(d.count||0)+'</b>. Далі - «Як налаштувати».'
+      : 'Ще не налаштовано. Натисни «Створити адресу», далі - «Як налаштувати».';
+  }catch(e){ st.textContent='⚠ '+e.message; }
+}
+if($('dlgRotate')) $('dlgRotate').onclick=async()=>{
+  const had=!!($('dlgUrl')||{}).value;
+  if(had && !confirm('Створити НОВУ адресу? Стара одразу перестане працювати - у скрипті на компʼютері треба буде оновити SOCIALIO_DIALOG_URL.')) return;
+  try{ await api('/integrations/dialog/rotate',{method:'POST'}); await loadDialog(); flash('Адресу створено'); }
+  catch(e){ flash('⚠ '+e.message); }
+};
+if($('dlgCopy')) $('dlgCopy').onclick=()=>{ const v=($('dlgUrl')||{}).value; if(v){ navigator.clipboard.writeText(v); flash('Скопійовано'); } };
+if($('dlgHelp')) $('dlgHelp').onclick=()=>{
+  const url=($('dlgUrl')||{}).value||'<спершу створи адресу вище>';
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
+  ov.innerHTML='<div class="modal-card" style="max-width:660px;padding:22px;max-height:86vh;overflow:auto">'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="font-size:17px">🗣 Щовечірній збір діалогів</b><button class="icon" id="dhX" style="margin-left:auto">✕</button></div>'
+    +'<div class="hint">Скрипт живе на твоєму компʼютері (у папці проєкту: <code>server/tools/dialog-sync.mjs</code>) - сюди приїжджає вже готовий текст, самі діалоги нікуди не копіюються. Ключі й паролі, якщо колись вставляв їх у чат, вирізаються ще на твоїй машині.</div>'
+    +'<div style="margin-top:12px"><b>1. Перевір, що збирає (нічого не надсилає):</b><pre class="dlgpre">node server/tools/dialog-sync.mjs --collect</pre></div>'
+    +'<div style="margin-top:10px"><b>2. Прогін «на суху» - покаже готовий текст:</b><pre class="dlgpre">node server/tools/dialog-sync.mjs --dry</pre></div>'
+    +'<div style="margin-top:10px"><b>3. Справжній запуск:</b><pre class="dlgpre">set SOCIALIO_DIALOG_URL='+esc(url)+'\nnode server/tools/dialog-sync.mjs</pre></div>'
+    +'<div style="margin-top:10px"><b>4. Щовечора автоматично (Windows, один раз у cmd):</b><pre class="dlgpre">schtasks /create /tn "socialio-dialog" /sc daily /st 22:30 ^\n  /tr "cmd /c set SOCIALIO_DIALOG_URL='+esc(url)+' ^&^& node D:\\Claude\\Claude\\Projects\\КонтентГров\\server\\tools\\dialog-sync.mjs"</pre>'
+    +'<div class="hint" style="margin-top:6px">Шлях до проєкту підстав свій, якщо він інший. Перевірити задачу: <code>schtasks /run /tn "socialio-dialog"</code>.</div></div>'
+    +'<div class="hint" style="margin-top:14px">У «пусті» дні (тільки технічна робота, без справжніх висновків) скрипт свідомо НЕ надсилає нічого - краще нуль матеріалів, ніж матеріал ні про що.</div>'
+    +'</div>';
+  document.body.appendChild(ov);
+  const close=()=>ov.remove(); ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#dhX').onclick=close;
+};
 
 // ---------- layout switcher (Студія/Конвеєр/Інбокс) ----------
 // ---------- задачі / бал заповнення (гейміфікація) ----------
@@ -273,7 +316,7 @@ $('toStudio').onclick=()=>setLayout('studio');
 
 // ---------- МАТЕРІАЛИ: стрічка сировини ----------
 let Mats=[], MatFilter='Усі', MatFeedFilter=null, MatOpen=null, Ideas=[];
-const MAT_TYPE={manual:'✍️ Нотатка',rss:'📡 RSS',fireflies:'🎙 Транскрипт',grain:'🎙 Транскрипт',meetgeek:'🎙 Транскрипт',gdrive:'📁 Drive',brand:'✨ Бренд',plan:'📅 План',idea:'💡 Ідея',diary:'📔 Щоденник'};
+const MAT_TYPE={manual:'✍️ Нотатка',rss:'📡 RSS',fireflies:'🎙 Транскрипт',grain:'🎙 Транскрипт',meetgeek:'🎙 Транскрипт',gdrive:'📁 Drive',brand:'✨ Бренд',plan:'📅 План',idea:'💡 Ідея',diary:'📔 Щоденник',dialog:'🗣 Діалог'};
 async function loadMaterials(){ try{ const r=await api('/materials'); Mats=r.materials||[]; }catch(e){ Mats=[]; } try{ const ib=await api('/ideas'); Ideas=ib.ideas||[]; }catch(e){ Ideas=[]; } renderMaterials(); updateCounts(); }
 function matType(m){ return MAT_TYPE[m.origin]||m.origin; }
 function renderMaterials(){
@@ -1239,7 +1282,7 @@ function renderFinals(posts){
 async function saveContent(id,v){ try{ await api('/posts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:v})}); flashSaved(); }catch(e){} }
 let StudioFilter='all', StudioRubric='', StudioOrigin='', StudioFormat='';
 const INTENT_META={awareness:['🌱','знайомство','цінність новій аудиторії, без продажу'],nurture:['🤝','прогрів','будує довіру, мʼякий заклик'],sale:['💰','продаж','прямий оффер за сходами']};
-const ORIGIN_LABEL={manual:'✍️ вручну',rss:'📡 RSS',fireflies:'🎙 транскрипт',grain:'🎙 транскрипт',meetgeek:'🎙 транскрипт',brand:'✨ з бренду',gdrive:'📁 Drive',plan:'📅 з плану',diary:'📔 щоденник',takes:'🧵 тейк',idea:'💡 з ідеї'};
+const ORIGIN_LABEL={manual:'✍️ вручну',rss:'📡 RSS',fireflies:'🎙 транскрипт',grain:'🎙 транскрипт',meetgeek:'🎙 транскрипт',brand:'✨ з бренду',gdrive:'📁 Drive',plan:'📅 з плану',diary:'📔 щоденник',dialog:'🗣 з діалогу',takes:'🧵 тейк',idea:'💡 з ідеї'};
 const SelPosts=new Set(); // масові дії
 // глобальний список усіх фінальних постів воркспейсу (НЕ привʼязаний до активного джерела/прогону)
 async function loadStudioPosts(){ try{ Finals=(await api('/posts/studio'))||[]; }catch(e){} SelPosts.clear(); renderStudio(); renderInbox(); if(typeof updateCounts==='function') updateCounts(); }
