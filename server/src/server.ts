@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, storytellingVerdict, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet, topPatterns, generateThreadsTakes, repeatVariant, expandTake, threadsStarterPack, threadsNicheReview, suggestThreadReplies } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, storytellingVerdict, normFormat, FORMATS, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet, topPatterns, generateThreadsTakes, repeatVariant, expandTake, threadsStarterPack, threadsNicheReview, suggestThreadReplies } from "./pipeline.js";
 import { startReelJob, reelJobs, parseReelScript } from "./reelvideo.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
@@ -642,7 +642,7 @@ app.get("/api/channels/status", async (req: any) => {
 
 // повний стан поста для композера (текст, канали, фото)
 app.get("/api/posts/:postId/full", async (req: any, reply) => {
-  const p = await one(`select p.id, p.content, p.review, p.channels, p.headline, p.rubric, p.intent, p.image_prompt, (p.image_base is not null) as has_base, ma.filename as media_filename
+  const p = await one(`select p.id, p.content, p.review, p.channels, p.headline, p.rubric, p.intent, p.format, p.image_prompt, (p.image_base is not null) as has_base, ma.filename as media_filename
      from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      left join media_asset ma on ma.id=p.media_id
      where p.id=$1 and s.workspace_id=$2`, [req.params.postId, req.user.workspace_id]);
@@ -2009,6 +2009,8 @@ app.put("/api/posts/:postId", async (req: any, reply) => {
   if (typeof req.body?.rubric === "string") await q(`update post set rubric=nullif($2,'') where id=$1`, [req.params.postId, req.body.rubric.slice(0, 60)]);
   if (typeof req.body?.intent === "string" && ["awareness", "nurture", "sale", ""].includes(req.body.intent))
     await q(`update post set intent=nullif($2,'') where id=$1`, [req.params.postId, req.body.intent]);
+  if (typeof req.body?.format === "string" && (FORMATS as readonly string[]).includes(req.body.format))
+    await q(`update post set format=$2 where id=$1`, [req.params.postId, req.body.format]);
   return { ok: true };
 });
 
@@ -2104,11 +2106,11 @@ app.post("/api/plan/generate", async (req: any, reply) => {
     // мережі, обрані для плану (порожньо = один спільний скелет 'all', легасі-поведінка)
     const nets: string[] = Array.isArray(req.body?.networks) ? req.body.networks.map((x: any) => String(x)).filter((x: string) => PLAN_NETS.includes(x)) : [];
     let total = 0; const byNet: Record<string, number> = {};
-    const insertSlots = async (channel: string, slots: { day: number; rubric: string; theme: string; hook: string }[]) => {
+    const insertSlots = async (channel: string, slots: { day: number; rubric: string; theme: string; hook: string; format: string }[]) => {
       for (const sl of slots) {
         const d = new Date(anchor); d.setUTCDate(d.getUTCDate() + sl.day);
-        await q(`insert into plan_slot(workspace_id, slot_date, channel, rubric, theme, hook) values($1,$2,$3,$4,$5,$6)`,
-          [ws, d.toISOString().slice(0, 10), channel, sl.rubric || null, sl.theme.slice(0, 300), sl.hook.slice(0, 300) || null]);
+        await q(`insert into plan_slot(workspace_id, slot_date, channel, rubric, theme, hook, format) values($1,$2,$3,$4,$5,$6,$7)`,
+          [ws, d.toISOString().slice(0, 10), channel, sl.rubric || null, sl.theme.slice(0, 300), sl.hook.slice(0, 300) || null, normFormat(sl.format)]);
         total++; byNet[channel] = (byNet[channel] || 0) + 1;
       }
     };
@@ -2132,14 +2134,25 @@ app.post("/api/plan/generate", async (req: any, reply) => {
 });
 
 app.get("/api/plan", async (req: any) => {
+  const ws = req.user.workspace_id;
   const channel = req.query?.channel ? String(req.query.channel) : null;
   const slots = await q(
-    `select ps.id, ps.slot_date, ps.channel, ps.rubric, ps.theme, ps.hook, ps.status, ps.match_note, ps.post_id, s.title as match_title
+    `select ps.id, ps.slot_date, ps.channel, ps.rubric, ps.theme, ps.hook, ps.status, ps.match_note, ps.post_id, ps.format, s.title as match_title
      from plan_slot ps left join source s on s.id = ps.match_source_id
      where ps.workspace_id=$1 ${channel ? "and ps.channel=$2" : ""} order by ps.slot_date`,
-    channel ? [req.user.workspace_id, channel] : [req.user.workspace_id]);
-  const channels = await q<{ channel: string }>(`select distinct channel from plan_slot where workspace_id=$1`, [req.user.workspace_id]);
-  return { slots, channels: channels.map((c) => c.channel) };
+    channel ? [ws, channel] : [ws]);
+  const [channels, realized] = await Promise.all([
+    q<{ channel: string }>(`select distinct channel from plan_slot where workspace_id=$1`, [ws]),
+    // ФАКТИЧНИЙ мікс форматів за 30 днів - цього не показує жоден конкурент (у них формат живе
+    // або лише в аналітиці, або взагалі в ручних тегах), а дані в нас уже є
+    q<{ format: string; n: number }>(
+      `select p.format, count(*)::int n from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+        where s.workspace_id=$1 and p.stage='final' and coalesce(p.review,'') <> 'archived'
+          and p.created_at > now() - interval '30 days' group by p.format`, [ws]),
+  ]);
+  const realizedMix: Record<string, number> = {};
+  for (const r of realized) realizedMix[r.format || "post"] = r.n;
+  return { slots, channels: channels.map((c) => c.channel), realizedMix };
 });
 
 app.post("/api/plan/match", async (req: any, reply) => {
@@ -2150,8 +2163,8 @@ app.post("/api/plan/match", async (req: any, reply) => {
 // Згенерувати пост для слота: from='material' (зі зметченого матеріалу) або 'theme' (чиста генерація з теми)
 app.post("/api/plan/slots/:id/generate", async (req: any, reply) => {
   const ws = req.user.workspace_id;
-  const slot = await one<{ id: string; theme: string; hook: string | null; cta: string | null; rubric: string | null; channel: string; match_source_id: string | null; status: string }>(
-    `select id, theme, hook, cta, rubric, channel, match_source_id, status from plan_slot where id=$1 and workspace_id=$2`, [req.params.id, ws]);
+  const slot = await one<{ id: string; theme: string; hook: string | null; cta: string | null; rubric: string | null; channel: string; match_source_id: string | null; status: string; format: string }>(
+    `select id, theme, hook, cta, rubric, channel, match_source_id, status, format from plan_slot where id=$1 and workspace_id=$2`, [req.params.id, ws]);
   if (!slot) return reply.code(404).send({ error: "слот не знайдено" });
   try {
     const useMaterial = req.body?.from === "material" && slot.match_source_id;
@@ -2167,7 +2180,7 @@ app.post("/api/plan/slots/:id/generate", async (req: any, reply) => {
     // 🧪-слот (10% плану): експериментальний пост - подача, якої бренд ще не робив
     const expNote = slot.theme.startsWith("🧪") ? ". ЕКСПЕРИМЕНТ: зроби подачу, якої бренд ще не робив (інший ритм, структура, жанр чи сміливіший кут) - але голос і ДНК бренду збережи" : "";
     const idea = `${slot.theme.replace(/^🧪\s*/, "")}${slot.hook ? `. Гачок: ${slot.hook}` : ""}${slot.cta ? `. Заклик: ${slot.cta}` : ""}${expNote}`;
-    await generatePostsOnePass(run!.id, 1, [idea]);
+    await generatePostsOnePass(run!.id, 1, [idea], [slot.format]);
     const post = await one<{ id: string }>(`select id from post where run_id=$1 and stage='final' limit 1`, [run!.id]);
     if (!post) throw new Error("пост не згенерувався");
     // привʼязка пост<->слот + рубрика слота + канал слота увімкнений (тільки для реальної мережі; 'all' - без примусу каналу)
@@ -2270,7 +2283,7 @@ app.post("/api/ideas/:id/post", async (req: any, reply) => {
     const src = await one<{ id: string }>(`insert into source(workspace_id, origin, title, transcript) values($1,'idea',$2,$3) returning id`,
       [ws, it.text.slice(0, 200), `Ідея поста: ${it.text}`]);
     const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
-    await generatePostsOnePass(run!.id, 1, [it.text]);
+    await generatePostsOnePass(run!.id, 1, [it.text], [normFormat(req.body?.format)]);
     const post = await one<{ id: string }>(`select id from post where run_id=$1 and stage='final' limit 1`, [run!.id]);
     await q(`update idea_bank set status='used', used_post_id=$2 where id=$1 and workspace_id=$3`, [req.params.id, post?.id ?? null, ws]);
     return { ok: true, count: 1 };
@@ -2283,8 +2296,10 @@ app.post("/api/materials/:id/posts", async (req: any, reply) => {
   if (!m) return reply.code(404).send({ error: "матеріал не знайдено" });
   try {
     const ideas = Array.isArray(req.body?.ideas) ? req.body.ideas.map((x: any) => String(x).trim()).filter(Boolean) : [];
+    // формати на кожну обрану ідею (Розвідник уже радить формат - тепер він доїжджає до поста)
+    const fmts = Array.isArray(req.body?.formats) ? req.body.formats.map((x: any) => normFormat(x)) : undefined;
     const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [m.id]);
-    const count = await generatePostsOnePass(run!.id, ideas.length || 1, ideas.length ? ideas : undefined);
+    const count = await generatePostsOnePass(run!.id, ideas.length || 1, ideas.length ? ideas : undefined, fmts);
     // якщо матеріал зметчений зі слотом - привʼяжемо перший пост до слота
     const slot = await one<{ id: string; rubric: string | null; channel: string }>(
       `select id, rubric, channel from plan_slot where workspace_id=$1 and match_source_id=$2 and status='matched' limit 1`, [ws, m.id]);

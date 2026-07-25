@@ -13,6 +13,9 @@ let ThStrat={};                // threads_strategy JSON {thread,cta_min,takes}
 let Pub={ bank: [], slots: [] };   // банк затверджених + слоти календаря
 let obVoiceImported=false;     // онбординг: чи вже тягнули голос з IG
 const NETS=[['telegram','Telegram'],['instagram','Instagram'],['facebook','Facebook'],['threads','Threads'],['linkedin','LinkedIn']];
+// 🎨 формат контент-одиниці: третій вимір поруч із рубрикою (про що) і каналом (куди)
+const FMT_META={post:['📝','Пост','звичайний текстовий пост'],carousel:['🖼','Карусель','кілька слайдів, які читач перегортає - найкраще збирає збереження'],reel:['🎬','Рілс','короткий вертикальний відео-сценарій - найкраще охоплення'],story:['⚡','Сторіс','ефемерний кадр на 24 години']};
+const FMT_KEYS=['post','carousel','reel','story'];
 const NETVAR={telegram:'--tg',instagram:'--ig',facebook:'--fb',threads:'--th',linkedin:'--li'};
 const NETICON={telegram:'M22 4L2 11l6 2 2 6 3-4 5 4 4-15z',instagram:'M7 3h10a4 4 0 014 4v10a4 4 0 01-4 4H7a4 4 0 01-4-4V7a4 4 0 014-4zm5 5a4 4 0 100 8 4 4 0 000-8z',facebook:'M14 9V7c0-1 .5-1.5 1.5-1.5H17V2h-3c-2.5 0-4 1.5-4 4v3H7v3h3v9h4v-9h3l.5-3H14z',threads:'M12 3c5 0 8 3 8 9s-3 9-8 9-8-3-8-9c0-2 .5-3.5 1.5-4.5',linkedin:'M4 4h4v16H4V4zm2-1a2 2 0 110-4 2 2 0 010 4zm5 5h4v2c.8-1.3 2.2-2.3 4-2.3 3 0 5 2 5 5.3V20h-4v-8c0-1.5-.8-2.5-2-2.5s-2 1-2 2.5v8h-5V8z'};
 const CP_LABEL={telegram:'Telegram',instagram:'Instagram',threads:'Threads',facebook:'Facebook'};
@@ -366,9 +369,13 @@ async function openMaterialIdeas(matId){
       +((it.angle||it.rubric||it.format)?'<span style="display:flex;flex-direction:column;gap:3px;align-items:flex-end">'+(it.rubric?'<span class="ptag">🏷 '+esc(it.rubric)+'</span>':'')+(it.angle?'<span class="ptag">🎯 '+esc(it.angle)+'</span>':'')+(it.format?'<span class="ptag">'+(it.format==='рілс'?'🎬':(it.format==='карусель'?'🖼':'📝'))+' '+esc(it.format)+'</span>':'')+'</span>':'')+'</label>').join('');
     list.querySelectorAll('.rchip').forEach(l=>{ const cb=l.querySelector('input'); cb.addEventListener('change',()=>l.classList.toggle('on',cb.checked)); });
     const go=card.querySelector('#miGo'); go.disabled=false;
-    go.onclick=async()=>{ const picked=[...list.querySelectorAll('.miCb:checked')].map(c=>{ const it=ideas[+c.dataset.i]; return it.idea+(it.angle?' Кут: '+it.angle+'.':'')+(it.hook?' Гачок: '+it.hook:''); }); if(!picked.length){ flash('Обери хоча б одну ідею'); return; }
+    go.onclick=async()=>{ const sel=[...list.querySelectorAll('.miCb:checked')].map(c=>ideas[+c.dataset.i]);
+      const picked=sel.map(it=>it.idea+(it.angle?' Кут: '+it.angle+'.':'')+(it.hook?' Гачок: '+it.hook:''));
+      // формат, який Розвідник уже порадив (раніше він показувався бейджем і губився) - їде разом з ідеєю
+      const formats=sel.map(it=>it.fmt||'post');
+      if(!picked.length){ flash('Обери хоча б одну ідею'); return; }
       close(); aiBusy('✨ Створюю '+picked.length+' постів з ідей…'); setCTab('posts'); setLayout('studio');
-      try{ const r=await api('/materials/'+matId+'/posts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ideas:picked})}); await loadStudioPosts(); flash('Готово - '+(r.count||0)+' постів ✓'); }
+      try{ const r=await api('/materials/'+matId+'/posts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ideas:picked,formats})}); await loadStudioPosts(); flash('Готово - '+(r.count||0)+' постів ✓'); }
       catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } };
   } else if(!list.textContent.includes('⚠')) list.innerHTML='<div class="empty">Ідей не знайшлось - спробуй «Створити пост» напряму.</div>';
   }
@@ -436,12 +443,29 @@ function renderPlanMix(){
   leg.innerHTML=rubs.map((r,i)=>{ const pct=Math.round(((+r.share||25)/total)*100); return '<span><span style="display:inline-block;width:8px;height:8px;border-radius:3px;background:'+COLORS[i%COLORS.length]+';margin-right:3px"></span>'+(r.emoji||'')+esc(r.name)+' '+pct+'%</span>'; }).join('');
 }
 async function loadPlan(){
-  try{ const r=await api('/plan'); PlanAll=r.slots||[]; PlanChans=[...new Set(PlanAll.map(s=>s.channel).filter(Boolean))]; }
+  try{ const r=await api('/plan'); PlanAll=r.slots||[]; PlanChans=[...new Set(PlanAll.map(s=>s.channel).filter(Boolean))]; renderFmtFact(r.realizedMix||{}); }
   catch(e){ PlanAll=[]; PlanChans=[]; }
   applyPlanFilter();
   // хаб Публікації: лічильник тем біля календаря + перерендер привидів-тем
   try{ const cs=$('calSum'); if(cs){ const th=PlanAll.filter(s=>['empty','matched','drafted'].includes(s.status)).length; cs.textContent=th?('· у плані '+th+' тем'):''; }
     if($('cal')&&$('cal').childNodes.length) renderCal(); }catch(e){}
+}
+// 🎨 ФАКТИЧНИЙ мікс форматів за 30 днів. Цього не показує жоден конкурент (у Buffer/Later формат
+// живе або лише в аналітиці, або в ручних тегах), а дані в нас уже є - тож видно, чи реальний
+// контент відповідає задуманому міксу, чи «збиралися робити каруселі», а вийшли самі пости.
+function renderFmtFact(mix){
+  const box=$('fmtFact'); if(!box) return;
+  const total=Object.values(mix).reduce((a,b)=>a+(+b||0),0);
+  if(!total){ box.style.display='none'; return; }
+  const keys=FMT_KEYS.filter(k=>mix[k]);
+  if(keys.length<2){ box.style.display='none'; return; } // один формат - нема що порівнювати
+  const COL={post:'var(--muted)',carousel:'var(--brand)',reel:'var(--ig)',story:'var(--amber)'};
+  box.style.display='';
+  box.innerHTML='<div style="font-size:11.5px;color:var(--muted);margin-bottom:4px">Фактично за 30 днів <span class="qh" title="Скільки чернеток кожного формату реально створено за останній місяць - щоб було видно, чи контент справді виходить таким, як задумано в міксі форматів.">?</span></div>'
+    +'<div style="display:flex;height:10px;border-radius:6px;overflow:hidden;border:1px solid var(--line)">'
+    +keys.map(k=>'<div style="width:'+Math.round(mix[k]/total*100)+'%;background:'+COL[k]+'" title="'+esc(FMT_META[k][1])+': '+mix[k]+'"></div>').join('')+'</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;font-size:11px;color:var(--muted)">'
+    +keys.map(k=>'<span>'+FMT_META[k][0]+' '+esc(FMT_META[k][1])+' '+Math.round(mix[k]/total*100)+'%</span>').join('')+'</div>';
 }
 // ---- 📡 Ритм каналів (спадкування «як у бренду» / свій ритм: дні, час, рубрики) ----
 const DAY_LBL=[['1','пн'],['2','вт'],['3','ср'],['4','чт'],['5','пт'],['6','сб'],['0','нд']];
@@ -466,14 +490,26 @@ async function renderRhythm(){
           +'</span>'
           +'<input class="rhRub txt" placeholder="рубрики через кому" value="'+esc(((r&&r.rubrics)||[]).join(', '))+'" style="width:150px;padding:3px 7px;font-size:11.5px" title="ця мережа братиме лише ці рубрики (порожньо = всі)">'
         +'</span>'
-      +'</div></div>'; }).join('')
-    +'<div style="font-size:11px;color:var(--faint);margin-top:7px">Застосовується при «AI-розподілі» та автопублікації з плану. Кілька часів = кілька постів на день у цій мережі.</div>';
+      // 🎨 мікс форматів саме ПО МЕРЕЖАХ: той самий формат у різних мережах працює по-різному
+      // (LinkedIn виграє каруселями-документами, IG - рілсами по охвату). Дефолт - лише пости,
+      // тож поки юзер нічого не обрав, поведінка плану не змінюється.
+      +'<div class="rhFmts" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:5px;padding-left:2px">'
+        +'<span style="font-size:11px;color:var(--faint);min-width:74px">формати:</span>'
+        +FMT_KEYS.map(k=>{ const row=((r&&r.formats)||[]).find(x=>(x&&x.f)===k); const on=!!row;
+          return '<label class="rhFmt" data-f="'+k+'" style="display:flex;align-items:center;gap:3px;font-size:11px;cursor:pointer" title="'+FMT_META[k][2]+'">'
+            +'<input type="checkbox" class="rhFmtOn"'+(on?' checked':'')+'> '+FMT_META[k][0]+' '+esc(FMT_META[k][1])
+            +'<input type="number" class="rhFmtShare txt" min="0" max="100" value="'+(on?(Number(row.share)||25):25)+'" style="width:44px;padding:2px 4px;font-size:11px;display:'+(on?'inline-block':'none')+'" title="приблизна частка слотів, %"><span class="rhFmtPct" style="display:'+(on?'inline':'none')+';color:var(--faint)">%</span></label>'; }).join('')
+      +'</div>'
+      +'</div>'; }).join('')
+    +'<div style="font-size:11px;color:var(--faint);margin-top:7px">Застосовується при «AI-розподілі» та автопублікації з плану. Кілька часів = кілька постів на день у цій мережі. Формати: нічого не обрано - усі слоти цієї мережі будуть звичайними постами; частки - орієнтир пропорції, не точна математика.</div>';
   const save=async()=>{ const out={};
     box.querySelectorAll('[data-net]').forEach(row=>{ if(row.querySelector('.rhMode').value!=='custom') return;
       const days=[...row.querySelectorAll('.rhDay')].filter(b=>b.dataset.on==='1').map(b=>+b.dataset.d);
       const times=[...row.querySelectorAll('.rhTime')].map(i=>i.value).filter(Boolean);
       const rubrics=row.querySelector('.rhRub').value.split(',').map(s=>s.trim()).filter(Boolean);
-      out[row.dataset.net]={...(days.length?{days}:{}),...(times.length?{times}:{}),...(rubrics.length?{rubrics}:{})}; });
+      const formats=[...row.querySelectorAll('.rhFmt')].filter(l=>l.querySelector('.rhFmtOn').checked)
+        .map(l=>({f:l.dataset.f, share:Math.max(0,Math.min(100,+l.querySelector('.rhFmtShare').value||25))}));
+      out[row.dataset.net]={...(days.length?{days}:{}),...(times.length?{times}:{}),...(rubrics.length?{rubrics}:{}),...(formats.length?{formats}:{})}; });
     try{ await saveSetting('channel_rhythm', JSON.stringify(out)); }catch(e){} };
   box.querySelectorAll('[data-net]').forEach(row=>{
     row.querySelectorAll('.rhDay').forEach(b=>{ const r=rh[row.dataset.net]; b.dataset.on=((r&&r.days)||[]).includes(+b.dataset.d)?'1':'0';
@@ -484,6 +520,9 @@ async function renderRhythm(){
       inp.className='rhTime txt'; inp.type='time'; inp.style.cssText='width:auto;padding:3px 6px;font-size:11.5px'; inp.onchange=save;
       wrap.insertBefore(inp, row.querySelector('.rhAddTime')); inp.focus(); };
     row.querySelector('.rhRub').addEventListener('input',()=>{ clearTimeout(row._t); row._t=setTimeout(save,700); });
+    row.querySelectorAll('.rhFmt').forEach(l=>{ const cb=l.querySelector('.rhFmtOn'), sh=l.querySelector('.rhFmtShare'), pct=l.querySelector('.rhFmtPct');
+      cb.onchange=()=>{ sh.style.display=cb.checked?'inline-block':'none'; pct.style.display=cb.checked?'inline':'none'; save(); };
+      sh.addEventListener('input',()=>{ clearTimeout(l._t); l._t=setTimeout(save,700); }); });
   });
 }
 function renderPlan(){
@@ -505,6 +544,7 @@ function renderPlan(){
     return '<div data-slot="'+s.id+'" style="display:flex;align-items:center;gap:11px;padding:12px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap">'
       +'<span style="font-size:12px;font-weight:700;color:var(--ink2);background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:5px 10px;min-width:82px;text-align:center;flex:none">'+day+'</span>'
       +(s.rubric?'<span class="ptag" style="color:var(--brand);border-color:var(--brand)">🏷 '+esc(s.rubric)+'</span>':'')
+      +((s.format&&s.format!=='post'&&FMT_META[s.format])?'<span class="ptag" title="Формат: '+FMT_META[s.format][2]+'">'+FMT_META[s.format][0]+' '+esc(FMT_META[s.format][1].toLowerCase())+'</span>':'')
       +((s.channel&&s.channel!=='all')?'<span class="ptag">'+(CP_ICON[s.channel]||'')+' '+esc(CP_LBL[s.channel]||s.channel)+'</span>':'')
       +'<div style="flex:1;min-width:200px"><div style="font-size:13.5px;font-weight:600;line-height:1.35">'+esc(s.theme||'')+'</div>'
         +(s.match_note?'<div style="font-size:11.5px;color:var(--amber);margin-top:2px">📎 '+esc(s.match_note)+'</div>':'')+'</div>'
@@ -1137,7 +1177,7 @@ function renderFinals(posts){
   o.innerHTML=vis.map(p=>'<div class="card post">'+esc((p.content||'').slice(0,200))+((p.content||'').length>200?'…':'')+'</div>').join('')+'<div class="hint" style="margin-top:8px">'+vis.length+' постів - відредагуй і затвердь у «Студії».</div>';
 }
 async function saveContent(id,v){ try{ await api('/posts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:v})}); flashSaved(); }catch(e){} }
-let StudioFilter='all', StudioRubric='', StudioOrigin='';
+let StudioFilter='all', StudioRubric='', StudioOrigin='', StudioFormat='';
 const INTENT_META={awareness:['🌱','знайомство','цінність новій аудиторії, без продажу'],nurture:['🤝','прогрів','будує довіру, мʼякий заклик'],sale:['💰','продаж','прямий оффер за сходами']};
 const ORIGIN_LABEL={manual:'✍️ вручну',rss:'📡 RSS',fireflies:'🎙 транскрипт',grain:'🎙 транскрипт',meetgeek:'🎙 транскрипт',brand:'✨ з бренду',gdrive:'📁 Drive',plan:'📅 з плану',diary:'📔 щоденник',takes:'🧵 тейк',idea:'💡 з ідеї'};
 const SelPosts=new Set(); // масові дії
@@ -1159,14 +1199,19 @@ function renderStudio(){
   if(tf){
     const rubset=[...new Set(all.map(p=>p.rubric).filter(Boolean))];
     const orgset=[...new Set(all.map(p=>p.source_origin).filter(Boolean))];
+    const fmtset=FMT_KEYS.filter(k=>all.some(p=>(p.format||'post')===k));
     tf.innerHTML=(rubset.length?'<select id="stRubSel" class="txt" style="width:auto;padding:6px 9px;display:inline-block;font-size:12.5px'+(StudioRubric?';border-color:var(--brand);color:var(--brand)':'')+'"><option value="">🏷 Всі рубрики</option>'+rubset.map(r=>'<option value="'+esc(r)+'"'+(StudioRubric===r?' selected':'')+'>🏷 '+esc(r)+'</option>').join('')+'</select>':'')
+      // фільтр за форматом - лише коли форматів реально більше одного (не додаємо шум тим, хто робить тільки пости)
+      +(fmtset.length>1?'<select id="stFmtSel" class="txt" style="width:auto;padding:6px 9px;display:inline-block;font-size:12.5px'+(StudioFormat?';border-color:var(--brand);color:var(--brand)':'')+'"><option value="">🎨 Всі формати</option>'+fmtset.map(k=>'<option value="'+k+'"'+(StudioFormat===k?' selected':'')+'>'+FMT_META[k][0]+' '+esc(FMT_META[k][1])+'</option>').join('')+'</select>':'')
       +(orgset.length>1?'<select id="stOrgSel" class="txt" style="width:auto;padding:6px 9px;display:inline-block;font-size:12.5px'+(StudioOrigin?';border-color:var(--brand);color:var(--brand)':'')+'"><option value="">📦 Всі джерела</option>'+orgset.map(o=>'<option value="'+esc(o)+'"'+(StudioOrigin===o?' selected':'')+'>'+(ORIGIN_LABEL[o]||esc(o))+'</option>').join('')+'</select>':'');
     const rs=$('stRubSel'); if(rs) rs.onchange=(e)=>{ StudioRubric=e.target.value; renderStudio(); };
+    const fs=$('stFmtSel'); if(fs) fs.onchange=(e)=>{ StudioFormat=e.target.value; renderStudio(); };
     const os=$('stOrgSel'); if(os) os.onchange=(e)=>{ StudioOrigin=e.target.value; renderStudio(); };
   }
   let show=act; if(StudioFilter==='review') show=act.filter(p=>p.review!=='approved'); if(StudioFilter==='approved') show=act.filter(p=>p.review==='approved');
   if(StudioFilter==='published') show=all.filter(isSent);
   if(StudioRubric) show=show.filter(p=>p.rubric===StudioRubric);
+  if(StudioFormat) show=show.filter(p=>(p.format||'post')===StudioFormat);
   if(StudioOrigin) show=show.filter(p=>p.source_origin===StudioOrigin);
   renderBulkBar();
   if(!show.length){ grid.innerHTML='<div class="empty" style="grid-column:1/-1">Поки порожньо. Додай джерело у «Джерела» і натисни «Згенерувати».</div>'; return; }
@@ -1175,7 +1220,9 @@ function renderStudio(){
     // шапка: опублікований пост показує мережі, КУДИ реально поїхав (✓); інші - обрані канали
     const dots=isPub?sentDots(p.sent):chanDots(p.channels);
     const im=INTENT_META[p.intent];
-    const tags=(p.format==='reel'?'<span class="ptag" style="color:var(--brand);border-color:var(--brand)">🎬 рілс</span>':'')+(im?'<span class="ptag" title="Намір поста: '+im[2]+'">'+im[0]+' '+im[1]+'</span>':'')+(p.rubric?'<span class="ptag">🏷 '+esc(p.rubric)+'</span>':'')+(p.source_origin&&p.source_origin!=='manual'?'<span class="ptag">'+(ORIGIN_LABEL[p.source_origin]||esc(p.source_origin))+'</span>':'');
+    // формат показуємо бейджем лише коли він НЕ звичайний пост (інакше бейдж на кожній картці = шум)
+    const fm=FMT_META[p.format]; const fmTag=(p.format&&p.format!=='post'&&fm)?'<span class="ptag" style="color:var(--brand);border-color:var(--brand)" title="Формат: '+fm[2]+'">'+fm[0]+' '+fm[1].toLowerCase()+'</span>':'';
+    const tags=fmTag+(im?'<span class="ptag" title="Намір поста: '+im[2]+'">'+im[0]+' '+im[1]+'</span>':'')+(p.rubric?'<span class="ptag">🏷 '+esc(p.rubric)+'</span>':'')+(p.source_origin&&p.source_origin!=='manual'?'<span class="ptag">'+(ORIGIN_LABEL[p.source_origin]||esc(p.source_origin))+'</span>':'');
     // 🛡 бейджі автоперевірок (settings_block.qa_gates) - показуються ЛИШЕ якщо перевірка знайшла слабке місце
     const qa=p.qa||{}; const qaBad=[];
     if(qa.director&&qa.director!=='yes') qaBad.push(['qad','🎯 '+(qa.director==='no'?'Директор: не веде до цілі':'Директор: частково веде до цілі')]);
@@ -1448,6 +1495,7 @@ async function openComposer(postId, opts){
         +'</div>'
         +'<label style="font-size:12px;color:var(--muted);display:inline-block;margin-bottom:12px">Рубрика <select id="cmpRubric" class="txt" style="width:auto;padding:6px 9px;display:inline-block;margin-left:4px">'+rubOpts+'</select></label>'
     +'<label style="font-size:12px;color:var(--muted);display:inline-block;margin:0 0 12px 10px" title="Намір керує закликом: знайомство - без продажу, прогрів - мʼякий, продаж - повний CTA">Намір <select id="cmpIntent" class="txt" style="width:auto;padding:6px 9px;display:inline-block;margin-left:4px"><option value="">-</option>'+Object.keys(INTENT_META).map(k=>'<option value="'+k+'"'+((full.intent||'')===k?' selected':'')+'>'+INTENT_META[k][0]+' '+INTENT_META[k][1]+'</option>').join('')+'</select></label>'
+    +'<label style="font-size:12px;color:var(--muted);display:inline-block;margin:0 0 12px 10px" title="Формат = як упаковано контент. Впливає на структуру тексту при перегенерації.">Формат <select id="cmpFormat" class="txt" style="width:auto;padding:6px 9px;display:inline-block;margin-left:4px">'+FMT_KEYS.map(k=>'<option value="'+k+'"'+((full.format||'post')===k?' selected':'')+'>'+FMT_META[k][0]+' '+FMT_META[k][1]+'</option>').join('')+'</select></label>'
         +'<textarea id="cmpText" class="txt" style="min-height:240px;font-size:14px;line-height:1.55;resize:vertical"></textarea>'
         +'<div style="font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint);margin-top:12px">🤖 ПОМІЧНИКИ ТЕКСТУ</div>'
         +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="dashbtn" id="cmpRewrite" title="Перепише текст; можна вказати, що саме змінити">✍ Переписати</button><button class="dashbtn" id="cmpHook" title="3 варіанти сильнішого відкриття з кульмінації">🪝 Гачок</button><button class="dashbtn" id="cmpAudit" title="Знайти і точково прибрати сліди AI">🔍 AI-сліди</button><button class="dashbtn" id="cmpHash" title="5-8 релевантних хештегів у кінець тексту"># Хештеги</button></div>'
@@ -1566,7 +1614,9 @@ async function openComposer(postId, opts){
     }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpPhoto').onclick=()=>openPhotoTool(postId, full.image_prompt||'', (f)=>{ mediaFilename=f; renderMedia(); renderPrev(); });
   // ----- зберегти / адаптувати / публікувати / планувати -----
-  async function saveDraft(){ const iv=ov.querySelector('#cmpIntent'); await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master,rubric,intent:iv?iv.value:''})}); await api('/posts/'+postId+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:C})}); }
+  async function saveDraft(){ const iv=ov.querySelector('#cmpIntent'), fv=ov.querySelector('#cmpFormat');
+    await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master,rubric,intent:iv?iv.value:'',...(fv?{format:fv.value}:{})})});
+    await api('/posts/'+postId+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:C})}); }
   ov.querySelector('#cmpSave').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('💾 зберігаю…'); try{ await saveDraft(); setMsg('чернетку збережено ✓','var(--brand)'); try{await loadStudioPosts();}catch(_){} }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; } };
   ov.querySelector('#cmpAdapt').onclick=async(e)=>{ const sel=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!sel.length){ setMsg('немає каналів для адаптації','var(--danger)'); return; } const b=e.target; b.disabled=true; setMsg('✨ AI підлаштовує під канали…'); aiBusy('✨ Підлаштовую під канали (з чернетки)…'); try{ await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master})}); const r=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:sel})}); Object.keys(r.channels||{}).forEach(k=>{ if(!sentSet.has(k)) C[k]=r.channels[k]; }); renderPrev(); setMsg('готово ✓ кожна мережа у своєму форматі','var(--brand)'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpNow').onclick=async(e)=>{ const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('усі обрані канали вже опубліковано','var(--danger)'); return; } const b=e.target; b.disabled=true;
@@ -1927,7 +1977,7 @@ function renderCal(){
       const g=document.createElement('div'); g.className='pchip ghost';
       const drafted=p.status==='drafted';
       g.title=drafted?'Чернетка готова - відкрити в композері':'Тема з плану (пост ще не створено). Клік = згенерувати пост'+(p.status==='matched'?' зі зметченого матеріалу':'');
-      g.innerHTML='<b>'+(drafted?'✍️ чернетка':'📋 тема')+'</b> '+((p.channel&&p.channel!=='all')?(CP_ICON[p.channel]||'')+' ':'')+esc(String(p.theme||p.rubric||'').replace(/\n+/g,' ').slice(0,maxTxt));
+      g.innerHTML='<b>'+(drafted?'✍️ чернетка':'📋 тема')+'</b> '+((p.format&&p.format!=='post'&&FMT_META[p.format])?FMT_META[p.format][0]+' ':'')+((p.channel&&p.channel!=='all')?(CP_ICON[p.channel]||'')+' ':'')+esc(String(p.theme||p.rubric||'').replace(/\n+/g,' ').slice(0,maxTxt));
       g.onclick=async(ev)=>{ ev.stopPropagation();
         if(drafted&&p.post_id){ openComposer(p.post_id); return; }
         const from=p.match_source_id?'material':'theme';
