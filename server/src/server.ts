@@ -1997,8 +1997,10 @@ app.post("/api/integrations/meta/select", async (req: any, reply) => {
 
 // ===================== POST-ЮНІТИ (банк публікацій) =====================
 async function postOwned(postId: string, ws: string) {
-  return one<{ content: string }>(
-    `select p.content from post p
+  // origin потрібен, щоб «Переробити» для щоденника/діалогу теж ішло в режимі «з власних слів автора»
+  // (інакше правка знову дописує вигадані списки й загальні висновки)
+  return one<{ content: string; origin: string }>(
+    `select p.content, coalesce(s.origin,'') as origin from post p
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
 }
@@ -2032,7 +2034,7 @@ app.post("/api/posts/:postId/regenerate", async (req: any, reply) => {
   const post = await postOwned(req.params.postId, req.user.workspace_id);
   if (!post) return reply.code(404).send({ error: "пост не знайдено" });
   try {
-    const fresh = await rewritePost(req.user.workspace_id, post.content, typeof req.body?.instruction === "string" ? req.body.instruction : undefined);
+    const fresh = await rewritePost(req.user.workspace_id, post.content, typeof req.body?.instruction === "string" ? req.body.instruction : undefined, post.origin);
     await q(`update post set content=$2, review=null where id=$1`, [req.params.postId, fresh]);
     return { ok: true, content: fresh };
   } catch (e: any) {

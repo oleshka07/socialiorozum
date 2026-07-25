@@ -99,6 +99,24 @@ function formatBag(rhythm: any, globalMix: any, network?: string): ContentFormat
   return bag.length ? bag : ["post"];
 }
 
+// ---- 🗣 Режим «З ВЛАСНИХ СЛІВ АВТОРА» (щоденник, власні діалоги) ----
+// Реальний провал, який це лікує: із запису про дзвінок з постачальником будинків вийшов пост
+// «Ось що ми випробували й що дійсно спрацювало: 1. Персоналізація 2. Інтеграція AI 3. Прозорість» -
+// автор такого НЕ казав і НЕ пробував, а два його справжні інсайти (нав'язування одного інструменту
+// всім партнерам без діагностики; потухший погляд на пропозицію глибинних інтервʼю) зникли.
+// Причина: модель отримує сирий особистий матеріал і за звичкою добиває його маркетинговою генерикою.
+// Тут матеріал - ЄДИНЕ джерело фактів, а цінність поста саме в конкретиці спостереження.
+const OWN_WORDS_RULE =
+  "\n\nРЕЖИМ «З ВЛАСНИХ СЛІВ АВТОРА» (матеріал - особистий запис/діалог автора, не стороння стаття):" +
+  "\n- ХРЕБЕТ поста = конкретне СПОСТЕРЕЖЕННЯ автора з цього запису, а не загальна тема, до якої воно дотичне. Якщо він описав випадок - пост про цей випадок." +
+  "\n- ФАКТИ беруться ВИКЛЮЧНО з матеріалу. ЗАБОРОНЕНО дописувати дії, спроби, впровадження, результати, інструменти й цифри, яких у записі нема. Формулювання «ось що ми випробували», «ось що спрацювало», «ми впровадили» дозволені ЛИШЕ якщо автор прямо це сказав." +
+  "\n- Списки-порадники з нічого ЗАБОРОНЕНІ. Список доречний лише тоді, коли його пункти - це те, що автор САМ назвав (його помилки, його кроки, його спостереження)." +
+  "\n- Конкретика запису - це і є цінність, НЕ узагальнюй її: «постачальник будинків», «нав'язав табличку», «потухший погляд» сильніші за «партнер», «інструмент», «незацікавленість». Зберігай, хто що саме зробив і сказав." +
+  "\n- Без загальних вступів і висновків про ринок, конкуренцію, «швидкі зміни», «сучасні технології» - вони не додають нічого й одразу читаються як AI." +
+  "\n- Фінал - висновок АВТОРА саме з цього випадку (що він із цього зрозумів / що зробить інакше). Не питання-заглушка «а ти як?» заради залучення." +
+  "\n- Якщо матеріалу мало на повний пост - зроби пост КОРОТШИМ. Короткий і правдивий кращий за довгий і добитий загальними словами." +
+  "\n- Переформулювати, скорочувати й структурувати думки автора МОЖНА і треба - вигадувати за нього не можна.";
+
 // «Директор»: головна бізнес-ціль контенту - фільтр «веде до цілі чи контент заради контенту».
 export const GOAL_LABELS: Record<string, string> = {
   money: "продажі та гроші (контент має підводити до покупки)",
@@ -339,8 +357,8 @@ function hash(s: string) {
 
 // контекст прогону
 async function runContext(runId: string) {
-  const row = await one<{ source_id: string; workspace_id: string; transcript: string }>(
-    `select r.source_id, s.workspace_id, s.transcript
+  const row = await one<{ source_id: string; workspace_id: string; transcript: string; origin: string }>(
+    `select r.source_id, s.workspace_id, s.transcript, coalesce(s.origin,'') as origin
      from pipeline_run r join source s on s.id=r.source_id where r.id=$1`,
     [runId]
   );
@@ -591,7 +609,11 @@ async function recentContentDigest(workspaceId: string): Promise<string> {
 
 // ---- LITE: один зібраний промт (усі кроки кишки в одному) ----
 // Зібрати спільний системний промт Lite-генерації (для самої генерації + для перегляду користувачем).
-export async function buildLitePrompt(workspaceId: string, count: number, ideas?: string[], formats?: string[]): Promise<{ system: string; model: string }> {
+// origin - походження матеріалу: 'diary'/'dialog' вмикають режим «з власних слів автора»
+// (особистий запис = єдине джерело фактів, вигадка заборонена); решта походжень працюють як раніше.
+export const OWN_WORDS_ORIGINS = ["diary", "dialog"];
+export async function buildLitePrompt(workspaceId: string, count: number, ideas?: string[], formats?: string[], origin?: string): Promise<{ system: string; model: string }> {
+  const ownWords = OWN_WORDS_ORIGINS.includes(String(origin || "")) ? OWN_WORDS_RULE : "";
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
   const rubs = await q<{ name: string; share: number; description: string }>(
@@ -649,7 +671,7 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
         ? "\n- Гачок (перший рядок вирішує все): вивчи, ЯК САМЕ автор відкриває пости у &lt;voice_examples&gt; вище (довжина першого рядка, характерні слова, чи задає питання чи стверджує) і склади 3 варіанти гачка САМЕ в його манері - не з готового списку типів, а з його власного почерку. Залиш найсильніший."
         : "\n- Гачок (перший рядок вирішує все): подумки склади 3 варіанти різних типів (цікавісний розрив, патерн-перебій, контр-теза, попередження про помилку, число/список, пряма обіцянка) і залиш у пості НАЙСИЛЬНІШИЙ - своїх прикладів голосу ще нема, тому цей список лише орієнтир, а не шаблон під копіювання формулювань.") +
       "\n- Один чіткий мʼякий заклик на пост, не більше." +
-      rubricsText + formatRules + recentDigest.replace(/^\n+/, "\n- ") +
+      rubricsText + formatRules + ownWords + recentDigest.replace(/^\n+/, "\n- ") +
       NO_DASH_RULE.replace(/^\n+/, "\n- ") +
       HOOK_RULE.replace(/^\n+/, "\n- ") +
       ANTI_AI_RULE.replace(/^\n+/, "\n- ") +
@@ -667,7 +689,7 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
     (s.marketing_context ? `\n\nБренд і аудиторія: ${s.marketing_context}` : "") +
     (s.tone_of_voice ? `\n\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) + painThesis(s) +
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
-    rubricsText + formatRules + ideasText + goalRule(s) + offerLadder(s) + HOOK_RULE + ANTI_AI_RULE + OBJECTION_RULE +
+    rubricsText + formatRules + ownWords + ideasText + goalRule(s) + offerLadder(s) + HOOK_RULE + ANTI_AI_RULE + OBJECTION_RULE +
     NO_DASH_RULE + `\n\nЗгенеруй рівно ${n} різних постів. ${outputFormat}`;
   return { system, model: "openai/gpt-4o" };
 }
@@ -699,10 +721,10 @@ async function runQaGates(workspaceId: string, postIds: string[]): Promise<void>
 // formats (опційно): формат на КОЖНУ ідею у тому ж порядку - слот плану / вибрана ідея Розвідника
 // вже знають, який формат замовлено, і цей вибір має доїхати до post.format, а не губитись.
 export async function generatePostsOnePass(runId: string, count: number, ideas?: string[], formats?: string[]): Promise<number> {
-  const { workspace_id, transcript } = await runContext(runId);
+  const { workspace_id, transcript, origin } = await runContext(runId);
   const sel = (ideas || []).map((t) => String(t).trim()).filter(Boolean);
   const n = Math.max(1, Math.min(12, sel.length ? sel.length : (Number(count) || 6)));
-  const { system, model } = await buildLitePrompt(workspace_id, n, sel.length ? sel : undefined, formats);
+  const { system, model } = await buildLitePrompt(workspace_id, n, sel.length ? sel : undefined, formats, origin);
   // max_tokens масштабується від к-сті постів - інакше дефолтний ліміт 1500 (openrouter.ts) на 8-12
   // постів або обрізає JSON (пости мовчки губляться), або примушує модель стискати кожен пост до куцого
   // варіанту ЧЕРЕЗ БРАК МІСЦЯ, а не тому що це найкращий текст.
@@ -1186,7 +1208,7 @@ export async function matchPlanSlots(workspaceId: string): Promise<number> {
 // Перегенерація одного поста зі СПІЛЬНИМ контекстом (голос + де-AI + бриф) - для кнопки «Переробити».
 // instruction - конкретна правка від користувача («зроби коротшим», «прибери смайли», «додай приклад»):
 // виконується ПОВЕРХ повного контексту, тож правка не губить голос/стратегію.
-export async function rewritePost(workspaceId: string, text: string, instruction?: string): Promise<string> {
+export async function rewritePost(workspaceId: string, text: string, instruction?: string, origin?: string): Promise<string> {
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
   const instr = (instruction || "").trim();
@@ -1199,6 +1221,7 @@ export async function rewritePost(workspaceId: string, text: string, instruction
     (s.tone_of_voice ? `\n\nГолос бренду: ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) + painThesis(s) +
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
     goalRule(s) + ANTI_AI_RULE +
+    (OWN_WORDS_ORIGINS.includes(String(origin || "")) ? OWN_WORDS_RULE : "") +
     NO_DASH_RULE + `\n\nПоверни лише текст поста. Мова: ${lang}.`;
   return chat("openai/gpt-4o", system, `---\n${text}`, { workspaceId, step: "regenerate" });
 }
