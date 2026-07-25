@@ -2414,7 +2414,15 @@ app.post("/api/tasks/ack", async (req: any, reply) => {
 });
 
 app.get("/api/bank", async (req: any) => {
-  return q(`select p.id, p.content, p.review, p.created_at, src.title as source_title
+  // sent: пост УЖЕ поїхав хоч в одну мережу - потрібно для перемикача «Опубліковані» в банку
+  // (раніше опубліковані просто тьмяніли разом із тими, що вже в календарі, і їх не було як розділити)
+  return q(`select p.id, p.content, p.review, p.created_at, src.title as source_title,
+                   exists(
+                     select 1 from telegram_publish t where t.post_id=p.id and t.status='sent'
+                     union all select 1 from threads_publish t where t.post_id=p.id and t.status='sent'
+                     union all select 1 from meta_publish t where t.post_id=p.id and t.status='sent'
+                     union all select 1 from linkedin_publish t where t.post_id=p.id and t.status='sent'
+                   ) as sent
             from post p join pipeline_run r on r.id=p.run_id join source src on src.id=r.source_id
             where src.workspace_id=$1 and p.stage='final' and p.review='approved'
             order by p.created_at desc`, [req.user.workspace_id]);

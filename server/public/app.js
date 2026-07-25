@@ -69,12 +69,71 @@ $('themeToggle').onclick=()=>setTheme(document.body.getAttribute('data-theme')==
 
 // ---------- навігація ----------
 const PAGES={today:['Сьогодні','Що виходить, що затвердити і що зробити зараз'],create:['Створення','Переглянь і затвердь готові пости'],publish:['Публікація','Запланований контент і календар'],brand:['Бренд і стратегія','Голос, візуал і цілі - вводяться раз, працюють всюди'],analytics:['Аналітика','Ефективність контенту і витрати'],settings:['Налаштування','Профіль, канали публікації та джерела'],tools:['Інструменти','Розширені й рідко вживані функції']};
+// ---------- 📌 липка плашка розділу: вкладки + дії розділу переїжджають у неї ----------
+// Вкладки кожного розділу ФІЗИЧНО переносяться у #phTabs (вузол той самий - обробники живі),
+// тож не треба дублювати розмітку й переписувати всі setCTab/setPTab/setBTab/setSTab.
+const VIEW_TABS={create:'cTabs',publish:'pubTabs',brand:'bTabs',settings:'sTabs'};
+function mountViewTabs(v){
+  const host=$('phTabs'); if(!host) return;
+  // повертаємо попередні вкладки на їхнє місце в секції (щоб не загубились між перемиканнями)
+  [...host.children].forEach(el=>{ const home=el._home; if(home) home.appendChild(el); else el.remove(); });
+  const id=VIEW_TABS[v]; if(!id) return;
+  const t=$(id); if(!t) return;
+  if(!t._home) t._home=t.parentNode;   // запамʼятовуємо, куди вертати
+  host.appendChild(t);
+}
+// поп-ап, що «виїжджає» з кнопки: панель фізично переїздить у нього й вертається назад при закритті
+let PopOpen=null;
+function closePop(){ if(!PopOpen) return;
+  const { pop, bg, node, home, btn } = PopOpen; PopOpen=null;
+  if(node&&home) home.appendChild(node);          // панель вертається у свій схований хост
+  pop.remove(); bg.remove(); if(btn) btn.classList.remove('on');
+}
+function openPop(btn, hostId, title){
+  const host=$(hostId); if(!host) return;
+  const node=host.firstElementChild; if(!node) return;
+  if(PopOpen&&PopOpen.hostId===hostId){ closePop(); return; }   // повторний клік = згорнути назад у кнопку
+  closePop();
+  const bg=document.createElement('div'); bg.className='popov-bg';
+  const pop=document.createElement('div'); pop.className='popov';
+  pop.innerHTML='<div class="popov-h"><b>'+esc(title)+'</b><button class="icon" id="popX" style="margin-left:auto" title="Закрити">✕</button></div><div id="popBody"></div>';
+  document.body.appendChild(bg); document.body.appendChild(pop);
+  pop.querySelector('#popBody').appendChild(node);
+  PopOpen={ pop, bg, node, home:host, btn, hostId };
+  btn.classList.add('on');
+  // позиція: під кнопкою, вирівняно по правому краю кнопки, з утриманням у межах екрана
+  const r=btn.getBoundingClientRect();
+  const w=Math.min(560, window.innerWidth-20);
+  pop.style.width=w+'px';
+  pop.style.top=Math.min(window.innerHeight-60, r.bottom+8)+'px';
+  pop.style.left=Math.max(10, Math.min(window.innerWidth-w-10, r.right-w))+'px';
+  bg.onclick=closePop; pop.querySelector('#popX').onclick=closePop;
+}
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&PopOpen) closePop(); });
+// дії розділу праворуч у липкій плашці (для Публікації залежать від активної вкладки)
+function renderViewActions(v){
+  const box=$('phActions'); if(!box) return;
+  closePop(); box.innerHTML='';
+  if(v!=='publish') return;
+  const isPlan=$('layPlan')&&$('layPlan').style.display!=='none'&&$('pubPlanHost')&&$('pubPlanHost').style.display!=='none';
+  const btns=isPlan
+    ? [['skeletonHost','📋 Скелет','Згенерувати скелет плану: горизонт, темп, теми'],
+       ['rhythmHost','📡 Ритм каналів','Дні/час/формати публікацій по мережах']]
+    : [['bankHost','🏦 Банк публікацій','Затверджені пости: нові, у календарі, опубліковані']];
+  btns.forEach(([hostId,label,tip])=>{
+    const b=document.createElement('button'); b.className='ghost'; b.title=tip; b.textContent=label;
+    b.style.cssText='padding:6px 12px;font-size:12.5px';
+    b.onclick=()=>openPop(b,hostId,label.replace(/^\S+\s/,''));
+    box.appendChild(b);
+  });
+}
 function selectView(v){
   if(v==='sources'){ v='settings'; setTimeout(()=>setSTab('sources'),0); } // джерела живуть у Налаштуваннях
   if(v==='strategy'){ v='brand'; setTimeout(()=>setBTab('strat'),0); } // Стратегія злита з Брендом (вкладка «Бриф і цілі»)
   document.querySelectorAll('.navitem').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
   document.querySelectorAll('.viewsec').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
   const p=PAGES[v]||['','']; $('pageTitle').textContent=p[0]; $('pageSub').textContent=p[1];
+  mountViewTabs(v); renderViewActions(v);        // вкладки й дії розділу - у липку плашку
   $('genPostsBtn').style.display='inline-flex'; // «＋ Додати матеріал» доступна з будь-якого розділу
   if(v==='today') loadToday();
   if(v==='analytics') loadAnalytics();
@@ -178,9 +237,10 @@ function setPTab(t){
   const host=$('pubPlanHost'); if(host) host.style.display=t==='plan'?'':'none';
   const lp=$('layPlan'); if(lp) lp.style.display=t==='plan'?'':'none';
   if(t==='plan'){ loadPlan(); try{ renderRhythm(); }catch(e){} try{ renderPlanNets(); }catch(e){} }
+  // кнопки в липкій плашці різні для Календаря (🏦 Банк) і Плану (📋 Скелет, 📡 Ритм)
+  try{ renderViewActions('publish'); }catch(e){}
 }
 document.querySelectorAll('#pubTabs .tab').forEach(x=>x.onclick=()=>setPTab(x.dataset.ptab));
-if($('calToPlan')) $('calToPlan').onclick=()=>setPTab('plan');
 // переселення панелі плану в хаб Публікації (обробники лишаються живими - вузол той самий)
 (function(){ const host=$('pubPlanHost'), lp=$('layPlan'); if(host&&lp) host.appendChild(lp); })();
 document.querySelectorAll('#cTabs .tab').forEach(x=>x.onclick=()=>setCTab(x.dataset.ctab));
@@ -1893,18 +1953,33 @@ function renderLegacyPlan(){ // СТАРИЙ конвеєрний план (#o7/
 
 // ---------- Публікація ----------
 async function loadPublish(){ try{ const [bank,slots]=await Promise.all([api('/bank'),api('/schedule')]); Pub.bank=bank||[]; Pub.slots=slots||[]; renderBank(); renderCal(); }catch(e){} }
+// 🏦 Банк: 3 перемикачі замість тьмяніння (раніше «вже в календарі» й «опубліковані» виглядали
+// однаково приглушеними, і розділити їх було ніяк). Нові = затверджені, ще не в календарі й не в мережі.
+let BankTab='new';
 function renderBank(){
   const o=$('bank'); if(!o) return; const sch=new Set(Pub.slots.map(s=>s.post_id));
-  $('bankCount').textContent=Pub.bank.length;
-  if(!Pub.bank.length){ o.innerHTML='<div class="empty">Порожньо. Затвердьте пости у «Студії» - вони зʼявляться тут.</div>'; return; }
+  const isPub=(p)=>!!p.sent, inCal=(p)=>sch.has(p.id)&&!p.sent;
+  const groups={ new:Pub.bank.filter(p=>!isPub(p)&&!inCal(p)), cal:Pub.bank.filter(inCal), pub:Pub.bank.filter(isPub) };
+  if($('btNew')) $('btNew').textContent=groups.new.length;
+  if($('btCal')) $('btCal').textContent=groups.cal.length;
+  if($('btPub')) $('btPub').textContent=groups.pub.length;
+  document.querySelectorAll('#bankTabs .tab').forEach(x=>x.classList.toggle('on',x.dataset.bt===BankTab));
+  const HINT={ new:'Перетягни картку на день у календарі (час за замовч. 09:00) або «AI-розподіл».',
+    cal:'Ці пости вже стоять у календарі й вийдуть автоматично у свій час.',
+    pub:'Уже опубліковані - лишаються як історія публікацій і аналітика.' };
+  if($('bankHint')) $('bankHint').textContent=HINT[BankTab]||'';
+  const show=groups[BankTab]||[];
+  if(!show.length){ o.innerHTML='<div class="empty">'+(BankTab==='new'?'Порожньо. Затвердь пости в Чорновиках - вони зʼявляться тут.':'Тут поки нічого.')+'</div>'; return; }
   o.innerHTML='';
-  Pub.bank.forEach(p=>{ const placed=sch.has(p.id);
-    const c=document.createElement('div'); c.className='chip'+(placed?' placed':''); c.draggable=true; c.dataset.post=p.id;
-    c.innerHTML='<b>'+esc((p.content||'').replace(/\n+/g,' ').slice(0,46))+'</b><small>'+(p.source_title?esc(p.source_title):'джерело')+(placed?' · у календарі':'')+'</small>';
-    c.addEventListener('dragstart',ev=>ev.dataTransfer.setData('text/plain','post:'+p.id));
+  show.forEach(p=>{ const placed=BankTab!=='new';
+    const c=document.createElement('div'); c.className='chip'+(placed?' placed':'');
+    c.draggable=BankTab==='new'; c.dataset.post=p.id;   // тягнути в календар має сенс лише для «нових»
+    c.innerHTML='<b>'+esc((p.content||'').replace(/\n+/g,' ').slice(0,46))+'</b><small>'+(p.source_title?esc(p.source_title):'джерело')+(BankTab==='cal'?' · у календарі':(BankTab==='pub'?' · ✈️ опубліковано':''))+'</small>';
+    if(BankTab==='new') c.addEventListener('dragstart',ev=>ev.dataTransfer.setData('text/plain','post:'+p.id));
     o.appendChild(c);
   });
 }
+document.querySelectorAll('#bankTabs .tab').forEach(x=>x.onclick=()=>{ BankTab=x.dataset.bt; renderBank(); });
 function calMonday(){ // «сьогодні» за поясом воркспейсу (TZ), якір - полудень UTC, щоб DST не зсував дату
   const [Y,M,D]=locDate(new Date()).split('-').map(Number);
   const d=new Date(Date.UTC(Y,M-1,D,12,0,0));

@@ -1,7 +1,7 @@
 {
   "server/db/schema.sql": {
-    "mtime": 1784919638.2989902,
-    "ast_hash": "5d84ca87982c0b6fdf424a55d8adcefe",
+    "mtime": 1784960375.4443965,
+    "ast_hash": "1b1248928915899d88ff20e1fab26ee9",
     "semantic_hash": ""
   },
   "server/package.json": {
@@ -15,7 +15,7 @@
     "semantic_hash": "0a46780760c16475d3cdf6c024879292"
   },
   "server/src/autopost.ts": {
-    "mtime": 1784919748.1109877,
+    "mtime": 1784919918.3229837,
     "ast_hash": "c2a3cdd5cdada79eaa581c6ce21f4c44",
     "semantic_hash": ""
   },
@@ -105,12 +105,12 @@
     "semantic_hash": ""
   },
   "server/src/pipeline.ts": {
-    "mtime": 1784918334.9504938,
-    "ast_hash": "2a83e301b52281a28a09306b28792685",
+    "mtime": 1784960705.2643998,
+    "ast_hash": "0a754228864010d053ef897c7a988eab",
     "semantic_hash": ""
   },
   "server/src/publisher.ts": {
-    "mtime": 1784919708.9789886,
+    "mtime": 1784919918.3229837,
     "ast_hash": "8bc9fc35c696daa255ce907b17ea4b42",
     "semantic_hash": ""
   },
@@ -125,8 +125,8 @@
     "semantic_hash": ""
   },
   "server/src/server.ts": {
-    "mtime": 1784918334.9504938,
-    "ast_hash": "1e4970cc05524dbbc45160e1ba414c0e",
+    "mtime": 1784960782.1404004,
+    "ast_hash": "8ff75440ed23c2a7dd3f4e7a79f1dfd9",
     "semantic_hash": ""
   },
   "server/src/telegram.ts": {
@@ -155,8 +155,8 @@
     "semantic_hash": "352df4b84f4af2922ccd9adaf8e4608f"
   },
   "CLAUDE.md": {
-    "mtime": 1784919848.6109855,
-    "ast_hash": "b903cb92594eb2242fce26a1a185a001",
+    "mtime": 1784961212.9644048,
+    "ast_hash": "d53aad023ce04e96eb99a0188aa77aa7",
     "semantic_hash": ""
   },
   "DEPLOY.md": {
@@ -225,8 +225,8 @@
     "semantic_hash": ""
   },
   "server/public/app.html": {
-    "mtime": 1784918334.9464936,
-    "ast_hash": "848dcea5dd2c80e1af6a4c1e331a218a",
+    "mtime": 1784960930.664402,
+    "ast_hash": "700f09862311a799f1b2853462e18c47",
     "semantic_hash": ""
   },
   "server/public/auth.html": {
@@ -360,8 +360,8 @@
     "semantic_hash": ""
   },
   "server/.lint/ui-smoke.mjs": {
-    "mtime": 1784918146.902498,
-    "ast_hash": "76bea27d1845f8762c1058ca60049bfe",
+    "mtime": 1784961131.440404,
+    "ast_hash": "ec8e43f6e8506cf74101fad5e96e7dfa",
     "semantic_hash": ""
   },
   "server/eslint.config.mjs": {
@@ -370,8 +370,8 @@
     "semantic_hash": ""
   },
   "server/public/app.js": {
-    "mtime": 1784918334.9464936,
-    "ast_hash": "0dd9531bb7027c374aeaf1af2e4d48ce",
+    "mtime": 1784960977.7684023,
+    "ast_hash": "3bd890018da87d8b47905f219be44831",
     "semantic_hash": ""
   },
   "server/src/settings.ts": {

@@ -84,7 +84,25 @@
   .modeseg span.pro.on{color:var(--brand)}
   .main{margin-left:0 !important;width:100%}
   .content{max-width:1460px;margin:0 auto}
-  .pagehead{margin-bottom:14px}
+  /* 📌 Єдина ЛИПКА плашка розділу: заголовок + вкладки + дії розділу в одному рядку.
+     Вкладки кожного розділу фізично ПЕРЕЇЗДЖАЮТЬ сюди при перемиканні виду (вузли ті самі,
+     тож усі обробники лишаються живими) - той самий host-move патерн, що вже вживається
+     для pubPlanHost/toolsGdriveHost. */
+  .pagehead{margin-bottom:14px;position:sticky;top:0;z-index:45;background:var(--surface);border:1px solid var(--line);
+    border-radius:var(--r);box-shadow:var(--shadow);padding:12px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .pagehead .phL{min-width:0}
+  .pagehead .tabs{margin:0!important}
+  .pagehead #phActions{margin-left:auto;display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+  @media(max-width:700px){ .pagehead{padding:10px 12px;gap:9px} .pagehead .psub{display:none} }
+  /* поп-ап, що «виїжджає» з кнопки в липкій плашці: панель фізично переїздить у нього й назад */
+  .popov-bg{position:fixed;inset:0;z-index:70}
+  .popov{position:fixed;z-index:71;background:var(--surface);border:1px solid var(--line);border-radius:14px;
+    box-shadow:var(--shadow-lg, 0 12px 40px rgba(0,0,0,.22));animation:pop .16s ease;overflow:auto;
+    max-height:78vh;padding:14px 16px}
+  .popov-h{display:flex;align-items:center;gap:8px;margin-bottom:8px;position:sticky;top:-14px;background:var(--surface);padding:4px 0 6px;z-index:2}
+  .popov-h b{font-size:15px}
+  .popov .panel{border:0!important;box-shadow:none!important;padding:0!important;margin:0 0 10px!important;background:transparent!important}
+  @media(max-width:700px){ .popov{left:8px!important;right:8px!important;width:auto!important} }
   .usermenu{position:absolute;right:0;top:calc(100% + 8px);z-index:80;min-width:250px;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow-lg, 0 12px 40px rgba(0,0,0,.18));animation:pop .18s ease;overflow:hidden}
   .umitem{padding:10px 14px;font-size:13.5px;font-weight:600;cursor:pointer;color:var(--ink2)}
   .umitem:hover{background:var(--surface2)}
@@ -470,7 +488,11 @@
 
   <main class="main">
     <div class="content">
-      <div class="pagehead"><div class="ptitle" id="pageTitle">Створення</div><div class="psub" id="pageSub">Переглянь і затвердь готові пости</div></div>
+      <div class="pagehead">
+        <div class="phL"><div class="ptitle" id="pageTitle">Створення</div><div class="psub" id="pageSub">Переглянь і затвердь готові пости</div></div>
+        <div id="phTabs"></div>
+        <div id="phActions"></div>
+      </div>
       <div id="taskStrip" style="display:none"></div>
 
       <!-- ============ TODAY: стан дня одним екраном (той самий зміст, що ранковий дайджест бота) ============ -->
@@ -512,8 +534,10 @@
 
         <!-- PLAN: скелет + ритм у дві колонки (компактно), довгі пояснення - у «?»-підказках -->
         <div id="layPlan" style="display:none">
-          <div class="grid2" style="grid-template-columns:1fr 1.35fr;align-items:start;gap:14px;margin-bottom:18px">
-            <div class="panel" style="margin:0">
+          <!-- 📋 Скелет і 📡 Ритм переїхали в попапи з кнопок липкої плашки: сам список плану тепер
+               на всю ширину, бо саме його людина й приходить дивитись. Вузли ті самі - обробники живі. -->
+          <div style="display:none">
+            <div id="skeletonHost"><div class="panel" style="margin:0">
               <div style="font-weight:700;font-size:14.5px;margin-bottom:7px;display:flex;align-items:center;gap:6px"><span id="planProgressLabel">Скелет плану</span><span class="qh" title="Скелет = теми на майбутні дні за твоєю стратегією (рубрики × найкращі дні). Кожен слот - ще НЕ пост: клік на тему в календарі чи «→ до поста» генерує чернетку.">?</span></div>
               <div style="height:9px;border-radius:6px;background:var(--surface2);overflow:hidden;margin-bottom:10px"><div id="planProgressBar" style="height:100%;background:var(--brand);width:0%;border-radius:6px;transition:width .3s"></div></div>
               <div id="planMixWrap" style="margin:4px 0 10px;display:none">
@@ -535,12 +559,11 @@
                 <button class="ghost" id="planMatchBtn" title="Підібрати наявні матеріали під теми слотів">🔗 Підібрати матеріали</button>
                 <span id="planMsg" style="font-size:12px;color:var(--muted)"></span>
               </div>
-            </div>
-            <div class="panel" id="rhythmPanel" style="margin:0">
-              <div class="ph" style="margin:0 0 8px;display:flex;align-items:center;gap:6px">📡 Ритм каналів<span class="qh" title="За замовчуванням усі мережі публікують за спільним ритмом бренду - нічого налаштовувати не треба. Хочеш інший графік чи тематику для конкретної мережі - перемкни її на «свій ритм»: дні, час(и) і (за бажанням) рубрики. Той самий пост поїде в кожну мережу у ЇЇ час - дублі неможливі, кожна мережа отримує пост рівно раз. Кілька часів = кілька постів на день (напр. Threads 2-3 рази).">?</span></div>
+            </div></div>
+            <div id="rhythmHost"><div class="panel" id="rhythmPanel" style="margin:0">
               <div id="rhythmRows"><span style="font-size:12.5px;color:var(--muted)">…</span></div>
               <div id="fmtFact" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)"></div>
-            </div>
+            </div></div>
           </div>
           <!-- «Контент-план по каналах» (LLM-таблиця) прибрано: дублював скелет+ритм і нікуди не вливався.
                Код/ендпоінти лишились дормантними (generateChannelPlan) - повернути можна за годину. -->
@@ -618,16 +641,24 @@
           <div class="tab" data-ptab="plan">📋 План і ритм <span class="badge" id="planCount" style="margin-left:5px"></span></div>
         </div>
         <div id="pubCal">
+        <!-- 🏦 Банк - у попапі з кнопки в липкій плашці (він рідко потрібен: календар відкривають, щоб
+             дивитись контент-план, а не банк). Панель живе тут схованою й фізично переїздить у попап. -->
+        <div id="bankHost" style="display:none">
         <div class="panel">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-            <div class="ph" style="margin:0">🏦 Банк публікацій <span class="badge" id="bankCount">0</span></div>
-            <div class="btnrow" style="margin:0 0 0 auto"><button class="primary" id="aiDistribute"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.8L19 9l-5.1 1.2L12 15l-1.9-4.8L5 9l5.1-1.2z"></path></svg>AI-розподіл</button><button class="ghost" id="reloadPub">↻ Оновити</button><span id="pubMsg" style="font-size:12px;color:var(--muted)"></span></div>
+            <div class="btnrow" style="margin:0"><button class="primary" id="aiDistribute"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.8L19 9l-5.1 1.2L12 15l-1.9-4.8L5 9l5.1-1.2z"></path></svg>AI-розподіл</button><button class="ghost" id="reloadPub">↻ Оновити</button><span id="pubMsg" style="font-size:12px;color:var(--muted)"></span></div>
           </div>
-          <div class="hint">Сюди потрапляють пости, які ви «Затвердили». Перетягни картку на день у календарі (час за замовч. 09:00) або «AI-розподіл».</div>
+          <div class="tabs" id="bankTabs" style="margin:10px 0 8px">
+            <div class="tab on" data-bt="new">Нові <span class="badge" id="btNew">0</span></div>
+            <div class="tab" data-bt="cal">У календарі <span class="badge" id="btCal">0</span></div>
+            <div class="tab" data-bt="pub">Опубліковані <span class="badge" id="btPub">0</span></div>
+          </div>
+          <div class="hint" id="bankHint">Перетягни картку на день у календарі (час за замовч. 09:00) або «AI-розподіл».</div>
           <div class="tray" id="bank"></div>
         </div>
+        </div>
         <div class="panel">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div class="ph" style="margin:0">📅 Календар</div><span id="calSum" style="font-size:12px;color:var(--muted)"></span><button class="ghost" id="calToPlan" style="margin-left:auto;padding:5px 12px;font-size:12.5px">⚙️ План і ритм</button></div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div class="ph" style="margin:0">📅 Календар</div><span id="calSum" style="font-size:12px;color:var(--muted)"></span></div>
           <div class="hint">Пунктирні картки - це ТЕМИ з плану (ще не пости): клікни, щоб згенерувати пост. Суцільні - заплановані публікації.</div>
           <div id="cal"></div>
         </div>
