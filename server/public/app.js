@@ -116,10 +116,12 @@ function renderViewActions(v){
   closePop(); box.innerHTML='';
   if(v!=='publish') return;
   const isPlan=$('layPlan')&&$('layPlan').style.display!=='none'&&$('pubPlanHost')&&$('pubPlanHost').style.display!=='none';
+  // Банк тепер ЖИВЕ лівою колонкою біля календаря (не попапом) - кнопки для нього тут нема;
+  // попапами лишились лише панелі Плану, які справді потрібні раз на кілька днів.
   const btns=isPlan
     ? [['skeletonHost','📋 Скелет','Згенерувати скелет плану: горизонт, темп, теми'],
        ['rhythmHost','📡 Ритм каналів','Дні/час/формати публікацій по мережах']]
-    : [['bankHost','🏦 Банк публікацій','Затверджені пости: нові, у календарі, опубліковані']];
+    : [];
   btns.forEach(([hostId,label,tip])=>{
     const b=document.createElement('button'); b.className='ghost'; b.title=tip; b.textContent=label;
     b.style.cssText='padding:6px 12px;font-size:12.5px';
@@ -127,6 +129,16 @@ function renderViewActions(v){
     box.appendChild(b);
   });
 }
+// 🏦 згортання лівої колонки банку: стан памʼятається між сесіями (кому банк не треба - той його
+// закрив раз і бачить весь календар; drag-drop не ламається, бо вузли лишаються в DOM)
+function setBankFold(fold){
+  const col=$('bankHost'), un=$('bankUnfold'); if(!col||!un) return;
+  col.style.display=fold?'none':''; un.style.display=fold?'flex':'none';
+  try{ localStorage.setItem('kg_bankfold', fold?'1':'0'); }catch(e){}
+}
+if($('bankFold')) $('bankFold').onclick=()=>setBankFold(true);
+if($('bankUnfold')) $('bankUnfold').onclick=()=>setBankFold(false);
+try{ setBankFold(localStorage.getItem('kg_bankfold')==='1'); }catch(e){}
 function selectView(v){
   if(v==='sources'){ v='settings'; setTimeout(()=>setSTab('sources'),0); } // джерела живуть у Налаштуваннях
   if(v==='strategy'){ v='brand'; setTimeout(()=>setBTab('strat'),0); } // Стратегія злита з Брендом (вкладка «Бриф і цілі»)
@@ -1609,7 +1621,7 @@ async function openComposer(postId, opts){
       +'</div>'
       +'<div class="cmp-right"><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:14px;text-align:center">Прев\'ю · мобільний</div><div id="cmpPrev"></div></div>'
     +'</div>'
-    +'<div class="cmp-foot"><button class="icon" id="cmpDel" title="Видалити пост назавжди" style="color:var(--danger);display:none">🗑</button><span style="font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--faint)">ЧЕРНЕТКА</span><button class="ghost" id="cmpSave">💾 Зберегти</button><button class="ghost" id="cmpApprove">✅ Затвердити</button><button id="cmpAdapt">✨ Підлаштувати під канали</button><span style="flex:1"></span><span style="font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--faint);border-left:1px solid var(--line);padding-left:12px">ПУБЛІКАЦІЯ</span>'
+    +'<div class="cmp-foot"><button class="icon" id="cmpDel" title="Видалити пост назавжди" style="color:var(--danger);display:none">🗑</button><span style="font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--faint)">ЧЕРНЕТКА</span><button class="ghost" id="cmpSave">💾 Зберегти</button><button class="ghost" id="cmpApprove">✅ Затвердити</button><span style="flex:1"></span><span style="font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--faint);border-left:1px solid var(--line);padding-left:12px">ПУБЛІКАЦІЯ</span>'
       +'<label style="font-size:12px;color:var(--muted)">Дата <input type="date" id="cmpDate" class="txt" value="'+initDate+'" style="width:auto;padding:6px 8px;display:inline-block"></label>'
       +'<label style="font-size:12px;color:var(--muted)">Час <input type="time" id="cmpTime" class="txt" value="'+initTime+'" style="width:auto;padding:6px 8px;display:inline-block"></label>'
       +'<button class="ok" id="cmpSched">🗓 Запланувати</button><button class="primary" id="cmpNow">📣 Опублікувати зараз</button></div>';
@@ -1630,12 +1642,43 @@ async function openComposer(postId, opts){
     const setAp=(on)=>{ apBtn.textContent=on?'✅ Затверджено':'✅ Затвердити'; apBtn.style.color=on?'var(--brand)':''; };
     setAp(cur&&cur.review==='approved');
     apBtn.onclick=async()=>{ apBtn.disabled=true; try{ await saveDraft(); await api('/posts/'+postId+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'approved'})}); setAp(true); try{ await loadStudioPosts(); }catch(_){ } try{loadGuide(true);}catch(e){} flash('✅ Затверджено - пост готовий до календаря'); close(); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); apBtn.disabled=false; } }; }
-  // ----- канали (надіслані = заблоковані з ✓) -----
+  // ----- канали (надіслані = заблоковані з ✓) + пер-канальна адаптація -----
+  const hasOwn=(k)=>!!(C[k]&&typeof C[k].text==='string'&&C[k].text.trim());
+  const netName=(k)=>{ const n=NETS.find(x=>x[0]===k); return n?n[1]:k; };
+  // Підлаштувати ОДНУ мережу. Раніше єдина кнопка внизу переписувала текст під ВСІ обрані канали
+  // одним рухом - і вернути свій варіант було нічим (фідбек Олега). Тепер кожна мережа окремо, а
+  // C.manual_adapt=true означає «адаптацією керує людина» → сервер більше не перепаковує сам
+  // (інакше мережі, які юзер свідомо лишив зі своїм текстом, все одно переписувались при публікації).
+  async function adaptOne(k,btn){
+    if(sentSet.has(k)) return;
+    if(btn) btn.disabled=true; setMsg('✨ підлаштовую під '+netName(k)+'…'); aiBusy('✨ Підлаштовую під '+netName(k)+'…');
+    try{
+      master=txt.value; // адаптація завжди з АКТУАЛЬНОГО майстер-тексту, а не з того, що було при відкритті
+      await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master})});
+      const r=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:[k]})});
+      const v=(r.channels||{})[k];
+      if(v&&typeof v.text==='string'&&v.text.trim()){ C[k]={...(C[k]||{}),...v,on:true}; C.manual_adapt=true; setMsg(netName(k)+': текст підлаштовано ✓ (↺ вернути мій)','var(--brand)'); }
+      else setMsg('⚠ модель не дала варіанту для '+netName(k),'var(--danger)');
+      renderChips(); renderPrev();
+    }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); }
+    finally{ if(btn) btn.disabled=false; aiDone(); }
+  }
   function renderChips(){ const box=ov.querySelector('#cmpChips'); const thOn=!!(C.threads&&C.threads.on&&C.threads.thread);
     box.innerHTML=NETS.map(n=>{ const k=n[0]; const on=C[k]&&C[k].on; const conn=ChanStatus[k]; const sent=sentSet.has(k);
       const dimmed=thOn&&k!=='threads'; // режим гілки: серія їде ЛИШЕ в Threads, решта мереж затінені
-      return '<button class="netchip'+(on&&!dimmed?' on':'')+'" data-net="'+k+'"'+((!conn||sent||dimmed)?' disabled':'')+' style="'+(dimmed?'opacity:.35':'')+'" title="'+(sent?'вже опубліковано':(dimmed?'у режимі гілки пост їде лише в Threads (вимкни 🧵, щоб обрати інші мережі)':(conn?'':'не підключено')))+'">'+(sent?'✓ ':'')+n[1]+'</button>'; }).join('');
+      const own=hasOwn(k);             // у мережі вже є СВОЯ версія тексту
+      const segOff=!conn||sent||dimmed||!on;
+      // ✨ = підлаштувати САМЕ цю мережу; ↺ (лише коли є своя версія) = вернути мій текст.
+      // Коли ↺ показано, ✨ втрачає скруглення справа - вони виглядають однією складеною кнопкою.
+      const seg='<button class="netseg'+(own?' has':'')+'" data-adapt="'+k+'"'+(segOff?' disabled':'')
+        +(own?' style="border-radius:0"':'')
+        +' title="'+(own?'Своя версія тексту для цієї мережі. Клік - підлаштувати заново':'Підлаштувати текст саме під цю мережу (решта мереж не зміняться)')+'">'+(own?'✨✓':'✨')+'</button>';
+      const rev=own?'<button class="netseg" data-revert="'+k+'" title="Вернути мій текст (прибрати окрему версію для цієї мережі)">↺</button>':'';
+      const chip='<button class="netchip'+(on&&!dimmed?' on':'')+'" data-net="'+k+'"'+((!conn||sent||dimmed)?' disabled':'')+' style="'+(dimmed?'opacity:.35':'')+'" title="'+(sent?'вже опубліковано':(dimmed?'у режимі гілки пост їде лише в Threads (вимкни 🧵, щоб обрати інші мережі)':(conn?'':'не підключено')))+'">'+(sent?'✓ ':'')+n[1]+'</button>';
+      return '<span class="netgrp">'+chip+seg+rev+'</span>'; }).join('');
     box.querySelectorAll('.netchip').forEach(b=>{ if(b.disabled) return; b.onclick=()=>{ const k=b.dataset.net; C[k]=C[k]||{text:''}; C[k].on=!C[k].on; renderChips(); renderPrev(); }; });
+    box.querySelectorAll('[data-adapt]').forEach(b=>{ if(b.disabled) return; b.onclick=()=>adaptOne(b.dataset.adapt,b); });
+    box.querySelectorAll('[data-revert]').forEach(b=>{ b.onclick=()=>{ const k=b.dataset.revert; if(C[k]) C[k].text=''; C.manual_adapt=true; renderChips(); renderPrev(); setMsg('вернув твій текст для '+netName(k)+' ✓','var(--brand)'); }; });
     // 🧵 режим «Гілкою»: серія повʼязаних постів (root-гачок + відповіді) з ПОВНОГО тексту
     const tw=ov.querySelector('#cmpThreadWrap');
     if(tw){ const showTh=C.threads&&C.threads.on&&!sentSet.has('threads'); tw.style.display=showTh?'':'none';
@@ -1681,7 +1724,12 @@ async function openComposer(postId, opts){
           +'<div class="pv-note">🧵 гілка: '+parts.length+' частин(и)'+(num?' з нумерацією 2/ 3/…':' без нумерації')+' - root-гачок + відповіді</div>';
       }
       else body=head+'<div class="phone-b"><div class="phone-txt">'+(t?pvCap(k,t):empty)+'</div></div>'+img;
-      return '<div class="pv-label" style="background:var('+NETVAR[k]+')">'+n[1]+'</div><div class="phone">'+body+'</div>'; }).join('');
+      // Честь прев'ю: поки адаптацією не керує людина, мережа без своєї версії буде спакована
+      // сервером ПРИ публікації - тобто вийде НЕ те, що показано тут. Кажемо це прямо.
+      const auto=!sent&&!C.manual_adapt&&!hasOwn(k)
+        ? '<div class="pv-note">✨ при публікації текст спакується під цю мережу автоматично. Хочеш керувати сам - тисни ✨ на каналі</div>' : '';
+      const ownMark=hasOwn(k)?'<div class="pv-note" style="color:var(--brand)">✨ своя версія для цієї мережі (↺ на каналі - вернути твій текст)</div>':'';
+      return '<div class="pv-label" style="background:var('+NETVAR[k]+')">'+n[1]+'</div><div class="phone">'+body+'</div>'+auto+ownMark; }).join('');
     box.querySelectorAll('[data-more]').forEach(el=>el.onclick=()=>{ _pvExp.add(el.dataset.more); renderPrev(); }); }
   txt.addEventListener('input',()=>{ master=txt.value; renderPrev(); });
   ov.querySelector('#cmpRubric').onchange=(e)=>{ rubric=e.target.value; };
@@ -1721,11 +1769,12 @@ async function openComposer(postId, opts){
     await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master,rubric,intent:iv?iv.value:'',...(fv?{format:fv.value}:{})})});
     await api('/posts/'+postId+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:C})}); }
   ov.querySelector('#cmpSave').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('💾 зберігаю…'); try{ await saveDraft(); setMsg('чернетку збережено ✓','var(--brand)'); try{await loadStudioPosts();}catch(_){} }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; } };
-  ov.querySelector('#cmpAdapt').onclick=async(e)=>{ const sel=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!sel.length){ setMsg('немає каналів для адаптації','var(--danger)'); return; } const b=e.target; b.disabled=true; setMsg('✨ AI підлаштовує під канали…'); aiBusy('✨ Підлаштовую під канали (з чернетки)…'); try{ await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master})}); const r=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:sel})}); Object.keys(r.channels||{}).forEach(k=>{ if(!sentSet.has(k)) C[k]=r.channels[k]; }); renderPrev(); setMsg('готово ✓ кожна мережа у своєму форматі','var(--brand)'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpNow').onclick=async(e)=>{ const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('усі обрані канали вже опубліковано','var(--danger)'); return; } const b=e.target; b.disabled=true;
     try{
-      // авто-перепаковка: мережі без власної версії адаптуються перед публікацією (щоб прев'ю = те, що вийде)
-      const missing=todo.filter(k=>!(C[k]&&typeof C[k].text==='string'&&C[k].text.trim()));
+      // Авто-перепаковка мереж без власної версії - АЛЕ лише поки адаптацією не почала керувати
+      // людина. Щойно юзер підлаштував (чи вернув ↺) хоч одну мережу вручну, прев'ю = істина:
+      // мережі, які він лишив зі своїм текстом, їдуть саме зі своїм текстом.
+      const missing=C.manual_adapt?[]:todo.filter(k=>!hasOwn(k));
       if(missing.length){ setMsg('✨ пакую під канали…'); aiBusy('✨ Пакую пост під кожну мережу…');
         await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master})});
         const ra=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:missing})});

@@ -156,11 +156,36 @@
   .netchip{font-size:13px;font-weight:600;padding:6px 12px;border-radius:9px;border:1px solid var(--line2);background:transparent;color:var(--muted)}
   .netchip.on{background:var(--brand-soft);border-color:var(--brand);color:var(--brand)}
   .netchip:disabled{opacity:.4;cursor:not-allowed}
+  /* канал у композері = складена кнопка: ліва частина обирає мережу, права (✨) підлаштовує текст
+     САМЕ під неї (фідбек Олега: одна кнопка «під канали» переписувала все й скасувати було нічим) */
+  .netgrp{display:inline-flex;align-items:stretch}
+  .netgrp .netchip{border-top-right-radius:0;border-bottom-right-radius:0}
+  .netgrp .netseg{font-size:12px;padding:6px 8px;border:1px solid var(--line2);border-left:none;border-top-right-radius:9px;border-bottom-right-radius:9px;background:transparent;color:var(--muted);cursor:pointer}
+  .netgrp .netchip.on+.netseg{border-color:var(--brand);background:var(--brand-soft)}
+  .netgrp .netseg:hover:not(:disabled){color:var(--brand);border-color:var(--brand)}
+  .netgrp .netseg:disabled{opacity:.4;cursor:not-allowed}
+  .netgrp .netseg.has{color:var(--brand);font-weight:800}
   .chip{flex:none;width:210px;background:var(--surface2);border:1px solid var(--line2);border-radius:11px;padding:11px 12px;cursor:grab}
   .chip.placed{opacity:.5}
   .chip b{display:block;font-size:13px;font-weight:600;line-height:1.4;margin-bottom:5px}
   .chip small{color:var(--faint);font-size:11.5px}
   .tray{display:flex;gap:11px;overflow-x:auto;padding-bottom:4px;margin-top:12px}
+  /* 🏦 Публікація: банк - ліва вертикальна колонка, календар - решта ширини */
+  .pubcal{display:flex;gap:14px;align-items:flex-start}
+  .bankcol{width:272px;flex:none;position:sticky;top:62px}
+  /* у колонці картки банку стоять СТОВПЧИКОМ і скролються всередині (не тягнуть сторінку) */
+  .bankcol .tray{flex-direction:column;overflow-x:hidden;overflow-y:auto;margin-top:0;flex:1;min-height:120px;max-height:46vh;gap:8px}
+  .bankcol .tray>*{flex:none;width:auto;max-width:100%}
+  .bankunfold{display:none;flex:none;position:sticky;top:62px;flex-direction:column;align-items:center;gap:6px;padding:12px 7px;font-size:16px;line-height:1;border:1px solid var(--line);border-radius:12px;background:var(--surface);cursor:pointer}
+  .bankunfold span{writing-mode:vertical-rl;font-size:11.5px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+  .bankunfold:hover{border-color:var(--brand);color:var(--brand)}
+  @media(max-width:900px){ /* на вузькому екрані колонка стає звичайною смугою над календарем */
+    .pubcal{flex-direction:column}
+    .bankcol{width:auto;align-self:stretch;position:static}
+    .bankcol .tray{flex-direction:row;overflow-x:auto;max-height:none}
+    .bankunfold{flex-direction:row;position:static;width:100%;justify-content:center}
+    .bankunfold span{writing-mode:horizontal-tb}
+  }
   /* segmented tabs */
   .tabs{display:inline-flex;background:var(--surface2);border:1px solid var(--line);border-radius:12px;padding:4px;gap:3px}
   .tab{display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600;color:var(--muted);transition:.12s}
@@ -642,24 +667,32 @@
           <div class="tab on" data-ptab="cal">📅 Календар</div>
           <div class="tab" data-ptab="plan">📋 План і ритм <span class="badge" id="planCount" style="margin-left:5px"></span></div>
         </div>
-        <div id="pubCal">
-        <!-- 🏦 Банк - у попапі з кнопки в липкій плашці (він рідко потрібен: календар відкривають, щоб
-             дивитись контент-план, а не банк). Панель живе тут схованою й фізично переїздить у попап. -->
-        <div id="bankHost" style="display:none">
-        <div class="panel">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-            <div class="btnrow" style="margin:0"><button class="primary" id="aiDistribute"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.8L19 9l-5.1 1.2L12 15l-1.9-4.8L5 9l5.1-1.2z"></path></svg>AI-розподіл</button><button class="ghost" id="reloadPub">↻ Оновити</button><span id="pubMsg" style="font-size:12px;color:var(--muted)"></span></div>
+        <!-- 🏦 Банк ЛІВОРУЧ вертикальною колонкою (фідбек Олега: у попапі загубилось і перетягування,
+             і сама видимість того, що в банку лежить). Колонка згортається кнопкою, коли треба весь
+             календар. Вузли лишаються в DOM - drag-drop у календар працює як раніше. -->
+        <div id="pubCal" class="pubcal">
+        <div id="bankHost" class="bankcol">
+        <div class="panel" style="margin:0;display:flex;flex-direction:column;max-height:calc(100vh - 150px)">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="ph" style="margin:0;font-size:13.5px">🏦 Банк</div>
+            <button class="icon" id="bankFold" title="Згорнути банк - показати весь календар" style="margin-left:auto;width:28px;height:28px">‹</button>
           </div>
-          <div class="tabs" id="bankTabs" style="margin:10px 0 8px">
+          <div class="tabs" id="bankTabs" style="margin:9px 0 8px;flex-wrap:wrap;gap:4px">
             <div class="tab on" data-bt="new">Нові <span class="badge" id="btNew">0</span></div>
             <div class="tab" data-bt="cal">У календарі <span class="badge" id="btCal">0</span></div>
             <div class="tab" data-bt="pub">Опубліковані <span class="badge" id="btPub">0</span></div>
           </div>
-          <div class="hint" id="bankHint">Перетягни картку на день у календарі (час за замовч. 09:00) або «AI-розподіл».</div>
+          <div class="hint" id="bankHint" style="margin:0 0 8px">Перетягни картку на день у календарі (час за замовч. 09:00) або «AI-розподіл».</div>
           <div class="tray" id="bank"></div>
+          <div class="btnrow" style="margin:10px 0 0;flex-direction:column;align-items:stretch;gap:6px">
+            <button class="primary" id="aiDistribute" style="justify-content:center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.8L19 9l-5.1 1.2L12 15l-1.9-4.8L5 9l5.1-1.2z"></path></svg>AI-розподіл</button>
+            <button class="ghost" id="reloadPub" style="justify-content:center">↻ Оновити</button>
+          </div>
+          <span id="pubMsg" style="font-size:11.5px;color:var(--muted);margin-top:6px"></span>
         </div>
         </div>
-        <div class="panel">
+        <button id="bankUnfold" class="bankunfold" title="Показати банк публікацій" style="display:none">🏦<span>Банк</span></button>
+        <div class="panel" style="margin:0;flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div class="ph" style="margin:0">📅 Календар</div><span id="calSum" style="font-size:12px;color:var(--muted)"></span></div>
           <div class="hint">Пунктирні картки - це ТЕМИ з плану (ще не пости): клікни, щоб згенерувати пост. Суцільні - заплановані публікації.</div>
           <div id="cal"></div>

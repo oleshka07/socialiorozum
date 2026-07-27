@@ -79,7 +79,12 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
   // «Створи один раз - сервіс сам перепакує»: мережі без власної версії тексту адаптуються
   // автоматично перед відправкою (один LLM-виклик на всі відсутні; при збої - майстер-текст як раніше).
   // Покриває і плановий автопостер, і публікацію з бота - не лише кнопку «Підлаштувати» в композері.
-  const missing = enabled.filter((k) => !sentSet.has(k) && !(ch[k] && String(ch[k].text || "").trim()));
+  // ⚠️ АЛЕ якщо адаптацією керує людина (композер поставив channels.manual_adapt при пер-канальному
+  // ✨ або ↺), сервер НЕ перепаковує: мережі, які юзер свідомо лишив зі своїм текстом, інакше все одно
+  // переписувались при публікації - і прев'ю в композері брехало (фідбек Олега «підлаштувало всюди,
+  // а мені подобався мій перший текст»).
+  const manual = ch.manual_adapt === true;
+  const missing = manual ? [] : enabled.filter((k) => !sentSet.has(k) && !(ch[k] && String(ch[k].text || "").trim()));
   if (missing.length) {
     try {
       const variants = await adaptForChannels(ws, post.content, missing, (post as any).intent || undefined);
