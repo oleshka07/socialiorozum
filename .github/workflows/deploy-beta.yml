@@ -31,3 +31,16 @@ jobs:
             cd server
             docker compose up -d --build
             docker image prune -f
+            # ⚠️ `up -d` НЕ доказ, що застосунок працює: healthcheck є лише в БД, тож контейнер
+            # застосунку рахується «Started» одразу після запуску процесу. Якщо він упаде на міграції
+            # чи на старті воркерів, деплой лишався ЗЕЛЕНИМ і про це ніхто не дізнавався до першого
+            # відкриття кабінету. Тому явно чекаємо на живий /health.
+            # порт бети - 8081 (APP_PORT живе в її .env, у цій ssh-сесії його нема, тож literal)
+            for i in $(seq 1 30); do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8081/health" || true)
+              if [ "$code" = "200" ]; then echo "✅ health 200 (спроба $i)"; exit 0; fi
+              sleep 2
+            done
+            echo "❌ застосунок не віддав health 200 за 60с - останні логи:"
+            docker compose logs --tail=40 app
+            exit 1
