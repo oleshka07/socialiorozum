@@ -115,6 +115,16 @@ export async function publish(token: string, userId: string, text: string, image
   throw lastErr || new Error("Threads: не вдалося опублікувати");
 }
 
+// Публічне посилання на опублікований тред. З media_id його НЕ вивести (у permalink інший
+// короткий код), тому це єдиний спосіб - спитати Graph API одним полем.
+export async function mediaPermalink(token: string, mediaId: string): Promise<string> {
+  const u = new URL(`${GRAPH}/v1.0/${mediaId}`);
+  u.searchParams.set("fields", "permalink");
+  u.searchParams.set("access_token", token);
+  const j = await thFetch<{ permalink?: string }>(u.toString());
+  return j.permalink || "";
+}
+
 // інсайти ПРОФІЛЮ за період (views - часовий ряд, решта - total_value за since..until;
 // followers_count - лише поточне значення, без періоду)
 export async function userInsights(token: string, userId: string, metrics: string[], sinceUnix?: number, untilUnix?: number): Promise<Record<string, number>> {

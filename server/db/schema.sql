@@ -583,3 +583,16 @@ alter table schedule_slot add column if not exists updated_at timestamptz not nu
 -- Later - окремі колонки `content type` і `content pillars`). До цього формат жив лише на пості
 -- ('post'|'reel'), а план узагалі не міг сказати «цей слот - карусель».
 alter table plan_slot add column if not exists format text not null default 'post';
+
+-- 🔗 ПОСИЛАННЯ НА ОПУБЛІКОВАНИЙ ПОСТ. Ідентифікатори ми зберігали й раніше (message_id, media_id,
+-- external_id), але людині вони ні про що не кажуть - щоб глянути «як воно там виглядає», доводилось
+-- шукати пост у мережі руками. Тепер при відправці одразу зберігаємо готовий URL:
+-- Telegram/Facebook/LinkedIn збираються з id детерміновано (без жодного запиту), Threads і Instagram
+-- віддають `permalink` полем Graph API - там один дешевий додатковий виклик.
+alter table telegram_publish add column if not exists permalink text;
+alter table threads_publish  add column if not exists permalink text;
+alter table meta_publish     add column if not exists permalink text;
+alter table linkedin_publish add column if not exists permalink text;
+-- @username каналу для гарного публічного лінка t.me/<name>/<id>; для приватних лишається
+-- t.me/c/<internal>/<id> (працює для власника-адміна). Тягнеться раз через getChat і кешується.
+alter table telegram_config add column if not exists channel_username text;

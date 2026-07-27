@@ -13,6 +13,7 @@ import { MEDIA_DIR } from "./media.js";
 import { ensureIgSafeImage } from "./images.js";
 import { adaptForChannels, reelCaption, threadsSplit } from "./pipeline.js";
 import { getSetting } from "./settings.js";
+import { tgLink, fbLink, liLink } from "./permalink.js";
 import { logEvent } from "./log.js";
 
 export async function thValidToken(ws: string): Promise<{ token: string; userId: string } | null> {
@@ -101,7 +102,7 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
   const imageUrl = post.filename ? `${env.appBaseUrl}/media/${post.filename}` : null;
   const results: PubResult[] = [];
   const [tgc, thTok, mt, li] = await Promise.all([
-    one<{ bot_token: string | null; channel_chat_id: string | null; group_chat_id: string | null }>(`select bot_token, channel_chat_id, group_chat_id from telegram_config where workspace_id=$1`, [ws]),
+    one<{ bot_token: string | null; channel_chat_id: string | null; group_chat_id: string | null; channel_username: string | null }>(`select bot_token, channel_chat_id, group_chat_id, channel_username from telegram_config where workspace_id=$1`, [ws]),
     thValidToken(ws),
     one<{ page_id: string | null; page_token: string | null; ig_user_id: string | null; token_expires_at: string | null }>(`select page_id, page_token, ig_user_id, token_expires_at from meta_config where workspace_id=$1`, [ws]),
     one<{ member_urn: string; access_token: string; token_expires_at: string | null }>(`select member_urn, access_token, token_expires_at from linkedin_config where workspace_id=$1`, [ws]),
@@ -132,7 +133,17 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
             } else {
               r = await tg.sendMessage(tgc.bot_token, chat, cap);
             }
-            await q(`update telegram_publish set message_id=$2, status='sent' where id=$1`, [reserved.id, r.message_id]);
+            // @username каналу потрібен для гарного лінка t.me/<name>/<id>. Тягнемо ОДИН раз і
+            // кешуємо в telegram_config: далі публікації обходяться без цього запиту.
+            if (t === "channel" && tgc.channel_username == null) {
+              try {
+                const info = await tg.getChat(tgc.bot_token, chat);
+                tgc.channel_username = info.username || "";
+                await q(`update telegram_config set channel_username=$2 where workspace_id=$1`, [ws, tgc.channel_username]);
+              } catch { tgc.channel_username = ""; } // не вийшло - лишиться лінк t.me/c/<internal>/<id>
+            }
+            await q(`update telegram_publish set message_id=$2, status='sent', permalink=nullif($3,'') where id=$1`,
+              [reserved.id, r.message_id, tgLink(chat, r.message_id, t === "channel" ? tgc.channel_username : null)]);
             any = true;
           } catch (e: any) {
             await q(`delete from telegram_publish where id=$1`, [reserved.id]); // звільняємо резервацію - можна повторити пізніше
@@ -182,6 +193,14 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
           await q(`delete from threads_publish where id=$1`, [reserved.id]);
           throw e;
         }
+        // 🔗 permalink Threads НЕ виводиться з media_id - лише окремим запитом. Свідомо НЕ критично:
+        // публікація вже успішна, тож збій тут її не валить (лінк доберемо лениво на вимогу UI).
+        if (rootId) {
+          try {
+            const pl = await threads.mediaPermalink(thTok.token, rootId);
+            if (pl) await q(`update threads_publish set permalink=$2 where id=$1`, [reserved.id, pl]);
+          } catch { /* доберемо в /publish-state */ }
+        }
         // CTA-гілка з затримкою: лінк/кодове слово доклеюємо, коли пост уже розганяється
         const delayMin = Number(strat.cta_min || 0);
         if (delayMin > 0) {
@@ -200,7 +219,9 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
         if (!reserved) { results.push({ channel: k, status: "skipped" }); continue; }
         try {
           const r = imageUrl ? await meta.publishPhotoToPage(mt.page_id, mt.page_token, textOf(k), imageUrl) : await meta.publishToPage(mt.page_id, mt.page_token, textOf(k));
-          await q(`update meta_publish set external_id=$2, status='sent' where id=$1`, [reserved.id, (r as any).post_id || r.id]);
+          const fbId = (r as any).post_id || r.id;
+          // id FB-поста вже містить id сторінки, тож лінк збирається без додаткового запиту
+          await q(`update meta_publish set external_id=$2, status='sent', permalink=nullif($3,'') where id=$1`, [reserved.id, fbId, fbLink(fbId)]);
         } catch (e: any) { await q(`delete from meta_publish where id=$1`, [reserved.id]); throw e; }
       } else if (k === "instagram") {
         if (!mt?.ig_user_id || !mt.page_token) throw new Error("Instagram не підключено");
@@ -215,6 +236,11 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
           const safe = await ensureIgSafeImage(ws, post.filename);
           const r = await meta.publishToInstagram(mt.ig_user_id, mt.page_token, `${env.appBaseUrl}/media/${safe}`, textOf(k));
           await q(`update meta_publish set external_id=$2, status='sent' where id=$1`, [reserved.id, r.mediaId]);
+          // permalink IG - лише окремим запитом; збій не критичний (доберемо лениво в /publish-state)
+          try {
+            const pl = await meta.mediaPermalink(r.mediaId, mt.page_token);
+            if (pl) await q(`update meta_publish set permalink=$2 where id=$1`, [reserved.id, pl]);
+          } catch { /* доберемо пізніше */ }
         } catch (e: any) { await q(`delete from meta_publish where id=$1`, [reserved.id]); throw e; }
       } else if (k === "linkedin") {
         if (!li?.access_token || !li.member_urn) throw new Error("LinkedIn не підключено");
@@ -228,7 +254,9 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
           let imgBuf: Buffer | undefined;
           if (post.filename) { try { imgBuf = await readFile(join(MEDIA_DIR, post.filename)); } catch { /* без фото */ } }
           const r = await linkedin.publish(li.access_token, li.member_urn, textOf(k), imgBuf);
-          await q(`update linkedin_publish set external_id=$2, status='sent' where id=$1`, [reserved.id, r.postId || null]);
+          // URN поста → лінк збирається детерміновано, без додаткового запиту
+          await q(`update linkedin_publish set external_id=$2, status='sent', permalink=nullif($3,'') where id=$1`,
+            [reserved.id, r.postId || null, liLink(r.postId || null)]);
         } catch (e: any) { await q(`delete from linkedin_publish where id=$1`, [reserved.id]); throw e; }
       }
       results.push({ channel: k, status: "sent" });

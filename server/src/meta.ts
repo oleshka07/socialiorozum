@@ -126,6 +126,17 @@ export async function publishPhotoToPage(pageId: string, pageToken: string, mess
   });
 }
 
+// Публічне посилання на ОПУБЛІКОВАНИЙ пост (щоб юзер міг глянути, як воно виглядає в мережі).
+// IG віддає permalink лише полем; FB-пост має permalink_url, але для нього достатньо й id
+// (<pageId>_<postId> у facebook.com/<id>), тож туди зайвого запиту не робимо.
+export async function mediaPermalink(mediaId: string, token: string): Promise<string> {
+  const u = new URL(`${GRAPH}/${mediaId}`);
+  u.searchParams.set("fields", "permalink");
+  u.searchParams.set("access_token", token);
+  const j = await fbFetch<{ permalink?: string }>(u.toString());
+  return j.permalink || "";
+}
+
 // останні N постів IG-акаунта (підписи) — для виведення голосу бренду з реальних дописів
 export async function getRecentMedia(igUserId: string, pageToken: string, limit = 20): Promise<Array<{ caption: string; like_count?: number; comments_count?: number; timestamp?: string }>> {
   const u = new URL(`${GRAPH}/${igUserId}/media`);

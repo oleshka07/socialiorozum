@@ -110,8 +110,8 @@
     "semantic_hash": ""
   },
   "server/src/publisher.ts": {
-    "mtime": 1784919918.3229837,
-    "ast_hash": "8bc9fc35c696daa255ce907b17ea4b42",
+    "mtime": 1785149308.292442,
+    "ast_hash": "94780e6002a98902f710710c0d42da20",
     "semantic_hash": ""
   },
   "server/src/rss-poller.ts": {
@@ -155,8 +155,8 @@
     "semantic_hash": "352df4b84f4af2922ccd9adaf8e4608f"
   },
   "CLAUDE.md": {
-    "mtime": 1784991585.5182989,
-    "ast_hash": "a61380d07a1e7e893f2c2916b9c35275",
+    "mtime": 1785149663.716463,
+    "ast_hash": "4f8b222b6d183cc5a72dcd24ae1b6071",
     "semantic_hash": ""
   },
   "DEPLOY.md": {
@@ -225,8 +225,8 @@
     "semantic_hash": ""
   },
   "server/public/app.html": {
-    "mtime": 1784991238.4862783,
-    "ast_hash": "d5b2ac76c09edca752f01c514d1b21b4",
+    "mtime": 1785149192.3124352,
+    "ast_hash": "03b503f79049caf34ae11029fab231c2",
     "semantic_hash": ""
   },
   "server/public/auth.html": {
@@ -360,8 +360,8 @@
     "semantic_hash": ""
   },
   "server/.lint/ui-smoke.mjs": {
-    "mtime": 1784991428.9117749,
-    "ast_hash": "96573f4d98b7ea523f3b5020c6af3e03",
+    "mtime": 1785149436.2695017,
+    "ast_hash": "0c7735d8c97b060244824a8ed8de5307",
     "semantic_hash": ""
   },
   "server/eslint.config.mjs": {
@@ -370,8 +370,8 @@
     "semantic_hash": ""
   },
   "server/public/app.js": {
-    "mtime": 1784991226.7989404,
-    "ast_hash": "68bb709c54e216d8ffcfc7cd690be43c",
+    "mtime": 1785149297.0964413,
+    "ast_hash": "57e332372a48370a1f19bdb5b059d2cc",
     "semantic_hash": ""
   },
   "server/src/settings.ts": {
@@ -412,6 +412,11 @@
   "server/tools/dialog-sync.mjs": {
     "mtime": 1784991320.9702833,
     "ast_hash": "da17f775257f2a54e771a84df7faa1e1",
+    "semantic_hash": ""
+  },
+  "server/.lint/shot.mjs": {
+    "mtime": 1785149566.4114876,
+    "ast_hash": "857b294394f3beca14d7d22e41491781",
     "semantic_hash": ""
   }
 }

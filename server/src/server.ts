@@ -12,6 +12,7 @@ import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveB
 import { startReelJob, reelJobs, parseReelScript } from "./reelvideo.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
+import { tgLink, fbLink, liLink } from "./permalink.js";
 import * as linkedin from "./linkedin.js";
 import * as youtube from "./youtube.js";
 import * as tiktok from "./tiktok.js";
@@ -700,12 +701,72 @@ app.post("/api/posts/:postId/publish-all", async (req: any, reply) => {
   } catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
 
+// 🔗 Посилання на опублікований пост по мережах. Для постів, опублікованих ДО появи колонки
+// permalink, лінк збирається зі збережених id тут же (Telegram/Facebook/LinkedIn це дозволяють) і
+// доліковується в БД, щоб наступного разу вже читався готовим. Threads/Instagram віддають permalink
+// лише запитом - для старих рядків доганяємо його лениво, по одному посту на вимогу UI.
+async function postPermalinks(ws: string, postId: string): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  const [tg, th, mt, li, tgc] = await Promise.all([
+    q<{ id: string; chat_id: string | null; message_id: string | null; permalink: string | null; target: string }>(
+      `select id, chat_id, message_id::text as message_id, permalink, target from telegram_publish where post_id=$1 and status='sent'`, [postId]),
+    q<{ id: string; media_id: string | null; permalink: string | null }>(
+      `select id, media_id, permalink from threads_publish where post_id=$1 and status='sent'`, [postId]),
+    q<{ id: string; channel: string; external_id: string | null; permalink: string | null }>(
+      `select id, channel, external_id, permalink from meta_publish where post_id=$1 and status='sent'`, [postId]),
+    q<{ id: string; external_id: string | null; permalink: string | null }>(
+      `select id, external_id, permalink from linkedin_publish where post_id=$1 and status='sent'`, [postId]),
+    one<{ channel_username: string | null }>(`select channel_username from telegram_config where workspace_id=$1`, [ws]),
+  ]);
+  // тип-юніон, а не string: імʼя таблиці підставляється в SQL, тож звужуємо його на рівні компілятора,
+  // щоб тут ніколи не могло опинитись значення із запиту
+  type PubTable = "telegram_publish" | "threads_publish" | "meta_publish" | "linkedin_publish";
+  const heal = async (table: PubTable, id: string, url: string) => {
+    await q(`update ${table} set permalink=$2 where id=$1`, [id, url]);
+  };
+  for (const r of tg) {
+    let url = r.permalink || "";
+    if (!url) { url = tgLink(r.chat_id || "", r.message_id, r.target === "channel" ? tgc?.channel_username : null); if (url) await heal("telegram_publish", r.id, url); }
+    if (url && !out.telegram) out.telegram = url;
+  }
+  for (const r of mt) {
+    let url = r.permalink || "";
+    if (!url && r.channel === "facebook") { url = fbLink(r.external_id); if (url) await heal("meta_publish", r.id, url); }
+    if (url && r.channel && !out[r.channel]) out[r.channel] = url;
+  }
+  for (const r of li) {
+    let url = r.permalink || "";
+    if (!url) { url = liLink(r.external_id); if (url) await heal("linkedin_publish", r.id, url); }
+    if (url && !out.linkedin) out.linkedin = url;
+  }
+  // Threads: старі рядки без permalink - один запит на пост (не критично, якщо не вийде)
+  for (const r of th) {
+    let url = r.permalink || "";
+    if (!url && r.media_id) {
+      try {
+        const tok = await thValidToken(ws);
+        if (tok) { url = await threads.mediaPermalink(tok.token, r.media_id); if (url) await heal("threads_publish", r.id, url); }
+      } catch { /* лишиться без лінка */ }
+    }
+    if (url && !out.threads) out.threads = url;
+  }
+  // Instagram зі старих рядків: permalink теж лише запитом
+  for (const r of mt) {
+    if (r.channel !== "instagram" || r.permalink || !r.external_id) continue;
+    try {
+      const cfg = await one<{ page_token: string | null }>(`select page_token from meta_config where workspace_id=$1`, [ws]);
+      if (cfg?.page_token) { const url = await meta.mediaPermalink(r.external_id, cfg.page_token); if (url) { await heal("meta_publish", r.id, url); out.instagram = out.instagram || url; } }
+    } catch { /* лишиться без лінка */ }
+  }
+  return out;
+}
+
 // стан публікації поста: у які мережі вже відправлено (для композера — блокуємо повторну відправку)
 app.get("/api/posts/:postId/publish-state", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
   const sent = await alreadySentNetworks(req.params.postId);
-  return { sent };
+  return { sent, links: await postPermalinks(ws, req.params.postId) };
 });
 
 // 🧵 Тейки для Threads: N коротких чернеток з Банку ідей/щоденника (кнопка в Студії;
@@ -2438,21 +2499,26 @@ app.get("/api/posts/studio", async (req: any) => {
             order by p.created_at desc`, [req.user.workspace_id]);
   const ids = rows.map((r: any) => r.id);
   const sentMap = new Map<string, string[]>();
-  const add = (pid: string, net: string) => { const a = sentMap.get(pid) || []; if (!a.includes(net)) a.push(net); sentMap.set(pid, a); };
+  // 🔗 links[postId][мережа] = URL опублікованого поста: іконки мереж на картці стають клікабельними
+  const linkMap = new Map<string, Record<string, string>>();
+  const add = (pid: string, net: string, link?: string | null) => {
+    const a = sentMap.get(pid) || []; if (!a.includes(net)) a.push(net); sentMap.set(pid, a);
+    if (link) { const l = linkMap.get(pid) || {}; if (!l[net]) l[net] = link; linkMap.set(pid, l); }
+  };
   if (ids.length) {
     const [tg, th, mt, li, yt, tt] = await Promise.all([
-      q<{ post_id: string }>(`select distinct post_id from telegram_publish where status='sent' and post_id=any($1)`, [ids]),
-      q<{ post_id: string }>(`select distinct post_id from threads_publish where status='sent' and post_id=any($1)`, [ids]),
-      q<{ post_id: string; channel: string }>(`select distinct post_id, channel from meta_publish where status='sent' and post_id=any($1)`, [ids]),
-      q<{ post_id: string }>(`select distinct post_id from linkedin_publish where status='sent' and post_id=any($1)`, [ids]),
+      q<{ post_id: string; permalink: string | null }>(`select distinct post_id, permalink from telegram_publish where status='sent' and post_id=any($1)`, [ids]),
+      q<{ post_id: string; permalink: string | null }>(`select distinct post_id, permalink from threads_publish where status='sent' and post_id=any($1)`, [ids]),
+      q<{ post_id: string; channel: string; permalink: string | null }>(`select distinct post_id, channel, permalink from meta_publish where status='sent' and post_id=any($1)`, [ids]),
+      q<{ post_id: string; permalink: string | null }>(`select distinct post_id, permalink from linkedin_publish where status='sent' and post_id=any($1)`, [ids]),
       q<{ post_id: string }>(`select distinct post_id from youtube_publish where status='sent' and post_id=any($1)`, [ids]),
       q<{ post_id: string }>(`select distinct post_id from tiktok_publish where status='sent' and post_id=any($1)`, [ids]),
     ]);
-    tg.forEach((r) => add(r.post_id, "telegram")); th.forEach((r) => add(r.post_id, "threads"));
-    mt.forEach((r) => r.channel && add(r.post_id, r.channel)); li.forEach((r) => add(r.post_id, "linkedin"));
+    tg.forEach((r) => add(r.post_id, "telegram", r.permalink)); th.forEach((r) => add(r.post_id, "threads", r.permalink));
+    mt.forEach((r) => r.channel && add(r.post_id, r.channel, r.permalink)); li.forEach((r) => add(r.post_id, "linkedin", r.permalink));
     yt.forEach((r) => add(r.post_id, "youtube")); tt.forEach((r) => add(r.post_id, "tiktok"));
   }
-  return rows.map((r: any) => ({ ...r, sent: sentMap.get(r.id) || [] }));
+  return rows.map((r: any) => ({ ...r, sent: sentMap.get(r.id) || [], links: linkMap.get(r.id) || {} }));
 });
 
 // видалення поста (замінило архів у UI): опублікованим - відмова, інакше зникла б історія
@@ -2478,12 +2544,13 @@ app.get("/api/schedule", async (req: any) => {
 // реально опубліковані пости (ручні + планові) з усіх мереж - для Аналітики
 app.get("/api/published", async (req: any) => {
   const ws = req.user.workspace_id;
-  const recent = await q<{ post_id: string; net: string; created_at: string; content: string }>(
-    `select x.post_id, x.net, x.created_at, p.content from (
-        select post_id, 'telegram'::text as net, created_at from telegram_publish where status='sent'
-        union all select post_id, 'threads', created_at from threads_publish where status='sent'
-        union all select post_id, channel, created_at from meta_publish where status='sent'
-        union all select post_id, 'linkedin', created_at from linkedin_publish where status='sent'
+  // permalink їде в тому ж union - «Останні публікації» стають клікабельними без окремого запиту
+  const recent = await q<{ post_id: string; net: string; created_at: string; content: string; permalink: string | null }>(
+    `select x.post_id, x.net, x.created_at, x.permalink, p.content from (
+        select post_id, 'telegram'::text as net, created_at, permalink from telegram_publish where status='sent'
+        union all select post_id, 'threads', created_at, permalink from threads_publish where status='sent'
+        union all select post_id, channel, created_at, permalink from meta_publish where status='sent'
+        union all select post_id, 'linkedin', created_at, permalink from linkedin_publish where status='sent'
      ) x
      join post p on p.id=x.post_id
      join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id

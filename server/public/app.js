@@ -859,7 +859,7 @@ async function loadAnalytics(){
     +'</div>'
     +'<div class="panel" style="margin:18px 0 0"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><div style="font-weight:700;font-size:14px">📊 Пости відносно твоєї норми</div><button class="ghost" id="topPatBtn" style="margin-left:auto;padding:5px 12px;font-size:12.5px" title="AI розбирає топ-пости і знаходить 1-2 патерни, що повторюються в усіх хітах">🔍 Що спрацювало</button></div><div class="hint" style="margin-bottom:8px">Норма = медіана переглядів твоїх постів у мережі за 90 днів. ×2.0 = удвічі краще за твій звичайний пост. Статистика збирається автоматично раз на добу.</div><div id="bmLive"><span class="spin"></span></div></div>'
     +'<div class="panel" id="thAnPanel" style="margin:18px 0 0;display:none"></div>'
-    +'<div class="panel" style="margin:18px 0 0"><div style="font-weight:700;font-size:14px;margin-bottom:6px">Останні публікації</div>'+(rec.length?rec.slice(0,12).map(r=>'<div style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--line)"><span style="font-size:15px">'+({telegram:"✈️",instagram:"📸",facebook:"📘",threads:"🧵"}[r.net]||"•")+'</span><div style="flex:1;min-width:0"><div style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc((r.content||"").replace(/\n+/g," ").slice(0,80))+'</div><div style="font-size:11px;color:var(--muted)">'+(CHN[r.net]?CHN[r.net][0]:r.net)+" · "+new Date(r.created_at).toLocaleString("uk")+'</div></div></div>').join(""):'<div class="empty">Ще нічого не опубліковано. Опублікуй пост - і він зʼявиться тут.</div>')+'</div>';
+    +'<div class="panel" style="margin:18px 0 0"><div style="font-weight:700;font-size:14px;margin-bottom:6px">Останні публікації</div>'+(rec.length?rec.slice(0,12).map(r=>'<div style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--line)"><span style="font-size:15px">'+({telegram:"✈️",instagram:"📸",facebook:"📘",threads:"🧵"}[r.net]||"•")+'</span><div style="flex:1;min-width:0"><div style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc((r.content||"").replace(/\n+/g," ").slice(0,80))+'</div><div style="font-size:11px;color:var(--muted)">'+(CHN[r.net]?CHN[r.net][0]:r.net)+" · "+new Date(r.created_at).toLocaleString("uk")+'</div></div>'+(r.permalink?'<a href="'+esc(r.permalink)+'" target="_blank" rel="noopener" title="Відкрити пост у мережі" style="font-size:12px;font-weight:700;color:var(--brand);text-decoration:none;flex:none">↗</a>':'')+'</div>').join(""):'<div class="empty">Ще нічого не опубліковано. Опублікуй пост - і він зʼявиться тут.</div>')+'</div>';
   if($('topPatBtn')) $('topPatBtn').onclick=topPatterns;
   api('/analytics/benchmarks').then(b=>{
     const el=$('bmLive'); if(!el) return;
@@ -1278,9 +1278,14 @@ async function loadChanStatus(){ try{ ChanStatus=await api('/channels/status'); 
 function chanDots(ch){ if(!ch) return ''; return NETS.filter(n=>ch[n[0]]&&ch[n[0]].on).map(n=>'<span class="cdot" title="'+n[1]+'" style="background:var('+NETVAR[n[0]]+')"><svg width="11" height="11" viewBox="0 0 24 24" fill="#fff"><path d="'+NETICON[n[0]]+'"></path></svg></span>').join(''); }
 function chanIcons(ch){ if(!ch) return ''; const I={telegram:'✈️',instagram:'📸',facebook:'📘',threads:'🧵',linkedin:'💼'}; return Object.keys(I).filter(k=>ch[k]&&ch[k].on).map(k=>I[k]).join(''); }
 // мережі, куди пост УЖЕ опубліковано: ті самі кольорові кружечки + ✓ (youtube/tiktok - для рілсів)
-function sentDots(sent){ const EXTRA={youtube:['YouTube','#FF0000','M12 4c7 0 9 1 9 8s-2 8-9 8-9-1-9-8 2-8 9-8zm-2 4.5v7l6-3.5-6-3.5z'],tiktok:['TikTok','#010101','M16 3c.4 2.6 2 4.2 4.6 4.5v3c-1.8 0-3.4-.6-4.6-1.5v6.8c0 3.9-2.8 6.2-6.1 6.2A5.9 5.9 0 013 16.2c0-3.5 2.7-6 6.4-5.8v3.1c-1.8-.3-3.3.8-3.3 2.6 0 1.7 1.3 2.9 2.9 2.9 1.8 0 3-1.3 3-3.3V3h4z']};
+// іконки мереж, куди пост поїхав. links[мережа] (з /posts/studio) робить іконку ПОСИЛАННЯМ на
+// живий пост - раніше побачити, «як воно там виглядає», можна було лише знайшовши пост руками
+function sentDots(sent,links){ const EXTRA={youtube:['YouTube','#FF0000','M12 4c7 0 9 1 9 8s-2 8-9 8-9-1-9-8 2-8 9-8zm-2 4.5v7l6-3.5-6-3.5z'],tiktok:['TikTok','#010101','M16 3c.4 2.6 2 4.2 4.6 4.5v3c-1.8 0-3.4-.6-4.6-1.5v6.8c0 3.9-2.8 6.2-6.1 6.2A5.9 5.9 0 013 16.2c0-3.5 2.7-6 6.4-5.8v3.1c-1.8-.3-3.3.8-3.3 2.6 0 1.7 1.3 2.9 2.9 2.9 1.8 0 3-1.3 3-3.3V3h4z']};
   return (sent||[]).map(k=>{ const n=NETS.find(x=>x[0]===k); const name=n?n[1]:(EXTRA[k]?EXTRA[k][0]:k); const bg=n?('var('+NETVAR[k]+')'):(EXTRA[k]?EXTRA[k][1]:'var(--muted)'); const path=NETICON[k]||(EXTRA[k]&&EXTRA[k][2])||'';
-    return '<span class="cdot" title="Опубліковано: '+esc(name)+'" style="background:'+bg+'"><svg width="11" height="11" viewBox="0 0 24 24" fill="#fff"><path d="'+path+'"></path></svg></span>'; }).join('')
+    const url=links&&links[k];
+    const inner='<svg width="11" height="11" viewBox="0 0 24 24" fill="#fff"><path d="'+path+'"></path></svg>';
+    if(url) return '<a class="cdot" href="'+esc(url)+'" target="_blank" rel="noopener" title="Відкрити пост у '+esc(name)+'" style="background:'+bg+';text-decoration:none" onclick="event.stopPropagation()">'+inner+'</a>';
+    return '<span class="cdot" title="Опубліковано: '+esc(name)+'" style="background:'+bg+'">'+inner+'</span>'; }).join('')
     +((sent||[]).length?'<span style="font-size:11px;color:var(--ok,#22a06b);font-weight:700;margin-left:2px">✓</span>':'');
 }
 function statusPill(rv){ if(rv==='approved') return ['Затверджено','sp-ok']; if(rv==='needs_work') return ['Доопрацювати','sp-warn']; return ['Готово до перегляду','sp-soft']; }
@@ -1333,7 +1338,7 @@ function renderStudio(){
   grid.innerHTML=show.map(p=>{ const isPub=!!(p.sent&&p.sent.length);
     const sp=isPub?['✈️ Опубліковано','sp-ok']:statusPill(p.review); const ap=p.review==='approved'; const sel=SelPosts.has(p.id);
     // шапка: опублікований пост показує мережі, КУДИ реально поїхав (✓); інші - обрані канали
-    const dots=isPub?sentDots(p.sent):chanDots(p.channels);
+    const dots=isPub?sentDots(p.sent,p.links):chanDots(p.channels);
     const im=INTENT_META[p.intent];
     // формат показуємо бейджем лише коли він НЕ звичайний пост (інакше бейдж на кожній картці = шум)
     const fm=FMT_META[p.format]; const fmTag=(p.format&&p.format!=='post'&&fm)?'<span class="ptag" style="color:var(--brand);border-color:var(--brand)" title="Формат: '+fm[2]+'">'+fm[0]+' '+fm[1].toLowerCase()+'</span>':'';
@@ -1583,7 +1588,8 @@ const NETMORE={instagram:'… ще',facebook:'… ще',threads:'Показат�
 async function openComposer(postId, opts){
   opts=opts||{};
   let full; try{ full=await api('/posts/'+postId+'/full'); }catch(e){ flash('Не вдалося відкрити: '+e.message); return; }
-  let ps={sent:[]}; try{ ps=await api('/posts/'+postId+'/publish-state'); }catch(e){}
+  let ps={sent:[],links:{}}; try{ ps=await api('/posts/'+postId+'/publish-state'); }catch(e){}
+  let sentLinks=ps.links||{}; // 🔗 мережа → URL живого поста (щоб одразу перескочити й глянути)
   const sentSet=new Set(ps.sent||[]);
   const C=JSON.parse(JSON.stringify(full.channels||{}));
   // якщо жодна мережа не обрана - вмикаємо всі підключені й ще не надіслані
@@ -1729,7 +1735,9 @@ async function openComposer(postId, opts){
       const auto=!sent&&!C.manual_adapt&&!hasOwn(k)
         ? '<div class="pv-note">✨ при публікації текст спакується під цю мережу автоматично. Хочеш керувати сам - тисни ✨ на каналі</div>' : '';
       const ownMark=hasOwn(k)?'<div class="pv-note" style="color:var(--brand)">✨ своя версія для цієї мережі (↺ на каналі - вернути твій текст)</div>':'';
-      return '<div class="pv-label" style="background:var('+NETVAR[k]+')">'+n[1]+'</div><div class="phone">'+body+'</div>'+auto+ownMark; }).join('');
+      // 🔗 щойно мережа опублікована - поруч із її плашкою зʼявляється лінк на живий пост
+      const open=sentLinks[k]?'<a href="'+esc(sentLinks[k])+'" target="_blank" rel="noopener" class="pv-open" title="Відкрити пост у '+esc(n[1])+'">↗ Відкрити пост</a>':'';
+      return '<div class="pv-label" style="background:var('+NETVAR[k]+')">'+n[1]+'</div>'+open+'<div class="phone">'+body+'</div>'+auto+ownMark; }).join('');
     box.querySelectorAll('[data-more]').forEach(el=>el.onclick=()=>{ _pvExp.add(el.dataset.more); renderPrev(); }); }
   txt.addEventListener('input',()=>{ master=txt.value; renderPrev(); });
   ov.querySelector('#cmpRubric').onchange=(e)=>{ rubric=e.target.value; };
@@ -1780,7 +1788,7 @@ async function openComposer(postId, opts){
         const ra=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:missing})});
         Object.keys(ra.channels||{}).forEach(k=>{ if(!sentSet.has(k)) C[k]=ra.channels[k]; }); renderPrev(); }
     }catch(_){ /* адаптація не критична - публікуємо майстер-текстом */ }
-    setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const r=await api('/posts/'+postId+'/publish-all',{method:'POST'}); const res=r.results||[]; const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); ok.forEach(k=>sentSet.add(k)); renderChips(); renderPrev(); setMsg((ok.length?'✓ '+ok.join(', '):'')+(err.length?' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; '):''), err.length?'var(--danger)':'var(--brand)'); if(ok.length&&!err.length) flash('Опубліковано ✓ Якщо пост залетить - 🔥 на картці дасть 5 кутів продовження'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
+    setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const r=await api('/posts/'+postId+'/publish-all',{method:'POST'}); const res=r.results||[]; const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); ok.forEach(k=>sentSet.add(k)); try{ const st=await api('/posts/'+postId+'/publish-state'); sentLinks=st.links||{}; }catch(_){} renderChips(); renderPrev(); setMsg((ok.length?'✓ '+ok.join(', '):'')+(err.length?' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; '):''), err.length?'var(--danger)':'var(--brand)'); if(ok.length&&!err.length) flash('Опубліковано ✓ Якщо пост залетить - 🔥 на картці дасть 5 кутів продовження'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ setMsg('вкажи дату й час','var(--danger)'); return; } const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('немає каналів для планування (усі вже опубліковано)','var(--danger)'); return; } const b=e.target; b.disabled=true; setMsg('🗓 зберігаю…'); const at=zonedToUTCISO(d,t); try{ await saveDraft(); if(opts.slotId){ await api('/schedule/'+opts.slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:at})}); } else { await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:at})}); } setMsg('заплановано ✓ ('+todo.join(', ')+')','var(--brand)'); try{await loadPublish();}catch(_){} try{await loadStudioPosts();}catch(_){} setTimeout(close,1000); }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); b.disabled=false; } };
 }
 // двокроковий редактор фото поста: крок 1 - джерело (галерея/завантаження/генерація) + формат (кроп),
