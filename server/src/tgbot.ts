@@ -10,6 +10,8 @@ import { generatePostsOnePass, buildLiteSkeleton, rewritePost, suggestDevelopmen
 import { publishPostToChannels } from "./publisher.js";
 import { sendDigestNow } from "./digest.js";
 import { isDiaryPending, appendDiaryText, attachDiaryMedia, transcribeVoice, skipDiaryToday, sendDiaryNow, weekDiaryText } from "./diary.js";
+import { cabinetPostLink } from "./permalink.js";
+const postDeepLink = (postId: string) => cabinetPostLink(env.appBaseUrl, postId);
 
 let BOT_ID = 0;
 let BOT_USERNAME = env.telegram.botUsername;
@@ -276,6 +278,8 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
 const draftButtons = (postId: string): tg.TgButton[][] => [
   [{ text: "✅ Опублікувати в Telegram", data: `pub:${postId}` }],
   [{ text: "✍️ Переробити", data: `rw:${postId}` }, { text: "📋 Ще ідеї", data: "idea_list" }],
+  // deep-лінк: відкрити ЦЕЙ пост у композері кабінету (доредагувати, додати фото, обрати мережі)
+  [{ text: "🌐 Відкрити в кабінеті", url: postDeepLink(postId) }],
 ];
 
 // натискання inline-кнопок (tokenOverride = власний бот воркспейсу)
@@ -383,8 +387,9 @@ async function handleCallback(cbq: any, tokenOverride?: string): Promise<void> {
       try {
         const script = await reelsScript(ws, src.transcript, 30);
         const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src.id]);
-        await q(`insert into post(run_id, stage, content, format) values($1,'final',$2,'reel')`, [run!.id, script]);
-        await tg.sendMessage(token, chatId, "🎬 Сценарій рілса з твого дня в Чорновиках. Зібрати відео - кнопка 🎞 на картці.", [[{ text: "🌐 Відкрити застосунок", url: env.appBaseUrl + "/app" }]]);
+        const np = await one<{ id: string }>(`insert into post(run_id, stage, content, format) values($1,'final',$2,'reel') returning id`, [run!.id, script]);
+        // 🔗 deep-лінк веде ПРЯМО в цей пост, а не просто «в застосунок»
+        await tg.sendMessage(token, chatId, "🎬 Сценарій рілса з твого дня. Зібрати відео - кнопка 🎞 на картці.", [[{ text: "✍ Відкрити пост", url: postDeepLink(np!.id) }]]);
       } catch (e: any) { await tg.sendMessage(token, chatId, "Не вдалося: " + String(e.message).slice(0, 200)); }
       return;
     }
@@ -443,9 +448,9 @@ async function handleCallback(cbq: any, tokenOverride?: string): Promise<void> {
       if (!post) { await tg.sendMessage(token, chatId, "Пост не знайдено."); return; }
       try {
         const script = await reelsScript(ws, post.content, 30);
-        await q(`insert into post(run_id, stage, content, format) values($1,'final',$2,'reel')`, [post.run_id, script]);
-        await tg.sendMessage(token, chatId, "🎬 Сценарій рілса за темою хіта готовий - шукай у Чорновиках (бейдж «🎬 рілс»). Зібрати відео - кнопка 🎞 на картці.",
-          [[{ text: "🌐 Відкрити застосунок", url: env.appBaseUrl + "/app" }]]);
+        const np = await one<{ id: string }>(`insert into post(run_id, stage, content, format) values($1,'final',$2,'reel') returning id`, [post.run_id, script]);
+        await tg.sendMessage(token, chatId, "🎬 Сценарій рілса за темою хіта готовий. Зібрати відео - кнопка 🎞 на картці.",
+          [[{ text: "✍ Відкрити пост", url: postDeepLink(np!.id) }]]);
       } catch (e: any) { await tg.sendMessage(token, chatId, "Не вдалося скласти сценарій: " + e.message); }
       return;
     }

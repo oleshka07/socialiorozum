@@ -39,3 +39,12 @@ export function liLink(urn: string | null): string {
   if (!u.startsWith("urn:li:")) return "";
   return `https://www.linkedin.com/feed/update/${u}/`;
 }
+
+// Посилання в НАШ кабінет на конкретний пост (deep-link `#/post/<id>`). Потрібне ботові: лінк
+// «сценарій готовий» має відкривати саме той пост у композері, а не просто «застосунок».
+export function cabinetPostLink(baseUrl: string, postId: string): string {
+  const b = String(baseUrl || "").replace(/\/+$/, "");
+  const id = String(postId || "").trim();
+  if (!b || !id) return "";
+  return `${b}/app#/post/${id}`;
+}

@@ -46,6 +46,8 @@ let busy = false;
 let curView = 'create';
 // вкладки розділів: стан угорі, бо його читає маршрутизатор ROUTE_TABS (визначений вище за setXTab)
 let cTab='posts', pTab='cal', bTab='voice', sTab='profile';
+let _cmpOpenId=null;      // id поста, відкритого в композері (для deep-лінка #/post/<id>)
+let _routeSilent=false;   // перемикаємо розділ БЕЗ запису адреси (її пише той, хто головний - напр. композер)
 let Finals = [];
 let Guide={tips:[],i:0,on:true,busy:false,shownAt:0}; // 🦉 сова-провідник (стан угорі - selectView його читає)
 function owlEl(){ return $('owl'); } // hoisted - безпечно з selectView вище
@@ -154,6 +156,7 @@ const ROUTE_TABS={
 };
 const ROUTE_VIEWS=['today','create','publish','brand','analytics','settings','tools'];
 function writeRoute(v,tab){
+  if(_routeSilent) return;
   const h='#/'+v+(tab?'/'+tab:'');
   if(location.hash===h) return;
   location.hash=h; // саме hash (а не pushState): дає запис в історії, тож «назад» працює
@@ -163,6 +166,16 @@ function writeRoute(v,tab){
 function applyRoute(){
   const parts=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean);
   const v=parts[0]||'', tab=parts[1]||'';
+  // 🔗 deep-link на КОНКРЕТНИЙ пост: `#/post/<id>` відкриває його в композері. Саме це дає лінкам
+  // з бота («сценарій готовий», «пост залетів») вести прямо в потрібний пост, а не просто «в застосунок».
+  if(v==='post'&&parts[1]){
+    if(_cmpOpenId===parts[1]) return true;             // уже відкритий - нічого не робимо (ідемпотентність)
+    // розділ під композером перемикаємо МОВЧКИ: адресу тримає сам композер, інакше selectView
+    // перезаписав би її на #/create/posts і лінк на пост загубився б
+    _routeSilent=true; try{ selectView('create','posts'); } finally { _routeSilent=false; }
+    if(typeof openComposer==='function') openComposer(parts[1]);
+    return true;
+  }
   if(!ROUTE_VIEWS.includes(v)) return false;
   if(v!==curView) selectView(v,tab||undefined);
   else if(tab){ const r=ROUTE_TABS[v]; if(r&&r.keys.includes(tab)&&r.get()!==tab) r.set(tab); }
@@ -1623,7 +1636,10 @@ const NETFOLD={instagram:125,facebook:280,threads:320,linkedin:210};
 const NETMORE={instagram:'… ще',facebook:'… ще',threads:'Показати повністю',linkedin:'…more'};
 async function openComposer(postId, opts){
   opts=opts||{};
-  let full; try{ full=await api('/posts/'+postId+'/full'); }catch(e){ flash('Не вдалося відкрити: '+e.message); return; }
+  // адреса, з якої прийшли: закриття композера має вернути ТУДИ, інакше оновлення сторінки
+  // знову відкрило б композер (хеш лишився б #/post/<id>)
+  const _routeBack=(location.hash&&!/^#\/post\//.test(location.hash))?location.hash:'#/create/posts';
+  let full; try{ full=await api('/posts/'+postId+'/full'); }catch(e){ flash('Не вдалося відкрити: '+e.message); if(/^#\/post\//.test(location.hash)) location.hash=_routeBack; return; }
   let ps={sent:[],links:{}}; try{ ps=await api('/posts/'+postId+'/publish-state'); }catch(e){}
   let sentLinks=ps.links||{}; // 🔗 мережа → URL живого поста (щоб одразу перескочити й глянути)
   const sentSet=new Set(ps.sent||[]);
@@ -1668,8 +1684,10 @@ async function openComposer(postId, opts){
       +'<label style="font-size:12px;color:var(--muted)">Час <input type="time" id="cmpTime" class="txt" value="'+initTime+'" style="width:auto;padding:6px 8px;display:inline-block"></label>'
       +'<button class="ok" id="cmpSched">🗓 Запланувати</button><button class="primary" id="cmpNow">📣 Опублікувати зараз</button></div>';
   document.body.appendChild(ov);
+  _cmpOpenId=postId; writeRoute('post',postId); // 🔗 тепер на цей пост можна дати пряме посилання
   const escH=(e)=>{ if(e.key==='Escape') close(); };
-  function close(){ ov.remove(); document.removeEventListener('keydown',escH); } // function-декларація: хойститься, безпечна для колбеків вище
+  function close(){ ov.remove(); document.removeEventListener('keydown',escH); _cmpOpenId=null;
+    if(/^#\/post\//.test(location.hash)) location.hash=_routeBack; } // function-декларація: хойститься, безпечна для колбеків вище
   document.addEventListener('keydown',escH);
   const msg=ov.querySelector('#cmpMsg'); const txt=ov.querySelector('#cmpText'); txt.value=master;
   const setMsg=(t,c)=>{ msg.textContent=t; msg.style.color=c||'var(--muted)'; };

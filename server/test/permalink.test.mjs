@@ -3,7 +3,7 @@
 // «https://t.me//123» на порожньому username, зібрати лінк із неповних даних.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { tgLink, fbLink, liLink } from "../dist/permalink.js";
+import { tgLink, fbLink, liLink, cabinetPostLink } from "../dist/permalink.js";
 
 test("tgLink: публічний канал за username", () => {
   assert.equal(tgLink("-1001234567890", 42, "mychannel"), "https://t.me/mychannel/42");
@@ -34,4 +34,12 @@ test("liLink: URN → посилання на апдейт", () => {
   assert.equal(liLink("urn:li:ugcPost:7123456789"), "https://www.linkedin.com/feed/update/urn:li:ugcPost:7123456789/");
   assert.equal(liLink("7123456789"), "", "без префікса urn:li: це не URN");
   assert.equal(liLink(null), "");
+});
+
+test("cabinetPostLink: deep-link у кабінет на конкретний пост", () => {
+  assert.equal(cabinetPostLink("https://beta.socialio.rozum.one", "abc-123"),
+    "https://beta.socialio.rozum.one/app#/post/abc-123");
+  assert.equal(cabinetPostLink("https://x.ua/", "abc"), "https://x.ua/app#/post/abc", "зайвий слеш зрізається");
+  assert.equal(cabinetPostLink("", "abc"), "", "без базового URL лінка нема");
+  assert.equal(cabinetPostLink("https://x.ua", ""), "", "без id лінка нема");
 });
