@@ -44,6 +44,8 @@ let runId = localStorage.getItem('kg_run') || null;
 let S = {plan:[], schedule:{}};
 let busy = false;
 let curView = 'create';
+// вкладки розділів: стан угорі, бо його читає маршрутизатор ROUTE_TABS (визначений вище за setXTab)
+let cTab='posts', pTab='cal', bTab='voice', sTab='profile';
 let Finals = [];
 let Guide={tips:[],i:0,on:true,busy:false,shownAt:0}; // 🦉 сова-провідник (стан угорі - selectView його читає)
 function owlEl(){ return $('owl'); } // hoisted - безпечно з selectView вище
@@ -139,9 +141,37 @@ function setBankFold(fold){
 if($('bankFold')) $('bankFold').onclick=()=>setBankFold(true);
 if($('bankUnfold')) $('bankUnfold').onclick=()=>setBankFold(false);
 try{ setBankFold(localStorage.getItem('kg_bankfold')==='1'); }catch(e){}
-function selectView(v){
-  if(v==='sources'){ v='settings'; setTimeout(()=>setSTab('sources'),0); } // джерела живуть у Налаштуваннях
-  if(v==='strategy'){ v='brand'; setTimeout(()=>setBTab('strat'),0); } // Стратегія злита з Брендом (вкладка «Бриф і цілі»)
+// ---------- 🔗 маршрутизація: у кожного розділу й вкладки своя адреса (#/publish/plan) ----------
+// Раніше стан жив лише у змінних + латка в localStorage, тож оновлення сторінки кидало на ДЕФОЛТНУ
+// вкладку розділу (Публікація → завжди Календар, Бренд → завжди Голос), кнопка «назад» виходила із
+// застосунку, а поділитись посиланням на конкретний екран було ніяк. Хеш-маршрути (а не History API)
+// свідомо: не треба ні нового роуту на сервері, ні правок nginx, ні змін у OAuth-редіректах на /app.
+const ROUTE_TABS={
+  create:  { keys:['materials','posts','ideas'], set:(t)=>setCTab(t), get:()=>cTab },
+  publish: { keys:['cal','plan'],                set:(t)=>setPTab(t), get:()=>pTab },
+  brand:   { keys:['voice','visual','strat'],    set:(t)=>setBTab(t), get:()=>bTab },
+  settings:{ keys:['profile','channels','sources'], set:(t)=>setSTab(t), get:()=>sTab },
+};
+const ROUTE_VIEWS=['today','create','publish','brand','analytics','settings','tools'];
+function writeRoute(v,tab){
+  const h='#/'+v+(tab?'/'+tab:'');
+  if(location.hash===h) return;
+  location.hash=h; // саме hash (а не pushState): дає запис в історії, тож «назад» працює
+}
+// застосувати адресу до інтерфейсу. Ідемпотентна НАВМИСНО: writeRoute→hashchange→applyRoute не
+// зациклюється, бо коли потрібний розділ/вкладка вже активні, функція нічого не робить.
+function applyRoute(){
+  const parts=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean);
+  const v=parts[0]||'', tab=parts[1]||'';
+  if(!ROUTE_VIEWS.includes(v)) return false;
+  if(v!==curView) selectView(v,tab||undefined);
+  else if(tab){ const r=ROUTE_TABS[v]; if(r&&r.keys.includes(tab)&&r.get()!==tab) r.set(tab); }
+  return true;
+}
+window.addEventListener('hashchange',applyRoute);
+function selectView(v,tab){
+  if(v==='sources'){ v='settings'; tab=tab||'sources'; } // джерела живуть у Налаштуваннях
+  if(v==='strategy'){ v='brand'; tab=tab||'strat'; }     // Стратегія злита з Брендом («Бриф і цілі»)
   document.querySelectorAll('.navitem').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
   document.querySelectorAll('.viewsec').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
   const p=PAGES[v]||['','']; $('pageTitle').textContent=p[0]; $('pageSub').textContent=p[1];
@@ -155,7 +185,12 @@ function selectView(v){
   if(v==='tools' && typeof loadDialog==='function') loadDialog();
   if(typeof loadTasks==='function') loadTasks();
   curView=v; if(typeof renderTaskStrip==='function') renderTaskStrip(v);
-  try{ localStorage.setItem('kg_view', v); }catch(e){} // памʼятаємо розділ між оновленнями сторінки
+  // вкладку застосовуємо ПІСЛЯ перемикання розділу (setXTab покладеться на curView), і лише якщо
+  // вона валідна для цього розділу; інакше лишається та, що була (або дефолтна)
+  const r=ROUTE_TABS[v];
+  if(r&&tab&&r.keys.includes(tab)&&r.get()!==tab) r.set(tab);
+  else writeRoute(v, r?r.get():'');
+  try{ localStorage.setItem('kg_view', v); }catch(e){} // фолбек, коли відкривають /app без адреси
   // сова перепозиціонується під поточну ціль підказки після зміни розділу (макет змінився)
   try{ if(Guide&&Guide.on&&Guide.tips.length&&owlEl()&&owlEl().style.display!=='none'){ const t=Guide.tips[Guide.i]; if(t&&$('owlBubble').style.display!=='none'){ const p=owlPosition(t.target); $('owlBubble').classList.toggle('below',p==='below'); } } }catch(e){}
 }
@@ -164,6 +199,7 @@ document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>selectView(n.data
 
 // ---------- вкладки Бренду (Голос/Візуал) і Налаштувань (Профіль/Канали/Джерела) ----------
 function setBTab(b){
+  bTab=b; if(curView==='brand') writeRoute('brand',b);
   document.querySelectorAll('#bTabs .tab').forEach(x=>x.classList.toggle('on',x.dataset.btab===b));
   if($('brandVoice')) $('brandVoice').style.display=b==='voice'?'':'none';
   if($('brandVisual')) $('brandVisual').style.display=b==='visual'?'':'none';
@@ -175,6 +211,7 @@ function setBTab(b){
   if(host&&sec){ while(sec.firstChild) host.appendChild(sec.firstChild); sec.remove(); } })();
 document.querySelectorAll('#bTabs .tab').forEach(x=>x.onclick=()=>setBTab(x.dataset.btab));
 function setSTab(s){
+  sTab=s; if(curView==='settings') writeRoute('settings',s);
   document.querySelectorAll('#sTabs .tab').forEach(x=>x.classList.toggle('on',x.dataset.stab===s));
   const M={profile:'setProfile',channels:'setChannels',sources:'setSources'};
   for(const k in M){ const el=$(M[k]); if(el) el.style.display=k===s?'':'none'; }
@@ -267,11 +304,11 @@ function loadPlans(){ const lite=$('planLiteBtn'), pro=$('planProBtn'); if(!pro)
 if($('planProBtn')) $('planProBtn').onclick=async()=>{ try{ const next=PRO?'0':'1'; await saveSetting('pro',next); PRO=(next==='1'); if(typeof updateProUI==='function') updateProUI(); loadPlans(); if(typeof loadTasks==='function') loadTasks(); flash(PRO?'ПРО увімкнено ✓':'ПРО вимкнено'); if(!PRO&&$('layPipeline')&&$('layPipeline').style.display!=='none') setLayout('studio'); }catch(e){ flash('⚠ '+e.message); } };
 if($('planLiteBtn')) $('planLiteBtn').onclick=async()=>{ if(!PRO) return; try{ await saveSetting('pro','0'); PRO=false; if(typeof updateProUI==='function') updateProUI(); loadPlans(); if(typeof loadTasks==='function') loadTasks(); flash('Lite активний'); if($('layPipeline')&&$('layPipeline').style.display!=='none') setLayout('studio'); }catch(e){} };
 // ---------- конвеєр Створення: Матеріали → План → Чорновики ----------
-let cTab='posts';
 function setCTab(t){
   if(t==='plan'){ selectView('publish'); setPTab('plan'); return; } // План переїхав у Публікацію (хаб календаря)
   cTab=t;
-  try{ localStorage.setItem('kg_ctab', t); }catch(e){} // памʼятаємо під-вкладку Створення між оновленнями
+  if(curView==='create') writeRoute('create',t);
+  try{ localStorage.setItem('kg_ctab', t); }catch(e){} // фолбек, коли відкривають /app без адреси
   document.querySelectorAll('#cTabs .tab').forEach(x=>x.classList.toggle('on',x.dataset.ctab===t));
   const show=(id,on)=>{ const el=$(id); if(el) el.style.display=on?'':'none'; };
   show('layMaterials',t==='materials');
@@ -284,9 +321,8 @@ function setCTab(t){
   if(t==='ideas') loadIdeasTab();
 }
 // ---- вкладки Публікації: Календар | План і ритм (layPlan фізично переїздить сюди при старті) ----
-let pTab='cal';
 function setPTab(t){
-  pTab=t;
+  pTab=t; if(curView==='publish') writeRoute('publish',t);
   document.querySelectorAll('#pubTabs .tab').forEach(x=>x.classList.toggle('on',x.dataset.ptab===t));
   if($('pubCal')) $('pubCal').style.display=t==='cal'?'':'none';
   const host=$('pubPlanHost'); if(host) host.style.display=t==='plan'?'':'none';
@@ -2867,11 +2903,9 @@ function owlShowTip(idx){ const o=owlEl(); if(!o||!Guide.tips.length) return;
 async function owlAct(t){ const a=t.action||{}; owlLog(t.id,'clicked'); owlHop();
   if(a.do==='takes'){ owlHideBubble(); if($('genTakes')){ selectView('create'); setCTab('posts'); setTimeout(()=>$('genTakes').click(),200); } return; }
   if(a.do==='addmaterial'){ owlHideBubble(); if(typeof openAddMaterial==='function') openAddMaterial(); return; }
-  if(a.view){ selectView(a.view);
-    if(a.tab&&a.view==='settings') setTimeout(()=>setSTab(a.tab),60);
-    else if(a.tab&&a.view==='publish') setTimeout(()=>setPTab(a.tab),60);
-    else if(a.tab&&a.view==='create') setTimeout(()=>setCTab(a.tab),60);
-  }
+  // вкладку тепер ставить сам selectView (маршрутизатор знає всі розділи) - без setTimeout-хаку
+  // і без розгалуження по мережах; заодно працює й для Бренду, якого в старому переліку не було
+  if(a.view) selectView(a.view, a.tab);
   owlHideBubble(); setTimeout(()=>loadGuide(),900); // спершу летить у гніздо, тоді - до наступного кроку
 }
 function owlHop(){ const o=owlEl(); if(!o) return; o.classList.add('owl-hop'); setTimeout(()=>o.classList.remove('owl-hop'),500); }
@@ -2953,10 +2987,16 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
     const bb=document.createElement('div'); bb.textContent='BETA';
     bb.style.cssText='position:fixed;bottom:76px;right:12px;z-index:95;background:#e67e22;color:#fff;font-weight:800;font-size:11px;padding:4px 10px;border-radius:20px;letter-spacing:.06em;box-shadow:0 2px 8px rgba(0,0,0,.25);pointer-events:none';
     document.body.appendChild(bb); }
-  // відновлюємо останній відкритий розділ (щоб оновлення сторінки лишало юзера де він був), інакше «Створення»
-  const _views=['today','create','publish','brand','strategy','sources','analytics','settings','tools'];
-  const _lastView=localStorage.getItem('kg_view');
-  selectView(_views.includes(_lastView)?_lastView:'today'); setLayout('studio'); renderCountChips();
+  // Пріоритет: АДРЕСА (#/publish/plan) → останній розділ із localStorage → «Сьогодні».
+  // Саме адреса головна: оновлення сторінки, «назад», закладка й надісланий комусь лінк повертають
+  // РІВНО той екран, а не дефолтну вкладку розділу.
+  if(!applyRoute()){
+    const _views=['today','create','publish','brand','strategy','sources','analytics','settings','tools'];
+    const _lastView=localStorage.getItem('kg_view');
+    const _lastTab=localStorage.getItem('kg_ctab');
+    selectView(_views.includes(_lastView)?_lastView:'today', _lastView==='create'?_lastTab:undefined);
+  }
+  setLayout('studio'); renderCountChips();
   renderStudio(); renderInbox(); renderStudioSteps({}); renderSourceCard(null);
   try{ const me=await api('/auth/me'); $('userEmail').textContent=me.email; if(me.email) $('avatar').textContent=(me.email[0]||'О').toUpperCase(); }
   catch(e){ location.href='/login'; return; }
@@ -2970,7 +3010,10 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
   await loadPrompts();
   loadRubrics(); loadStrategy(); loadFF(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadTasks(); loadStudioPosts(); loadGoalCta(); loadMagnets();
   loadMaterials(); // стрічка + лічильник
-  loadPlan().then(()=>{ const _ct=localStorage.getItem('kg_ctab'); setCTab(_ct==='materials'?'materials':'posts'); }); // План живе в Публікації; тут лише Матеріали/Чорновики
+  // ⚠️ вкладку Створення тут БІЛЬШЕ НЕ смикаємо: раніше цей рядок безумовно кликав setCTab і
+  // перебивав адресу (#/create/ideas відкривався й одразу з'їжджав на Чорновики). Початкову вкладку
+  // тепер ставить applyRoute/фолбек вище; сюди лишився лише сам завантажувач плану.
+  loadPlan();
   await loadChanStatus();
   let _onb=true; try{ const st=await api('/settings'); if(!st.some(r=>r.key==='onboarded')){ _onb=false; showOnboarding(); } }catch(e){}
   // 🦉 сова-провідник (лише після онбордингу; не заважає першому налаштуванню)
