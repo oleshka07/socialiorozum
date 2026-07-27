@@ -260,8 +260,6 @@
   .calhead{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px}
   /* «?»-підказка: коротка назва + пояснення при наведенні (замість довгих абзаців у панелях) */
   .qh{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;border:1px solid var(--line);color:var(--faint);font-size:10.5px;font-weight:800;cursor:help;flex:none}
-  /* команди для копіювання в інструкціях (напр. налаштування збору діалогів) */
-  .dlgpre{white-space:pre-wrap;word-break:break-all;font-size:12px;line-height:1.5;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin:5px 0 0;overflow-x:auto}
   .qh:hover{color:var(--brand);border-color:var(--brand)}
   .calhead b{font-size:14px;min-width:150px;text-align:center}
   .cal.week .day{min-height:240px}
@@ -1049,23 +1047,6 @@
           <div class="btnrow" style="margin-top:10px;flex-wrap:wrap">
             <button class="ghost" id="toolsPipeline" title="Покроковий PRO-конвеєр: ідеї → чернетки → тон → формат → де-AI → стратегія">🧪 Конвеєр генерації <span style="font-size:9px;font-weight:800;background:var(--brand);color:var(--brand-ink);border-radius:5px;padding:1px 5px;margin-left:3px">PRO</span></button>
             <button class="ghost" id="viewPrompt" title="Переглянути спільний промт генерації - що саме бачить AI">👁 Промт генерації</button>
-          </div>
-        </div>
-        <!-- 🗣 Власні діалоги: нічний скрипт на машині юзера читає локальні сесії Claude Code,
-             дистилює «що я сьогодні зрозумів» і шле сюди. Публічного API до історії чатів немає,
-             тому це PUSH збоку клієнта - тут лише адреса + токен. -->
-        <div class="panel">
-          <div class="ph">🗣 Власні діалоги (Claude Code)</div>
-          <div class="hint">Найживіший матеріал - те, що ти сам сформулював, поки думав уголос. Нічний скрипт на твоєму компʼютері читає локальні сесії Claude Code, витягає з них тільки твої висновки й спостереження і кладе сюди як матеріал. Пости з нього генеруються в режимі «з власних слів автора» - без вигаданих списків і загальних фраз.</div>
-          <div id="dlgState" class="hint" style="margin-top:8px">…</div>
-          <div id="dlgUrlWrap" style="display:none;margin-top:10px">
-            <label>Адреса для скрипта <span class="qh" title="Це персональний ключ твого кабінету. Не публікуй його: хто має цю адресу - може додавати тобі матеріали.">?</span></label>
-            <input class="txt" id="dlgUrl" readonly style="font-family:ui-monospace,monospace;font-size:12px">
-          </div>
-          <div class="btnrow" style="margin-top:10px;flex-wrap:wrap">
-            <button class="ghost" id="dlgCopy" style="display:none" title="Скопіювати адресу для скрипта">⧉ Копіювати адресу</button>
-            <button class="ghost" id="dlgRotate" title="Створити нову адресу. Стара одразу перестане працювати - у скрипті треба буде оновити.">🔑 Створити адресу</button>
-            <button class="ghost" id="dlgHelp" title="Як налаштувати щовечірній запуск">📖 Як налаштувати</button>
           </div>
         </div>
         <div id="toolsGdriveHost"></div>

@@ -37,7 +37,7 @@ import { startDigest } from "./digest.js";
 import { startMetrics, networkBenchmarks } from "./metrics.js";
 import { startDiary } from "./diary.js";
 import { startThreadsAuto } from "./threads-auto.js";
-import { getSettingText, setSetting } from "./settings.js";
+import { getSettingText } from "./settings.js";
 import { generateImageForPost, imageProviders, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto } from "./images.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook } from "./tgbot.js";
 import { chat } from "./openrouter.js";
@@ -2265,7 +2265,7 @@ app.get("/api/materials", async (req: any) => {
      left join content_source cs on cs.id = s.feed_id
      left join plan_slot ps on ps.match_source_id = s.id and ps.status='matched'
      where s.workspace_id=$1 and s.archived=false and coalesce(s.transcript,'') <> ''
-     order by (s.origin in ('diary','dialog')) desc, s.created_at desc limit 200`, [req.user.workspace_id]);
+     order by (s.origin='diary') desc, s.created_at desc limit 200`, [req.user.workspace_id]);
   return { materials: rows };
 });
 app.get("/api/materials/:id", async (req: any, reply) => {
@@ -2853,53 +2853,6 @@ app.post("/api/webhooks/fireflies/:token", async (req: any, reply) => {
     await logEvent("error", "transcription", `вебхук getTranscript: ${e.message}`, null);
     return reply.code(500).send({ error: e.message });
   }
-});
-
-// ===================== 🗣 ВЛАСНІ ДІАЛОГИ (Claude Code / ChatGPT) ЯК ДЖЕРЕЛО =====================
-// Навіщо: найживіший матеріал автора - не стороння стаття, а те, що він САМ сформулював, поки думав.
-// Публічного API для читання історії claude.ai / ChatGPT НЕ існує, тому наповнення тільки PUSH збоку
-// клієнта: нічний скрипт `server/tools/dialog-sync.mjs` читає локальні JSONL Claude Code, дистилює з
-// них «що я сьогодні реально зрозумів» і шле сюди. Матеріал лягає з origin='dialog' → одразу працює
-// режим «з власних слів автора» (OWN_WORDS_ORIGINS у pipeline.ts), тож пост не добивається генерикою.
-const DIALOG_TOKEN_KEY = "dialog_token";
-const dialogUrl = (token: string) => `${env.appBaseUrl}/api/webhooks/dialog/${token}`;
-app.get("/api/integrations/dialog", async (req: any) => {
-  const token = await getSettingText(req.user.workspace_id, DIALOG_TOKEN_KEY);
-  const n = await one<{ c: string }>(
-    `select count(*)::text as c from source where workspace_id=$1 and origin='dialog'`, [req.user.workspace_id]);
-  return { url: token ? dialogUrl(token) : "", hasToken: !!token, count: Number(n?.c || 0) };
-});
-// Створити/перевипустити токен. Перевипуск = старий URL одразу мертвий (як «змінити пароль»).
-app.post("/api/integrations/dialog/rotate", async (req: any) => {
-  const token = auth.newToken();
-  await setSetting(req.user.workspace_id, DIALOG_TOKEN_KEY, token);
-  return { ok: true, url: dialogUrl(token) };
-});
-app.post("/api/webhooks/dialog/:token", async (req: any, reply) => {
-  const token = String(req.params.token || "");
-  // токен = 64 hex-символи (auth.newToken); коротке значення відсікаємо ДО запиту в БД,
-  // щоб випадкове порожнє/сміттєве співпадіння з іншим ключем settings_block було неможливе
-  if (!/^[0-9a-f]{64}$/.test(token)) return reply.code(404).send({ error: "unknown webhook" });
-  const row = await one<{ workspace_id: string }>(
-    `select workspace_id from settings_block where key=$1 and content=$2`, [DIALOG_TOKEN_KEY, token]);
-  if (!row) return reply.code(404).send({ error: "unknown webhook" });
-  const ws = row.workspace_id;
-  const text = String(req.body?.text ?? "").trim();
-  // скрипт САМ вирішує, чи є про що писати, і в «пусті» дні не шле нічого; цей гард - друга лінія
-  if (text.length < 80) return reply.code(400).send({ error: "порожній або занадто короткий текст" });
-  const body = text.slice(0, 12000);
-  // дедуп за вмістом: ретрай скрипта чи два запуски за добу не плодять копії матеріалу
-  const ext = "dialog:" + createHash("sha256").update(body).digest("hex").slice(0, 32);
-  const dup = await one<{ id: string }>(`select id from source where workspace_id=$1 and external_id=$2`, [ws, ext]);
-  if (dup) return { ok: true, duplicate: true, id: dup.id };
-  const rawTitle = String(req.body?.title ?? "").trim().replace(/\s+/g, " ").slice(0, 160);
-  const title = `🗣 ${rawTitle || "Діалог " + new Date().toISOString().slice(0, 10)}`;
-  const src = await one<{ id: string }>(
-    `insert into source(workspace_id,origin,title,transcript,external_id) values($1,'dialog',$2,$3,$4) returning id`,
-    [ws, title, body, ext]);
-  await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
-  await logEvent("info", "dialog", `імпорт діалогу: ${title} (${body.length} симв.)`, null);
-  return { ok: true, id: src!.id };
 });
 
 // ===================== СТОРІНКИ =====================

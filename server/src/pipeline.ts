@@ -609,9 +609,9 @@ async function recentContentDigest(workspaceId: string): Promise<string> {
 
 // ---- LITE: один зібраний промт (усі кроки кишки в одному) ----
 // Зібрати спільний системний промт Lite-генерації (для самої генерації + для перегляду користувачем).
-// origin - походження матеріалу: 'diary'/'dialog' вмикають режим «з власних слів автора»
+// origin - походження матеріалу: 'diary' вмикає режим «з власних слів автора»
 // (особистий запис = єдине джерело фактів, вигадка заборонена); решта походжень працюють як раніше.
-export const OWN_WORDS_ORIGINS = ["diary", "dialog"];
+export const OWN_WORDS_ORIGINS = ["diary"];
 export async function buildLitePrompt(workspaceId: string, count: number, ideas?: string[], formats?: string[], origin?: string): Promise<{ system: string; model: string }> {
   const ownWords = OWN_WORDS_ORIGINS.includes(String(origin || "")) ? OWN_WORDS_RULE : "";
   const s = await loadSettings(workspaceId);
@@ -1103,10 +1103,9 @@ export async function atomizePost(workspaceId: string, content: string, channels
 
 // Режим Розвідника за походженням матеріалу - одна точка правди (раніше цей вибір був продубльований
 // у двох роутах, тож новий origin легко забути додати в одному з них).
-// 'dialog' (власні діалоги з Claude/ChatGPT) - це той самий власний матеріал, що щоденник → 'story'.
 export function ideaMode(origin: string): "signal" | "story" | undefined {
   if (origin === "rss") return "signal";
-  if (["manual", "idea", "diary", "dialog"].includes(origin)) return "story";
+  if (["manual", "idea", "diary"].includes(origin)) return "story";
   return undefined;
 }
 
