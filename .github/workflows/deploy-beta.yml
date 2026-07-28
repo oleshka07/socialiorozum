@@ -41,6 +41,9 @@ jobs:
               if [ "$code" = "200" ]; then echo "✅ health 200 (спроба $i)"; exit 0; fi
               sleep 2
             done
-            echo "❌ застосунок не віддав health 200 за 60с - останні логи:"
-            docker compose logs --tail=40 app
+            echo "❌ застосунок не віддав health 200 за 60с"
+            echo "--- стан контейнерів ---"; docker compose ps
+            echo "--- диск ---";  df -h / | tail -1
+            echo "--- памʼять ---"; free -h | head -2
+            echo "--- логи застосунку ---"; docker compose logs --tail=60 app
             exit 1
