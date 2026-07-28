@@ -334,7 +334,7 @@ $('toStudio').onclick=()=>setLayout('studio');
 
 // ---------- МАТЕРІАЛИ: стрічка сировини ----------
 let Mats=[], MatFilter='Усі', MatFeedFilter=null, MatOpen=null, Ideas=[];
-const MAT_TYPE={manual:'✍️ Нотатка',rss:'📡 RSS',fireflies:'🎙 Транскрипт',grain:'🎙 Транскрипт',meetgeek:'🎙 Транскрипт',gdrive:'📁 Drive',brand:'✨ Бренд',plan:'📅 План',idea:'💡 Ідея',diary:'📔 Щоденник'};
+const MAT_TYPE={bot:'🤖 З бота',manual:'✍️ Нотатка',rss:'📡 RSS',fireflies:'🎙 Транскрипт',grain:'🎙 Транскрипт',meetgeek:'🎙 Транскрипт',gdrive:'📁 Drive',brand:'✨ Бренд',plan:'📅 План',idea:'💡 Ідея',diary:'📔 Щоденник'};
 async function loadMaterials(){ try{ const r=await api('/materials'); Mats=r.materials||[]; }catch(e){ Mats=[]; } try{ const ib=await api('/ideas'); Ideas=ib.ideas||[]; }catch(e){ Ideas=[]; } renderMaterials(); updateCounts(); }
 function matType(m){ return MAT_TYPE[m.origin]||m.origin; }
 function renderMaterials(){
@@ -1305,7 +1305,7 @@ function renderFinals(posts){
 async function saveContent(id,v){ try{ await api('/posts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:v})}); flashSaved(); }catch(e){} }
 let StudioFilter='all', StudioRubric='', StudioOrigin='', StudioFormat='';
 const INTENT_META={awareness:['🌱','знайомство','цінність новій аудиторії, без продажу'],nurture:['🤝','прогрів','будує довіру, мʼякий заклик'],sale:['💰','продаж','прямий оффер за сходами']};
-const ORIGIN_LABEL={manual:'✍️ вручну',rss:'📡 RSS',fireflies:'🎙 транскрипт',grain:'🎙 транскрипт',meetgeek:'🎙 транскрипт',brand:'✨ з бренду',gdrive:'📁 Drive',plan:'📅 з плану',diary:'📔 щоденник',takes:'🧵 тейк',idea:'💡 з ідеї'};
+const ORIGIN_LABEL={bot:'🤖 з бота',manual:'✍️ вручну',rss:'📡 RSS',fireflies:'🎙 транскрипт',grain:'🎙 транскрипт',meetgeek:'🎙 транскрипт',brand:'✨ з бренду',gdrive:'📁 Drive',plan:'📅 з плану',diary:'📔 щоденник',takes:'🧵 тейк',idea:'💡 з ідеї'};
 const SelPosts=new Set(); // масові дії
 // глобальний список усіх фінальних постів воркспейсу (НЕ привʼязаний до активного джерела/прогону)
 async function loadStudioPosts(){ try{ Finals=(await api('/posts/studio'))||[]; }catch(e){} SelPosts.clear(); renderStudio(); renderInbox(); if(typeof updateCounts==='function') updateCounts(); }

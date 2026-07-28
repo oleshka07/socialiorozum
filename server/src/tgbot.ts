@@ -11,6 +11,7 @@ import { publishPostToChannels } from "./publisher.js";
 import { sendDigestNow } from "./digest.js";
 import { isDiaryPending, appendDiaryText, attachDiaryMedia, transcribeVoice, skipDiaryToday, sendDiaryNow, weekDiaryText } from "./diary.js";
 import { cabinetPostLink } from "./permalink.js";
+import * as cmp from "./tgcompose.js";
 const postDeepLink = (postId: string) => cabinetPostLink(env.appBaseUrl, postId);
 
 let BOT_ID = 0;
@@ -163,7 +164,11 @@ async function captureIdea(workspaceId: string, chatId: string, text: string): P
   const r = await one<{ id: string }>(`insert into idea_bank(workspace_id, text, origin) values($1,$2,'bot') returning id`, [workspaceId, text.slice(0, 500)]);
   await liveSend(workspaceId, chatId, "capture",
     `💡 Збережено в Банк ідей:\n«${text.slice(0, 140)}»`,
-    [[{ text: "✨ Зробити пост зараз", data: `idea_post:${r!.id}` }], [{ text: "📋 Усі ідеї", data: "idea_list" }]]);
+    // «✨ Зробити пост» = AI перепише думку в пост; «📝 Це вже готовий пост» = взяти текст ДОСЛІВНО
+    // й одразу відкрити композер (канали/фото/час). Дві різні наміри - дві різні кнопки.
+    [[{ text: "✨ Зробити пост зараз", data: `idea_post:${r!.id}` }],
+     [{ text: "📝 Це вже готовий пост", data: `idea_raw:${r!.id}` }],
+     [{ text: "📋 Усі ідеї", data: "idea_list" }]]);
 }
 
 // список банку ідей (живий меседж, category='idea_list')
@@ -190,11 +195,21 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
         if (row) {
           await q(`update tg_connect set tg_user_id=$2 where code=$1`, [code, fromId]);
           await setOwner(fromId, row.workspace_id, chatId);
-          await tg.sendMessage(token, chatId, "Вітаю! 🤝 Я тепер твій контент-помічник.\n\n• Надішли будь-яку думку — збережу як ідею в Банк.\n• /idea — твої ідеї, зробити з них пост у 1 тап.\n• 📔 Двічі на день спитаю, що відбувалося: відповідай текстом, ГОЛОСОМ, фото чи відео — усе ляже в щоденник і стане живим джерелом постів. /diary — спитати зараз.\n\nЩоб публікувати у свій канал: додай мене АДМІНОМ у канал і перешли сюди будь-який пост із нього.");
+          await tg.sendMessage(token, chatId, "Вітаю! 🤝 Я тепер твій контент-помічник.\n\n• Надішли будь-яку думку — збережу як ідею в Банк.\n• /idea — твої ідеї, зробити з них пост у 1 тап.\n• /post — написати пост прямо тут: текст, фото, канали, публікація зараз або за розкладом.\n• 📔 Двічі на день спитаю, що відбувалося: відповідай текстом, ГОЛОСОМ, фото чи відео — усе ляже в щоденник і стане живим джерелом постів. /diary — спитати зараз.\n\nЩоб публікувати у свій канал: додай мене АДМІНОМ у канал і перешли сюди будь-який пост із нього.");
           return;
         }
       }
       await tg.sendMessage(token, chatId, "Привіт! Щоб під'єднати мене до твого кабінету, відкрий посилання «Підключити наш бот» у socialio.");
+      return;
+    }
+
+    // 📝 /post [текст] — написати пост прямо з телефона: текст → фото → канали → публікація
+    if (text.toLowerCase().startsWith("/post")) {
+      const ws = await ownerWorkspace(fromId);
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio."); return; }
+      const body = text.slice(5).trim();
+      if (!body) { await cmp.expect(ws, "", "text", chatId); await tg.sendMessage(token, chatId, "📝 Надішли текст поста наступним повідомленням."); return; }
+      await openCompose(ws, chatId, await cmp.createBotDraft(ws, body), token);
       return;
     }
 
@@ -220,6 +235,16 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
       if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio."); return; }
       await sendDiaryNow(ws, chatId);
       return;
+    }
+
+    // 📝 якщо композер чекає на конкретну відповідь (текст/фото/дату) - вона має пріоритет над
+    // щоденником і банком ідей: людина щойно натиснула кнопку й відповідає саме на неї
+    {
+      const wsC = await ownerWorkspace(fromId);
+      if (wsC) {
+        const st = await cmp.getCompose(wsC);
+        if (st.await && await composeReply(wsC, chatId, msg, st, token)) return;
+      }
     }
 
     // 🎙 голосове → Whisper → запис у щоденник (голос = завжди щоденник: надиктовані історії дня)
@@ -274,7 +299,85 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
   } catch (e: any) { await logEvent("error", "tgbot", "update: " + e.message); }
 }
 
+// ---- 📝 композер у Telegram ----
+// Картка поста живе «одним живим меседжем» (liveSend category='compose'): кожна дія оновлює ту саму
+// картку, а не плодить нові - інакше після п'яти натискань чат перетворюється на стрічку копій.
+async function openCompose(ws: string, chatId: string, postId: string, token: string): Promise<void> {
+  const card = await cmp.composeCard(ws, postId);
+  if (!card) { await tg.sendMessage(token, chatId, "Пост не знайдено."); return; }
+  await cmp.expect(ws, postId, null, chatId);
+  await liveSend(ws, chatId, "compose", card.text, [...card.buttons, [{ text: "🌐 Відкрити в кабінеті", url: postDeepLink(postId) }]]);
+}
+
+// відповідь на те, чого композер зараз чекає; true = повідомлення оброблено
+async function composeReply(ws: string, chatId: string, msg: any, st: { postId: string | null; await: string | null }, token: string): Promise<boolean> {
+  const text = String(msg.text || "").trim();
+  if (st.await === "photo") {
+    const ph = msg.photo?.length ? msg.photo[msg.photo.length - 1] : null;
+    if (!ph) return false;                       // прислали не фото - хай іде звичайним шляхом
+    if ((ph.file_size || 0) > 19.5 * 1024 * 1024) { await tg.sendMessage(token, chatId, "⚠️ Файл понад 20 МБ - Telegram не віддає такі ботам."); return true; }
+    const f = await tg.getFileBuffer(token, ph.file_id);
+    await cmp.attachPhoto(ws, st.postId!, f.buffer, "image/jpeg", "tg-post.jpg");
+    await openCompose(ws, chatId, st.postId!, token);
+    return true;
+  }
+  if (!text) return false;
+  if (st.await === "text") {
+    // порожній postId = це перший текст після «/post» → створюємо чернетку
+    const id = st.postId || await cmp.createBotDraft(ws, text);
+    if (st.postId) await cmp.setText(ws, st.postId, text);
+    await openCompose(ws, chatId, id, token);
+    return true;
+  }
+  if (st.await === "rewrite") {
+    await tg.sendMessage(token, chatId, "🤖 Переписую…");
+    try { await cmp.aiRewrite(ws, st.postId!, text === "-" ? undefined : text); }
+    catch (e: any) { await tg.sendMessage(token, chatId, "⚠️ " + String(e.message).slice(0, 200)); }
+    await openCompose(ws, chatId, st.postId!, token);
+    return true;
+  }
+  if (st.await === "when") {
+    const at = await cmp.parseWhen(ws, text);
+    if (!at) { await tg.sendMessage(token, chatId, "Не зрозумів дату. Приклади: «01.08 14:30», «завтра 09:00», «2026-08-01 18:00»."); return true; }
+    await tg.sendMessage(token, chatId, await cmp.schedule(ws, st.postId!, at));
+    await openCompose(ws, chatId, st.postId!, token);
+    return true;
+  }
+  return false;
+}
+
 // кнопки під згенерованою чернеткою в DM
+// композер: усі гілки під одним префіксом `c*`, щоб не плутати зі старими pub:/rw:
+async function composeCallback(ws: string, chatId: string, data: string, cbq: any, token: string): Promise<boolean> {
+  const [head, postId, arg] = data.split(":");
+  if (!postId || !/^c/.test(head)) return false;
+  switch (head) {
+    case "cc":  await tg.answerCallbackQuery(token, cbq.id); await openCompose(ws, chatId, postId, token); return true;
+    case "cn":  await cmp.toggleNet(ws, postId, arg); await tg.answerCallbackQuery(token, cbq.id); await openCompose(ws, chatId, postId, token); return true;
+    case "cp":  await cmp.expect(ws, postId, "photo", chatId); await tg.answerCallbackQuery(token, cbq.id, "Надішли фото"); await tg.sendMessage(token, chatId, "🖼 Надішли фото наступним повідомленням."); return true;
+    case "ce":  await cmp.expect(ws, postId, "text", chatId);  await tg.answerCallbackQuery(token, cbq.id, "Надішли новий текст"); await tg.sendMessage(token, chatId, "✍ Надішли новий текст поста."); return true;
+    case "cr":  await cmp.expect(ws, postId, "rewrite", chatId); await tg.answerCallbackQuery(token, cbq.id); await tg.sendMessage(token, chatId, "🤖 Що саме змінити? Напиши побажання (або «-», щоб просто переписати іншими словами)."); return true;
+    case "cgo": {
+      await tg.answerCallbackQuery(token, cbq.id, "Публікую…");
+      let out: string; try { out = await cmp.publishNow(ws, postId); } catch (e: any) { out = "⚠️ " + String(e.message).slice(0, 200); }
+      await tg.sendMessage(token, chatId, out);
+      await openCompose(ws, chatId, postId, token); return true;
+    }
+    case "cs": {
+      const w = await cmp.whenButtons(ws, postId);
+      await tg.answerCallbackQuery(token, cbq.id);
+      await liveSend(ws, chatId, "compose", w.text, w.buttons); return true;
+    }
+    case "cwx": await cmp.expect(ws, postId, "when", chatId); await tg.answerCallbackQuery(token, cbq.id); await tg.sendMessage(token, chatId, "🗓 Напиши дату й час: «01.08 14:30», «завтра 09:00» або «2026-08-01 18:00»."); return true;
+    case "cw": {
+      await tg.answerCallbackQuery(token, cbq.id);
+      await tg.sendMessage(token, chatId, await cmp.schedule(ws, postId, new Date(Number(arg))));
+      await openCompose(ws, chatId, postId, token); return true;
+    }
+  }
+  return false;
+}
+
 const draftButtons = (postId: string): tg.TgButton[][] => [
   [{ text: "✅ Опублікувати в Telegram", data: `pub:${postId}` }],
   [{ text: "✍️ Переробити", data: `rw:${postId}` }, { text: "📋 Ще ідеї", data: "idea_list" }],
@@ -289,6 +392,16 @@ async function handleCallback(cbq: any, tokenOverride?: string): Promise<void> {
   const ws = await ownerWorkspace(fromId);
   if (!ws) { await tg.answerCallbackQuery(token, cbq.id, "Спершу під'єднай кабінет socialio"); return; }
   try {
+    if (data.startsWith("idea_raw:")) {
+      const it = await one<{ text: string }>(`select text from idea_bank where id=$1 and workspace_id=$2`, [data.slice(9), ws]);
+      if (!it) { await tg.answerCallbackQuery(token, cbq.id, "Не знайшов"); return; }
+      await tg.answerCallbackQuery(token, cbq.id);
+      const pid = await cmp.createBotDraft(ws, it.text);
+      await q(`update idea_bank set status='used', used_post_id=$2 where id=$1`, [data.slice(9), pid]);
+      await openCompose(ws, chatId, pid, token);
+      return;
+    }
+    if (await composeCallback(ws, chatId, data, cbq, token)) return;
     if (data === "idea_list") { await tg.answerCallbackQuery(token, cbq.id); await sendIdeaList(ws, chatId); return; }
     if (data.startsWith("slot_post:")) {
       await tg.answerCallbackQuery(token, cbq.id, "Генерую пост…");
