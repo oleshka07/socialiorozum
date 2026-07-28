@@ -1,8 +1,5 @@
 name: deploy
 
-# GitHub бачить workflow ЛИШЕ в .github/workflows у КОРЕНІ репозиторію.
-# Цей файл — канонічний (репо-корінь = тека КонтентГров, усередині — /server).
-
 on:
   push:
     branches: [main]
@@ -25,3 +22,24 @@ jobs:
             cd server
             docker compose up -d --build
             docker image prune -f
+            # 📋 Інвентар хоста. Бокс один на всі сервіси, тож коли щось «зникає» (28.07 контейнери
+            # socialio знесло цілком - compose створював їх з нуля), треба бачити, ЩО саме лишилось.
+            # Найважливіше - ТОМИ: видалення контейнера дані НЕ втрачає, а видалення тому втрачає.
+            echo "--- контейнери на хості ---"; docker ps -a --format '{{.Names}}\t{{.Status}}\t{{.Image}}'
+            echo "--- томи (CreatedAt свіжий = дані втрачені) ---"
+            for v in $(docker volume ls -q); do echo "$v  $(docker volume inspect -f '{{.CreatedAt}}' "$v")"; done
+            echo "--- диск ---";  df -h / | tail -1
+            echo "--- памʼять ---"; free -h | head -2
+            # ⚠️ `up -d` НЕ доказ, що застосунок працює: healthcheck є лише в БД, тож контейнер
+            # застосунку рахується «Started» одразу після запуску процесу. Якщо він упаде на міграції
+            # чи на старті воркерів, деплой лишався ЗЕЛЕНИМ і про це ніхто не дізнавався до першого
+            # відкриття кабінету. Чекаємо на живий /health (прод слухає 8080).
+            for i in $(seq 1 30); do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080/health" || true)
+              if [ "$code" = "200" ]; then echo "✅ health 200 (спроба $i)"; exit 0; fi
+              sleep 2
+            done
+            echo "❌ застосунок не віддав health 200 за 60с"
+            echo "--- стан контейнерів проєкту ---"; docker compose ps
+            echo "--- логи застосунку ---"; docker compose logs --tail=60 app
+            exit 1
