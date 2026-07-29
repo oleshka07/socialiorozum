@@ -50,6 +50,7 @@ export async function initTelegramBot(): Promise<void> {
     }
     const url = `${env.appBaseUrl}/api/webhooks/telegram/${env.telegram.webhookSecret}`;
     await tg.setWebhook(env.telegram.botToken, url, env.telegram.webhookSecret);
+    await registerMenu(env.telegram.botToken);
     console.log(`[tgbot] спільний бот @${BOT_USERNAME} (id ${BOT_ID}); webhook → ${url}`);
   } catch (e: any) { console.error("[tgbot] init: " + e.message); }
 }
@@ -180,6 +181,25 @@ async function sendIdeaList(workspaceId: string, chatId: string): Promise<void> 
 }
 
 // обробка апдейту від Telegram (виклик із вебхука); tokenOverride = власний бот воркспейсу (?bot= у URL)
+// ---- точки входу без слешів ----
+// TG_MENU: підказки в ☰; кнопка ліворуч від поля вводу відкриває Mini App; постійна клавіатура
+// дублює найчастіші дії текстом (натиснув - Telegram надіслав саме цей рядок, ми його роутимо).
+const MINIAPP_URL = `${env.appBaseUrl}/tgapp`;
+const KB_NEW = "✍️ Новий пост", KB_APP = "🚀 Кабінет", KB_IDEAS = "💡 Ідеї", KB_DIARY = "📔 Щоденник", KB_DIGEST = "☀️ Зведення";
+async function registerMenu(token: string): Promise<void> {
+  await tg.setMyCommands(token, [
+    { command: "post", description: "Новий пост: текст, фото, канали, публікація" },
+    { command: "idea", description: "Банк ідей" },
+    { command: "diary", description: "Записати в щоденник" },
+    { command: "digest", description: "Зведення дня" },
+  ]);
+  await tg.setChatMenuButton(token, MINIAPP_URL, "Кабінет");
+}
+const mainKeyboard = (): tg.TgKbButton[][] => [
+  [{ text: KB_NEW }, { text: KB_APP, web_app: { url: MINIAPP_URL } }],
+  [{ text: KB_IDEAS }, { text: KB_DIARY }, { text: KB_DIGEST }],
+];
+
 export async function handleUpdate(update: any, tokenOverride?: string): Promise<void> {
   const token = tokenOverride || env.telegram.botToken; if (!token) return;
   try {
@@ -195,11 +215,24 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
         if (row) {
           await q(`update tg_connect set tg_user_id=$2 where code=$1`, [code, fromId]);
           await setOwner(fromId, row.workspace_id, chatId);
-          await tg.sendMessage(token, chatId, "Вітаю! 🤝 Я тепер твій контент-помічник.\n\n• Надішли будь-яку думку — збережу як ідею в Банк.\n• /idea — твої ідеї, зробити з них пост у 1 тап.\n• /post — написати пост прямо тут: текст, фото, канали, публікація зараз або за розкладом.\n• 📔 Двічі на день спитаю, що відбувалося: відповідай текстом, ГОЛОСОМ, фото чи відео — усе ляже в щоденник і стане живим джерелом постів. /diary — спитати зараз.\n\nЩоб публікувати у свій канал: додай мене АДМІНОМ у канал і перешли сюди будь-який пост із нього.");
+          await tg.sendWithKeyboard(token, chatId, "Вітаю! 🤝 Я тепер твій контент-помічник.\n\n• Надішли будь-яку думку — збережу як ідею в Банк.\n• /idea — твої ідеї, зробити з них пост у 1 тап.\n• /post — написати пост прямо тут: текст, фото, канали, публікація зараз або за розкладом.\n• 📔 Двічі на день спитаю, що відбувалося: відповідай текстом, ГОЛОСОМ, фото чи відео — усе ляже в щоденник і стане живим джерелом постів. /diary — спитати зараз.\n\nЩоб публікувати у свій канал: додай мене АДМІНОМ у канал і перешли сюди будь-який пост із нього.", mainKeyboard());
+          await registerMenu(token);
           return;
         }
       }
       await tg.sendMessage(token, chatId, "Привіт! Щоб під'єднати мене до твого кабінету, відкрий посилання «Підключити наш бот» у socialio.");
+      return;
+    }
+
+    // кнопки постійної клавіатури приходять звичайним текстом - зводимо їх до тих самих дій
+    if (text === KB_NEW || text === KB_IDEAS || text === KB_DIARY || text === KB_DIGEST) {
+      const ws = await ownerWorkspace(fromId);
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio."); return; }
+      if (text === KB_IDEAS)  { await sendIdeaList(ws, chatId); return; }
+      if (text === KB_DIARY)  { await sendDiaryNow(ws, chatId); return; }
+      if (text === KB_DIGEST) { await sendDigestNow(ws, chatId); return; }
+      await cmp.expect(ws, "", "text", chatId);
+      await tg.sendMessage(token, chatId, "📝 Надішли текст поста наступним повідомленням.");
       return;
     }
 
@@ -210,6 +243,13 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
       const body = text.slice(5).trim();
       if (!body) { await cmp.expect(ws, "", "text", chatId); await tg.sendMessage(token, chatId, "📝 Надішли текст поста наступним повідомленням."); return; }
       await openCompose(ws, chatId, await cmp.createBotDraft(ws, body), token);
+      return;
+    }
+
+    // /menu — повернути кнопки (якщо юзер їх колись сховав)
+    if (text.toLowerCase().startsWith("/menu")) {
+      await registerMenu(token);
+      await tg.sendWithKeyboard(token, chatId, "Кнопки на місці 👇", mainKeyboard());
       return;
     }
 

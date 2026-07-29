@@ -125,18 +125,18 @@
     "semantic_hash": ""
   },
   "server/src/server.ts": {
-    "mtime": 1785309908.4044678,
-    "ast_hash": "c0786619e2b0810feec97c6382e0786e",
+    "mtime": 1785266492.5277684,
+    "ast_hash": "08efedcc3c8717a39be6e89dbcd267af",
     "semantic_hash": ""
   },
   "server/src/telegram.ts": {
-    "mtime": 1785309978.707437,
-    "ast_hash": "5550661f9f5b358cfe65b99510c49c5f",
+    "mtime": 1785266492.5277684,
+    "ast_hash": "d639434558ace07bb982cb973943712b",
     "semantic_hash": ""
   },
   "server/src/tgbot.ts": {
-    "mtime": 1785310017.278081,
-    "ast_hash": "9f1f61627c5fe8685f7eb96122c13640",
+    "mtime": 1785270113.9847748,
+    "ast_hash": "f09582e88021e86d31dd94d98e7cba02",
     "semantic_hash": ""
   },
   "server/src/threads.ts": {
@@ -155,8 +155,8 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1785310181.6620762,
-    "ast_hash": "7f0967c6fcd57a2ce257200e8b3f1911",
+    "mtime": 1785270323.969528,
+    "ast_hash": "0132afda5ec802d6bbee52f9697775f7",
     "semantic_hash": ""
   },
   "DEPLOY.md": {
@@ -427,26 +427,6 @@
   "server/test/tgcompose.test.mjs": {
     "mtime": 1785270083.3300004,
     "ast_hash": "71a09827e669ba420e98167cb4fee358",
-    "semantic_hash": ""
-  },
-  "server/.lint/tgshot.mjs": {
-    "mtime": 1785310105.602078,
-    "ast_hash": "067fdd61ad9f851dd937e734b5eac293",
-    "semantic_hash": ""
-  },
-  "server/src/tgauth.ts": {
-    "mtime": 1785309831.809134,
-    "ast_hash": "a57bf22a8d69aca4fc186df95fb8f860",
-    "semantic_hash": ""
-  },
-  "server/test/tgauth.test.mjs": {
-    "mtime": 1785309831.8093107,
-    "ast_hash": "602c14aba5b41d44f844e9d5482af24b",
-    "semantic_hash": ""
-  },
-  "server/public/tgapp.html": {
-    "mtime": 1785310133.9452896,
-    "ast_hash": "8d165f1d8ba8bf9aefecac92d4c8977e",
     "semantic_hash": ""
   }
 }

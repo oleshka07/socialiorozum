@@ -101,3 +101,21 @@ export async function getFileBuffer(token: string, fileId: string): Promise<{ bu
 }
 export const setWebhook = (token: string, url: string, secretToken?: string) =>
   tg(token, "setWebhook", { url, allowed_updates: ["message", "channel_post", "my_chat_member", "callback_query"], ...(secretToken ? { secret_token: secretToken } : {}) });
+
+// ---- точки входу без слешів: постійна клавіатура, меню команд, кнопка Mini App ----
+// Слеш-команди памʼятають одиниці; кнопка під полем вводу - те, що видно завжди.
+export type TgKbButton = { text: string; web_app?: { url: string } };
+export async function sendWithKeyboard(token: string, chatId: string, text: string, keyboard: TgKbButton[][]) {
+  return tg<{ message_id: number }>(token, "sendMessage", {
+    chat_id: chatId, text: toTgHtml(text), parse_mode: "HTML", disable_web_page_preview: true,
+    reply_markup: { keyboard, resize_keyboard: true, is_persistent: true },
+  });
+}
+// підказки в ☰ біля поля вводу
+export async function setMyCommands(token: string, commands: Array<{ command: string; description: string }>): Promise<void> {
+  try { await tg(token, "setMyCommands", { commands }); } catch { /* не критично: бот працює й без меню */ }
+}
+// кнопка ліворуч від поля вводу відкриває Mini App
+export async function setChatMenuButton(token: string, url: string, text = "Кабінет"): Promise<void> {
+  try { await tg(token, "setChatMenuButton", { menu_button: { type: "web_app", text, web_app: { url } } }); } catch { /* не критично */ }
+}

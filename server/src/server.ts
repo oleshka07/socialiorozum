@@ -13,6 +13,8 @@ import { startReelJob, reelJobs, parseReelScript } from "./reelvideo.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
 import { tgLink, fbLink, liLink } from "./permalink.js";
+import { verifyInitData } from "./tgauth.js";
+import { createBotDraft, publishNow, connectedNets } from "./tgcompose.js";
 import * as linkedin from "./linkedin.js";
 import * as youtube from "./youtube.js";
 import * as tiktok from "./tiktok.js";
@@ -127,6 +129,8 @@ document.getElementById('p').addEventListener('keydown',e=>{if(e.key==='Enter')g
   app.addHook("onRequest", async (req: any, reply) => {
     const url = (req.raw.url || "").split("?")[0];
     if (url === "/health" || url === "/beta-pin" || url === "/favicon.svg" || url.startsWith("/api/webhooks/") || url.startsWith("/media/")) return;
+    // Mini App живе всередині Telegram - PIN там ввести ніде, а захист у нього свій (підпис initData)
+    if (url === "/tgapp" || url.startsWith("/api/tg/")) return;
     if (req.cookies?.[PIN_COOKIE] === pinToken) return;
     if (url.startsWith("/api/")) return reply.code(401).send({ error: "beta: потрібен PIN" });
     return reply.type("text/html").send(pinPage);
@@ -149,6 +153,7 @@ app.addHook("preHandler", async (req: any, reply) => {
   if (!url.startsWith("/api/")) return;
   if (url.startsWith("/api/auth/")) return;
   if (url.startsWith("/api/webhooks/")) return;
+  if (url.startsWith("/api/tg/")) return;   // Mini App: перевірка не кукою, а підписом initData (tgauth.ts)
   const user = await auth.userBySession(req.cookies?.[COOKIE]);
   if (!user) return reply.code(401).send({ error: "Не авторизовано" });
   if (!user.email_verified) return reply.code(403).send({ error: "Пошта не підтверджена" });
@@ -2855,7 +2860,106 @@ app.post("/api/webhooks/fireflies/:token", async (req: any, reply) => {
   }
 });
 
+// ===================== 📱 TELEGRAM MINI APP =====================
+// Сторінка відкривається ВСЕРЕДИНІ Telegram, де нашої кукі-сесії немає. Автентифікація - через
+// підписаний `initData` (див. tgauth.ts), а воркспейс береться з tg_owner: той самий звʼязок
+// «цей телеграм-юзер = цей кабінет», що вже закріплюється при підключенні бота.
+// Тому ці роути свідомо ЗВІЛЬНЕНІ від кукі-хука (їхня перевірка не слабша, а інша).
+async function tgUser(req: any): Promise<{ ws: string; tgId: number } | null> {
+  const initData = String(req.headers["x-tg-init-data"] || req.body?.initData || "");
+  if (!initData) return null;
+  // спільний бот або власний бот воркспейсу: перевіряємо обома токенами, які реально можуть підписати
+  const tokens = [env.telegram.botToken, ...(await q<{ bot_token: string }>(`select distinct bot_token from telegram_config where bot_token is not null`)).map((r) => r.bot_token)];
+  for (const t of tokens) {
+    if (!t) continue;
+    const u = verifyInitData(initData, t);
+    if (!u) continue;
+    const own = await one<{ workspace_id: string }>(`select workspace_id from tg_owner where tg_user_id=$1`, [u.id]);
+    if (own) return { ws: own.workspace_id, tgId: u.id };
+    return null; // підпис валідний, але кабінет не привʼязаний
+  }
+  return null;
+}
+const tgGuard = async (req: any, reply: any) => {
+  const u = await tgUser(req);
+  if (!u) { reply.code(401).send({ error: "Відкрий застосунок кнопкою в боті (підпис Telegram недійсний або кабінет не підключено)" }); return null; }
+  return u;
+};
+
+app.get("/api/tg/me", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const [drafts, mats, nets] = await Promise.all([
+    one<{ c: string }>(`select count(*)::text c from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+                        where s.workspace_id=$1 and p.stage='final' and (p.review is null or p.review<>'archived')`, [u.ws]),
+    one<{ c: string }>(`select count(*)::text c from source where workspace_id=$1 and archived=false`, [u.ws]),
+    connectedNets(u.ws),
+  ]);
+  return { ok: true, drafts: +(drafts?.c || 0), materials: +(mats?.c || 0), nets };
+});
+
+// 📥 джерела/матеріали: свіже зверху, коротким тілом (у телефоні довгі полотна ніхто не читає)
+app.get("/api/tg/materials", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const rows = await q<{ id: string; title: string; origin: string; created_at: string; transcript: string; ai_score: number | null }>(
+    `select id, coalesce(title,'(без назви)') as title, origin, created_at, left(coalesce(transcript,''), 240) as transcript, ai_score
+       from source where workspace_id=$1 and archived=false
+     order by (origin='diary') desc, created_at desc limit 30`, [u.ws]);
+  return { items: rows };
+});
+
+// 📝 чорновики: те саме, що Студія, але лише найпотрібніше
+app.get("/api/tg/drafts", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const rows = await q<{ id: string; content: string; review: string | null; channels: any; created_at: string }>(
+    `select p.id, p.content, p.review, p.channels, p.created_at from post p
+       join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+     where s.workspace_id=$1 and p.stage='final' and (p.review is null or p.review<>'archived')
+     order by p.created_at desc limit 30`, [u.ws]);
+  const ids = rows.map((r) => r.id);
+  const sent = new Set<string>();
+  if (ids.length) {
+    const rs = await q<{ post_id: string }>(
+      `select post_id from telegram_publish where status='sent' and post_id=any($1)
+       union select post_id from threads_publish where status='sent' and post_id=any($1)
+       union select post_id from meta_publish where status='sent' and post_id=any($1)
+       union select post_id from linkedin_publish where status='sent' and post_id=any($1)`, [ids]);
+    rs.forEach((r) => sent.add(r.post_id));
+  }
+  return { items: rows.map((r) => ({ ...r, sent: sent.has(r.id) })) };
+});
+
+// ✍️ створити пост із власного тексту (той самий шлях, що й у боті)
+app.post("/api/tg/post", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const text = String(req.body?.text ?? "").trim();
+  if (text.length < 3) return reply.code(400).send({ error: "Порожній текст" });
+  const id = await createBotDraft(u.ws, text.slice(0, 8000));
+  return { ok: true, id };
+});
+
+// вибір мереж + текст існуючої чернетки
+app.put("/api/tg/post/:postId", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const own = await one<{ id: string }>(
+    `select p.id from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+     where p.id=$1 and s.workspace_id=$2`, [req.params.postId, u.ws]);
+  if (!own) return reply.code(404).send({ error: "пост не знайдено" });
+  if (typeof req.body?.text === "string" && req.body.text.trim())
+    await q(`update post set content=$2 where id=$1`, [own.id, String(req.body.text).slice(0, 8000)]);
+  if (req.body?.channels && typeof req.body.channels === "object")
+    await q(`update post set channels=$2 where id=$1`, [own.id, JSON.stringify(req.body.channels)]);
+  return { ok: true };
+});
+
+// 🚀 публікація: та сама точка, що й кабінет/бот - дедуп і permalink працюють однаково
+app.post("/api/tg/post/:postId/publish", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  try { return { ok: true, message: await publishNow(u.ws, req.params.postId) }; }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+
 // ===================== СТОРІНКИ =====================
+app.get("/tgapp", (_req, reply) => reply.sendFile("tgapp.html"));
 app.get("/app", (_req, reply) => reply.sendFile("app.html"));
 app.get("/B", (_req, reply) => reply.sendFile("b.html"));
 app.get("/b", (_req, reply) => reply.sendFile("b.html"));
