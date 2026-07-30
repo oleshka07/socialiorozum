@@ -329,6 +329,15 @@ function renderBriefText(b: any): string {
   return lines.join("\n");
 }
 
+// 🧠 Головна модель генерації постів. Була ЗАХАРДКОДЖЕНА в двох гілках buildLitePrompt, тож
+// перевірити «а на іншій моделі вийде краще?» можна було лише правкою коду й деплоєм. Тепер це
+// `settings_block.main_model`: порівняв моделі в Інструментах → вписав переможця → працює далі.
+// Дефолт лишається gpt-4o, тож без явної зміни поведінка та сама.
+export const DEFAULT_MAIN_MODEL = "openai/gpt-4o";
+export function mainModel(s: Record<string, string>): string {
+  return (s.main_model || "").trim() || DEFAULT_MAIN_MODEL;
+}
+
 async function loadSettings(workspaceId: string): Promise<Record<string, string>> {
   const rows = await q<{ key: string; content: string }>(
     `select key, content from settings_block where workspace_id=$1`,
@@ -679,7 +688,7 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
       "\n</rules>" +
       `\n\n<task>\nЗгенеруй рівно ${n} різних постів за вхідним матеріалом.${ideasText}\n</task>` +
       `\n\n<output_format>\n${outputFormat}\n</output_format>`;
-    return { system, model: "openai/gpt-4o" };
+    return { system, model: mainModel(s) };
   }
 
   // LEGACY (prompt_engine != v2) - незмінний класичний промт
@@ -691,7 +700,7 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
     rubricsText + formatRules + ownWords + ideasText + goalRule(s) + offerLadder(s) + HOOK_RULE + ANTI_AI_RULE + OBJECTION_RULE +
     NO_DASH_RULE + `\n\nЗгенеруй рівно ${n} різних постів. ${outputFormat}`;
-  return { system, model: "openai/gpt-4o" };
+  return { system, model: mainModel(s) };
 }
 
 // Lite-генерація: ОДИН виклик LLM -> N готових постів (замість 5 кроків кишки).
@@ -718,6 +727,24 @@ async function runQaGates(workspaceId: string, postIds: string[]): Promise<void>
   }));
 }
 
+// Розбір відповіді Lite-генерації. Винесено окремо й ЕКСПОРТОВАНО свідомо: цей парсер - вузьке
+// місце, де пости губляться МОВЧКИ (модель відповіла прозою, обгорнула JSON у markdown, назвала
+// поле `content` замість `text`, вигадала свій intent). Тепер він (а) покритий юнітами, (б) той самий
+// і в бойовій генерації, і в порівнянні моделей - інакше «на іншій моделі гірше» могло б насправді
+// означати «наш парсер не зрозумів її формат».
+export type LitePost = { text: string; image_prompt: string; rubric: string; intent: string };
+const LITE_INTENTS = new Set(["awareness", "nurture", "sale"]);
+export function parseLitePosts(out: string): LitePost[] {
+  let raw: any[];
+  try { raw = extractJsonArray<any>(out); } catch { return []; }
+  return raw
+    .map((x) => typeof x === "string"
+      ? { text: x, image_prompt: "", rubric: "", intent: "" }
+      : { text: String(x?.text || x?.content || x?.post || ""), image_prompt: String(x?.image_prompt || x?.image || ""), rubric: String(x?.rubric || ""), intent: String(x?.intent || "").toLowerCase() })
+    .map((p) => ({ text: p.text.trim(), image_prompt: p.image_prompt.trim(), rubric: p.rubric.trim().slice(0, 60), intent: LITE_INTENTS.has(p.intent) ? p.intent : "awareness" }))
+    .filter((p) => p.text);
+}
+
 // formats (опційно): формат на КОЖНУ ідею у тому ж порядку - слот плану / вибрана ідея Розвідника
 // вже знають, який формат замовлено, і цей вибір має доїхати до post.format, а не губитись.
 export async function generatePostsOnePass(runId: string, count: number, ideas?: string[], formats?: string[]): Promise<number> {
@@ -729,14 +756,7 @@ export async function generatePostsOnePass(runId: string, count: number, ideas?:
   // постів або обрізає JSON (пости мовчки губляться), або примушує модель стискати кожен пост до куцого
   // варіанту ЧЕРЕЗ БРАК МІСЦЯ, а не тому що це найкращий текст.
   const out = await chat(model, system, `Вхідний матеріал:\n---\n${transcript}`, { workspaceId: workspace_id, step: "lite", maxTokens: Math.min(8000, 700 + n * 500) });
-  const INTENTS = new Set(["awareness", "nurture", "sale"]);
-  let posts: { text: string; image_prompt: string; rubric: string; intent: string }[] = [];
-  try {
-    posts = extractJsonArray<any>(out).map((x) => typeof x === "string"
-      ? { text: x, image_prompt: "", rubric: "", intent: "" }
-      : { text: String(x?.text || x?.content || x?.post || ""), image_prompt: String(x?.image_prompt || x?.image || ""), rubric: String(x?.rubric || ""), intent: String(x?.intent || "").toLowerCase() })
-      .map((p) => ({ text: p.text.trim(), image_prompt: p.image_prompt.trim(), rubric: p.rubric.trim().slice(0, 60), intent: INTENTS.has(p.intent) ? p.intent : "awareness" })).filter((p) => p.text);
-  } catch { posts = []; }
+  const posts = parseLitePosts(out);
   if (!posts.length) throw new Error("Не вдалося згенерувати пости (порожня відповідь моделі)");
   await q(`delete from post where run_id=$1 and stage='final'`, [runId]);
   const ids: string[] = [];

@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, ideaMode, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, storytellingVerdict, normFormat, FORMATS, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet, topPatterns, generateThreadsTakes, repeatVariant, expandTake, threadsStarterPack, threadsNicheReview, suggestThreadReplies } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, ideaMode, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, storytellingVerdict, normFormat, FORMATS, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet, topPatterns, generateThreadsTakes, repeatVariant, expandTake, threadsStarterPack, threadsNicheReview, suggestThreadReplies, DEFAULT_MAIN_MODEL } from "./pipeline.js";
 import { startReelJob, reelJobs, parseReelScript } from "./reelvideo.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
@@ -40,6 +40,7 @@ import { startMetrics, networkBenchmarks } from "./metrics.js";
 import { startDiary } from "./diary.js";
 import { startThreadsAuto } from "./threads-auto.js";
 import { getSettingText } from "./settings.js";
+import { runAbTest, modelCatalog, abSpend } from "./abtest.js";
 import { generateImageForPost, imageProviders, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto } from "./images.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook } from "./tgbot.js";
 import { chat } from "./openrouter.js";
@@ -2109,10 +2110,48 @@ app.post("/api/posts/:postId/regenerate", async (req: any, reply) => {
 });
 
 app.get("/api/usage", async (req: any) => {
-  return one(`select coalesce(sum(prompt_tokens),0)::int as prompt_tokens,
+  const ws = req.user.workspace_id;
+  const total = await one(`select coalesce(sum(prompt_tokens),0)::int as prompt_tokens,
                      coalesce(sum(completion_tokens),0)::int as completion_tokens,
                      coalesce(sum(cost),0)::float as cost, count(*)::int as calls
-              from llm_usage where workspace_id=$1`, [req.user.workspace_id]);
+              from llm_usage where workspace_id=$1`, [ws]);
+  // Розріз за моделями й кроками (30 днів). Раніше ендпоінт віддавав ЛИШЕ разом за весь час, тож на
+  // питання «яка модель зʼїдає гроші / скільки токенів іде на генерацію поста» відповіді не було -
+  // хоча дані для неї в llm_usage лежали з першого дня.
+  const byModel = await q(`select model, count(*)::int as calls,
+                                  coalesce(sum(prompt_tokens),0)::int as prompt_tokens,
+                                  coalesce(sum(completion_tokens),0)::int as completion_tokens,
+                                  coalesce(sum(cost),0)::float as cost
+                             from llm_usage where workspace_id=$1 and created_at > now() - interval '30 days'
+                            group by model order by cost desc, calls desc`, [ws]);
+  const byStep = await q(`select coalesce(step,'-') as step, count(*)::int as calls,
+                                 coalesce(sum(prompt_tokens),0)::int as prompt_tokens,
+                                 coalesce(sum(completion_tokens),0)::int as completion_tokens,
+                                 coalesce(sum(cost),0)::float as cost
+                            from llm_usage where workspace_id=$1 and created_at > now() - interval '30 days'
+                           group by step order by cost desc, calls desc`, [ws]);
+  return { ...(total || {}), byModel, byStep };
+});
+
+// ===================== 🧪 ПОРІВНЯННЯ МОДЕЛЕЙ =====================
+// «Контент слабкий через модель чи через промт?» - без прогону на тому самому матеріалі це вгадування.
+app.get("/api/models/catalog", async (req: any) => {
+  const [cat, spend] = await Promise.all([modelCatalog(), abSpend(req.user.workspace_id)]);
+  const s = await getSettingText(req.user.workspace_id, "main_model");
+  return { models: cat.rows, live: cat.live, current: s.trim() || DEFAULT_MAIN_MODEL, defaultModel: DEFAULT_MAIN_MODEL, spend };
+});
+
+app.post("/api/ab/generate", async (req: any, reply) => {
+  const b = req.body ?? {};
+  try {
+    return await runAbTest(req.user.workspace_id, {
+      sourceId: b.sourceId, postId: b.postId, text: b.text,
+      models: Array.isArray(b.models) ? b.models : [], count: b.count,
+    });
+  } catch (e: any) {
+    await logEvent("warn", "abtest", e.message, null, req.user.id);
+    return reply.code(400).send({ error: e.message });
+  }
 });
 
 // ===================== БАЗА БРЕНДУ =====================

@@ -1,7 +1,13 @@
 import { env } from "./env.js";
 import { q } from "./db.js";
 
-export type ChatCtx = { workspaceId: string; step?: string; json?: boolean; maxTokens?: number };
+// usage: опційний «вихідний» обʼєкт - chat() заповнює його токенами й вартістю ЦЬОГО виклику.
+// Потрібен там, де ціна конкретного виклику є частиною результату (порівняння моделей): читати її
+// назад із llm_usage було б гонкою (паралельні виклики пишуть у ту саму таблицю).
+// costKnown=false означає «токени точні, ціна невідома» - прямий виклик OpenAI не повертає вартість,
+// і ми знаємо ставки лише для моделей із OPENAI_PRICES; показувати 0 як факт було б брехнею.
+export type UsageOut = { prompt_tokens: number; completion_tokens: number; cost: number; costKnown: boolean };
+export type ChatCtx = { workspaceId: string; step?: string; json?: boolean; maxTokens?: number; usage?: UsageOut };
 
 // «—»/«–» - найстійкіший AI-маркер: промпти просять їх не вживати, але моделі однаково їх вставляють.
 // Гарантію дає лише зачистка КОДОМ на виході кожного виклику (безпечно і для JSON-відповідей).
@@ -24,7 +30,9 @@ async function geminiChat(model: string, system: string, user: string, ctx?: Cha
   const body = {
     systemInstruction: { parts: [{ text: system }] },
     contents: [{ role: "user", parts: [{ text: user }] }],
-    generationConfig: { temperature: 0.7, maxOutputTokens: 1500 },
+    // ctx.maxTokens шанується так само, як в OpenAI-гілці: інакше Gemini обрізався б на 1500 там,
+    // де решта моделей отримує 8000 (генерація 8-12 постів), і порівняння моделей було б нечесним
+    generationConfig: { temperature: 0.7, maxOutputTokens: ctx?.maxTokens || 1500 },
   };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 60000);
@@ -38,12 +46,14 @@ async function geminiChat(model: string, system: string, user: string, ctx?: Cha
   if (!res.ok) { const t = await res.text(); throw new Error(`Gemini ${res.status}: ${t.slice(0, 300)}`); }
   const j: any = await res.json();
   const text = stripDashes((j.candidates?.[0]?.content?.parts || []).map((p: any) => p?.text || "").join(""));
-  if (ctx?.workspaceId) {
+  {
     const um = j.usageMetadata || {};
     const pin = um.promptTokenCount || 0, pout = um.candidatesTokenCount || 0;
     const [cin, cout] = GEMINI_PRICES[apiModel] || [0, 0];
     const cost = (pin / 1e6) * cin + (pout / 1e6) * cout;
-    try { await q(`insert into llm_usage(workspace_id, step, model, prompt_tokens, completion_tokens, cost) values($1,$2,$3,$4,$5,$6)`, [ctx.workspaceId, ctx.step ?? null, model, pin, pout, cost]); } catch { /* облік не критичний */ }
+    // ціна «відома» лише для моделей із нашого прайсу; для gemini-2.5-flash це навмисний 0 (free tier)
+    if (ctx?.usage) Object.assign(ctx.usage, { prompt_tokens: pin, completion_tokens: pout, cost, costKnown: !!GEMINI_PRICES[apiModel] });
+    if (ctx?.workspaceId) try { await q(`insert into llm_usage(workspace_id, step, model, prompt_tokens, completion_tokens, cost) values($1,$2,$3,$4,$5,$6)`, [ctx.workspaceId, ctx.step ?? null, model, pin, pout, cost]); } catch { /* облік не критичний */ }
   }
   return text;
 }
@@ -93,14 +103,18 @@ export async function chat(model: string, system: string, user: string, ctx?: Ch
     throw new Error(`${provider} ${res.status}: ${t.slice(0, 300)}`);
   }
   const j: any = await res.json();
-  if (ctx?.workspaceId) {
+  {
     const u = j.usage || {};
     let cost = u.cost || 0;
+    // OpenRouter вертає вартість сам; прямий OpenAI - ні, тож рахуємо за нашим прайсом (і чесно
+    // кажемо «невідомо», якщо моделі в ньому нема - інакше нова модель виглядала б безкоштовною)
+    const costKnown = !useOpenAI ? u.cost != null : !!OPENAI_PRICES[apiModel];
     if (useOpenAI && OPENAI_PRICES[apiModel]) {
       const [pin, pout] = OPENAI_PRICES[apiModel];
       cost = ((u.prompt_tokens || 0) / 1e6) * pin + ((u.completion_tokens || 0) / 1e6) * pout;
     }
-    try {
+    if (ctx?.usage) Object.assign(ctx.usage, { prompt_tokens: u.prompt_tokens || 0, completion_tokens: u.completion_tokens || 0, cost, costKnown });
+    if (ctx?.workspaceId) try {
       await q(
         `insert into llm_usage(workspace_id, step, model, prompt_tokens, completion_tokens, cost) values($1,$2,$3,$4,$5,$6)`,
         [ctx.workspaceId, ctx.step ?? null, model, u.prompt_tokens || 0, u.completion_tokens || 0, cost]

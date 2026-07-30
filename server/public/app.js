@@ -195,6 +195,7 @@ function selectView(v,tab){
   if(v==='publish'){ loadPublish(); loadPlan(); }
   if(v==='create') loadStudioPosts();
   if(v==='settings'){ loadAccount(); loadPlans(); }
+  if(v==='tools') loadAbTest(); // каталог моделей тягнеться раз (див. _abReady)
   if(typeof loadTasks==='function') loadTasks();
   curView=v; if(typeof renderTaskStrip==='function') renderTaskStrip(v);
   // вкладку застосовуємо ПІСЛЯ перемикання розділу (setXTab покладеться на curView), і лише якщо
@@ -2428,6 +2429,100 @@ async function savePrompt(step){ const sel=document.querySelector('.stepModel[da
 async function resetPrompt(step){ if(!confirm('Повернути стандартний промпт цього кроку? Твої правки тут зітруться.')) return; try{ await api('/prompts/'+step,{method:'DELETE'}); const cfg=await api('/prompts'); const c=cfg.find(x=>x.step_key===step)||{model:'',content:''}; const sel=document.querySelector('.stepModel[data-step="'+step+'"]'); const ta=document.querySelector('.stepPrompt[data-step="'+step+'"]'); if(ta) ta.value=c.content||''; if(sel){ if(c.model && !Array.from(sel.options).some(o=>o.value===c.model)){ const op=document.createElement('option'); op.value=c.model; op.textContent=c.model; sel.appendChild(op); } sel.value=c.model; } flashSaved(); }catch(e){ flash('Не вдалося скинути: '+e.message); } }
 // ---------- RSS ----------
 // людський підпис джерела замість внутрішнього URL (rsshub-адреси й instagram:маркер)
+// ---------- 🧪 порівняння моделей (Інструменти) ----------
+// Питання Олега: «яка модель дасть кращий контент - чи це взагалі промт?». Єдиний спосіб відповісти -
+// прогнати ОДИН матеріал через ОДИН промт кількома моделями і прочитати результати поруч. Тому:
+// • промт будує сервер звичайним buildLitePrompt і віддає моделям дослівно (єдина змінна - модель);
+// • назви моделей сховані до оцінки (гучне імʼя інакше вирішує за тебе);
+// • порядок колонок перемішується (позиція теж впливає на оцінку);
+// • біля кожної - токени, час і ціна, бо «краще» без ціни не є рішенням.
+let _abReady=false, _abCat=[], _abReveal=false;
+function abPriceLabel(m){ return (m.in||m.out)?(' - $'+m.in+'/$'+m.out):' - ціна невідома'; }
+function abModelOptions(sel){
+  const byVendor={};
+  _abCat.forEach(m=>{ const v=m.id.split('/')[0]; (byVendor[v]=byVendor[v]||[]).push(m); });
+  return '<option value="">- не використовувати</option>'
+    +Object.keys(byVendor).sort().map(v=>'<optgroup label="'+esc(v)+'">'
+      +byVendor[v].map(m=>'<option value="'+esc(m.id)+'"'+(m.id===sel?' selected':'')+'>'+esc(m.id)+esc(abPriceLabel(m))+'</option>').join('')
+      +'</optgroup>').join('');
+}
+async function loadAbTest(){
+  if(_abReady) return; _abReady=true;
+  const box=$('abModels'), src=$('abSource'); if(!box||!src) return;
+  // матеріали: беремо вже завантажену стрічку, щоб не робити зайвий запит
+  const mats=(Mats||[]).slice(0,40);
+  src.innerHTML=(mats.length?mats.map(m=>'<option value="'+esc(m.id)+'">'+esc((matType(m)||'')+' · '+String(m.title||'без назви').slice(0,70))+'</option>').join('')
+    :'<option value="">- нема матеріалів: додай хоч один у «Створення → Матеріали»</option>');
+  let cat={models:[],live:false,current:'',spend:{calls:0,cost:0}};
+  try{ cat=await api('/models/catalog'); }catch(e){}
+  _abCat=cat.models||[];
+  const msg=$('abCatMsg');
+  if(msg) msg.textContent=(cat.live?('каталог OpenRouter · '+_abCat.length+' моделей'):'каталог недоступний - показую лише ті, що вже вживаються')
+    +(cat.spend&&cat.spend.calls?(' · на експерименти витрачено $'+(cat.spend.cost||0).toFixed(4)+' за '+cat.spend.calls+' викл.'):'');
+  // 4 слоти: перший - те, на чому працюєш зараз (база порівняння), решту обираєш сам
+  box.innerHTML=[0,1,2,3].map(i=>'<select class="abModel txt" data-i="'+i+'" style="font-size:12.5px">'+abModelOptions(i===0?cat.current:'')+'</select>').join('');
+  const main=$('abMain');
+  if(main){ main.innerHTML=abModelOptions(cat.current);
+    main.onchange=async()=>{ const mm=$('abMainMsg');
+      if(!main.value){ mm.textContent='порожньо = дефолт '+(cat.defaultModel||''); }
+      try{ await api('/settings/main_model',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:main.value})});
+        mm.style.color='var(--brand)'; mm.textContent='збережено ✓ вся генерація постів іде на '+(main.value||cat.defaultModel);
+      }catch(e){ mm.style.color='var(--danger)'; mm.textContent='⚠ '+e.message; } }; }
+}
+function abRenderOut(r){
+  const box=$('abOut'); if(!box) return;
+  const NAMES=['А','Б','В','Г'];
+  const cols=r.variants.map((v,i)=>{
+    const label=_abReveal?esc(v.model):('Варіант '+NAMES[i]);
+    const tok=v.prompt_tokens+v.completion_tokens
+      ? (v.prompt_tokens+' → '+v.completion_tokens+' токенів · '+(v.ms/1000).toFixed(1)+'с'
+         +(v.costKnown?(' · $'+v.cost.toFixed(5)):' · ціна невідома'))
+      : ((v.ms/1000).toFixed(1)+'с');
+    const body=v.ok
+      ? v.posts.map(p=>'<div class="post" style="margin-bottom:8px;white-space:pre-wrap">'+esc(p.text)+'</div>'
+          +(p.rubric?'<div style="font-size:11px;color:var(--faint);margin:-4px 0 10px">🏷 '+esc(p.rubric)+' · '+esc(p.intent)+' · '+p.text.replace(/\n/g,'').length+' симв.</div>':'')).join('')
+      : '<div style="font-size:12.5px;color:var(--danger)">⚠ '+esc(v.error||'без результату')+'</div>';
+    return '<div style="flex:1;min-width:280px;border:1px solid var(--line);border-radius:var(--r);padding:12px">'
+      +'<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px"><b style="font-size:13.5px">'+label+'</b>'
+      +'<span style="font-size:11px;color:var(--muted)">'+esc(tok)+'</span></div>'+body+'</div>';
+  }).join('');
+  box.innerHTML='<div style="font-size:12px;color:var(--muted);margin-bottom:8px">Матеріал: <b>'+esc(r.material.title)+'</b> ('+r.material.chars+' симв.) · промт '+r.prompt.chars+' симв. - однаковий для всіх</div>'
+    +'<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start">'+cols+'</div>'
+    +'<div class="btnrow" style="margin-top:10px;flex-wrap:wrap"><button class="ghost" id="abReveal">'+(_abReveal?'🙈 Сховати назви':'👁 Показати, які це моделі')+'</button>'
+    +'<button class="ghost" id="abPrompt">📄 Показати промт</button></div>'
+    +'<div style="font-size:11.5px;color:var(--faint);margin-top:8px">⚠ Один прогін - це один зразок, не вирок: моделі відповідають по-різному щоразу. Якщо різниця невелика, прожени ще раз (можна вказати ОДНУ Й ТУ САМУ модель у двох слотах - побачиш, наскільки вона розходиться сама з собою; якщо цей розкид схожий на розкид між моделями, справа не в моделі).</div>';
+  $('abReveal').onclick=()=>{ _abReveal=!_abReveal; abRenderOut(r); };
+  $('abPrompt').onclick=()=>{
+    const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='90';
+    ov.innerHTML='<div class="modal-card" style="max-width:820px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b>📄 Промт, який отримали ВСІ моделі</b><button class="icon" id="apX" style="margin-left:auto">✕</button></div>'
+      +'<pre style="white-space:pre-wrap;font-size:12px;line-height:1.5;max-height:66vh;overflow:auto;margin:0;color:var(--ink2)">'+esc(r.prompt.system)+'</pre></div>';
+    document.body.appendChild(ov);
+    ov.querySelector('#apX').onclick=()=>ov.remove();
+    ov.addEventListener('click',e=>{ if(e.target===ov) ov.remove(); });
+  };
+}
+if($('abRun')) $('abRun').onclick=async()=>{
+  const models=[...document.querySelectorAll('#abModels .abModel')].map(s=>s.value).filter(Boolean);
+  const uniq=[...new Set(models)];
+  const msg=$('abMsg'), btn=$('abRun');
+  if(models.length<2){ msg.style.color='var(--danger)'; msg.textContent='обери щонайменше дві моделі'; return; }
+  const sourceId=$('abSource').value;
+  if(!sourceId){ msg.style.color='var(--danger)'; msg.textContent='нема матеріалу для прогону'; return; }
+  const cnt=+$('abCount').value||1;
+  if(!confirm('Прогнати '+models.length+' модел(і) × '+cnt+' пост(и)? Це РЕАЛЬНІ виклики - вони коштують грошей'+(uniq.length<models.length?' (одна модель обрана двічі - це навмисно можна, щоб побачити її власний розкид)':'')+'.')) return;
+  btn.disabled=true; msg.style.color='var(--muted)'; msg.textContent='генерую паралельно…'; aiBusy('🧪 Проганяю той самий матеріал '+models.length+' моделями…');
+  try{
+    const r=await api('/ab/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sourceId,models,count:cnt})});
+    // перемішуємо колонки: позиція теж впливає на оцінку, а ми хочемо оцінку ТЕКСТУ
+    for(let i=r.variants.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); const t=r.variants[i]; r.variants[i]=r.variants[j]; r.variants[j]=t; }
+    _abReveal=false; abRenderOut(r);
+    const okN=r.variants.filter(v=>v.ok).length;
+    msg.style.color=okN===r.variants.length?'var(--brand)':'var(--amber)';
+    msg.textContent='готово: '+okN+' з '+r.variants.length+' моделей дали результат';
+  }catch(e){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+e.message; }
+  finally{ btn.disabled=false; aiDone(); }
+};
+
 function rssNiceUrl(f){
   let m=f.url.match(/\/telegram\/channel\/([A-Za-z0-9_]+)/); if(m) return '✈️ t.me/'+m[1];
   m=f.url.match(/\/threads\/([A-Za-z0-9_.]+)/); if(m) return '🧵 @'+m[1];

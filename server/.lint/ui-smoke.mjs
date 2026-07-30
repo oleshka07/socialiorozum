@@ -8,7 +8,7 @@
 // Вихід: 0 - усі перевірки true й нема pageerror; 1 - будь-яка false або помилка сторінки.
 //
 // ⚠️ Файл СВІДОМО в git (раніше .lint/ був у .gitignore і його зніс скидання середовища -
-// відновлювати 35 перевірок руками довше, ніж тримати їх у репозиторії).
+// відновлювати перевірки руками довше, ніж тримати їх у репозиторії).
 import { createServer } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { readdirSync } from "node:fs";
@@ -139,6 +139,25 @@ const API = {
   "GET /account": { email: "smoke@rozum.one", created_at: iso(-30, 8), pro: false },
   "GET /analytics/benchmarks": { networks: {}, posts: [] },
   "GET /analytics/threads": null,
+  "GET /models/catalog": {
+    models: [
+      { id: "openai/gpt-4o", name: "GPT-4o", in: 2.5, out: 10, ctx: 128000 },
+      { id: "openai/gpt-4o-mini", name: "GPT-4o mini", in: 0.15, out: 0.6, ctx: 128000 },
+      { id: "anthropic/claude-x", name: "Claude X", in: 3, out: 15, ctx: 200000 },
+    ],
+    live: true, current: "openai/gpt-4o", defaultModel: "openai/gpt-4o", spend: { calls: 2, cost: 0.0123 },
+  },
+};
+
+// Відповідь порівняння моделей: одна модель дала пости, друга - ні (обидва випадки мусять малюватись).
+const AB_RESULT = {
+  material: { id: "m1", title: "📔 Щоденник, 30 липня", chars: 900 },
+  prompt: { chars: 4200, system: "<role>Ти елітний копірайтер…</role>" },
+  count: 1,
+  variants: [
+    { model: "openai/gpt-4o", ok: true, posts: [{ text: "Варіант від першої моделі", image_prompt: "", rubric: "Кейси", intent: "awareness" }], ms: 4200, prompt_tokens: 1800, completion_tokens: 400, cost: 0.0085, costKnown: true },
+    { model: "anthropic/claude-x", ok: false, error: "модель не повернула валідний JSON за нашим контрактом", posts: [], ms: 3100, prompt_tokens: 1800, completion_tokens: 120, cost: 0, costKnown: false },
+  ],
 };
 
 // Пости: /full і /publish-state обслуговуються окремо (шлях із id).
@@ -155,6 +174,7 @@ function handleApi(method, path) {
     const p = POSTS.find((x) => x.id === m[1]) || POSTS[0];
     return { sent: p.sent || [], links: p.links || {} };
   }
+  if (method === "POST" && path === "/ab/generate") return AB_RESULT;
   if (method === "POST" || method === "PUT" || method === "DELETE") return { ok: true };
   return {};
 }
@@ -488,6 +508,37 @@ const run = async () => {
   await check("toolsView", async () =>
     (await has("#toolsGdriveHost #gdStatus")) && (await has("#toolsTransHost #ffKey")) &&
     (await has("#toolsPipeline")) && (await has("#viewPrompt")));
+
+  await check("abPanel", async () => {
+    // матеріали й каталог моделей мусять доїхати в селекти, а результат - показатись СЛІПО
+    await page.waitForFunction(() => { const s = document.getElementById("abSource"); return s && s.options.length >= 2; }, { timeout: 6000 });
+    const st = await page.evaluate(() => ({
+      mats: document.getElementById("abSource").options.length,
+      slots: document.querySelectorAll("#abModels .abModel").length,
+      first: document.querySelector("#abModels .abModel").value,   // база порівняння = поточна модель
+      rest: [...document.querySelectorAll("#abModels .abModel")].slice(1).every((x) => x.value === ""),
+      main: document.getElementById("abMain").value,
+      msg: document.getElementById("abCatMsg").textContent,
+    }));
+    // менше двох моделей - порівнювати нічого, і UI мусить сказати це ДО витрати грошей
+    await page.click("#abRun");
+    await page.waitForTimeout(150);
+    const guard = (await $t("#abMsg")).includes("щонайменше дві");
+    await page.evaluate(() => { document.querySelectorAll("#abModels .abModel")[1].value = "anthropic/claude-x"; });
+    await page.click("#abRun");
+    await page.waitForFunction(() => document.querySelectorAll("#abOut .post, #abOut [style*='--danger']").length > 0, { timeout: 8000 });
+    const out = await page.evaluate(() => ({
+      blind: !document.getElementById("abOut").textContent.includes("gpt-4o"),
+      variants: document.getElementById("abOut").textContent.includes("Варіант"),
+      err: document.getElementById("abOut").textContent.includes("валідний JSON"),
+      prompt: !!document.getElementById("abPrompt"),
+    }));
+    await page.click("#abReveal"); // ⟵ назви показуються лише на явну дію
+    await page.waitForTimeout(150);
+    const revealed = (await $t("#abOut")).includes("anthropic/claude-x");
+    return st.mats === 2 && st.slots === 4 && st.first === "openai/gpt-4o" && st.rest && st.main === "openai/gpt-4o" &&
+      st.msg.includes("3 моделей") && guard && out.blind && out.variants && out.err && out.prompt && revealed;
+  });
 
   await check("foldedPanels", async () => {
     await page.evaluate(() => { selectView("brand"); setBTab("voice"); });
