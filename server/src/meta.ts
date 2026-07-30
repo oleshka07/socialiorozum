@@ -81,6 +81,17 @@ export async function postInsights(postId: string, pageToken: string): Promise<R
   return out;
 }
 
+// інсайти опублікованого IG-поста (media-level): охоплення + лайки (для бенчмарків ×N)
+export async function igMediaInsights(mediaId: string, pageToken: string): Promise<{ reach: number; likes: number }> {
+  const u = new URL(`${GRAPH}/${mediaId}/insights`);
+  u.searchParams.set("metric", "reach,likes");
+  u.searchParams.set("access_token", pageToken);
+  const j = await fbFetch<{ data: Array<{ name: string; values?: Array<{ value: number }>; total_value?: { value: number } }> }>(u.toString());
+  const out: Record<string, number> = {};
+  for (const m of j.data || []) out[m.name] = m.total_value?.value ?? m.values?.[0]?.value ?? 0;
+  return { reach: out.reach || 0, likes: out.likes || 0 };
+}
+
 // базова аналітика акаунтів (надійні поля): FB-Сторінка + IG-акаунт
 export async function pageStats(pageId: string, pageToken: string) {
   const u = new URL(`${GRAPH}/${pageId}`);
@@ -115,6 +126,17 @@ export async function publishPhotoToPage(pageId: string, pageToken: string, mess
   });
 }
 
+// Публічне посилання на ОПУБЛІКОВАНИЙ пост (щоб юзер міг глянути, як воно виглядає в мережі).
+// IG віддає permalink лише полем; FB-пост має permalink_url, але для нього достатньо й id
+// (<pageId>_<postId> у facebook.com/<id>), тож туди зайвого запиту не робимо.
+export async function mediaPermalink(mediaId: string, token: string): Promise<string> {
+  const u = new URL(`${GRAPH}/${mediaId}`);
+  u.searchParams.set("fields", "permalink");
+  u.searchParams.set("access_token", token);
+  const j = await fbFetch<{ permalink?: string }>(u.toString());
+  return j.permalink || "";
+}
+
 // останні N постів IG-акаунта (підписи) — для виведення голосу бренду з реальних дописів
 export async function getRecentMedia(igUserId: string, pageToken: string, limit = 20): Promise<Array<{ caption: string; like_count?: number; comments_count?: number; timestamp?: string }>> {
   const u = new URL(`${GRAPH}/${igUserId}/media`);
@@ -125,15 +147,84 @@ export async function getRecentMedia(igUserId: string, pageToken: string, limit 
   return (j.data || []).map((m) => ({ caption: m.caption || "", like_count: m.like_count, comments_count: m.comments_count, timestamp: m.timestamp }));
 }
 
-// Instagram: двокроковий публіш (контейнер із image_url+caption -> media_publish)
-export async function publishToInstagram(igUserId: string, pageToken: string, imageUrl: string, caption: string) {
-  const cbody = new URLSearchParams({ image_url: imageUrl, caption, access_token: pageToken });
+// Business Discovery: читання постів ЧУЖОЇ публічної бізнес/креатор-сторінки IG через власний
+// підключений акаунт (офіційний API - без кук і скрейпінгу). Особисті акаунти API не віддає.
+export async function businessDiscovery(igUserId: string, pageToken: string, targetUsername: string, limit = 12):
+  Promise<{ username: string; name?: string; media: Array<{ id: string; caption: string; permalink?: string; timestamp?: string }> }> {
+  const u = new URL(`${GRAPH}/${igUserId}`);
+  u.searchParams.set("fields", `business_discovery.username(${targetUsername}){username,name,media.limit(${limit}){id,caption,permalink,timestamp}}`);
+  u.searchParams.set("access_token", pageToken);
+  const j = await fbFetch<any>(u.toString());
+  const bd = j.business_discovery;
+  if (!bd) throw new Error("акаунт не знайдено або він не бізнес/креатор");
+  return {
+    username: bd.username, name: bd.name,
+    media: ((bd.media && bd.media.data) || []).map((m: any) => ({ id: String(m.id), caption: m.caption || "", permalink: m.permalink, timestamp: m.timestamp })),
+  };
+}
+
+// Instagram Reels: контейнер media_type=REELS з video_url → чекаємо обробки відео → media_publish.
+// IG вимагає MP4 H.264+AAC, 9:16 — саме такий наш рілс із збірки.
+export async function publishReelToInstagram(igUserId: string, pageToken: string, videoUrl: string, caption: string) {
+  const cbody = new URLSearchParams({ media_type: "REELS", video_url: videoUrl, caption, access_token: pageToken });
   const c = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media`, {
     method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: cbody,
   });
+  // відео обробляється асинхронно: публікувати можна лише після status_code=FINISHED
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 5000));
+    const st = await fbFetch<{ status_code?: string }>(`${GRAPH}/${c.id}?fields=status_code&access_token=${encodeURIComponent(pageToken)}`);
+    if (st.status_code === "FINISHED") break;
+    if (st.status_code === "ERROR") throw new Error("Instagram не зміг обробити відео (перевір формат MP4 9:16)");
+    if (i === 39) throw new Error("Instagram довго обробляє відео - спробуй ще раз за кілька хвилин");
+  }
   const pbody = new URLSearchParams({ creation_id: c.id, access_token: pageToken });
   const p = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media_publish`, {
     method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: pbody,
   });
   return { mediaId: p.id };
+}
+
+// відео-пост у FB-Сторінку (file_url — Meta сама тягне з нашого /media)
+export async function publishVideoToPage(pageId: string, pageToken: string, description: string, videoUrl: string) {
+  const body = new URLSearchParams({ file_url: videoUrl, description, access_token: pageToken });
+  return fbFetch<{ id: string }>(`${GRAPH}/${pageId}/videos`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body,
+  });
+}
+
+// Instagram: двокроковий публіш (контейнер із image_url+caption -> media_publish).
+// НАДІЙНІСТЬ: навіть фото-контейнер обробляється асинхронно (IG ще тягне картинку з нашого /media) -
+// media_publish одразу після create періодично падав «Media ID is not available». Тому: чекаємо
+// status_code=FINISHED (фото зазвичай 1-3с) і ретраїмо публіш, якщо IG ще «не бачить» медіа.
+export async function publishToInstagram(igUserId: string, pageToken: string, imageUrl: string, caption: string) {
+  const cbody = new URLSearchParams({ image_url: imageUrl, caption, access_token: pageToken });
+  const c = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: cbody,
+  });
+  for (let i = 0; i < 20; i++) {
+    let st: { status_code?: string } = {};
+    try { st = await fbFetch<{ status_code?: string }>(`${GRAPH}/${c.id}?fields=status_code&access_token=${encodeURIComponent(pageToken)}`); }
+    catch { /* статус інколи недоступний одразу - просто чекаємо далі */ }
+    if (st.status_code === "FINISHED") break;
+    if (st.status_code === "ERROR") throw new Error("Instagram не зміг обробити зображення (формат/недоступний URL фото)");
+    await new Promise((r) => setTimeout(r, 2000));
+    if (i === 19) throw new Error("Instagram довго обробляє зображення - спробуй ще раз за хвилину");
+  }
+  const pbody = new URLSearchParams({ creation_id: c.id, access_token: pageToken });
+  let lastErr: any = null;
+  for (let att = 0; att < 4; att++) {
+    try {
+      const p = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media_publish`, {
+        method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: pbody,
+      });
+      return { mediaId: p.id };
+    } catch (e: any) {
+      lastErr = e;
+      // «Media ID is not available» = контейнер ще доїжджає - почекати і повторити, не валити публікацію
+      if (!/media id is not available|not available/i.test(String(e.message))) throw e;
+      await new Promise((r) => setTimeout(r, 4000 * (att + 1)));
+    }
+  }
+  throw lastErr || new Error("Instagram: не вдалося опублікувати");
 }

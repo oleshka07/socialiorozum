@@ -19,6 +19,20 @@ services:
     expose:
       - "5432"
 
+  # RSSHub: генератор RSS зі сторінок соцмереж (Telegram-канали через публічне t.me/s).
+  # БЕЗ published ports - доступний ЛИШЕ з внутрішньої мережі compose (app → http://rsshub:1200).
+  # Легкий образ без chromium (для Telegram puppeteer не потрібен); mem_limit - страховка RAM сервера.
+  rsshub:
+    image: diygod/rsshub
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      CACHE_EXPIRE: "600"
+      CACHE_CONTENT_EXPIRE: "3600"
+    mem_limit: 400m
+    expose:
+      - "1200"
+
   app:
     build: .
     restart: unless-stopped

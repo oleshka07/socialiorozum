@@ -131,7 +131,7 @@ create table if not exists schedule_slot (
   plan_item_id  uuid not null references plan_item(id) on delete cascade,
   channel_type  text not null default 'telegram',
   scheduled_at  timestamptz,
-  status        text not null default 'planned' -- planned|posted|failed
+  status        text not null default 'planned' -- planned|posting|posted|failed
 );
 
 -- інтеграція Telegram (per-workspace; bot token лише на сервері, не в git)
@@ -259,6 +259,21 @@ create table if not exists threads_publish (
 );
 create index if not exists idx_thpub_post on threads_publish(post_id);
 
+-- 🧵 відкладені відповіді у ВЛАСНУ гілку Threads (CTA-гілка: лінк/кодове слово доклеюється,
+-- коли пост уже розганяється - практика «спершу охоплення, потім перелив»)
+create table if not exists threads_reply_job (
+  id            uuid primary key default gen_random_uuid(),
+  workspace_id  uuid not null references workspace(id) on delete cascade,
+  post_id       uuid references post(id) on delete cascade,
+  root_media_id text not null,
+  reply_text    text not null,
+  due_at        timestamptz not null,
+  status        text not null default 'pending',   -- pending|sent|error
+  error         text,
+  created_at    timestamptz not null default now()
+);
+create index if not exists idx_threply_due on threads_reply_job(status, due_at);
+
 -- інтеграція Meta (Facebook + Instagram): FB-постинг + аналітика (токени лише на сервері)
 create table if not exists meta_config (
   workspace_id     uuid primary key references workspace(id) on delete cascade,
@@ -385,6 +400,96 @@ alter table post add column if not exists image_prompt text;
 -- редактор зображення: базова картинка без тексту (для дешевого перенакладання) + поточний заголовок
 alter table post add column if not exists image_base text;
 alter table post add column if not exists headline text;
+-- зібраний відео-рілс (mp4 у MEDIA_DIR) - щоб результат не губився після збірки
+alter table post add column if not exists reel_video text;
+-- лічильник підряд невдалих спроб фіда - для експоненційного бекофу поллера (0 = здоровий)
+alter table content_source add column if not exists error_count int not null default 0;
+-- з якої стрічки прийшов матеріал (фільтр «ця інста / ця тема новин / той телеграм» у Матеріалах)
+alter table source add column if not exists feed_id uuid references content_source(id) on delete set null;
+-- AI-оцінка цікавості матеріалу для аудиторії бренду (1-10, безкоштовний Gemini) + пояснення
+alter table source add column if not exists ai_score int;
+alter table source add column if not exists ai_score_why text;
+-- формат контент-одиниці: 'post' (текстовий) чи 'reel' (сценарій/відео) - фундамент рілс-треку (IG/FB/TikTok/YT)
+alter table post add column if not exists format text not null default 'post';
+alter table post add column if not exists intent text; -- намір поста: awareness (знайомство) / nurture (прогрів) / sale (продаж) - керує CTA-політикою
+
+-- LinkedIn-автопостинг (5-та мережа, шаблон Threads): підключення профілю + журнал публікацій
+create table if not exists linkedin_config (
+  workspace_id     uuid primary key references workspace(id) on delete cascade,
+  member_urn       text not null,            -- urn:li:person:… (пізніше: urn:li:organization:… для сторінок)
+  display_name     text,
+  access_token     text not null,            -- живе 60 днів; програмного рефрешу на базовому доступі нема → індикатор перепідключення
+  token_expires_at timestamptz,
+  updated_at       timestamptz not null default now()
+);
+create table if not exists linkedin_publish (
+  id          uuid primary key default gen_random_uuid(),
+  post_id     uuid not null references post(id) on delete cascade,
+  external_id text,                           -- URN опублікованого поста (x-restli-id)
+  status      text not null default 'sent',
+  error       text,
+  created_at  timestamptz not null default now()
+);
+create index if not exists idx_lipub_post on linkedin_publish(post_id);
+
+-- YouTube Shorts (рілси): Google OAuth (scope youtube.upload) + журнал завантажень
+create table if not exists youtube_config (
+  workspace_id     uuid primary key references workspace(id) on delete cascade,
+  channel_title    text,
+  access_token     text not null,
+  refresh_token    text,                       -- offline-доступ: оновлюємо access_token самі
+  token_expires_at timestamptz,
+  updated_at       timestamptz not null default now()
+);
+create table if not exists youtube_publish (
+  id          uuid primary key default gen_random_uuid(),
+  post_id     uuid not null references post(id) on delete cascade,
+  external_id text,                            -- videoId на YouTube
+  status      text not null default 'sent',
+  error       text,
+  created_at  timestamptz not null default now()
+);
+create index if not exists idx_ytpub_post on youtube_publish(post_id);
+
+-- TikTok (рілси): Content Posting API; до аудиту застосунку відео їде в «чернетки» юзера (inbox upload)
+create table if not exists tiktok_config (
+  workspace_id     uuid primary key references workspace(id) on delete cascade,
+  open_id          text not null,
+  display_name     text,
+  access_token     text not null,
+  refresh_token    text,
+  token_expires_at timestamptz,
+  updated_at       timestamptz not null default now()
+);
+create table if not exists tiktok_publish (
+  id          uuid primary key default gen_random_uuid(),
+  post_id     uuid not null references post(id) on delete cascade,
+  external_id text,                            -- publish_id джоби TikTok
+  status      text not null default 'sent',
+  error       text,
+  created_at  timestamptz not null default now()
+);
+create index if not exists idx_ttpub_post on tiktok_publish(post_id);
+
+-- Ритм каналів: слот розкладу може цілити ПІДМНОЖИНУ мереж поста (null = усі ввімкнені, як раніше).
+-- Один пост їде в різні мережі в різний час за їхніми ритмами; дедуп «раз на мережу» вже захищає від дублів.
+alter table schedule_slot add column if not exists channels jsonb;
+
+-- 🧵 повні метрики Threads-постів для розширеної аналітики (для FB/IG лишаються 0)
+alter table post_metric add column if not exists replies int not null default 0;
+alter table post_metric add column if not exists reposts int not null default 0;
+alter table post_metric add column if not exists quotes  int not null default 0;
+
+-- Метрики опублікованих постів (останній знімок по мережі) - фундамент бенчмарків «×N до власної норми»:
+-- медіана переглядів за 75-90 днів = норма мережі, кожен пост звітується множником до неї.
+create table if not exists post_metric (
+  post_id    uuid not null references post(id) on delete cascade,
+  network    text not null,                  -- threads / facebook / instagram
+  views      int  not null default 0,        -- перегляди/охоплення (по мережі: views | post_impressions | reach)
+  likes      int  not null default 0,
+  fetched_at timestamptz not null default now(),
+  primary key (post_id, network)
+);
 
 -- підключення каналу до СПІЛЬНОГО Telegram-бота: код deep-link -> воркспейс, + хто почав діалог
 create table if not exists tg_connect (
@@ -428,3 +533,66 @@ create table if not exists tg_message (
   updated_at   timestamptz not null default now(),
   primary key (workspace_id, category)
 );
+
+-- 🦉 Помічник-провідник (сова Rozum): лог показаних порад/дій - для навчання й персоналізації
+create table if not exists guide_log (
+  id           uuid primary key default gen_random_uuid(),
+  workspace_id uuid references workspace(id) on delete cascade,
+  tip          text not null,
+  event        text not null,          -- shown|clicked|dismissed|snoozed|off
+  created_at   timestamptz not null default now()
+);
+create index if not exists idx_guidelog_ws on guide_log(workspace_id, created_at desc);
+
+-- «Ворота якості» (settings_block.qa_gates {director,aiaudit,storytelling}): опційний авто-прогін
+-- Директора/AI-слідів/Сторителлінга одразу після генерації. Компактний підсумок, лише для бейджа
+-- в Студії - повну деталь юзер бачить, клікнувши на бейдж (той самий live-виклик, що й раніше).
+alter table post add column if not exists qa jsonb;
+
+-- 🔒 Технічний аудит, Рівень 1 (надійність публікації).
+-- ① unique-індекси на *_publish: захист від подвійної публікації НА РІВНІ БД (раніше дедуп був лише
+-- SELECT-потім-INSERT у коді - гонка при подвійному кліку чи збігу ручної публікації з автопостом
+-- могла все одно проскочити). publisher.ts тепер РЕЗЕРВУЄ рядок (INSERT...ON CONFLICT DO NOTHING)
+-- ПЕРЕД зовнішнім викликом мережі, а не пише його вже ПІСЛЯ успіху. Дедуп-DELETE перед створенням
+-- індексу самолікує старі дублі, якщо такі лишились із задокументованих багів double-post (безпечно
+-- повторювати на кожному деплої - після першого разу дублів уже нема, запит просто нічого не знайде).
+delete from telegram_publish where id in (
+  select id from (select id, row_number() over (partition by post_id, target order by created_at, id) rn from telegram_publish) t where rn > 1
+);
+create unique index if not exists uq_tgpub_post_target on telegram_publish(post_id, target);
+delete from threads_publish where id in (
+  select id from (select id, row_number() over (partition by post_id order by created_at, id) rn from threads_publish) t where rn > 1
+);
+create unique index if not exists uq_thpub_post on threads_publish(post_id);
+delete from meta_publish where id in (
+  select id from (select id, row_number() over (partition by post_id, channel order by created_at, id) rn from meta_publish) t where rn > 1
+);
+create unique index if not exists uq_metapub_post_channel on meta_publish(post_id, channel);
+delete from linkedin_publish where id in (
+  select id from (select id, row_number() over (partition by post_id order by created_at, id) rn from linkedin_publish) t where rn > 1
+);
+create unique index if not exists uq_lipub_post on linkedin_publish(post_id);
+-- ② `updated_at` на schedule_slot - без нього неможливо відрізнити слот, що ЗАВИС у 'posting'
+-- (процес упав посеред публікації - деплой, OOM) від того, що просто зараз публікується; такий
+-- слот раніше випадав із автопосту І з /api/schedule/auto НАЗАВЖДИ без жодної помилки в UI.
+alter table schedule_slot add column if not exists updated_at timestamptz not null default now();
+
+-- 🎨 ФОРМАТ як повноцінний вимір плану (post|carousel|reel|story).
+-- Формат ортогональний рубриці: рубрика = ПРО ЩО, формат = ЯК УПАКОВАНО, канал = КУДИ. Так це
+-- влаштовано в усіх професійних контент-календарях (в Airtable це поле `Content Type`, у шаблоні
+-- Later - окремі колонки `content type` і `content pillars`). До цього формат жив лише на пості
+-- ('post'|'reel'), а план узагалі не міг сказати «цей слот - карусель».
+alter table plan_slot add column if not exists format text not null default 'post';
+
+-- 🔗 ПОСИЛАННЯ НА ОПУБЛІКОВАНИЙ ПОСТ. Ідентифікатори ми зберігали й раніше (message_id, media_id,
+-- external_id), але людині вони ні про що не кажуть - щоб глянути «як воно там виглядає», доводилось
+-- шукати пост у мережі руками. Тепер при відправці одразу зберігаємо готовий URL:
+-- Telegram/Facebook/LinkedIn збираються з id детерміновано (без жодного запиту), Threads і Instagram
+-- віддають `permalink` полем Graph API - там один дешевий додатковий виклик.
+alter table telegram_publish add column if not exists permalink text;
+alter table threads_publish  add column if not exists permalink text;
+alter table meta_publish     add column if not exists permalink text;
+alter table linkedin_publish add column if not exists permalink text;
+-- @username каналу для гарного публічного лінка t.me/<name>/<id>; для приватних лишається
+-- t.me/c/<internal>/<id> (працює для власника-адміна). Тягнеться раз через getChat і кешується.
+alter table telegram_config add column if not exists channel_username text;

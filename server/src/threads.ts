@@ -66,8 +66,10 @@ export async function getMe(token: string) {
   return thFetch<{ id: string; username?: string }>(u.toString());
 }
 
-// двокроковий публіш: текст (+ опційне зображення за URL)
-export async function publish(token: string, userId: string, text: string, imageUrl?: string) {
+// двокроковий публіш: текст (+ опційне зображення за URL).
+// replyToId - відповідь у гілку (на ВЛАСНИЙ пост це працює з базовим threads_content_publish;
+// для відповідей на чужі пости потрібен окремий пермішен threads_manage_replies).
+export async function publish(token: string, userId: string, text: string, imageUrl?: string, replyToId?: string) {
   const create = new URL(`${GRAPH}/v1.0/${userId}/threads`);
   create.searchParams.set("access_token", token);
   if (imageUrl) {
@@ -78,12 +80,88 @@ export async function publish(token: string, userId: string, text: string, image
     create.searchParams.set("media_type", "TEXT");
     create.searchParams.set("text", text);
   }
+  if (replyToId) create.searchParams.set("reply_to_id", replyToId);
   const c = await thFetch<{ id: string }>(create.toString(), { method: "POST" });
+  // НАДІЙНІСТЬ: контейнер (особливо з фото - Threads тягне його з нашого /media) обробляється
+  // асинхронно; threads_publish одразу падав «The requested resource does not exist».
+  // Док Meta: чекати до ~30с. Полимо статус контейнера до FINISHED, потім публікуємо з ретраями.
+  for (let i = 0; i < 20; i++) {
+    let st: { status?: string; error_message?: string } = {};
+    try {
+      const su = new URL(`${GRAPH}/v1.0/${c.id}`);
+      su.searchParams.set("fields", "status,error_message");
+      su.searchParams.set("access_token", token);
+      st = await thFetch(su.toString());
+    } catch { /* статус ще не віддається - чекаємо далі */ }
+    if (st.status === "FINISHED") break;
+    if (st.status === "ERROR") throw new Error("Threads не зміг обробити медіа" + (st.error_message ? `: ${st.error_message}` : ""));
+    await new Promise((r) => setTimeout(r, 2000));
+    if (i === 19) throw new Error("Threads довго обробляє медіа - спробуй ще раз за хвилину");
+  }
   const pub = new URL(`${GRAPH}/v1.0/${userId}/threads_publish`);
   pub.searchParams.set("creation_id", c.id);
   pub.searchParams.set("access_token", token);
-  const p = await thFetch<{ id: string }>(pub.toString(), { method: "POST" });
-  return { mediaId: p.id };
+  let lastErr: any = null;
+  for (let att = 0; att < 4; att++) {
+    try {
+      const p = await thFetch<{ id: string }>(pub.toString(), { method: "POST" });
+      return { mediaId: p.id };
+    } catch (e: any) {
+      lastErr = e;
+      if (!/does not exist|not exist|try again/i.test(String(e.message))) throw e;
+      await new Promise((r) => setTimeout(r, 4000 * (att + 1))); // контейнер/root ще доїжджає
+    }
+  }
+  throw lastErr || new Error("Threads: не вдалося опублікувати");
+}
+
+// Публічне посилання на опублікований тред. З media_id його НЕ вивести (у permalink інший
+// короткий код), тому це єдиний спосіб - спитати Graph API одним полем.
+export async function mediaPermalink(token: string, mediaId: string): Promise<string> {
+  const u = new URL(`${GRAPH}/v1.0/${mediaId}`);
+  u.searchParams.set("fields", "permalink");
+  u.searchParams.set("access_token", token);
+  const j = await thFetch<{ permalink?: string }>(u.toString());
+  return j.permalink || "";
+}
+
+// інсайти ПРОФІЛЮ за період (views - часовий ряд, решта - total_value за since..until;
+// followers_count - лише поточне значення, без періоду)
+export async function userInsights(token: string, userId: string, metrics: string[], sinceUnix?: number, untilUnix?: number): Promise<Record<string, number>> {
+  const u = new URL(`${GRAPH}/v1.0/${userId}/threads_insights`);
+  u.searchParams.set("metric", metrics.join(","));
+  if (sinceUnix) u.searchParams.set("since", String(sinceUnix));
+  if (untilUnix) u.searchParams.set("until", String(untilUnix));
+  u.searchParams.set("access_token", token);
+  const j = await thFetch<{ data: Array<{ name: string; values?: Array<{ value: number }>; total_value?: { value: number } }> }>(u.toString());
+  const out: Record<string, number> = {};
+  for (const m of j.data || [])
+    out[m.name] = m.total_value?.value ?? (m.values || []).reduce((s, v) => s + (Number(v.value) || 0), 0);
+  return out;
+}
+
+// демографія підписників (потрібен threads_manage_insights і ≥100 підписників; інакше API поверне помилку)
+export async function followerDemographics(token: string, userId: string, breakdown: "age" | "gender" | "country" | "city"): Promise<Array<{ key: string; value: number }>> {
+  const u = new URL(`${GRAPH}/v1.0/${userId}/threads_insights`);
+  u.searchParams.set("metric", "follower_demographics");
+  u.searchParams.set("breakdown", breakdown);
+  u.searchParams.set("access_token", token);
+  const j = await thFetch<any>(u.toString());
+  const res = j?.data?.[0]?.total_value?.breakdowns?.[0]?.results || [];
+  return res.map((r: any) => ({ key: String((r.dimension_values || []).join(", ")), value: Number(r.value) || 0 }))
+    .sort((a: any, b: any) => b.value - a.value);
+}
+
+// коментарі (відповіді інших людей) під власним постом - потребує threads_manage_replies
+export type ThreadReply = { id: string; text: string; username: string; timestamp: string };
+export async function mediaReplies(token: string, mediaId: string): Promise<ThreadReply[]> {
+  const u = new URL(`${GRAPH}/v1.0/${mediaId}/replies`);
+  u.searchParams.set("fields", "id,text,username,timestamp");
+  u.searchParams.set("access_token", token);
+  const j = await thFetch<{ data: any[] }>(u.toString());
+  return (j.data || []).map((r) => ({
+    id: String(r.id || ""), text: String(r.text || ""), username: String(r.username || ""), timestamp: String(r.timestamp || ""),
+  })).filter((r) => r.id && r.text);
 }
 
 // інсайти по опублікованому посту

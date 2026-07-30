@@ -5,6 +5,43 @@ import { env } from "./env.js";
 import { logEvent } from "./log.js";
 import { nextInsight } from "./pipeline.js";
 import { liveSend } from "./tgbot.js";
+import { networkBenchmarks } from "./metrics.js";
+import { weekDiary } from "./diary.js";
+import * as threads from "./threads.js";
+
+// «Мультиплікатор ← аналітика»: чи вистрілив хтось із нещодавніх Threads-постів (перегляди ≥1.5× середнього решти).
+// MVP на Threads (там insights найдоступніші); IG/FB додамо, коли буде збір метрик у БД.
+async function findBreakout(ws: string): Promise<{ postId: string; views: number; title: string } | null> {
+  const cfg = await one<{ threads_user_id: string | null; access_token: string | null }>(
+    `select threads_user_id, access_token from threads_config where workspace_id=$1`, [ws]);
+  if (!cfg?.access_token) return null;
+  const recent = await q<{ post_id: string; media_id: string; content: string }>(
+    `select tp.post_id, tp.media_id, p.content from threads_publish tp join post p on p.id=tp.post_id
+       join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+     where s.workspace_id=$1 and tp.status='sent' and tp.media_id is not null
+       and tp.created_at > now() - interval '72 hours' order by tp.created_at desc limit 6`, [ws]);
+  if (recent.length < 3) return null; // замало даних для медіани
+  const stats: { postId: string; views: number; title: string }[] = [];
+  for (const r of recent) {
+    try {
+      const ins = await threads.mediaInsights(cfg.access_token, r.media_id);
+      stats.push({ postId: r.post_id, views: ins.views || 0, title: (r.content || "").split("\n")[0].slice(0, 70) });
+    } catch { /* один недоступний інсайт не валить перевірку */ }
+  }
+  if (stats.length < 3) return null;
+  const top = stats.reduce((a, b) => (b.views > a.views ? b : a));
+  // норма = медіана з накопичених метрик (post_metric, ≥5 знімків); фолбек - середнє решти свіжих постів
+  let baseline = 0;
+  try {
+    const { networks } = await networkBenchmarks(ws);
+    if (networks.threads && networks.threads.count >= 5) baseline = networks.threads.median;
+  } catch { /* бенчмарки ще не зібрані */ }
+  if (!baseline) {
+    const rest = stats.filter((x) => x !== top);
+    baseline = rest.reduce((s2, x) => s2 + x.views, 0) / rest.length;
+  }
+  return top.views >= 30 && top.views >= baseline * 1.5 ? top : null;
+}
 
 const DIGEST_HOUR = 9; // ранок за таймзоною воркспейсу
 
@@ -34,8 +71,65 @@ async function sendDigest(ws: string, chatId: string, localDate: string): Promis
   if (nextSlot?.theme) lines.push(`✍️ Найближча тема: «${nextSlot.theme.slice(0, 90)}»`);
   if (ideasCount?.n) lines.push(`💡 У Банку ${ideasCount.n} ідей — зроби пост у 1 тап.`);
   if (!(anyPlan?.n)) lines.push("📭 Контент-плану ще нема — сформуймо кістяк на 2 тижні.");
+  // 🔥 пост вистрілив → пропонуємо «Продовження» одразу, поки аудиторія тепла
+  let breakout: { postId: string; views: number; title: string } | null = null;
+  try { breakout = await findBreakout(ws); } catch { /* аналітика не критична */ }
+  if (breakout) lines.push(`\n🔥 Пост «${breakout.title}» залетів (${breakout.views} переглядів — сильно вище решти). Розвинути, поки гаряче?`);
+  // 🧵 стрік Threads: поспіль днів із публікацією (за локальною датою) - і рятівний тейк, якщо сьогодні пусто
+  let thStreak = 0, thToday = true, thConnected = false;
+  try {
+    const cfg = await one<{ n: number }>(`select count(*)::int n from threads_config where workspace_id=$1 and access_token is not null`, [ws]);
+    thConnected = (cfg?.n || 0) > 0;
+    if (thConnected) {
+      const tzRow = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='timezone'`, [ws]);
+      const days = await q<{ d: string }>(
+        `select distinct to_char(tp.created_at at time zone $2, 'YYYY-MM-DD') as d
+           from threads_publish tp join post p on p.id=tp.post_id
+           join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+         where s.workspace_id=$1 and tp.status='sent' and tp.created_at > now() - interval '60 days'`, [ws, tzRow?.content || "Europe/Kyiv"]);
+      const set = new Set(days.map((x) => x.d));
+      thToday = set.has(localDate);
+      const prev = (n: number) => plusDay(localDate, -n);
+      for (let i = thToday ? 0 : 1; i < 60; i++) { if (set.has(i === 0 ? localDate : prev(i))) thStreak++; else break; }
+      if (thStreak >= 2 && !thToday) lines.push(`\n🧵 Стрік Threads: ${thStreak} дн. поспіль — сьогодні ще пусто, не дай йому згоріти.`);
+      else if (thStreak >= 3) lines.push(`\n🧵 Стрік Threads: ${thStreak} дн. поспіль — так тримати.`);
+    }
+  } catch { /* стрік не критичний */ }
+  // 🎯 Директор: «третя ідея повз ціль» - патерн, який варто назвати
+  try {
+    const dm = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='director_misses'`, [ws]);
+    const d = JSON.parse(dm?.content || "{}");
+    if (Number(d.count) >= 3 && (d.date === localDate || d.date === plusDay(localDate, -1)))
+      lines.push(`\n🎯 ${d.count} чернетки поспіль не вели до цілі. Що відводить від фокуса?`);
+  } catch { /* не критично */ }
 
+  // 📔 недільна петля: тиждень щоденника → серія ідей / нарізка на рілси
+  let weekD: { count: number; chars: number } | null = null;
+  if (new Date(localDate + "T12:00:00Z").getUTCDay() === 0) {
+    try { const w = await weekDiary(ws); if (w.count > 0) { weekD = w; lines.push(`\n📔 За тиждень ${w.count} запис(ів) щоденника. Перетворимо на контент?`); } }
+    catch { /* не критично */ }
+  }
   const buttons: { text: string; data?: string; url?: string }[][] = [];
+  if (weekD) {
+    const row: { text: string; data: string }[] = [{ text: "💡 Ідеї з тижня", data: "dweek_ideas" }];
+    try {
+      const pro = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='pro'`, [ws]);
+      if (pro?.content === "1" && weekD.chars > 800) row.push({ text: "🎞 Нарізка на рілси", data: "dweek_reels" });
+    } catch { /* без другої кнопки */ }
+    buttons.push(row);
+  }
+  if (breakout) {
+    const row: { text: string; data: string }[] = [{ text: "🔥 5 кутів продовження", data: `dev:${breakout.postId}` }];
+    // перепакування хіта в інший формат - рілс (ПРО-трек)
+    try {
+      const pro = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='pro'`, [ws]);
+      if (pro?.content === "1") row.push({ text: "🎬 Рілс із цього", data: `reel:${breakout.postId}` });
+    } catch { /* без кнопки */ }
+    buttons.push(row);
+    // «тест → масштаб»: повтор хіта зі свіжим гачком через 48 год (іншій аудиторії)
+    buttons.push([{ text: "🔁 Повторити хіт через 48 год", data: `rep:${breakout.postId}` }]);
+  }
+  if (thConnected && !thToday) buttons.push([{ text: "🧵 3 тейки зараз (урятувати день)", data: "takes_gen" }]);
   if (nextSlot?.id) buttons.push([{ text: "✍️ Зробити пост зараз", data: `slot_post:${nextSlot.id}` }]); // 1 тап: тема слота → чернетка в DM
   if (ideasCount?.n) buttons.push([{ text: "💡 Показати ідеї", data: "idea_list" }]);
   if (!(anyPlan?.n)) buttons.push([{ text: "⚡ Сформувати план", data: "plan_gen" }]);

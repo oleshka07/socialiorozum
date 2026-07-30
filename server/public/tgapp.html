@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>socialio</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+/* Кольори беремо з ТЕМИ Telegram: Mini App має виглядати частиною месенджера, а не чужим сайтом */
+:root{
+  --bg: var(--tg-theme-bg-color, #fff);
+  --fg: var(--tg-theme-text-color, #111);
+  --muted: var(--tg-theme-hint-color, #888);
+  --card: var(--tg-theme-secondary-bg-color, #f4f4f6);
+  --link: var(--tg-theme-link-color, #2481cc);
+  --btn: var(--tg-theme-button-color, #2481cc);
+  --btn-fg: var(--tg-theme-button-text-color, #fff);
+  --line: color-mix(in srgb, var(--muted) 25%, transparent);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+     padding:0 0 calc(16px + env(safe-area-inset-bottom))}
+.tabs{display:flex;gap:6px;padding:10px 12px;position:sticky;top:0;background:var(--bg);z-index:5;border-bottom:1px solid var(--line)}
+.tab{flex:1;text-align:center;padding:9px 4px;border-radius:10px;background:var(--card);font-size:13.5px;font-weight:600;cursor:pointer;user-select:none}
+.tab.on{background:var(--btn);color:var(--btn-fg)}
+.wrap{padding:12px}
+.card{background:var(--card);border-radius:12px;padding:12px 13px;margin-bottom:9px}
+.card h4{margin:0 0 4px;font-size:14.5px;font-weight:650}
+.meta{font-size:11.5px;color:var(--muted);margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.body{font-size:13.5px;color:var(--fg);opacity:.85;white-space:pre-wrap;word-break:break-word}
+.pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;border:1px solid var(--line);color:var(--muted)}
+.pill.ok{color:#1a9e5c;border-color:#1a9e5c}
+textarea{width:100%;min-height:170px;padding:11px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);font:inherit;resize:vertical}
+.nets{display:flex;gap:7px;flex-wrap:wrap;margin:11px 0}
+.net{padding:7px 12px;border-radius:20px;border:1px solid var(--line);background:transparent;color:var(--muted);font-size:13px;cursor:pointer}
+.net.on{background:var(--btn);color:var(--btn-fg);border-color:var(--btn)}
+button.go{width:100%;padding:13px;border:0;border-radius:12px;background:var(--btn);color:var(--btn-fg);font-size:15px;font-weight:700;cursor:pointer}
+button.go[disabled]{opacity:.55}
+/* специфічність: `button.go` (елемент+клас) сильніша за `.ghost`, тож другорядна кнопка
+   малювалась основною - потрібен саме `button.go.ghost` */
+button.go.ghost{background:transparent;color:var(--link);border:1px solid var(--line);margin-top:8px;font-weight:600}
+.empty{color:var(--muted);text-align:center;padding:34px 16px;font-size:14px}
+.msg{font-size:13px;margin-top:10px;min-height:18px}
+</style>
+</head>
+<body>
+<div class="tabs">
+  <div class="tab on" data-t="new">✍️ Новий</div>
+  <div class="tab" data-t="drafts">📝 Чорновики</div>
+  <div class="tab" data-t="mats">📥 Джерела</div>
+</div>
+<div class="wrap" id="view"><div class="empty">Завантажую…</div></div>
+
+<script>
+const TG = window.Telegram && window.Telegram.WebApp;
+if (TG) { TG.ready(); TG.expand(); }
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+
+// initData - підписаний Telegram рядок; сервер перевіряє підпис і знаходить кабінет. Іншої
+// автентифікації тут немає й не треба: кукі-сесії всередині Telegram все одно нема.
+const INIT = (TG && TG.initData) || '';
+async function api(path, opts) {
+  const r = await fetch('/api/tg' + path, {
+    ...opts,
+    headers: { 'Content-Type': 'application/json', 'X-TG-Init-Data': INIT, ...(opts && opts.headers) },
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
+
+let NETS = [], tab = 'new', draft = { text: '', nets: [] };
+const NETNAME = { telegram:'✈️ Telegram', instagram:'📸 Instagram', facebook:'📘 Facebook', threads:'🧵 Threads', linkedin:'💼 LinkedIn' };
+const ORIGIN = { diary:'📔 щоденник', rss:'📡 RSS', bot:'🤖 з бота', manual:'✍️ нотатка', idea:'💡 ідея', plan:'📅 план',
+                 instagram:'📸 Instagram', fireflies:'🎙 транскрипт', gdrive:'📁 Drive', brand:'✨ бренд', takes:'🧵 тейк', topic:'🎯 тема' };
+
+document.querySelectorAll('.tab').forEach((el) => el.onclick = () => {
+  tab = el.dataset.t;
+  document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x === el));
+  render();
+});
+
+function render() {
+  if (tab === 'new') return renderNew();
+  if (tab === 'drafts') return renderList('/drafts', drawDraft, 'Чорновиків ще немає. Створи перший на вкладці «Новий».');
+  return renderList('/materials', drawMat, 'Джерел ще немає. Підключи RSS чи Instagram у кабінеті.');
+}
+
+function renderNew() {
+  $('view').innerHTML =
+    '<textarea id="t" placeholder="Про що пост? Пиши як є - опублікується саме твій текст."></textarea>'
+    + '<div class="nets" id="nets"></div>'
+    + '<button class="go" id="pub">🚀 Опублікувати</button>'
+    + '<button class="go ghost" id="save">💾 Зберегти чернеткою</button>'
+    + '<div class="msg" id="m"></div>';
+  $('t').value = draft.text;
+  $('t').oninput = (e) => { draft.text = e.target.value; };
+  drawNets();
+  $('pub').onclick = () => submit(true);
+  $('save').onclick = () => submit(false);
+}
+
+function drawNets() {
+  if (!NETS.length) { $('nets').innerHTML = '<span class="pill">Спершу підключи канали в кабінеті</span>'; return; }
+  $('nets').innerHTML = NETS.map((k) =>
+    '<button class="net' + (draft.nets.includes(k) ? ' on' : '') + '" data-n="' + k + '">' + (NETNAME[k] || k) + '</button>').join('');
+  $('nets').querySelectorAll('.net').forEach((b) => b.onclick = () => {
+    const k = b.dataset.n;
+    draft.nets = draft.nets.includes(k) ? draft.nets.filter((x) => x !== k) : draft.nets.concat(k);
+    drawNets();
+  });
+}
+
+async function submit(publish) {
+  const text = (draft.text || '').trim();
+  if (text.length < 3) { $('m').textContent = 'Спершу напиши текст.'; return; }
+  if (publish && !draft.nets.length) { $('m').textContent = 'Обери хоч один канал.'; return; }
+  $('pub').disabled = $('save').disabled = true;
+  $('m').textContent = publish ? '🚀 Публікую…' : '💾 Зберігаю…';
+  try {
+    const { id } = await api('/post', { method: 'POST', body: JSON.stringify({ text }) });
+    const channels = {}; draft.nets.forEach((k) => channels[k] = { on: true });
+    await api('/post/' + id, { method: 'PUT', body: JSON.stringify({ channels }) });
+    if (publish) {
+      const r = await api('/post/' + id + '/publish', { method: 'POST' });
+      $('m').textContent = r.message || 'Готово';
+      if (TG && TG.HapticFeedback) TG.HapticFeedback.notificationOccurred('success');
+    } else {
+      $('m').textContent = '💾 Збережено в Чорновики.';
+    }
+    draft = { text: '', nets: draft.nets };  // канали лишаємо - зазвичай постять в ті самі
+    $('t').value = '';
+  } catch (e) {
+    $('m').textContent = '⚠️ ' + e.message;
+  } finally { $('pub').disabled = $('save').disabled = false; }
+}
+
+async function renderList(path, draw, emptyText) {
+  $('view').innerHTML = '<div class="empty">Завантажую…</div>';
+  try {
+    const { items } = await api(path);
+    $('view').innerHTML = items.length ? items.map(draw).join('') : '<div class="empty">' + emptyText + '</div>';
+  } catch (e) { $('view').innerHTML = '<div class="empty">⚠️ ' + esc(e.message) + '</div>'; }
+}
+
+const shortDate = (s) => { try { return new Date(s).toLocaleDateString('uk-UA', { day:'2-digit', month:'2-digit' }); } catch (e) { return ''; } };
+
+function drawDraft(p) {
+  const nets = Object.keys(p.channels || {}).filter((k) => p.channels[k] && p.channels[k].on).map((k) => NETNAME[k] || k);
+  return '<div class="card"><div class="body">' + esc((p.content || '').slice(0, 300)) + ((p.content || '').length > 300 ? '…' : '') + '</div>'
+    + '<div class="meta">' + (p.sent ? '<span class="pill ok">✈️ опубліковано</span>' : (p.review === 'approved' ? '<span class="pill">✅ затверджено</span>' : '<span class="pill">чернетка</span>'))
+    + (nets.length ? '<span>' + esc(nets.join(', ')) + '</span>' : '') + '<span>' + shortDate(p.created_at) + '</span></div></div>';
+}
+
+function drawMat(m) {
+  return '<div class="card"><h4>' + esc(m.title) + '</h4>'
+    + '<div class="body">' + esc((m.transcript || '').slice(0, 180)) + ((m.transcript || '').length > 180 ? '…' : '') + '</div>'
+    + '<div class="meta"><span class="pill">' + esc(ORIGIN[m.origin] || m.origin) + '</span>'
+    + (m.ai_score ? '<span class="pill">⭐ ' + m.ai_score + '/10</span>' : '')
+    + '<span>' + shortDate(m.created_at) + '</span></div></div>';
+}
+
+(async function boot() {
+  if (!INIT) { $('view').innerHTML = '<div class="empty">Відкрий це вікно кнопкою в боті — так Telegram передасть підпис для входу.</div>'; return; }
+  try {
+    const me = await api('/me');
+    NETS = me.nets || [];
+    draft.nets = NETS.includes('telegram') ? ['telegram'] : [];
+    render();
+  } catch (e) { $('view').innerHTML = '<div class="empty">⚠️ ' + esc(e.message) + '</div>'; }
+})();
+</script>
+</body>
+</html>

@@ -30,6 +30,18 @@ async function purgeWorkspaceContent(ws: string): Promise<void> {
   await q(`delete from source where workspace_id=$1`, [ws]);
 }
 
+// Старі ig-safe копії БЕЗ external_id (створені до дедупу) - невидимі в бібліотеці й ніколи
+// не реюзаються → зачищаємо. Нові ig-safe (з external_id) живуть і реюзаються при публікаціях.
+async function sweepLegacyIgSafe(): Promise<void> {
+  const rows = await q<{ id: string; filename: string }>(
+    `select id, filename from media_asset where source='ig-safe' and external_id is null and created_at < now() - interval '1 hour' limit 500`);
+  for (const m of rows) {
+    await q(`delete from media_asset where id=$1`, [m.id]);
+    await deleteMediaFile(m.filename);
+  }
+  if (rows.length) await logEvent("info", "lifecycle", `зачищено легасі ig-safe копій: ${rows.length}`);
+}
+
 // Файли на диску, яким не відповідає жоден media_asset (залишки невдалих видалень) — старші за добу.
 async function sweepOrphanMedia(): Promise<void> {
   let files: string[] = [];
@@ -73,6 +85,7 @@ async function tick(): Promise<void> {
   }
   // 4) осиротілі файли медіа
   try { await sweepOrphanMedia(); } catch { /* ignore */ }
+  try { await sweepLegacyIgSafe(); } catch { /* ignore */ }
 }
 
 let running = false;
