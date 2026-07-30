@@ -22,6 +22,30 @@ jobs:
             cd server
             docker compose up -d --build
             docker image prune -f
+            # 🛡 KEEPALIVE проти сторонніх зачисток. 28.07 контейнери socialio знесло чужим деплоєм
+            # на цьому ж боксі (`Creating` замість `Running` у логу) - і вони НЕ повернулись самі:
+            # `restart: unless-stopped` не воскрешає ВИДАЛЕНИЙ контейнер. Ставимо host-cron, який
+            # раз на 10 хв ідемпотентно піднімає обидва стеки: якщо все живе, `up -d` не робить нічого.
+            # Пишемо через деплой, бо це єдиний наш канал до хоста; крок навмисно НЕ валить деплой.
+            if command -v crontab >/dev/null 2>&1; then
+              cat > /opt/socialio-keepalive.sh <<'KEEPSH'
+            #!/bin/sh
+            # піднімає стеки socialio, якщо їх знесли. --build у фолбеку: якщо образ теж запрунили,
+            # без нього compose скаже «image not found» і нічого не підніме.
+            for d in /opt/socialio/server /opt/socialio-beta/server; do
+              [ -d "$d" ] || continue
+              cd "$d" || continue
+              docker compose up -d >/dev/null 2>&1 || docker compose up -d --build >/dev/null 2>&1
+            done
+            date -u "+%Y-%m-%dT%H:%M:%SZ keepalive ok" > /opt/socialio-keepalive.log
+            KEEPSH
+              sed -i 's/^            //' /opt/socialio-keepalive.sh
+              chmod +x /opt/socialio-keepalive.sh
+              ( crontab -l 2>/dev/null | grep -v socialio-keepalive ; echo "*/10 * * * * /opt/socialio-keepalive.sh" ) | crontab - \
+                && echo "🛡 keepalive-cron на місці (*/10 хв)" || echo "⚠️ не вдалося поставити cron - перевір вручну"
+            else
+              echo "⚠️ crontab на хості немає - keepalive не встановлено"
+            fi
             # 📋 Інвентар хоста. Бокс один на всі сервіси, тож коли щось «зникає» (28.07 контейнери
             # socialio знесло цілком - compose створював їх з нуля), треба бачити, ЩО саме лишилось.
             # Найважливіше - ТОМИ: видалення контейнера дані НЕ втрачає, а видалення тому втрачає.
