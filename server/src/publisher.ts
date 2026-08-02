@@ -15,6 +15,7 @@ import { adaptForChannels, reelCaption, threadsSplit } from "./pipeline.js";
 import { getSetting } from "./settings.js";
 import { tgLink, fbLink, liLink } from "./permalink.js";
 import { logEvent } from "./log.js";
+import { ensurePostDigest } from "./memory.js";
 
 export async function thValidToken(ws: string): Promise<{ token: string; userId: string } | null> {
   const c = await one<{ threads_user_id: string | null; access_token: string | null; token_expires_at: string | null }>(
@@ -261,6 +262,13 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
       }
       results.push({ channel: k, status: "sent" });
     } catch (e: any) { results.push({ channel: k, status: "error", error: e.message }); }
+  }
+  // 🧠 памʼять контенту: щойно опублікований пост дистилюється в структурований артефакт (гачок,
+  // теза, цифри, заклик), який далі читає генерація - щоб наступні пости не повторювали те саме.
+  // Свідомо fire-and-forget: публікація вже відбулась, і збій дистиляції не має ані затримувати
+  // відповідь, ані псувати результат. Ідемпотентність - усередині (пост у 4 мережі = один артефакт).
+  if (results.some((r) => r.status === "sent")) {
+    void ensurePostDigest(ws, postId).catch(() => { /* лог пише сама ensurePostDigest */ });
   }
   return results;
 }

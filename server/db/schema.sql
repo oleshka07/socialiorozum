@@ -600,3 +600,23 @@ alter table linkedin_publish add column if not exists permalink text;
 -- @username каналу для гарного публічного лінка t.me/<name>/<id>; для приватних лишається
 -- t.me/c/<internal>/<id> (працює для власника-адміна). Тягнеться раз через getChat і кешується.
 alter table telegram_config add column if not exists channel_username text;
+
+-- 🧠 ДИСТИЛЬОВАНИЙ АРТЕФАКТ ОПУБЛІКОВАНОГО ПОСТА (памʼять контенту).
+-- Було: `recentContentDigest` на КОЖНІЙ генерації брав 15 останніх опублікованих постів і стискав
+-- їх окремим LLM-викликом. Тобто (а) платили щоразу за одну й ту саму роботу, (б) памʼять обривалась
+-- на 15 постах - усе, що старше, для моделі не існувало, і теми поверталися по колу.
+-- Стало: пост дистилюється ОДИН раз при публікації в структурований артефакт, а генерація просто
+-- читає збережене. Дешевше й ширше водночас.
+-- workspace_id тут ЯВНО (хоч і виводиться через post→run→source): це сховище читається на кожній
+-- генерації, і мультитенантна ізоляція має бути в ключі й в індексі, а не в пам'яті автора запиту.
+create table if not exists post_digest (
+  post_id uuid primary key references post(id) on delete cascade,
+  workspace_id uuid not null references workspace(id) on delete cascade,
+  hook text,      -- дослівне відкриття поста
+  thesis text,    -- головна теза одним реченням
+  facts text,     -- конкретні цифри/назви/приклади, вжиті в пості
+  cta text,       -- заклик до дії
+  topics text,    -- теми через кому (під майбутній пошук за змістом)
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_postdigest_ws on post_digest(workspace_id, created_at desc);

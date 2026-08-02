@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { q, one } from "./db.js";
 import { chat, extractJsonArray, extractJsonObject } from "./openrouter.js";
+// памʼять контенту: пост дистилюється ОДИН раз при публікації, генерація лише читає збережене
+// (було - стиснення 15 останніх постів окремим LLM-викликом на КОЖНІЙ генерації)
+import { usedDigest } from "./memory.js";
 import { env } from "./env.js";
 import { getSetting } from "./settings.js";
 
@@ -594,27 +597,7 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
 // publish-таблицях + один дешевий виклик-стиснення, БЕЗ векторної БД чи RAG-інфраструктури (overkill
 // для цього масштабу; якщо колись знадобиться семантичний пошук по тисячах постів - природний наступний
 // крок це pgvector як розширення вже наявного Postgres, а не окремий сервіс). Нема опублікованих - порожньо.
-async function recentContentDigest(workspaceId: string): Promise<string> {
-  const rows = await q<{ pid: string; content: string }>(
-    `select p.id as pid, p.content from (
-       select tp.post_id as pid, tp.created_at as at from telegram_publish tp where tp.status='sent'
-       union all select tp.post_id, tp.created_at from threads_publish tp where tp.status='sent'
-       union all select tp.post_id, tp.created_at from meta_publish tp where tp.status='sent'
-       union all select tp.post_id, tp.created_at from linkedin_publish tp where tp.status='sent'
-     ) u join post p on p.id=u.pid join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
-     where s.workspace_id=$1 order by u.at desc limit 60`, [workspaceId]);
-  const seen = new Set<string>(); const posts: string[] = [];
-  for (const r of rows) { if (seen.has(r.pid)) continue; seen.add(r.pid); posts.push(r.content); if (posts.length >= 15) break; }
-  if (!posts.length) return "";
-  try {
-    const raw = await chat(env.cheapModel,
-      "Ось останні опубліковані пости бренду. Виведи КОРОТКИЙ список (до 8 пунктів) - які гачки (перші рядки), конкретні цифри-приклади й заклики до дії вже використані, щоб наступні пости НЕ повторювали їх дослівно чи майже дослівно. Лише буллети, без пояснень і вступів.",
-      posts.map((p, i) => `${i + 1}. ${p.slice(0, 400)}`).join("\n---\n"),
-      { workspaceId, step: "recent_digest" });
-    const text = raw.trim().slice(0, 1200);
-    return text ? `\n\nВЖЕ ВИКОРИСТАНО в останніх постах (НЕ повторюй дослівно чи майже дослівно ці гачки/цифри/заклики):\n${text}` : "";
-  } catch { return ""; } // дайджест не критичний - генерація йде і без нього
-}
+
 
 // ---- LITE: один зібраний промт (усі кроки кишки в одному) ----
 // Зібрати спільний системний промт Lite-генерації (для самої генерації + для перегляду користувачем).
@@ -650,7 +633,7 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
   const n = ideas && ideas.length ? ideas.length : count;
   const v2 = s.prompt_engine !== "legacy";
   // памʼять між постами - лише v2 (legacy лишається незмінним для миттєвого відкату); нема опублікованих - без зайвого виклику
-  const recentDigest = v2 ? await recentContentDigest(workspaceId) : "";
+  const recentDigest = v2 ? await usedDigest(workspaceId) : "";
   const outputFormat = `Поверни ЛИШЕ валідний JSON-масив обʼєктів: [{"text":"повний текст поста","image_prompt":"короткий опис зображення англійською для генерації - сцена/обʼєкти/настрій, без тексту на зображенні","rubric":"назва рубрики поста${rubs.length ? " (СТРОГО одна з переліку рубрик вище)" : ""}","intent":"намір поста: awareness (цінність новій аудиторії, БЕЗ продажу) | nurture (довіра й прогрів, мʼякий заклик) | sale (прямий продаж за сходами офферів)"}, …]. Розподіл намірів у наборі: більшість awareness, частина nurture, sale - не більш як ~1 із 5 (ціль «гроші/ліди» - можна 1 із 4; «ріст/авторитет» - рідше). Мова текстів постів: ${lang}.`;
 
   if (v2) {
@@ -1076,7 +1059,7 @@ export async function buildLiteSkeleton(workspaceId: string, horizonDays: number
     try {
       const lang = (s.output_language || "Українська").trim();
       const themes = Array.isArray(data.monthly_themes) ? data.monthly_themes.filter(Boolean).map(String) : [];
-      const recentDigest = await recentContentDigest(workspaceId);
+      const recentDigest = await usedDigest(workspaceId);
       const system = "Ти контент-стратег. Для кожного слота (рубрика задана) придумай коротку конкретну тему поста (до 12 слів) у ніші бренду." +
         (s.strategy_brief ? `\nБриф: ${s.strategy_brief.slice(0, 1500)}` : (s.marketing_context ? `\nНіша: ${s.marketing_context}` : "")) +
         goalRule(s) +

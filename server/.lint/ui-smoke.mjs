@@ -254,7 +254,7 @@ const run = async () => {
     const e = document.getElementById("userEmail");
     const w = document.getElementById("todayWrap");
     return e && e.textContent.includes("@") && w && w.children.length > 0;
-  }, { timeout: 20000 });
+  }, undefined, { timeout: 20000 });
 
   const $t = (sel) => page.$eval(sel, (el) => el.textContent || "").catch(() => "");
   const vis = (sel) => page.$eval(sel, (el) => !!el.offsetParent || getComputedStyle(el).position === "fixed").catch(() => false);
@@ -279,7 +279,7 @@ const run = async () => {
   });
 
   await check("commCount", async () => {
-    await page.waitForFunction(() => { const e = document.getElementById("tdComm"); return e && e.textContent === "4"; }, { timeout: 8000 });
+    await page.waitForFunction(() => { const e = document.getElementById("tdComm"); return e && e.textContent === "4"; }, undefined, { timeout: 8000 });
     return true;
   });
 
@@ -301,13 +301,17 @@ const run = async () => {
   // ---------------------------------------------------------- 2. Створення: вкладки, банк ідей
   await check("ideasTab", async () => {
     await page.evaluate(() => { selectView("create"); setCTab("ideas"); });
-    await page.waitForTimeout(250);
-    return (await vis("#layIdeas")) && (await $t("#ideaBankFeed")).includes("підрядника");
+    // чекаємо на ФАКТ рендера, не на таймер: під навантаженням фіксована пауза дає фантомний провал
+    await page.waitForFunction(() => {
+      const l = document.getElementById("layIdeas"), f = document.getElementById("ideaBankFeed");
+      return l && l.offsetParent && f && f.textContent.includes("підрядника");
+    }, undefined, { timeout: 8000 });
+    return true;
   });
 
   await check("studioClean", async () => {
     await page.evaluate(() => setCTab("posts"));
-    await page.waitForTimeout(200);
+    await page.waitForFunction((id) => document.querySelector('.pcard[data-post="' + id + '"]'), P1, { timeout: 8000 });
     const tabs = await page.$$eval("#studioFilters .ftab", (a) => a.map((x) => ({ t: x.textContent, on: x.classList.contains("on") })));
     const active = tabs.find((x) => x.t.includes("Активні"));
     const pub = tabs.find((x) => x.t.includes("Опубліковані"));
@@ -337,11 +341,11 @@ const run = async () => {
 
   await check("postLinks", async () => {
     await page.evaluate(() => { StudioFilter = "published"; renderStudio(); });
-    await page.waitForTimeout(150);
+    await page.waitForFunction((id) => document.querySelector('.pcard[data-post="' + id + '"]'), P3, { timeout: 8000 });
     const links = await page.$$eval('.pcard[data-post="' + P3 + '"] a.cdot', (a) => a.map((x) => x.getAttribute("href")));
     const ok = links.length === 1 && links[0] === TG_LINK;
     await page.evaluate(() => { StudioFilter = "all"; renderStudio(); }); // не лишаємо фільтр наступним перевіркам
-    await page.waitForTimeout(150);
+    await page.waitForFunction((id) => document.querySelector('.pcard[data-post="' + id + '"]'), P1, { timeout: 8000 });
     return ok;
   });
 
@@ -511,7 +515,7 @@ const run = async () => {
 
   await check("abPanel", async () => {
     // матеріали й каталог моделей мусять доїхати в селекти, а результат - показатись СЛІПО
-    await page.waitForFunction(() => { const s = document.getElementById("abSource"); return s && s.options.length >= 2; }, { timeout: 6000 });
+    await page.waitForFunction(() => { const s = document.getElementById("abSource"); return s && s.options.length >= 2; }, undefined, { timeout: 6000 });
     const st = await page.evaluate(() => ({
       mats: document.getElementById("abSource").options.length,
       slots: document.querySelectorAll("#abModels .abModel").length,
@@ -526,7 +530,7 @@ const run = async () => {
     const guard = (await $t("#abMsg")).includes("щонайменше дві");
     await page.evaluate(() => { document.querySelectorAll("#abModels .abModel")[1].value = "anthropic/claude-x"; });
     await page.click("#abRun");
-    await page.waitForFunction(() => document.querySelectorAll("#abOut .post, #abOut [style*='--danger']").length > 0, { timeout: 8000 });
+    await page.waitForFunction(() => document.querySelectorAll("#abOut .post, #abOut [style*='--danger']").length > 0, undefined, { timeout: 8000 });
     const out = await page.evaluate(() => ({
       blind: !document.getElementById("abOut").textContent.includes("gpt-4o"),
       variants: document.getElementById("abOut").textContent.includes("Варіант"),
@@ -578,7 +582,7 @@ const run = async () => {
   // ---------------------------------------------------------- 8. 🦉 сова
   await check("owlGuide", async () => {
     await page.evaluate(() => { Guide.on = true; owlInit(); return loadGuide(); });
-    await page.waitForFunction(() => { const b = document.getElementById("owlBubble"); return b && b.style.display === "block"; }, { timeout: 6000 });
+    await page.waitForFunction(() => { const b = document.getElementById("owlBubble"); return b && b.style.display === "block"; }, undefined, { timeout: 6000 });
     return (await $t("#owlText")).includes("Підключи канал") && (await has("#owlDo"));
   });
 
@@ -586,7 +590,7 @@ const run = async () => {
     // ✕ на бульбашці ЛИШЕ ховає підказку й вертає сову в гніздо (помічник не вимикається)
     await page.click("#owlBubbleX");
     // політ у гніздо триває ~620мс, і саме в його колбеку ставиться atHome - чекаємо на факт, не на таймер
-    await page.waitForFunction(() => document.getElementById("owl").dataset.atHome === "1", { timeout: 5000 });
+    await page.waitForFunction(() => document.getElementById("owl").dataset.atHome === "1", undefined, { timeout: 5000 });
     const st = await page.evaluate(() => {
       const o = document.getElementById("owl");
       return { bubble: document.getElementById("owlBubble").style.display, atHome: o.dataset.atHome, shown: o.style.display };

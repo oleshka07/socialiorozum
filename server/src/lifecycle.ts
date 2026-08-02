@@ -7,6 +7,7 @@ import { logEvent } from "./log.js";
 import { env } from "./env.js";
 import { MEDIA_DIR, deleteMediaFile } from "./media.js";
 import { sendInactivityWarningEmail } from "./email.js";
+import { backfillDigests } from "./memory.js";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -86,6 +87,10 @@ async function tick(): Promise<void> {
   // 4) осиротілі файли медіа
   try { await sweepOrphanMedia(); } catch { /* ignore */ }
   try { await sweepLegacyIgSafe(); } catch { /* ignore */ }
+  // 5) 🧠 памʼять контенту: наздоганяємо пости, опубліковані ДО появи дистиляції. Порційно (ліміт
+  // усередині) - кожен артефакт це виклик моделі, і разовий прохід по всьому архіву коштував би
+  // відчутних грошей; за кілька проходів воркера архів наздожене себе сам.
+  try { await backfillDigests(); } catch { /* ignore */ }
 }
 
 let running = false;
