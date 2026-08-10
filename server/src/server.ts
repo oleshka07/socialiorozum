@@ -682,29 +682,65 @@ app.post("/api/posts/:postId/adapt", async (req: any, reply) => {
 });
 
 // опублікувати в усі обрані мережі (через спільний publisher)
+// 📣 ПУБЛІКАЦІЯ - ФОНОВА ДЖОБА, а не синхронний запит.
+// Причина: пост їде в мережі ПОСЛІДОВНО, і кожна ланка може бути повільною - авто-адаптація тексту,
+// polling контейнера в Instagram і Threads (вони обробляють медіа асинхронно, до 40с кожен), ретраї з
+// бекофом, паузи між частинами гілки, дозапит permalink. У сумі це легко перевалює за хвилину, а
+// nginx рве проксі-зʼєднання на 60с і віддає 504. Найгірше тут не сама помилка: публікація на сервері
+// ПРОДОВЖУВАЛАСЬ і зазвичай успішно завершувалась, тож людина бачила «⚠ 504» на реально
+// опублікованому пості. Тепер запит одразу вертає «почав», а клієнт полить статус.
+type PubJob = { status: "running" | "done" | "error"; results?: any[]; message?: string; error?: string; at: number };
+const publishJobs = new Map<string, PubJob>();
+const PUBJOB_TTL = 15 * 60 * 1000;
+
+function startPublishJob(postId: string, work: () => Promise<Partial<PubJob>>): PubJob {
+  // прибирання завершених джоб: Map інакше росла б увесь час життя процесу
+  for (const [k, v] of publishJobs) if (v.status !== "running" && Date.now() - v.at > PUBJOB_TTL) publishJobs.delete(k);
+  const cur = publishJobs.get(postId);
+  if (cur && cur.status === "running") return cur;   // подвійний клік не запускає другу публікацію
+  const job: PubJob = { status: "running", at: Date.now() };
+  publishJobs.set(postId, job);
+  work()
+    .then((out) => publishJobs.set(postId, { ...job, ...out, status: "done", at: Date.now() }))
+    .catch(async (e: any) => {
+      publishJobs.set(postId, { ...job, status: "error", error: String(e?.message || e).slice(0, 300), at: Date.now() });
+      await logEvent("error", "publish", e?.message || String(e), { postId });
+    });
+  return job;
+}
+
 app.post("/api/posts/:postId/publish-all", async (req: any, reply) => {
   const ws = req.user.workspace_id;
-  if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
-  try {
-    const results = await publishPostToChannels(ws, req.params.postId);
-    if (!results.length) return reply.code(400).send({ error: "Оберіть хоча б одну мережу" });
-    // Публікація один раз на мережу: гасимо запланований слот ЛИШЕ якщо не лишилось не надісланих обраних мереж
-    // (інакше слот має відпрацювати решту мереж пізніше). Так уникаємо і дубля, і скасування запланованого каналу.
+  const postId = req.params.postId;
+  if (!(await postOwned(postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  const job = startPublishJob(postId, async () => {
+    const results = await publishPostToChannels(ws, postId);
+    if (!results.length) throw new Error("Оберіть хоча б одну мережу");
+    // Публікація один раз на мережу: гасимо запланований слот ЛИШЕ якщо не лишилось не надісланих мереж
+    // (інакше слот має відпрацювати решту мереж пізніше). Так уникаємо і дубля, і скасування каналу.
     if (results.some((r) => r.status === "sent")) {
-      // «Розвідник», режим «Питання»: у фоні - 3 питання-продовження від аудиторії → Банк ідей (не блокує відповідь)
-      one<{ content: string }>(`select content from post where id=$1`, [req.params.postId])
+      // «Розвідник», режим «Питання»: 3 питання-продовження від аудиторії → Банк ідей
+      one<{ content: string }>(`select content from post where id=$1`, [postId])
         .then((p) => p && publishQuestions(ws, p.content)).catch(() => {});
-      const post = await one<{ channels: any }>(`select channels from post where id=$1`, [req.params.postId]);
+      const post = await one<{ channels: any }>(`select channels from post where id=$1`, [postId]);
       const enabled = Object.keys(post?.channels || {}).filter((k) => post!.channels[k] && post!.channels[k].on);
-      const sent = new Set(await alreadySentNetworks(req.params.postId));
-      const remaining = enabled.filter((k) => !sent.has(k));
-      if (!remaining.length) {
-        await q(`update schedule_slot set status='posted', result='опубліковано вручну (слот погашено)' where post_id=$1 and status='planned'`, [req.params.postId]);
-        await q(`update plan_slot set status='published' where post_id=$1 and status in ('drafted','approved','scheduled')`, [req.params.postId]);
+      const sent = new Set(await alreadySentNetworks(postId));
+      if (!enabled.filter((k) => !sent.has(k)).length) {
+        await q(`update schedule_slot set status='posted', result='опубліковано вручну (слот погашено)' where post_id=$1 and status='planned'`, [postId]);
+        await q(`update plan_slot set status='published' where post_id=$1 and status in ('drafted','approved','scheduled')`, [postId]);
       }
     }
-    return { ok: true, results };
-  } catch (e: any) { return reply.code(500).send({ error: e.message }); }
+    return { results };
+  });
+  return { started: true, status: job.status };
+});
+
+// Статус публікації. `idle` = джоби нема (процес перезапустився або запит прийшов надто пізно) -
+// клієнт у цьому разі просто перечитує реальний стан поста через /publish-state, а не висить вічно.
+app.get("/api/posts/:postId/publish-job", async (req: any, reply) => {
+  if (!(await postOwned(req.params.postId, req.user.workspace_id))) return reply.code(404).send({ error: "пост не знайдено" });
+  const j = publishJobs.get(req.params.postId);
+  return j ? { status: j.status, results: j.results, message: j.message, error: j.error } : { status: "idle" };
 });
 
 // 🔗 Посилання на опублікований пост по мережах. Для постів, опублікованих ДО появи колонки
@@ -2991,10 +3027,18 @@ app.put("/api/tg/post/:postId", async (req: any, reply) => {
 });
 
 // 🚀 публікація: та сама точка, що й кабінет/бот - дедуп і permalink працюють однаково
+// Mini App ходить через той самий nginx, тож має ту саму 504-експозицію, що й кабінет - публікуємо
+// теж джобою. Клієнт полить `/api/tg/post/:id/publish-job`.
 app.post("/api/tg/post/:postId/publish", async (req: any, reply) => {
   const u = await tgGuard(req, reply); if (!u) return;
-  try { return { ok: true, message: await publishNow(u.ws, req.params.postId) }; }
-  catch (e: any) { return reply.code(400).send({ error: e.message }); }
+  const job = startPublishJob(req.params.postId, async () => ({ message: await publishNow(u.ws, req.params.postId) }));
+  return { started: true, status: job.status };
+});
+
+app.get("/api/tg/post/:postId/publish-job", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const j = publishJobs.get(req.params.postId);
+  return j ? { status: j.status, message: j.message, error: j.error } : { status: "idle" };
 });
 
 // ===================== СТОРІНКИ =====================

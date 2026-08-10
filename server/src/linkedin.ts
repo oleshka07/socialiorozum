@@ -4,7 +4,18 @@
 // Community Management API (додається пізніше тим самим adapter-ом, зміниться лише author URN).
 const OAUTH = "https://www.linkedin.com/oauth/v2";
 const API = "https://api.linkedin.com";
-const LI_VERSION = "202506"; // версійований REST (місяць); оновлювати разом із тестом публікації
+// 📅 ВЕРСІЯ REST API. LinkedIn версіонує API помісячно (`YYYYMM`) і тримає версію активною ~12 місяців,
+// після чого вона вимикається і БУДЬ-ЯКИЙ запит падає з «Requested version … is not active».
+// Саме це й сталось: константа "202506" пережила своє вікно, і публікація в LinkedIn померла цілком.
+// Хардкодити місяць - значить закласти ту саму поломку рівно через рік, тож версія тепер РАХУЄТЬСЯ
+// від поточної дати: беремо позаминулий місяць (він гарантовано вже випущений і глибоко всередині
+// 12-місячного вікна). `LINKEDIN_VERSION` у .env перебиває розрахунок, якщо LinkedIn колись зламає
+// цю схему і знадобиться прибити конкретне значення руками.
+export function linkedinVersion(now: Date = new Date(), monthsBack = 2): string {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - monthsBack, 1));
+  return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+const LI_VERSION = (process.env.LINKEDIN_VERSION || "").trim() || linkedinVersion();
 
 async function liFetch<T = any>(url: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();

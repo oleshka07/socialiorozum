@@ -160,6 +160,10 @@ const AB_RESULT = {
   ],
 };
 
+// Публікація як ФОНОВА джоба: перше опитування має вернути «running», і лише наступне - «done».
+// Саме це відрізняє полінг від старої синхронної відповіді, через яку nginx і віддавав 504.
+let pubPolls = 0;
+
 // Пости: /full і /publish-state обслуговуються окремо (шлях із id).
 function handleApi(method, path) {
   const key = method + " " + path.split("?")[0];
@@ -175,6 +179,13 @@ function handleApi(method, path) {
     return { sent: p.sent || [], links: p.links || {} };
   }
   if (method === "POST" && path === "/ab/generate") return AB_RESULT;
+  if (method === "POST" && /\/publish-all$/.test(path)) { pubPolls = 0; return { started: true, status: "running" }; }
+  if (method === "GET" && /\/publish-job$/.test(path)) {
+    pubPolls++;
+    return pubPolls < 2
+      ? { status: "running" }
+      : { status: "done", results: [{ channel: "telegram", status: "sent" }, { channel: "threads", status: "sent" }] };
+  }
   if (method === "POST" || method === "PUT" || method === "DELETE") return { ok: true };
   return {};
 }
@@ -375,6 +386,25 @@ const run = async () => {
     await page.click("#cmpBack");
     await page.waitForTimeout(250);
     return opened && !(await has(".cmp-ov"));
+  });
+
+  await check("slowPublish", async () => {
+    // Регресія на 504: публікація мусить пережити ПОВІЛЬНУ відправку. Стара синхронна відповідь
+    // висіла до кінця запиту й гинула об таймаут nginx; тепер запит вертає «почав», а UI полить.
+    await page.evaluate((id) => openComposer(id), P1);
+    await page.waitForSelector(".cmp-ov #cmpNow", { timeout: 6000 });
+    await page.click("#cmpNow");
+    // проміжний стан із лічильником секунд = доказ, що клієнт справді полить, а не чекає одну відповідь
+    await page.waitForFunction(() => /публікую…\s*\d+с/.test(document.querySelector("#cmpMsg").textContent), undefined, { timeout: 8000 });
+    await page.waitForFunction(() => /✓ telegram/.test(document.querySelector("#cmpMsg").textContent), undefined, { timeout: 15000 });
+    const st = await page.evaluate(() => ({
+      msg: document.querySelector("#cmpMsg").textContent,
+      // надіслані мережі мусять стати заблокованими з ✓ одразу, без перезаходу в композер
+      tgLocked: !!document.querySelector('#cmpChips .netchip[data-net="telegram"]').disabled,
+    }));
+    await page.evaluate(() => { const b = document.querySelector("#cmpBack"); if (b) b.click(); });
+    await page.waitForTimeout(250);
+    return st.msg.includes("✓ telegram") && st.msg.includes("threads") && st.tgLocked;
   });
 
   await check("perChanAdapt", async () => {

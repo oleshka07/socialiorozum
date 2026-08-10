@@ -1592,6 +1592,25 @@ const NETLIM={telegram:1024,threads:500,instagram:2200,facebook:2000,linkedin:30
 // скільки символів мережа показує ДО «… ще»/«показати повністю» (візуальний згин, як у застосунках); telegram - без згину
 const NETFOLD={instagram:125,facebook:280,threads:320,linkedin:210};
 const NETMORE={instagram:'… ще',facebook:'… ще',threads:'Показати повністю',linkedin:'…more'};
+// 📣 Публікація тепер ФОНОВА: сервер одразу вертає «почав», а ми полимо статус.
+// Раніше запит висів на весь час відправки (Instagram і Threads обробляють медіа асинхронно, до 40с
+// кожен, плюс ретраї й паузи між частинами гілки) - nginx рвав зʼєднання на 60с і людина бачила
+// «⚠ 504» на пості, який НАСПРАВДІ публікувався далі й зазвичай успішно виходив.
+async function runPublish(postId, setMsg){
+  await api('/posts/'+postId+'/publish-all',{method:'POST'});
+  const t0=Date.now();
+  for(;;){
+    await new Promise(r=>setTimeout(r,1500));
+    let j; try{ j=await api('/posts/'+postId+'/publish-job'); }catch(e){ j=null; }
+    if(j&&j.status==='done') return j.results||[];
+    if(j&&j.status==='error') throw new Error(j.error||'публікація не вдалась');
+    // 'idle' = процес перезапустився посеред публікації: висіти вічно не можна, але й брехати
+    // «не опублікувалось» теж - справжній стан читаємо з поста нижче, у виклику
+    if(j&&j.status==='idle'&&Date.now()-t0>4000) throw new Error('стан публікації втрачено - перевір мережі на картці');
+    if(Date.now()-t0>5*60*1000) throw new Error('публікація триває надто довго - перевір мережі на картці');
+    if(setMsg) setMsg('📣 публікую… '+Math.round((Date.now()-t0)/1000)+'с');
+  }
+}
 async function openComposer(postId, opts){
   opts=opts||{};
   // адреса, з якої прийшли: закриття композера має вернути ТУДИ, інакше оновлення сторінки
@@ -1800,7 +1819,11 @@ async function openComposer(postId, opts){
         const ra=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:missing})});
         Object.keys(ra.channels||{}).forEach(k=>{ if(!sentSet.has(k)) C[k]=ra.channels[k]; }); renderPrev(); }
     }catch(_){ /* адаптація не критична - публікуємо майстер-текстом */ }
-    setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const r=await api('/posts/'+postId+'/publish-all',{method:'POST'}); const res=r.results||[]; const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); ok.forEach(k=>sentSet.add(k)); try{ const st=await api('/posts/'+postId+'/publish-state'); sentLinks=st.links||{}; }catch(_){} renderChips(); renderPrev(); setMsg((ok.length?'✓ '+ok.join(', '):'')+(err.length?' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; '):''), err.length?'var(--danger)':'var(--brand)'); if(ok.length&&!err.length) flash('Опубліковано ✓ Якщо пост залетить - 🔥 на картці дасть 5 кутів продовження'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
+    setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const res=await runPublish(postId,setMsg); const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); ok.forEach(k=>sentSet.add(k)); try{ const st=await api('/posts/'+postId+'/publish-state'); sentLinks=st.links||{}; }catch(_){} renderChips(); renderPrev(); setMsg((ok.length?'✓ '+ok.join(', '):'')+(err.length?' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; '):''), err.length?'var(--danger)':'var(--brand)'); if(ok.length&&!err.length) flash('Опубліковано ✓ Якщо пост залетить - 🔥 на картці дасть 5 кутів продовження'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)');
+      // навіть при збої частина мереж могла пройти - перечитуємо ФАКТИЧНИЙ стан, щоб інтерфейс
+      // не показував «не опубліковано» на пості, який уже вийшов
+      try{ const st=await api('/posts/'+postId+'/publish-state'); (st.sent||[]).forEach(k=>sentSet.add(k)); sentLinks=st.links||{}; renderChips(); renderPrev(); }catch(_){ }
+    } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ setMsg('вкажи дату й час','var(--danger)'); return; } const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('немає каналів для планування (усі вже опубліковано)','var(--danger)'); return; } const b=e.target; b.disabled=true; setMsg('🗓 зберігаю…'); const at=zonedToUTCISO(d,t); try{ await saveDraft(); if(opts.slotId){ await api('/schedule/'+opts.slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:at})}); } else { await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:at})}); } setMsg('заплановано ✓ ('+todo.join(', ')+')','var(--brand)'); try{await loadPublish();}catch(_){} try{await loadStudioPosts();}catch(_){} setTimeout(close,1000); }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); b.disabled=false; } };
 }
 // двокроковий редактор фото поста: крок 1 - джерело (галерея/завантаження/генерація) + формат (кроп),
