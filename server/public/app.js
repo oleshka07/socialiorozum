@@ -1101,7 +1101,7 @@ async function openCtxFix(fnd){
   const msg=ov.querySelector('#cfMsg');
   const ai=ov.querySelector('#cfAi');
   if(ai) ai.onclick=async()=>{ ai.disabled=true; msg.textContent='пишу варіант…'; aiBusy('✨ Готую виправлений варіант…');
-    try{ const r=await api('/brand/context-fix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:fnd.key,problem:fnd.title+'. '+(fnd.why||'')})});
+    try{ const r=await runAiJob('/brand/context-fix',{key:fnd.key,problem:fnd.title+'. '+(fnd.why||'')},(sec)=>{ msg.textContent='пишу варіант… '+sec+'с'; });
       ta.value=r.suggestion||''; const stx=ov.querySelector('#cfState'); if(stx){ stx.textContent='- варіант від AI'; stx.style.color='var(--brand)'; }
       msg.textContent='готово - перечитай і, якщо треба, поправ своєю рукою'; }
     catch(e){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+e.message; }
@@ -1119,7 +1119,7 @@ async function openCtxFix(fnd){
 }
 if($('ctxRun')) $('ctxRun').onclick=async()=>{
   const b=$('ctxRun'); b.disabled=true; $('ctxOut').innerHTML='<span class="spin"></span> читаю зібраний промт…'; aiBusy('🩺 Перевіряю контекст на суперечності…');
-  try{ renderCtx(await api('/brand/context-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deep:true})})); loadTasks(); }
+  try{ renderCtx(await runAiJob('/brand/context-check',{deep:true},(sec)=>{ $('ctxOut').innerHTML='<span class="spin"></span> читаю зібраний промт… '+sec+'с'; })); loadTasks(); }
   catch(e){ $('ctxOut').innerHTML='<div style="color:var(--danger);font-size:13px">⚠ '+esc(e.message)+'</div>'; }
   finally{ b.disabled=false; aiDone(); }
 };
@@ -1765,6 +1765,24 @@ async function refreshSentState(postId, sentSet, onState){
     // усі надіслані мережі вже мають лінк - чекати більше нема чого
     if(![...sentSet].some(k=>!links[k])) return;
     await new Promise(r=>setTimeout(r,2000));
+  }
+}
+// ⏳ Спільний клієнт фонових AI-джоб. Довгі виклики моделі не вкладаються в 60-секундне вікно nginx,
+// тож сервер вертає jobId, а ми полимо результат. Маршрут, який ще відповідає синхронно, працює як
+// раніше - тут це видно з відсутності jobId.
+async function runAiJob(path, body, onTick){
+  const r=await api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  if(!r||!r.jobId) return r;
+  const t0=Date.now();
+  for(;;){
+    await new Promise(x=>setTimeout(x,1500));
+    let j=null; try{ j=await api('/jobs/'+r.jobId); }catch(e){ /* мережа моргнула - пробуємо далі */ }
+    if(j&&j.status==='done') return j.result;
+    if(j&&j.status==='error') throw new Error(j.error||'не вдалося');
+    // 'idle' = процес перезапустився посеред роботи: висіти вічно не можна
+    if(j&&j.status==='idle'&&Date.now()-t0>4000) throw new Error('стан втрачено - спробуй ще раз');
+    if(Date.now()-t0>5*60*1000) throw new Error('надто довго - спробуй пізніше або скороти поля');
+    if(onTick) onTick(Math.round((Date.now()-t0)/1000));
   }
 }
 async function runPublish(postId, setMsg){
@@ -2710,7 +2728,7 @@ if($('abRun')) $('abRun').onclick=async()=>{
   if(!confirm('Прогнати '+models.length+' модел(і) × '+cnt+' пост(и)? Це РЕАЛЬНІ виклики - вони коштують грошей'+(uniq.length<models.length?' (одна модель обрана двічі - це навмисно можна, щоб побачити її власний розкид)':'')+'.')) return;
   btn.disabled=true; msg.style.color='var(--muted)'; msg.textContent='генерую паралельно…'; aiBusy('🧪 Проганяю той самий матеріал '+models.length+' моделями…');
   try{
-    const r=await api('/ab/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sourceId,models,count:cnt})});
+    const r=await runAiJob('/ab/generate',{sourceId,models,count:cnt},(sec)=>{ msg.textContent='генерую паралельно… '+sec+'с'; });
     // перемішуємо колонки: позиція теж впливає на оцінку, а ми хочемо оцінку ТЕКСТУ
     for(let i=r.variants.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); const t=r.variants[i]; r.variants[i]=r.variants[j]; r.variants[j]=t; }
     _abReveal=false; abRenderOut(r);

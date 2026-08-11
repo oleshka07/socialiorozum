@@ -6,7 +6,7 @@ import cookie from "@fastify/cookie";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { readFileSync } from "node:fs";
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual, randomUUID } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
 import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, ideaMode, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, storytellingVerdict, normFormat, FORMATS, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet, topPatterns, generateThreadsTakes, repeatVariant, expandTake, threadsStarterPack, threadsNicheReview, suggestThreadReplies, DEFAULT_MAIN_MODEL } from "./pipeline.js";
@@ -470,19 +470,52 @@ app.post("/api/generate/from-brand", async (req: any, reply) => {
 });
 
 // ✨ чорновий список болів клієнта з брифу/ніші (юзер редагує; НЕ зберігає сам - лише пропозиція)
+// ⏳ ФОНОВІ AI-ДЖОБИ (спільний механізм). nginx рве проксі на 60 секундах, а один виклик головної
+// моделі на промті в 25 тис. символів у це вікно не вкладається - людина отримувала 504 на роботі,
+// яка НАСПРАВДІ виконувалась далі. Ту саму дірку ми вже закрили для публікації; тут вона
+// повторилась на перевірці контексту, тож механізм зроблено спільним, а не ще однією латкою.
+type AiJob = { ws: string; status: "running" | "done" | "error"; result?: any; error?: string; at: number };
+const aiJobs = new Map<string, AiJob>();
+const AIJOB_TTL = 15 * 60 * 1000;
+
+function startAiJob(ws: string, work: () => Promise<any>): string {
+  for (const [k, v] of aiJobs) if (v.status !== "running" && Date.now() - v.at > AIJOB_TTL) aiJobs.delete(k);
+  const id = randomUUID();
+  aiJobs.set(id, { ws, status: "running", at: Date.now() });
+  work()
+    .then((result) => aiJobs.set(id, { ws, status: "done", result, at: Date.now() }))
+    .catch(async (e: any) => {
+      aiJobs.set(id, { ws, status: "error", error: String(e?.message || e).slice(0, 300), at: Date.now() });
+      await logEvent("warn", "aijob", e?.message || String(e), { ws });
+    });
+  return id;
+}
+
+app.get("/api/jobs/:id", async (req: any, reply) => {
+  const j = aiJobs.get(req.params.id);
+  if (!j) return { status: "idle" };                                   // процес перезапустився - клієнт не висне
+  if (j.ws !== req.user.workspace_id) return reply.code(404).send({ error: "не знайдено" });
+  return { status: j.status, result: j.result, error: j.error };
+});
+
 // 🩺 Перевірка контексту: що людина поклала в промт і чи не суперечить воно саме собі.
 // Запобіжника від «сміття на вході» не було зовсім - порожнє чи самосуперечливе поле мовчки їхало
 // в модель, і зрозуміти, чому пости слабкі, було неможливо навіть розробнику.
-app.post("/api/brand/context-check", async (req: any, reply) => {
-  try { return await contextReview(req.user.workspace_id, req.body?.deep !== false); }
-  catch (e: any) { return reply.code(500).send({ error: e.message }); }
+app.post("/api/brand/context-check", async (req: any) => {
+  const ws = req.user.workspace_id;
+  const deep = req.body?.deep !== false;
+  // швидкий (детермінований) шар віддаємо ОДРАЗУ - він без моделі й займає мілісекунди;
+  // джоба потрібна лише глибокому розбору
+  if (!deep) return await contextReview(ws, false);
+  return { jobId: startAiJob(ws, () => contextReview(ws, true)) };
 });
 
 // Варіант виправлення ОДНОГО поля. Свідомо не «полагодь усе»: людина мусить бачити «було → стало»
 // і зберегти сама - інакше сервіс тихо перепише бренд за неї.
-app.post("/api/brand/context-fix", async (req: any, reply) => {
-  try { return { suggestion: await suggestFieldFix(req.user.workspace_id, String(req.body?.key || ""), String(req.body?.problem || "")) }; }
-  catch (e: any) { return reply.code(400).send({ error: e.message }); }
+app.post("/api/brand/context-fix", async (req: any) => {
+  const ws = req.user.workspace_id;
+  const key = String(req.body?.key || ""), problem = String(req.body?.problem || "");
+  return { jobId: startAiJob(ws, async () => ({ suggestion: await suggestFieldFix(ws, key, problem) })) };
 });
 
 app.post("/api/brand/suggest-pains", async (req: any, reply) => {
@@ -2194,17 +2227,14 @@ app.get("/api/models/catalog", async (req: any) => {
   return { models: cat.rows, live: cat.live, current: s.trim() || DEFAULT_MAIN_MODEL, defaultModel: DEFAULT_MAIN_MODEL, spend };
 });
 
-app.post("/api/ab/generate", async (req: any, reply) => {
+app.post("/api/ab/generate", async (req: any) => {
   const b = req.body ?? {};
-  try {
-    return await runAbTest(req.user.workspace_id, {
-      sourceId: b.sourceId, postId: b.postId, text: b.text,
-      models: Array.isArray(b.models) ? b.models : [], count: b.count,
-    });
-  } catch (e: any) {
-    await logEvent("warn", "abtest", e.message, null, req.user.id);
-    return reply.code(400).send({ error: e.message });
-  }
+  const ws = req.user.workspace_id;
+  // 4 моделі паралельно, кожна до хвилини - синхронна відповідь тут не мала шансів пережити nginx
+  return { jobId: startAiJob(ws, () => runAbTest(ws, {
+    sourceId: b.sourceId, postId: b.postId, text: b.text,
+    models: Array.isArray(b.models) ? b.models : [], count: b.count,
+  })) };
 });
 
 // ===================== БАЗА БРЕНДУ =====================

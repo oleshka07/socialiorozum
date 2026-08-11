@@ -118,7 +118,7 @@ const API = {
     netToday: { telegram: 1 },
   },
   "GET /threads/comments": { count: 4, items: [] },
-  "POST /brand/context-check": {
+  "POST /brand/context-check-result": {
     score: 5, promptChars: 9200,
     findings: [
       { severity: "critical", field: "Бренд → Голос → Приклади постів", title: "У прикладах голосу 2 ознаки машинного тексту",
@@ -181,6 +181,11 @@ const AB_RESULT = {
 // Публікація як ФОНОВА джоба: перше опитування має вернути «running», і лише наступне - «done».
 // Саме це відрізняє полінг від старої синхронної відповіді, через яку nginx і віддавав 504.
 let pubPolls = 0;
+// Довгі AI-виклики теж фонові (перевірка контексту, виправлення, порівняння моделей): заглушка
+// відповідає «running» на перше опитування - інакше перевірка не відрізнила б полінг від синхронної
+// відповіді, а саме синхронність і давала 504 на nginx.
+let aiJobPolls = 0;
+const AI_JOB_RESULT = new Map();
 
 // Пости: /full і /publish-state обслуговуються окремо (шлях із id).
 function handleApi(method, path) {
@@ -199,7 +204,22 @@ function handleApi(method, path) {
     return { sent: p.sent || [], links: p.links || {} };
   }
   if (method === "POST" && path === "/ab/generate") return AB_RESULT;
-  if (method === "POST" && path === "/brand/context-fix") return { suggestion: "Допомагаємо власникам житла не втрачати гроші на підрядниках." };
+  if (method === "POST" && path === "/brand/context-fix") {
+    aiJobPolls = 0;
+    AI_JOB_RESULT.set("job-fix", { suggestion: "Допомагаємо власникам житла не втрачати гроші на підрядниках." });
+    return { jobId: "job-fix" };
+  }
+  if (method === "GET" && /^\/jobs\//.test(path)) {
+    const id = path.split("/")[2];
+    aiJobPolls++;
+    return aiJobPolls < 2 ? { status: "running" } : { status: "done", result: AI_JOB_RESULT.get(id) };
+  }
+  if (method === "POST" && path === "/brand/context-check") {
+    // deep:false віддається одразу (детермінований шар), deep:true - джобою
+    aiJobPolls = 0;
+    AI_JOB_RESULT.set("job-ctx", API["POST /brand/context-check-result"]);
+    return { jobId: "job-ctx" };
+  }
   if (method === "POST" && /\/publish-all$/.test(path)) {
     pubPolls = 0;
     const id = path.split("/")[2];
