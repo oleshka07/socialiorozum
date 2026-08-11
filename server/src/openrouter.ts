@@ -6,7 +6,10 @@ import { q } from "./db.js";
 // назад із llm_usage було б гонкою (паралельні виклики пишуть у ту саму таблицю).
 // costKnown=false означає «токени точні, ціна невідома» - прямий виклик OpenAI не повертає вартість,
 // і ми знаємо ставки лише для моделей із OPENAI_PRICES; показувати 0 як факт було б брехнею.
-export type UsageOut = { prompt_tokens: number; completion_tokens: number; cost: number; costKnown: boolean };
+// truncated: відповідь урвалась на ліміті токенів. Без цього прапорця обрізаний JSON виглядав як
+// «модель не тримає наш контракт», хоча насправді це НАШ ліміт був затісний - і в порівнянні моделей
+// це прямо обмовляло нормальну модель.
+export type UsageOut = { prompt_tokens: number; completion_tokens: number; cost: number; costKnown: boolean; truncated?: boolean };
 export type ChatCtx = { workspaceId: string; step?: string; json?: boolean; maxTokens?: number; usage?: UsageOut };
 
 // «—»/«–» - найстійкіший AI-маркер: промпти просять їх не вживати, але моделі однаково їх вставляють.
@@ -43,7 +46,13 @@ async function geminiChat(model: string, system: string, user: string, ctx?: Cha
     if (e && e.name === "AbortError") throw new Error("Gemini timeout 60s");
     throw e;
   } finally { clearTimeout(timer); }
-  if (!res.ok) { const t = await res.text(); throw new Error(`Gemini ${res.status}: ${t.slice(0, 300)}`); }
+  if (!res.ok) {
+    const t = await res.text();
+    // 429 RESOURCE_EXHAUSTED - це не збій коду, а вичерпані кредити/квота проєкту в AI Studio.
+    // Сира портянка JSON тут нічого не пояснює людині, яка просто хоче зрозуміти, що робити далі.
+    if (res.status === 429) throw new Error("Gemini: вичерпано квоту або кредити проєкту - поповни в Google AI Studio (ai.studio/projects) чи обери іншу модель");
+    throw new Error(`Gemini ${res.status}: ${t.slice(0, 300)}`);
+  }
   const j: any = await res.json();
   const text = stripDashes((j.candidates?.[0]?.content?.parts || []).map((p: any) => p?.text || "").join(""));
   {
@@ -56,6 +65,40 @@ async function geminiChat(model: string, system: string, user: string, ctx?: Cha
     if (ctx?.workspaceId) try { await q(`insert into llm_usage(workspace_id, step, model, prompt_tokens, completion_tokens, cost) values($1,$2,$3,$4,$5,$6)`, [ctx.workspaceId, ctx.step ?? null, model, pin, pout, cost]); } catch { /* облік не критичний */ }
   }
   return text;
+}
+
+// Особливості конкретних моделей, вивчені з їхніх же помилок (модель → що робити з тілом запиту).
+// Живе на процес: перезапуск просто перевчиться за один виклик.
+type Quirk = { renameMaxTokens?: boolean; drop?: string[] };
+const QUIRKS = new Map<string, Quirk>();
+
+function applyQuirks(apiModel: string, body: any): void {
+  const qk = QUIRKS.get(apiModel);
+  if (!qk) return;
+  if (qk.renameMaxTokens && body.max_tokens != null) { body.max_completion_tokens = body.max_tokens; delete body.max_tokens; }
+  for (const k of qk.drop || []) delete body[k];
+}
+
+// Розбір 400 «unsupported_parameter/unsupported_value»: правимо тіло під модель і кажемо, чи є сенс
+// повторювати. Саме так ми дізнаємось про вимоги нових моделей, не тримаючи їх списку в коді.
+export function fixUnsupportedParam(apiModel: string, body: any, errText: string): boolean {
+  let e: any = {};
+  try { e = JSON.parse(errText)?.error || {}; } catch { /* не JSON - нижче підстрахуємось текстом */ }
+  const code = String(e.code || "");
+  const param = String(e.param || "");
+  const msg = String(e.message || errText);
+  if (!/unsupported_parameter|unsupported_value|Unsupported parameter|Unsupported value/i.test(code + " " + msg)) return false;
+  const qk = QUIRKS.get(apiModel) || {};
+  if (param === "max_tokens" || /max_completion_tokens/.test(msg)) {
+    if (body.max_tokens == null) return false;
+    body.max_completion_tokens = body.max_tokens; delete body.max_tokens;
+    qk.renameMaxTokens = true; QUIRKS.set(apiModel, qk); return true;
+  }
+  if (param && body[param] !== undefined) {
+    delete body[param];
+    qk.drop = [...new Set([...(qk.drop || []), param])]; QUIRKS.set(apiModel, qk); return true;
+  }
+  return false;
 }
 
 export async function chat(model: string, system: string, user: string, ctx?: ChatCtx): Promise<string> {
@@ -84,18 +127,29 @@ export async function chat(model: string, system: string, user: string, ctx?: Ch
   // примусовий JSON-режим - без нього модель інколи ігнорує «поверни лише JSON» і відповідає прозою
   // (уточнююче питання, відмова), і extractJsonArray/Object лишається ні з чим
   if (ctx?.json) body.response_format = { type: "json_object" };
+  applyQuirks(apiModel, body);
 
-  // timeout: інакше крок назавжди лишиться у статусі running
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 60000);
-  let res: Response;
-  try {
-    res = await fetch(url, { method: "POST", headers, signal: controller.signal, body: JSON.stringify(body) });
-  } catch (e: any) {
-    if (e && e.name === "AbortError") throw new Error(`${provider} timeout 60s`);
-    throw e;
-  } finally {
-    clearTimeout(timer);
+  const send = async (): Promise<Response> => {
+    // timeout: інакше крок назавжди лишиться у статусі running
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 60000);
+    try { return await fetch(url, { method: "POST", headers, signal: controller.signal, body: JSON.stringify(body) }); }
+    catch (e: any) { if (e && e.name === "AbortError") throw new Error(`${provider} timeout 60s`); throw e; }
+    finally { clearTimeout(timer); }
+  };
+
+  let res = await send();
+  // 🔧 САМОНАЛАШТУВАННЯ ПІД МОДЕЛЬ. Нові моделі OpenAI відкидають параметри, які приймали старі:
+  // `max_tokens` треба слати як `max_completion_tokens`, а фіксовані temperature/presence_penalty
+  // вони взагалі не підтримують. Через це БУДЬ-ЯКА новіша модель падала з 400 ще до генерації - тобто
+  // перемкнутися на щось свіжіше за gpt-4o було неможливо в принципі. Список моделей хардкодити не
+  // можна (застаріє за місяць), тож ми читаємо, на що САМЕ свариться API, прибираємо цей параметр і
+  // повторюємо. Вдале налаштування памʼятається на процес - розплачується лише перший виклик.
+  for (let i = 0; i < 4 && !res.ok; i++) {
+    const raw = await res.clone().text();
+    const fixed = fixUnsupportedParam(apiModel, body, raw);
+    if (!fixed) break;
+    res = await send();
   }
 
   if (!res.ok) {
@@ -113,7 +167,8 @@ export async function chat(model: string, system: string, user: string, ctx?: Ch
       const [pin, pout] = OPENAI_PRICES[apiModel];
       cost = ((u.prompt_tokens || 0) / 1e6) * pin + ((u.completion_tokens || 0) / 1e6) * pout;
     }
-    if (ctx?.usage) Object.assign(ctx.usage, { prompt_tokens: u.prompt_tokens || 0, completion_tokens: u.completion_tokens || 0, cost, costKnown });
+    if (ctx?.usage) Object.assign(ctx.usage, { prompt_tokens: u.prompt_tokens || 0, completion_tokens: u.completion_tokens || 0, cost, costKnown,
+      truncated: j.choices?.[0]?.finish_reason === "length" });
     if (ctx?.workspaceId) try {
       await q(
         `insert into llm_usage(workspace_id, step, model, prompt_tokens, completion_tokens, cost) values($1,$2,$3,$4,$5,$6)`,

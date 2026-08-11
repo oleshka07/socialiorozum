@@ -13,7 +13,7 @@
 // У `llm_usage` він лягає з `step='abtest'`, щоб вартість експериментів було видно окремо від роботи.
 import { q, one } from "./db.js";
 import { chat, type UsageOut } from "./openrouter.js";
-import { buildLitePrompt, parseLitePosts, type LitePost } from "./pipeline.js";
+import { buildLitePrompt, parseLitePosts, liteMaxTokens, type LitePost } from "./pipeline.js";
 
 export type AbVariant = {
   model: string;
@@ -73,7 +73,7 @@ export async function runAbTest(
   // автора» для щоденника мусить бути таким самим, як у бою.
   const { system } = await buildLitePrompt(workspaceId, count, undefined, undefined, mat.origin);
   const user = `Вхідний матеріал:\n---\n${mat.transcript}`;
-  const maxTokens = Math.min(8000, 700 + count * 500);
+  const maxTokens = liteMaxTokens(count);   // рівно той самий кап, що й у бойовій генерації
 
   // паралельно: послідовно 4 моделі × кілька постів - це хвилини очікування на екрані
   const variants = await Promise.all(models.map(async (model): Promise<AbVariant> => {
@@ -84,9 +84,12 @@ export async function runAbTest(
       const posts = parseLitePosts(out);
       return {
         model, ok: posts.length > 0, posts, ms: Date.now() - t0,
-        // порожній розбір - це ТЕЖ результат порівняння (модель не тримає наш JSON-контракт),
-        // тож не ховаємо його за загальною помилкою, а називаємо прямо
-        error: posts.length ? undefined : "модель не повернула валідний JSON за нашим контрактом",
+        // Причину порожнього розбору називаємо ЧЕСНО. Обрізання на ліміті токенів - це НАША вина,
+        // а не «модель не тримає контракт»: саме так у першому ж прогоні дві нормальні моделі
+        // виглядали зламаними, хоча просто не помістились у кап.
+        error: posts.length ? undefined
+          : usage.truncated ? `відповідь обрізалась на ліміті ${maxTokens} токенів - це наш кап, не якість моделі`
+          : "модель не повернула валідний JSON за нашим контрактом",
         ...usage,
       };
     } catch (e: any) {

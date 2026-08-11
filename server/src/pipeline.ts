@@ -717,6 +717,13 @@ async function runQaGates(workspaceId: string, postIds: string[]): Promise<void>
 // означати «наш парсер не зрозумів її формат».
 export type LitePost = { text: string; image_prompt: string; rubric: string; intent: string };
 const LITE_INTENTS = new Set(["awareness", "nurture", "sale"]);
+// Стеля відповіді для Lite-генерації. ЕКСПОРТОВАНА навмисно: порівняння моделей мусить рахувати її
+// ТАК САМО, інакше воно міряє не ту генерацію, що працює в бою.
+// ⚠️ Підняли після першого ж прогону порівняння: на ОДИН пост виходило 1200 токенів, і багатослівніші
+// моделі впирались рівно в цей ліміт - JSON обривався, а виглядало це як «модель не тримає контракт».
+// max_tokens це КАП, а не витрата: тримати його з запасом майже безкоштовно, а тихе обрізання коштує поста.
+export const liteMaxTokens = (n: number): number => Math.min(8000, 2000 + n * 700);
+
 export function parseLitePosts(out: string): LitePost[] {
   let raw: any[];
   try { raw = extractJsonArray<any>(out); } catch { return []; }
@@ -738,7 +745,11 @@ export async function generatePostsOnePass(runId: string, count: number, ideas?:
   // max_tokens масштабується від к-сті постів - інакше дефолтний ліміт 1500 (openrouter.ts) на 8-12
   // постів або обрізає JSON (пости мовчки губляться), або примушує модель стискати кожен пост до куцого
   // варіанту ЧЕРЕЗ БРАК МІСЦЯ, а не тому що це найкращий текст.
-  const out = await chat(model, system, `Вхідний матеріал:\n---\n${transcript}`, { workspaceId: workspace_id, step: "lite", maxTokens: Math.min(8000, 700 + n * 500) });
+  // ⚠️ Стелю піднято після порівняння моделей: на ОДИН пост виходило 1200 токенів, і багатослівніші
+  // моделі (Claude) впирались рівно в цей ліміт - JSON обривався, а виглядало це як «модель не тримає
+  // наш контракт». max_tokens це КАП, а не витрата: піднімати його майже безкоштовно, а тихе обрізання
+  // коштує згенерованого поста.
+  const out = await chat(model, system, `Вхідний матеріал:\n---\n${transcript}`, { workspaceId: workspace_id, step: "lite", maxTokens: liteMaxTokens(n) });
   const posts = parseLitePosts(out);
   if (!posts.length) throw new Error("Не вдалося згенерувати пости (порожня відповідь моделі)");
   await q(`delete from post where run_id=$1 and stage='final'`, [runId]);
