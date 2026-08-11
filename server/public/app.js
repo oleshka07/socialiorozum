@@ -1042,13 +1042,73 @@ function renderCtx(r){
     +'<b style="font-size:15px">Оцінка контексту: '+(r.score||0)+'/10</b>'
     +(crit?'<span style="font-size:12.5px;color:var(--danger);font-weight:700">'+crit+' критичн.</span>':'')
     +(r.promptChars?'<span style="font-size:12px;color:var(--faint)">промт '+r.promptChars+' симв.</span>':'')+'</div>'
-    +f.map(x=>{ const sv=CTX_SEV[x.severity]||CTX_SEV.info;
+    +f.map((x,i)=>{ const sv=CTX_SEV[x.severity]||CTX_SEV.info;
       return '<div style="border-left:3px solid '+sv[1]+';background:var(--surface2);border-radius:0 9px 9px 0;padding:10px 13px;margin-bottom:8px">'
         +'<div style="display:flex;gap:7px;align-items:baseline;flex-wrap:wrap"><span>'+sv[0]+'</span><b style="font-size:13.5px">'+esc(x.title)+'</b>'
         +'<span style="font-size:11px;color:var(--faint)">'+esc(x.field||'')+'</span></div>'
         +(x.why?'<div style="font-size:12.5px;color:var(--ink2);margin-top:4px;line-height:1.5">'+esc(x.why)+'</div>':'')
         +(x.fix?'<div style="font-size:12.5px;color:'+sv[1]+';margin-top:5px;line-height:1.5"><b>Що зробити:</b> '+esc(x.fix)+'</div>':'')
+        +(x.key?'<button class="ghost ctxFix" data-i="'+i+'" style="margin-top:8px;padding:5px 12px;font-size:12.5px">✏️ Виправити</button>':'')
         +'</div>'; }).join('');
+  box.querySelectorAll('.ctxFix').forEach(b=>b.onclick=()=>openCtxFix(f[+b.dataset.i]));
+}
+// «Виправити» просто в місці знахідки: ліворуч ЩО Є (з підсвіченими проблемними фрагментами),
+// праворуч ЩО СТАНЕ - редагується й зберігається. Причина такого рішення: знайти проблему виявилось
+// легше, ніж її полагодити - людина бачила діагноз і не знала, куди йти й що саме писати.
+// ⚠️ Кнопка «✨ Запропонувати» є НЕ скрізь. Приклади голосу й докази переписує лише людина: приклад,
+// написаний моделлю, перестає бути прикладом ГОЛОСУ, а вигаданий доказ - це те, від чого ми якраз
+// ставили запобіжник.
+const CTX_FIELD_LABEL={voice_examples:'Приклади постів',strategy_brief:'Стратегічний бриф',pain_points:'Болі клієнта',
+  tone_of_voice:'Голос бренду',voice_stoplist:'Стоп-лист',brand_story:'Історія бренду',brand_antiassoc:'Анти-асоціації'};
+function hlQuotes(text,quotes){
+  let h=esc(text);
+  (quotes||[]).forEach(qt=>{ const q=esc(String(qt||'').trim()); if(q.length<3) return;
+    // ⚠️ регістронезалежно: слова зі стоп-листа приходять нормалізованими в нижній регістр, тож
+    // точний збіг не підсвітив би «Ключовий фактор» у тексті - тобто саме те, на що вказує знахідка
+    const rx=new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi');
+    h=h.replace(rx,'<mark style="background:var(--amber-soft);color:var(--ink);border-radius:3px">$&</mark>'); });
+  return h;
+}
+async function openCtxFix(fnd){
+  if(!fnd||!fnd.key) return;
+  let cur=''; try{ const st=await api('/settings'); const row=(st||[]).find(r=>r.key===fnd.key); cur=(row&&row.content)||''; }catch(e){}
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='96';
+  const aiOk=fnd.mode==='ai';
+  ov.innerHTML='<div class="modal-card" style="max-width:900px;padding:20px;max-height:88vh;overflow:auto">'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><b style="font-size:16px">✏️ '+esc(fnd.title)+'</b><button class="icon" id="cfX" style="margin-left:auto">✕</button></div>'
+    +'<div class="hint" style="margin-bottom:12px">'+esc(fnd.fix||'')+'</div>'
+    +'<div class="grid2" style="gap:14px;align-items:start">'
+      +'<div><div style="font-size:11px;font-weight:800;letter-spacing:.07em;color:var(--faint);text-transform:uppercase;margin-bottom:5px">Було</div>'
+        +'<div style="border:1px solid var(--line);border-radius:10px;padding:11px;font-size:12.5px;line-height:1.6;white-space:pre-wrap;max-height:44vh;overflow:auto;background:var(--surface2)">'+(cur?hlQuotes(cur,fnd.quotes):'<span style="color:var(--muted)">порожньо</span>')+'</div></div>'
+      +'<div><div style="font-size:11px;font-weight:800;letter-spacing:.07em;color:var(--faint);text-transform:uppercase;margin-bottom:5px">Стало ('+esc(CTX_FIELD_LABEL[fnd.key]||fnd.key)+')</div>'
+        +'<textarea id="cfNew" class="txt" style="min-height:44vh;font-size:12.5px;line-height:1.6"></textarea></div>'
+    +'</div>'
+    +'<div class="btnrow" style="margin-top:12px;flex-wrap:wrap;align-items:center">'
+      +(aiOk?'<button class="ghost" id="cfAi">✨ Запропонувати варіант</button>':'<span style="font-size:12px;color:var(--muted)">Це поле пишеш лише ти: текст, написаний моделлю, перестане бути твоїм голосом - і наступні пости вчитимуться вже на ньому.</span>')
+      +'<span style="flex:1"></span><button class="primary" id="cfSave">💾 Зберегти</button></div>'
+    +'<div id="cfMsg" style="font-size:12.5px;color:var(--muted);margin-top:8px;min-height:16px"></div></div>';
+  document.body.appendChild(ov);
+  const close=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
+  ov.querySelector('#cfX').onclick=close;
+  const ta=ov.querySelector('#cfNew'); ta.value=cur;
+  const msg=ov.querySelector('#cfMsg');
+  const ai=ov.querySelector('#cfAi');
+  if(ai) ai.onclick=async()=>{ ai.disabled=true; msg.textContent='пишу варіант…'; aiBusy('✨ Готую виправлений варіант…');
+    try{ const r=await api('/brand/context-fix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:fnd.key,problem:fnd.title+'. '+(fnd.why||'')})});
+      ta.value=r.suggestion||''; msg.textContent='готово - перечитай і, якщо треба, поправ своєю рукою'; }
+    catch(e){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+e.message; }
+    finally{ ai.disabled=false; aiDone(); } };
+  ov.querySelector('#cfSave').onclick=async()=>{
+    const btn=ov.querySelector('#cfSave'); btn.disabled=true; msg.style.color='var(--muted)'; msg.textContent='зберігаю…';
+    try{ await api('/settings/'+fnd.key,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:ta.value})});
+      const el=$(Object.keys(SET).find(k=>SET[k]===fnd.key)||''); if(el) el.value=ta.value;   // поле в кабінеті теж оновлюємо
+      close();
+      // перечитуємо ШВИДКИЙ шар: виправлений пункт має зникнути одразу, без нового платного розбору
+      try{ renderCtx(await api('/brand/context-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deep:false})})); }catch(e){}
+      loadTasks(); flash('Збережено ✓');
+    }catch(e){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+e.message; btn.disabled=false; }
+  };
 }
 if($('ctxRun')) $('ctxRun').onclick=async()=>{
   const b=$('ctxRun'); b.disabled=true; $('ctxOut').innerHTML='<span class="spin"></span> читаю зібраний промт…'; aiBusy('🩺 Перевіряю контекст на суперечності…');

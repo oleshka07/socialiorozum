@@ -41,7 +41,7 @@ import { startDiary } from "./diary.js";
 import { startThreadsAuto } from "./threads-auto.js";
 import { getSettingText } from "./settings.js";
 import { runAbTest, modelCatalog, abSpend } from "./abtest.js";
-import { contextReview, contextIssueCount } from "./context-check.js";
+import { contextReview, contextIssueCount, suggestFieldFix } from "./context-check.js";
 import { generateImageForPost, imageProviders, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto } from "./images.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook } from "./tgbot.js";
 import { chat } from "./openrouter.js";
@@ -475,6 +475,13 @@ app.post("/api/generate/from-brand", async (req: any, reply) => {
 app.post("/api/brand/context-check", async (req: any, reply) => {
   try { return await contextReview(req.user.workspace_id, req.body?.deep !== false); }
   catch (e: any) { return reply.code(500).send({ error: e.message }); }
+});
+
+// Варіант виправлення ОДНОГО поля. Свідомо не «полагодь усе»: людина мусить бачити «було → стало»
+// і зберегти сама - інакше сервіс тихо перепише бренд за неї.
+app.post("/api/brand/context-fix", async (req: any, reply) => {
+  try { return { suggestion: await suggestFieldFix(req.user.workspace_id, String(req.body?.key || ""), String(req.body?.problem || "")) }; }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
 
 app.post("/api/brand/suggest-pains", async (req: any, reply) => {
