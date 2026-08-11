@@ -709,6 +709,16 @@
           <div class="tab" data-btab="visual">🎨 Візуал</div>
           <div class="tab" data-btab="strat">🎯 Бриф і цілі</div>
         </div>
+        <div id="ctxPanel" class="panel" style="margin-bottom:14px">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <div style="font-weight:700;font-size:14.5px">🩺 Перевірка контексту</div>
+            <span class="qh" title="Промт збирається з полів цього розділу. Перевірка шукає, де вони суперечать одне одному - наприклад, приклади голосу демонструють те, що стоп-лист забороняє. У такому конфлікті модель майже завжди слухає ПРИКЛАД.">?</span>
+            <span id="ctxBadge" style="display:none;font-size:12px;font-weight:700"></span>
+            <button class="primary" id="ctxRun" style="margin-left:auto;padding:6px 13px;font-size:12.5px">Перевірити</button>
+          </div>
+          <div class="hint" style="margin-top:6px">Що саме потрапляє в модель і чи не заважає воно саме собі. Швидкі перевірки безкоштовні, глибокий розбір - один дешевий виклик.</div>
+          <div id="ctxOut" style="margin-top:10px"></div>
+        </div>
         <div id="brandVoice">
           <div class="panel">
             <div class="ph">✨ Виведи свій голос за прикладами</div>

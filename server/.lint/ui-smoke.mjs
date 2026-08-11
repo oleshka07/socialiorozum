@@ -72,6 +72,7 @@ const API = {
   "GET /channels/status": { telegram: true, threads: true, instagram: false, facebook: false, linkedin: false },
   "GET /tasks": {
     score: 45,
+    context: { critical: 1, total: 2 },
     tasks: [
       { id: "pains", label: "Опиши болі клієнта", points: 10, section: "strategy", done: false },
       { id: "chan2", label: "Підключи другий канал", points: 10, section: "settings", done: false },
@@ -116,6 +117,16 @@ const API = {
     netToday: { telegram: 1 },
   },
   "GET /threads/comments": { count: 4, items: [] },
+  "POST /brand/context-check": {
+    score: 5, promptChars: 9200,
+    findings: [
+      { severity: "critical", field: "Бренд → Голос → Приклади постів", title: "У прикладах голосу 2 ознаки машинного тексту",
+        why: "Промт наказує відтворювати ритм саме як у прикладах, а моделі імітують приклади охочіше, ніж виконують правила.",
+        fix: "Прибери з прикладів: широке тире, «не просто X, а Y»." },
+      { severity: "warn", field: "Бренд → Бриф і цілі", title: "Стратегічний бриф написаний штампами",
+        why: "У промті він помічений як джерело правди, тож штамп звідти протікає в кожен пост.", fix: "Перепиши бриф своєю мовою." },
+    ],
+  },
   "GET /guide/next": {
     tips: [{ id: "connect", text: "Підключи канал - інакше постам нікуди їхати.", target: "#genPostsBtn", emote: "happy", action: { label: "Показати", view: "settings", tab: "channels" } }],
   },
@@ -491,8 +502,29 @@ const run = async () => {
       (await page.$eval('#bTabs .tab[data-btab="strat"]', (el) => el.classList.contains("on")));
   });
 
-  await check("painsPanel", async () =>
-    (await has("#brandThesis")) && (await has("#painPoints")) && (await has("#painsSuggest")) && (await vis("#painPoints")));
+  await check("contextCheck", async () => {
+    // запобіжник від сміття на вході: знахідка мусить казати ЧОМУ і ЩО ЗРОБИТИ, а критичні
+    // суперечності - бути видимими біля відсотка налаштування, без жодного кліку
+    await page.evaluate(() => { selectView("brand"); setBTab("voice"); });
+    await page.waitForFunction(() => document.getElementById("ctxRun"), undefined, { timeout: 6000 });
+    const badge = await page.evaluate(() => ({
+      panel: (document.getElementById("ctxBadge") || {}).textContent || "",
+      dot: !!document.querySelector("#scorePill .ctxdot"),
+    }));
+    await page.click("#ctxRun");
+    await page.waitForFunction(() => /Оцінка контексту/.test(document.getElementById("ctxOut").textContent), undefined, { timeout: 8000 });
+    const out = await $t("#ctxOut");
+    return badge.dot && badge.panel.includes("критичних") &&
+      out.includes("5/10") && out.includes("машинного тексту") && out.includes("Що зробити") && out.includes("штампами");
+  });
+
+  await check("painsPanel", async () => {
+    // перевірка самодостатня: сама вмикає потрібну вкладку, а не покладається на стан, який лишила
+    // попередня (саме на це вона й впала, коли перед нею зʼявилась перевірка контексту)
+    await page.evaluate(() => { selectView("brand"); setBTab("strat"); });
+    await page.waitForFunction(() => { const el = document.getElementById("painPoints"); return el && el.offsetParent; }, undefined, { timeout: 6000 });
+    return (await has("#brandThesis")) && (await has("#painsSuggest"));
+  });
 
   // ---------------------------------------------------------- 6. Публікація: плашка, банк, план
   await check("stickyHead", async () => {

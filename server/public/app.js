@@ -260,7 +260,7 @@ document.querySelectorAll('#sTabs .tab').forEach(x=>x.onclick=()=>setSTab(x.data
 // ---------- layout switcher (Студія/Конвеєр/Інбокс) ----------
 // ---------- задачі / бал заповнення (гейміфікація) ----------
 let _lastScore=-1;
-async function loadTasks(){ try{ const d=await api('/tasks'); window._tasks=d.tasks||[]; const v=$('scoreVal'); if(v)v.textContent=d.score+'%'; const sp=$('scorePill'); if(sp){ sp.style.color=d.score>=80?'var(--brand)':(d.score>=40?'var(--amber)':'var(--muted)'); sp.style.borderColor=d.score>=80?'var(--brand)':'var(--line2)'; } if(_lastScore>=0 && d.score>_lastScore) flyPoints('+'+(d.score-_lastScore)+'%'); _lastScore=d.score; const bySec={}; (d.tasks||[]).forEach(t=>{ if(!t.done) bySec[t.section]=(bySec[t.section]||0)+1; }); document.querySelectorAll('.navitem[data-view]').forEach(it=>{ const s=it.dataset.view; let b=it.querySelector('.navbadge'); const n=bySec[s]||0; if(!b){ b=document.createElement('span'); b.className='navbadge'; it.appendChild(b); } b.textContent=n||''; b.style.display=n?'inline-flex':'none'; }); renderTaskStrip(curView); }catch(e){} }
+async function loadTasks(){ try{ const d=await api('/tasks'); window._tasks=d.tasks||[]; try{ renderCtxBadge(d.context); }catch(e){} const v=$('scoreVal'); if(v)v.textContent=d.score+'%'; const sp=$('scorePill'); if(sp){ sp.style.color=d.score>=80?'var(--brand)':(d.score>=40?'var(--amber)':'var(--muted)'); sp.style.borderColor=d.score>=80?'var(--brand)':'var(--line2)'; } if(_lastScore>=0 && d.score>_lastScore) flyPoints('+'+(d.score-_lastScore)+'%'); _lastScore=d.score; const bySec={}; (d.tasks||[]).forEach(t=>{ if(!t.done) bySec[t.section]=(bySec[t.section]||0)+1; }); document.querySelectorAll('.navitem[data-view]').forEach(it=>{ const s=it.dataset.view; let b=it.querySelector('.navbadge'); const n=bySec[s]||0; if(!b){ b=document.createElement('span'); b.className='navbadge'; it.appendChild(b); } b.textContent=n||''; b.style.display=n?'inline-flex':'none'; }); renderTaskStrip(curView); }catch(e){} }
 function flyPoints(txt){ const sp=$('scorePill'); if(!sp) return; const r=sp.getBoundingClientRect(); const el=document.createElement('div'); el.textContent=txt; el.style.cssText='position:fixed;left:'+(r.left+r.width/2)+'px;top:'+r.top+'px;transform:translateX(-50%);font-weight:800;color:var(--brand);font-size:16px;z-index:90;pointer-events:none;transition:top 1.1s ease,opacity 1.1s ease'; document.body.appendChild(el); requestAnimationFrame(()=>{ el.style.top=(r.top-48)+'px'; el.style.opacity='0'; }); setTimeout(()=>el.remove(),1200); try{ sp.animate([{transform:'scale(1)'},{transform:'scale(1.18)'},{transform:'scale(1)'}],{duration:480}); }catch(e){} }
 function openTasksModal(){ const tasks=window._tasks||[]; const SECN={create:'Створення',publish:'Публікація',brand:'База бренду',strategy:'Стратегія',sources:'Джерела',settings:'Налаштування',analytics:'Аналітика'}; const order=['brand','strategy','settings','sources','create','publish']; const bySec={}; tasks.forEach(t=>{ (bySec[t.section]=bySec[t.section]||[]).push(t); }); const done=tasks.filter(t=>t.done).length;
   let html='<div class="modal-card" style="max-width:560px;padding:22px;max-height:86vh;overflow:auto"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:18px">🚀 Налаштування профілю</b><button class="icon" id="tkX" style="margin-left:auto">✕</button></div><div class="hint" style="margin-bottom:8px">Виконано '+done+' із '+tasks.length+' - що більше, то кращі пости.</div>';
@@ -270,6 +270,20 @@ if($('scorePill')) $('scorePill').onclick=openTasksModal;
 const TASK_TARGET={brand:'#mkt',voice:'#tov',pains:'#painPoints',goal:'#goalChips',plan:'#planGenBtn',chan1:'#tgSharedBox',chan2:'#mtConnect',bot:'#tgSharedBox',transcriber:'#ffKey',plans:'#planPro',gdrive:'#gdConnect',source:'#rssUrl',media:'#mediaFile',strategy:'#genStrat',gen10:'#genPostsBtn',approve:'#genPostsBtn',schedule:'#bank',publish:'#bank'};
 const _tdismiss=new Set(); const _tidx={};
 function highlightTarget(sel){ const el=sel&&document.querySelector(sel); if(!el||!el.offsetParent) return; el.scrollIntoView({behavior:'smooth',block:'center'}); el.classList.add('thl'); setTimeout(()=>el.classList.remove('thl'),2200); }
+// стан контексту поруч зі шкалою налаштування: детермінований шар безкоштовний, тож критичні
+// суперечності видно ще до того, як людина здогадається натиснути «Перевірити»
+function renderCtxBadge(c){
+  const n=(c&&c.critical)||0, tot=(c&&c.total)||0;
+  const b=$('ctxBadge');
+  if(b){ b.style.display=tot?'inline':'none'; b.style.color=n?'var(--danger)':'var(--amber)';
+    b.textContent=tot?(n?('🔴 '+n+' критичних'):('🟠 '+tot+' зауваж.')):''; }
+  const sp=$('scorePill');
+  if(sp){ let d=sp.querySelector('.ctxdot');
+    if(n&&!d){ d=document.createElement('span'); d.className='ctxdot'; d.textContent='🔴';
+      d.title='У базі бренду є суперечності, через які пости виходять слабкішими. Бренд → Голос → «Перевірка контексту»';
+      d.style.cssText='margin-left:5px;font-size:10px'; sp.appendChild(d); }
+    else if(!n&&d) d.remove(); }
+}
 function renderTaskStrip(view){ const strip=$('taskStrip'); if(!strip) return; const all=(window._tasks||[]).filter(t=>t.section===view && !t.done && !_tdismiss.has(t.id)); if(!all.length){ strip.style.display='none'; strip.innerHTML=''; return; } let i=_tidx[view]||0; if(i>=all.length) i=0; _tidx[view]=i; const t=all[i]; const tgt=TASK_TARGET[t.id]; strip.style.display='flex'; strip.className='tstrip'; strip.innerHTML='<span style="font-size:16px">💡</span><div style="flex:1;min-width:0"><b>'+esc(t.label)+'</b> <span style="color:var(--brand);font-weight:700">+'+t.points+'</span></div>'+(tgt?'<button class="ghost" id="tsShow" style="padding:5px 11px;font-size:12.5px">Показати</button>':'')+(all.length>1?'<button class="icon" id="tsPrev" title="Попередня">◀</button><span style="font-size:12px;color:var(--muted)">'+(i+1)+'/'+all.length+'</span><button class="icon" id="tsNext" title="Наступна">▶</button>':'')+'<button class="icon" id="tsX" title="Сховати">✕</button>'; const q=(s)=>strip.querySelector(s); if(q('#tsShow')) q('#tsShow').onclick=()=>highlightTarget(tgt); if(q('#tsPrev')) q('#tsPrev').onclick=()=>{ _tidx[view]=(i-1+all.length)%all.length; renderTaskStrip(view); }; if(q('#tsNext')) q('#tsNext').onclick=()=>{ _tidx[view]=(i+1)%all.length; renderTaskStrip(view); }; q('#tsX').onclick=()=>{ _tdismiss.add(t.id); renderTaskStrip(view); }; }
 function loadPlans(){ const lite=$('planLiteBtn'), pro=$('planProBtn'); if(!pro) return;
   if(PRO){ pro.textContent='✓ Активно - вимкнути'; pro.className='ghost'; if(lite){ lite.textContent='Обрати Lite'; lite.className='ghost'; } }
@@ -1006,6 +1020,33 @@ async function loadSettings(){
     $('srvDot').style.background='var(--brand)';
   }catch(e){ $('srvDot').style.background='var(--danger)'; }
 }
+// 🩺 перевірка контексту: показує, ЧОМУ пости виходять не такі, ще до того, як їх генерувати.
+// Ключова ідея, яку перевірка доносить до людини: приклади голосу сильніші за written-правила, тож
+// суперечність між ними - не дрібниця, а головна причина «правильних, але нічиїх» текстів.
+const CTX_SEV={critical:['🔴','var(--danger)','критично'],warn:['🟠','var(--amber)','варто виправити'],info:['⚪','var(--muted)','дрібниця']};
+function renderCtx(r){
+  const box=$('ctxOut'); if(!box) return;
+  const f=r.findings||[];
+  if(!f.length){ box.innerHTML='<div style="padding:12px;border-radius:10px;background:var(--brand-soft);color:var(--brand);font-size:13px;font-weight:600">✓ Суперечностей не знайшов. Контекст готовий до генерації.</div>'; return; }
+  const crit=f.filter(x=>x.severity==='critical').length;
+  box.innerHTML='<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px;flex-wrap:wrap">'
+    +'<b style="font-size:15px">Оцінка контексту: '+(r.score||0)+'/10</b>'
+    +(crit?'<span style="font-size:12.5px;color:var(--danger);font-weight:700">'+crit+' критичн.</span>':'')
+    +(r.promptChars?'<span style="font-size:12px;color:var(--faint)">промт '+r.promptChars+' симв.</span>':'')+'</div>'
+    +f.map(x=>{ const sv=CTX_SEV[x.severity]||CTX_SEV.info;
+      return '<div style="border-left:3px solid '+sv[1]+';background:var(--surface2);border-radius:0 9px 9px 0;padding:10px 13px;margin-bottom:8px">'
+        +'<div style="display:flex;gap:7px;align-items:baseline;flex-wrap:wrap"><span>'+sv[0]+'</span><b style="font-size:13.5px">'+esc(x.title)+'</b>'
+        +'<span style="font-size:11px;color:var(--faint)">'+esc(x.field||'')+'</span></div>'
+        +(x.why?'<div style="font-size:12.5px;color:var(--ink2);margin-top:4px;line-height:1.5">'+esc(x.why)+'</div>':'')
+        +(x.fix?'<div style="font-size:12.5px;color:'+sv[1]+';margin-top:5px;line-height:1.5"><b>Що зробити:</b> '+esc(x.fix)+'</div>':'')
+        +'</div>'; }).join('');
+}
+if($('ctxRun')) $('ctxRun').onclick=async()=>{
+  const b=$('ctxRun'); b.disabled=true; $('ctxOut').innerHTML='<span class="spin"></span> читаю зібраний промт…'; aiBusy('🩺 Перевіряю контекст на суперечності…');
+  try{ renderCtx(await api('/brand/context-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deep:true})})); loadTasks(); }
+  catch(e){ $('ctxOut').innerHTML='<div style="color:var(--danger);font-size:13px">⚠ '+esc(e.message)+'</div>'; }
+  finally{ b.disabled=false; aiDone(); }
+};
 function renderBrief(text){ const o=$('briefView'); if(!o) return; o.innerHTML = text ? '<pre style="white-space:pre-wrap;font:inherit;margin:0;color:var(--ink2);line-height:1.65">'+esc(text)+'</pre>' : '<div class="empty">Натисни «Згенерувати» вгорі - бриф зʼявиться тут.</div>'; }
 let saveT;
 function flashSaved(){ const s=$('saved'); if(!s) return; s.style.opacity='1'; clearTimeout(flashSaved._t); flashSaved._t=setTimeout(()=>s.style.opacity='0',1500); }

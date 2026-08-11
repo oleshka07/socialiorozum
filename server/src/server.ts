@@ -41,6 +41,7 @@ import { startDiary } from "./diary.js";
 import { startThreadsAuto } from "./threads-auto.js";
 import { getSettingText } from "./settings.js";
 import { runAbTest, modelCatalog, abSpend } from "./abtest.js";
+import { contextReview, contextIssueCount } from "./context-check.js";
 import { generateImageForPost, imageProviders, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto } from "./images.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook } from "./tgbot.js";
 import { chat } from "./openrouter.js";
@@ -468,6 +469,14 @@ app.post("/api/generate/from-brand", async (req: any, reply) => {
 });
 
 // ✨ чорновий список болів клієнта з брифу/ніші (юзер редагує; НЕ зберігає сам - лише пропозиція)
+// 🩺 Перевірка контексту: що людина поклала в промт і чи не суперечить воно саме собі.
+// Запобіжника від «сміття на вході» не було зовсім - порожнє чи самосуперечливе поле мовчки їхало
+// в модель, і зрозуміти, чому пости слабкі, було неможливо навіть розробнику.
+app.post("/api/brand/context-check", async (req: any, reply) => {
+  try { return await contextReview(req.user.workspace_id, req.body?.deep !== false); }
+  catch (e: any) { return reply.code(500).send({ error: e.message }); }
+});
+
 app.post("/api/brand/suggest-pains", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   try {
@@ -2543,7 +2552,11 @@ app.get("/api/tasks", async (req: any) => {
   ];
   const total = tasks.reduce((a, t) => a + t.points, 0);
   const got = tasks.filter((t) => t.done).reduce((a, t) => a + t.points, 0);
-  return { score: Math.round((got / total) * 100), points: got, total, tasks };
+  // 🩺 стан контексту поруч із відсотком налаштування: детермінований шар безкоштовний, тож
+  // проблеми видно ЗАВЖДИ, а не лише коли людина здогадається натиснути перевірку
+  let context = { critical: 0, total: 0 };
+  try { context = await contextIssueCount(ws); } catch { /* не критично для екрана задач */ }
+  return { score: Math.round((got / total) * 100), points: got, total, tasks, context };
 });
 
 // позначити задачу-прапорець виконаною (напр. «Ознайомитися з тарифами»)
