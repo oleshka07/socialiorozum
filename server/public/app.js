@@ -260,12 +260,21 @@ document.querySelectorAll('#sTabs .tab').forEach(x=>x.onclick=()=>setSTab(x.data
 // ---------- layout switcher (Студія/Конвеєр/Інбокс) ----------
 // ---------- задачі / бал заповнення (гейміфікація) ----------
 let _lastScore=-1;
-async function loadTasks(){ try{ const d=await api('/tasks'); window._tasks=d.tasks||[]; try{ renderCtxBadge(d.context); }catch(e){} const v=$('scoreVal'); if(v)v.textContent=d.score+'%'; const sp=$('scorePill'); if(sp){ sp.style.color=d.score>=80?'var(--brand)':(d.score>=40?'var(--amber)':'var(--muted)'); sp.style.borderColor=d.score>=80?'var(--brand)':'var(--line2)'; } if(_lastScore>=0 && d.score>_lastScore) flyPoints('+'+(d.score-_lastScore)+'%'); _lastScore=d.score; const bySec={}; (d.tasks||[]).forEach(t=>{ if(!t.done) bySec[t.section]=(bySec[t.section]||0)+1; }); document.querySelectorAll('.navitem[data-view]').forEach(it=>{ const s=it.dataset.view; let b=it.querySelector('.navbadge'); const n=bySec[s]||0; if(!b){ b=document.createElement('span'); b.className='navbadge'; it.appendChild(b); } b.textContent=n||''; b.style.display=n?'inline-flex':'none'; }); renderTaskStrip(curView); }catch(e){} }
+async function loadTasks(){ try{ const d=await api('/tasks'); window._tasks=d.tasks||[]; window._ctx=d.context||{}; try{ renderCtxBadge(d.context); }catch(e){} const v=$('scoreVal'); if(v)v.textContent=d.score+'%'; const sp=$('scorePill'); if(sp){ sp.style.color=d.score>=80?'var(--brand)':(d.score>=40?'var(--amber)':'var(--muted)'); sp.style.borderColor=d.score>=80?'var(--brand)':'var(--line2)'; } if(_lastScore>=0 && d.score>_lastScore) flyPoints('+'+(d.score-_lastScore)+'%'); _lastScore=d.score; const bySec={}; (d.tasks||[]).forEach(t=>{ if(!t.done) bySec[t.section]=(bySec[t.section]||0)+1; }); document.querySelectorAll('.navitem[data-view]').forEach(it=>{ const s=it.dataset.view; let b=it.querySelector('.navbadge'); const n=bySec[s]||0; if(!b){ b=document.createElement('span'); b.className='navbadge'; it.appendChild(b); } b.textContent=n||''; b.style.display=n?'inline-flex':'none'; }); renderTaskStrip(curView); }catch(e){} }
 function flyPoints(txt){ const sp=$('scorePill'); if(!sp) return; const r=sp.getBoundingClientRect(); const el=document.createElement('div'); el.textContent=txt; el.style.cssText='position:fixed;left:'+(r.left+r.width/2)+'px;top:'+r.top+'px;transform:translateX(-50%);font-weight:800;color:var(--brand);font-size:16px;z-index:90;pointer-events:none;transition:top 1.1s ease,opacity 1.1s ease'; document.body.appendChild(el); requestAnimationFrame(()=>{ el.style.top=(r.top-48)+'px'; el.style.opacity='0'; }); setTimeout(()=>el.remove(),1200); try{ sp.animate([{transform:'scale(1)'},{transform:'scale(1.18)'},{transform:'scale(1)'}],{duration:480}); }catch(e){} }
 function openTasksModal(){ const tasks=window._tasks||[]; const SECN={create:'Створення',publish:'Публікація',brand:'База бренду',strategy:'Стратегія',sources:'Джерела',settings:'Налаштування',analytics:'Аналітика'}; const order=['brand','strategy','settings','sources','create','publish']; const bySec={}; tasks.forEach(t=>{ (bySec[t.section]=bySec[t.section]||[]).push(t); }); const done=tasks.filter(t=>t.done).length;
   let html='<div class="modal-card" style="max-width:560px;padding:22px;max-height:86vh;overflow:auto"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:18px">🚀 Налаштування профілю</b><button class="icon" id="tkX" style="margin-left:auto">✕</button></div><div class="hint" style="margin-bottom:8px">Виконано '+done+' із '+tasks.length+' - що більше, то кращі пости.</div>';
+  // 🔴 ПЕРШИМ РЯДКОМ - розшифровка червоної точки біля відсотка. Сама по собі вона нічого не пояснює:
+  // людина бачить тривожний маркер і не знає ні що він означає, ні куди йти (фідбек Олега).
+  const ctx=window._ctx||{};
+  if(ctx.critical) html+='<div style="display:flex;align-items:center;gap:11px;padding:12px 13px;margin-bottom:6px;border:1px solid var(--danger);border-radius:11px;background:var(--danger-soft)">'
+    +'<span style="font-size:15px">🔴</span><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13.5px">Червона точка: у базі бренду '+ctx.critical+' суперечність(і)</div>'
+    +'<div style="font-size:12.5px;color:var(--ink2);margin-top:2px">Поля, з яких збирається промт, заперечують одне одному - через це пости виходять слабкішими, скільки б задач ти не виконав.</div></div>'
+    +'<button class="primary" id="tkCtx" style="padding:6px 12px;font-size:12.5px;flex:none">Перевірити</button></div>';
   order.concat(Object.keys(bySec).filter(s=>!order.includes(s))).forEach(sec=>{ const list=bySec[sec]; if(!list) return; html+='<div style="font-weight:700;font-size:12.5px;color:var(--muted);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.03em">'+(SECN[sec]||sec)+'</div>'; list.forEach(t=>{ html+='<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)"><span style="width:22px;height:22px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:12px;'+(t.done?'background:var(--brand);color:#fff':'border:2px solid var(--line2);color:var(--faint)')+'">'+(t.done?'✓':'')+'</span><div style="flex:1;font-size:13.5px;'+(t.done?'color:var(--faint);text-decoration:line-through':'')+'">'+esc(t.label)+'</div><span style="font-size:12px;color:var(--muted)">+'+t.points+'</span>'+(t.done?'':(t.id==='plans'?'<button class="ghost tkAck" data-key="seen_plans" style="padding:5px 10px;font-size:12px">Зрозуміло</button>':'<button class="ghost tkGo" data-sec="'+(t.id==='transcriber'||t.id==='gdrive'?'tools':t.section)+'" style="padding:5px 10px;font-size:12px">Перейти</button>'))+'</div>'; }); });
-  html+='</div>'; const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='75'; ov.innerHTML=html; document.body.appendChild(ov); const close=()=>ov.remove(); ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#tkX').onclick=close; ov.querySelectorAll('.tkGo').forEach(b=>b.onclick=()=>{ close(); go(b.dataset.sec); }); ov.querySelectorAll('.tkAck').forEach(b=>b.onclick=async()=>{ try{ await api('/tasks/ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:b.dataset.key})}); close(); loadTasks(); }catch(e){} }); }
+  html+='</div>'; const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='75'; ov.innerHTML=html; document.body.appendChild(ov); const close=()=>ov.remove(); ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#tkX').onclick=close;
+  const ctxBtn=ov.querySelector('#tkCtx'); if(ctxBtn) ctxBtn.onclick=()=>{ close(); selectView('brand'); setBTab('voice');
+    setTimeout(()=>{ const p=$('ctxPanel'); if(p) p.scrollIntoView({behavior:'smooth',block:'center'}); const r=$('ctxRun'); if(r) r.click(); },300); }; ov.querySelectorAll('.tkGo').forEach(b=>b.onclick=()=>{ close(); go(b.dataset.sec); }); ov.querySelectorAll('.tkAck').forEach(b=>b.onclick=async()=>{ try{ await api('/tasks/ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:b.dataset.key})}); close(); loadTasks(); }catch(e){} }); }
 if($('scorePill')) $('scorePill').onclick=openTasksModal;
 const TASK_TARGET={brand:'#mkt',voice:'#tov',pains:'#painPoints',goal:'#goalChips',plan:'#planGenBtn',chan1:'#tgSharedBox',chan2:'#mtConnect',bot:'#tgSharedBox',transcriber:'#ffKey',plans:'#planPro',gdrive:'#gdConnect',source:'#rssUrl',media:'#mediaFile',strategy:'#genStrat',gen10:'#genPostsBtn',approve:'#genPostsBtn',schedule:'#bank',publish:'#bank'};
 const _tdismiss=new Set(); const _tidx={};
@@ -1676,6 +1685,21 @@ const NETMORE={instagram:'… ще',facebook:'… ще',threads:'Показат�
 // Раніше запит висів на весь час відправки (Instagram і Threads обробляють медіа асинхронно, до 40с
 // кожен, плюс ретраї й паузи між частинами гілки) - nginx рвав зʼєднання на 60с і людина бачила
 // «⚠ 504» на пості, який НАСПРАВДІ публікувався далі й зазвичай успішно виходив.
+// Перечитати фактичний стан публікації і ДОЧЕКАТИСЬ посилань. Permalink для Threads та Instagram
+// не збирається з id детерміновано (він містить окремий короткий код) - його доводиться дозапитувати,
+// і робиться це вже ПІСЛЯ успішної відправки, щоб збій запиту не завалив саму публікацію. Через це на
+// момент першого читання лінка ще може не бути, і людина бачила пост без посилання аж до F5.
+async function refreshSentState(postId, sentSet, onState){
+  for(let i=0;i<3;i++){
+    let st=null; try{ st=await api('/posts/'+postId+'/publish-state'); }catch(e){ return; }
+    (st.sent||[]).forEach(k=>sentSet.add(k));
+    const links=st.links||{};
+    if(onState) onState(links);
+    // усі надіслані мережі вже мають лінк - чекати більше нема чого
+    if(![...sentSet].some(k=>!links[k])) return;
+    await new Promise(r=>setTimeout(r,2000));
+  }
+}
 async function runPublish(postId, setMsg){
   await api('/posts/'+postId+'/publish-all',{method:'POST'});
   const t0=Date.now();
@@ -1895,14 +1919,18 @@ async function openComposer(postId, opts){
       // мережі, які він лишив зі своїм текстом, їдуть саме зі своїм текстом.
       const missing=C.manual_adapt?[]:todo.filter(k=>!hasOwn(k));
       if(missing.length){ setMsg('✨ пакую під канали…'); aiBusy('✨ Пакую пост під кожну мережу…');
-        await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master})});
-        const ra=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:missing})});
-        Object.keys(ra.channels||{}).forEach(k=>{ if(!sentSet.has(k)) C[k]=ra.channels[k]; }); renderPrev(); }
+        // ⚠️ aiBusy/aiDone - ЛІЧИЛЬНИК: без парного aiDone саме тут банер «Публікую в канали…»
+        // лишався висіти назавжди, бо _aiN ніколи не падав до нуля (finally нижче гасить лише СВІЙ виклик)
+        try{
+          await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master})});
+          const ra=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:missing})});
+          Object.keys(ra.channels||{}).forEach(k=>{ if(!sentSet.has(k)) C[k]=ra.channels[k]; }); renderPrev();
+        } finally { aiDone(); } }
     }catch(_){ /* адаптація не критична - публікуємо майстер-текстом */ }
-    setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const res=await runPublish(postId,setMsg); const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); ok.forEach(k=>sentSet.add(k)); try{ const st=await api('/posts/'+postId+'/publish-state'); sentLinks=st.links||{}; }catch(_){} renderChips(); renderPrev(); setMsg((ok.length?'✓ '+ok.join(', '):'')+(err.length?' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; '):''), err.length?'var(--danger)':'var(--brand)'); if(ok.length&&!err.length) flash('Опубліковано ✓ Якщо пост залетить - 🔥 на картці дасть 5 кутів продовження'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)');
+    setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const res=await runPublish(postId,setMsg); const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); ok.forEach(k=>sentSet.add(k)); await refreshSentState(postId,sentSet,(l)=>{ sentLinks=l; renderChips(); renderPrev(); }); renderChips(); renderPrev(); setMsg((ok.length?'✓ '+ok.join(', '):'')+(err.length?' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; '):''), err.length?'var(--danger)':'var(--brand)'); if(ok.length&&!err.length) flash('Опубліковано ✓ Якщо пост залетить - 🔥 на картці дасть 5 кутів продовження'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)');
       // навіть при збої частина мереж могла пройти - перечитуємо ФАКТИЧНИЙ стан, щоб інтерфейс
       // не показував «не опубліковано» на пості, який уже вийшов
-      try{ const st=await api('/posts/'+postId+'/publish-state'); (st.sent||[]).forEach(k=>sentSet.add(k)); sentLinks=st.links||{}; renderChips(); renderPrev(); }catch(_){ }
+      try{ await refreshSentState(postId,sentSet,(l)=>{ sentLinks=l; renderChips(); renderPrev(); }); }catch(_){ }
     } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ setMsg('вкажи дату й час','var(--danger)'); return; } const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('немає каналів для планування (усі вже опубліковано)','var(--danger)'); return; } const b=e.target; b.disabled=true; setMsg('🗓 зберігаю…'); const at=zonedToUTCISO(d,t); try{ await saveDraft(); if(opts.slotId){ await api('/schedule/'+opts.slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:at})}); } else { await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:at})}); } setMsg('заплановано ✓ ('+todo.join(', ')+')','var(--brand)'); try{await loadPublish();}catch(_){} try{await loadStudioPosts();}catch(_){} setTimeout(close,1000); }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); b.disabled=false; } };
 }

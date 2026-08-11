@@ -196,7 +196,13 @@ function handleApi(method, path) {
     return { sent: p.sent || [], links: p.links || {} };
   }
   if (method === "POST" && path === "/ab/generate") return AB_RESULT;
-  if (method === "POST" && /\/publish-all$/.test(path)) { pubPolls = 0; return { started: true, status: "running" }; }
+  if (method === "POST" && /\/publish-all$/.test(path)) {
+    pubPolls = 0;
+    const id = path.split("/")[2];
+    const p = POSTS.find((x) => x.id === id);
+    if (p) { p.sent = ["telegram", "threads"]; p.links = { telegram: TG_LINK, threads: "https://www.threads.net/@brand/post/abc" }; }
+    return { started: true, status: "running" };
+  }
   if (method === "GET" && /\/publish-job$/.test(path)) {
     pubPolls++;
     return pubPolls < 2
@@ -418,10 +424,19 @@ const run = async () => {
       msg: document.querySelector("#cmpMsg").textContent,
       // надіслані мережі мусять стати заблокованими з ✓ одразу, без перезаходу в композер
       tgLocked: !!document.querySelector('#cmpChips .netchip[data-net="telegram"]').disabled,
+      // 🔗 і посилання на живий пост мусить зʼявитись ОДРАЗУ, а не після F5
+      links: [...document.querySelectorAll("#cmpPrev a.pv-open")].map((a) => a.getAttribute("href")),
     }));
+    // індикатор «AI працює» мусить ЗГАСНУТИ. Гасне він у finally, тобто на такт пізніше за повідомлення,
+    // тому чекаємо на факт: так перевірка ловить саме «висить назавжди» (aiBusy без парного aiDone),
+    // а не нормальну затримку в кілька мілісекунд.
+    let busyCleared = true;
+    try { await page.waitForFunction(() => !document.querySelector("#aiBusy.show"), undefined, { timeout: 6000 }); }
+    catch { busyCleared = false; }
     await page.evaluate(() => { const b = document.querySelector("#cmpBack"); if (b) b.click(); });
     await page.waitForTimeout(250);
-    return st.msg.includes("✓ telegram") && st.msg.includes("threads") && st.tgLocked;
+    return st.msg.includes("✓ telegram") && st.msg.includes("threads") && st.tgLocked
+      && st.links.includes(TG_LINK) && busyCleared;
   });
 
   await check("perChanAdapt", async () => {
@@ -500,6 +515,19 @@ const run = async () => {
     return (await page.$eval('.viewsec[data-view="brand"]', (el) => el.classList.contains("active"))) &&
       (await vis("#brandStratHost")) &&
       (await page.$eval('#bTabs .tab[data-btab="strat"]', (el) => el.classList.contains("on")));
+  });
+
+  await check("ctxDotExplained", async () => {
+    // сама по собі 🔴 нічого не пояснює: у модалці налаштування вона мусить бути ПЕРШИМ рядком
+    // із розшифровкою і кнопкою, куди йти (інакше це просто тривожний маркер без адресата)
+    await page.evaluate(() => openTasksModal());
+    await page.waitForFunction(() => document.querySelector(".modal #tkCtx"), undefined, { timeout: 6000 });
+    // читаємо САМЕ ту модалку, де є кнопка: у DOM може лишатись інша від попередніх перевірок
+    const txt = await page.$eval("#tkCtx", (b) => b.closest(".modal").textContent);
+    await page.click("#tkCtx");
+    await page.waitForFunction(() => /Оцінка контексту/.test((document.getElementById("ctxOut") || {}).textContent || ""), undefined, { timeout: 8000 });
+    return txt.includes("Червона точка") && txt.includes("суперечн") && txt.includes("промт")
+      && !(await has("#tkCtx"));   // кнопка закриває модалку й веде в перевірку
   });
 
   await check("contextCheck", async () => {
