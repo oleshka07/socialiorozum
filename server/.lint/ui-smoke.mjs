@@ -121,7 +121,11 @@ const API = {
   },
   "GET /prompts": [],
   "GET /published": [],
-  "GET /usage": { prompt_tokens: 1000, completion_tokens: 500, cost: 0.02, calls: 3 },
+  "GET /usage": {
+    prompt_tokens: 1000, completion_tokens: 500, cost: 0.02, calls: 3,
+    byModel: [{ model: "openai/gpt-4o", calls: 2, cost: 0.018 }, { model: "openai/gpt-4o-mini", calls: 1, cost: 0.002 }],
+    byStep: [{ step: "lite", calls: 2, cost: 0.018 }, { step: "post_digest", calls: 1, cost: 0.002 }],
+  },
   "GET /media": [{ id: "md1", filename: "pic.jpg", source: "upload", created_at: iso(0, 8) }],
   "GET /sources/recent": [],
   "GET /sources/rss": { feeds: [] },
@@ -563,6 +567,17 @@ const run = async () => {
   await check("toolsView", async () =>
     (await has("#toolsGdriveHost #gdStatus")) && (await has("#toolsTransHost #ffKey")) &&
     (await has("#toolsPipeline")) && (await has("#viewPrompt")));
+
+  await check("aiSpend", async () => {
+    // розріз витрат + ВИДИМИЙ вхід у порівняння моделей (раніше панель була лише в меню аватара,
+    // і знайти її було майже неможливо - саме на це й поскаржився Олег)
+    await page.evaluate(() => selectView("analytics"));
+    await page.waitForFunction(() => document.getElementById("anAbBtn"), undefined, { timeout: 8000 });
+    const txt = await $t("#analyticsBox");
+    await page.click("#anAbBtn");
+    await page.waitForFunction(() => document.querySelector('.viewsec[data-view="tools"]').classList.contains("active"), undefined, { timeout: 6000 });
+    return txt.includes("Куди йдуть гроші") && txt.includes("gpt-4o") && txt.includes("post_digest") && txt.includes("$0.0180");
+  });
 
   await check("abPanel", async () => {
     // матеріали й каталог моделей мусять доїхати в селекти, а результат - показатись СЛІПО

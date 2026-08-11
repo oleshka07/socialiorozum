@@ -13,7 +13,9 @@ import { cabinetMaterialLink } from "./permalink.js";
 import { chat, extractJsonArray } from "./openrouter.js";
 
 // ---- стан щоденника на воркспейс (settings_block key='diary_state') ----
-type DiaryState = { answered?: string; skip?: string; lunch?: string; evening?: string; pending?: boolean; misses?: number };
+// photoFor/photoAt: щойно створений запис, до якого приклеїться НАСТУПНЕ фото чи відео.
+// Свідомо НЕ режим очікування: людина нічого не мусить надсилати, вікно просто тихо спливає.
+type DiaryState = { answered?: string; skip?: string; lunch?: string; evening?: string; pending?: boolean; misses?: number; photoFor?: string; photoAt?: number };
 async function getState(ws: string): Promise<DiaryState> {
   const row = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='diary_state'`, [ws]);
   try { return JSON.parse(row?.content || "{}"); } catch { return {}; }
@@ -103,9 +105,11 @@ export async function appendDiaryText(ws: string, chatId: string, text: string, 
   const d = await one<{ id: string }>(
     `insert into source(workspace_id, origin, title, transcript) values($1,'diary',$2,$3) returning id`,
     [ws, title, text.trim().slice(0, 8000)]);
-  await setState(ws, { answered: date, pending: false, misses: 0 });
+  // фото приклеїться САМЕ до цього запису, якщо надійде наступним (вікно PHOTO_WINDOW_MS)
+  await setState(ws, { answered: date, pending: false, misses: 0, photoFor: d!.id, photoAt: Date.now() });
   await liveSend(ws, chatId, "diary_ok",
-    `📔 Записав у щоденник (${uaDate(date)}, ${time}):\n«${text.trim().slice(0, 160)}»\n\nЗапис збережено ЦІЛИМ - історія не ріжеться на шматки, тож пост вийде звʼязним.`,
+    `📔 Записав у щоденник (${uaDate(date)}, ${time}):\n«${text.trim().slice(0, 160)}»\n\nЗапис збережено ЦІЛИМ - історія не ріжеться на шматки, тож пост вийде звʼязним.` +
+    `\n\n🖼 Можеш надіслати фото чи відео наступним повідомленням - приклею до цього ж запису. Необовʼязково: не надішлеш - запис і так повний.`,
     await diaryButtons(ws, d!.id));
 }
 
@@ -135,6 +139,34 @@ async function splitDiaryTopics(ws: string, srcId: string, baseTitle: string): P
 }
 
 // фото/відео → галерея (source='diary') + позначка в записі дня
+// Вікно, у якому фото вважається продовженням щойно надиктованого запису. Пів години - людина
+// встигає знайти знімок у галереї, але випадкове фото через день уже не приліпиться до чужої історії.
+const PHOTO_WINDOW_MS = 30 * 60 * 1000;
+
+// id запису, до якого зараз доречно приклеїти медіа (або null). Вікно перевіряємо ТУТ, а не в боті,
+// щоб правило жило в одному місці.
+export async function diaryPhotoTarget(ws: string): Promise<string | null> {
+  const st = await getState(ws);
+  if (!st.photoFor || !st.photoAt) return null;
+  return Date.now() - st.photoAt < PHOTO_WINDOW_MS ? st.photoFor : null;
+}
+
+// Приклеїти медіа до вже наявного запису щоденника: та сама історія, а не окремий матеріал.
+// Раніше будь-яке фото створювало НОВИЙ source, хоч повідомлення й обіцяло «привʼязане до запису» -
+// тобто текст і знімок про одну подію їхали в генерацію окремо й губили один одного.
+export async function attachMediaToEntry(ws: string, chatId: string, srcId: string, buffer: Buffer, mime: string, name: string, caption?: string): Promise<void> {
+  const src = await one<{ transcript: string }>(`select transcript from source where id=$1 and workspace_id=$2 and origin='diary'`, [srcId, ws]);
+  if (!src) { await attachDiaryMedia(ws, chatId, buffer, mime, name, caption); return; }  // запис зник - не втрачаємо медіа
+  const m = await saveMedia(ws, { buffer, mime, name, source: "diary", externalId: srcId });
+  const note = `\n📎 ${m.kind === "video" ? "відео" : "фото"} до запису${caption ? `: ${caption.trim().slice(0, 300)}` : ""}`;
+  await q(`update source set transcript = left(coalesce(transcript,'') || $2, 8000) where id=$1`, [srcId, note]);
+  await setState(ws, { photoFor: undefined, photoAt: undefined });   // одне фото на запрошення
+  const buttons = await diaryButtons(ws, srcId);
+  if (m.kind === "video") buttons.push([{ text: "🎥 У вставки для рілсів (b-roll)", data: `dbroll:${m.id}` }]);
+  await liveSend(ws, chatId, "diary_ok",
+    `📔 ${m.kind === "video" ? "Відео" : "Фото"} приклеїв до того самого запису ✓ Тепер історія і кадр підуть у пост разом.`, buttons);
+}
+
 export async function attachDiaryMedia(ws: string, chatId: string, buffer: Buffer, mime: string, name: string, caption?: string): Promise<void> {
   const { date, time } = localParts(await wsTz(ws));
   const title = `📔 Щоденник, ${uaDate(date)} · ${time} 📎`;

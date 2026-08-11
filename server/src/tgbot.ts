@@ -9,7 +9,7 @@ import { logEvent } from "./log.js";
 import { generatePostsOnePass, buildLiteSkeleton, rewritePost, suggestDevelopment, reelsScript, sliceToReels, extractIdeasFromText, repeatVariant, generateThreadsTakes } from "./pipeline.js";
 import { publishPostToChannels } from "./publisher.js";
 import { sendDigestNow } from "./digest.js";
-import { isDiaryPending, appendDiaryText, attachDiaryMedia, transcribeVoice, skipDiaryToday, sendDiaryNow, weekDiaryText } from "./diary.js";
+import { isDiaryPending, appendDiaryText, attachDiaryMedia, attachMediaToEntry, diaryPhotoTarget, transcribeVoice, skipDiaryToday, sendDiaryNow, weekDiaryText } from "./diary.js";
 import { cabinetPostLink } from "./permalink.js";
 import * as cmp from "./tgcompose.js";
 const postDeepLink = (postId: string) => cabinetPostLink(env.appBaseUrl, postId);
@@ -308,7 +308,14 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
       const ws = await ownerWorkspace(fromId);
       if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio."); return; }
       if ((media.size || 0) > 19.5 * 1024 * 1024) { await tg.sendMessage(token, chatId, "⚠️ Telegram віддає ботам файли лише до 20 МБ. Закороти відео або завантаж його через застосунок (Матеріали → медіа)."); return; }
-      try { await attachDiaryMedia(ws, chatId, (await tg.getFileBuffer(token, media.fileId)).buffer, media.mime, media.name, msg.caption); }
+      try {
+        const buf = (await tg.getFileBuffer(token, media.fileId)).buffer;
+        // якщо щойно був запис (голос чи текст) - фото ПРОДОВЖУЄ саме його, а не заводить окремий
+        // матеріал: історія і кадр про ту саму подію мають доїхати в генерацію разом
+        const target = await diaryPhotoTarget(ws);
+        if (target) await attachMediaToEntry(ws, chatId, target, buf, media.mime, media.name, msg.caption);
+        else await attachDiaryMedia(ws, chatId, buf, media.mime, media.name, msg.caption);
+      }
       catch (e: any) {
         const friendly = /too big/i.test(String(e.message)) ? "файл понад 20 МБ - Telegram не віддає його ботам. Закороти відео або завантаж через застосунок." : String(e.message).slice(0, 200);
         await tg.sendMessage(token, chatId, "⚠️ " + friendly);

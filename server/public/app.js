@@ -874,8 +874,28 @@ async function loadAnalytics(){
   rec.forEach(r=>{ if(chCount[r.net]!=null){ chCount[r.net]++; chTot++; } });
   const CHN={telegram:['Telegram','--tg'],instagram:['Instagram','--ig'],facebook:['Facebook','--fb'],threads:['Threads','--th']};
   const igHtml = '<div id="igLive" style="margin-top:14px;padding:13px;border-radius:11px;background:var(--brand-soft);font-size:12.5px;color:var(--brand)"><span class="spin"></span> Завантажую статистику Instagram/Facebook…</div>';
+  // 💸 куди йдуть гроші на AI: розріз за моделями й кроками (30 днів) + вхід у порівняння моделей.
+  // Дані лежали в llm_usage з першого дня, але ніде не показувались, а панель порівняння була
+  // захована в меню аватара - тут і те, й те опиняється саме там, де виникає питання «яка модель».
+  const usageRow=(r,tot)=>'<div style="display:flex;align-items:baseline;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:12.5px">'
+    +'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(r.name)+'</span>'
+    +'<span style="color:var(--muted);font-variant-numeric:tabular-nums">'+(r.calls||0)+' викл.</span>'
+    +'<span style="font-weight:700;font-variant-numeric:tabular-nums;min-width:64px;text-align:right">$'+(Number(r.cost)||0).toFixed(4)+'</span>'
+    +'<span style="color:var(--faint);font-variant-numeric:tabular-nums;min-width:38px;text-align:right">'+(tot?Math.round((Number(r.cost)||0)/tot*100):0)+'%</span></div>';
+  const byModel=(usage.byModel||[]).slice(0,6).map(r=>({name:r.model,calls:r.calls,cost:r.cost}));
+  const byStep=(usage.byStep||[]).slice(0,6).map(r=>({name:r.step,calls:r.calls,cost:r.cost}));
+  const totCost=(usage.byModel||[]).reduce((a,r)=>a+(Number(r.cost)||0),0);
+  const spendHtml='<div class="panel" style="margin:0 0 18px"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">'
+    +'<div style="font-weight:700;font-size:14px">💸 Куди йдуть гроші на AI</div>'
+    +'<span style="font-size:12px;color:var(--muted)">за 30 днів</span>'
+    +'<button class="ghost" id="anAbBtn" style="margin-left:auto;padding:5px 12px;font-size:12.5px" title="Прогнати один матеріал кількома моделями і порівняти тексти поруч">🧪 Порівняти моделі</button></div>'
+    +(byModel.length
+      ? '<div class="grid2" style="gap:16px"><div><div style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">За моделями</div>'+byModel.map(r=>usageRow(r,totCost)).join('')+'</div>'
+        +'<div><div style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">За кроками</div>'+byStep.map(r=>usageRow(r,totCost)).join('')+'</div></div>'
+      : '<div class="empty" style="padding:12px">За останні 30 днів викликів не було.</div>')+'</div>';
   box.innerHTML=
     '<div class="stat-grid" style="margin-bottom:18px">'+stats.map(s=>'<div class="stat"><div class="l">'+s[0]+'</div><div class="v">'+s[1]+'</div><div class="d">'+s[2]+'</div></div>').join('')+'</div>'
+    +spendHtml
     +'<div class="grid2" style="grid-template-columns:1.5fr 1fr">'
     +'<div class="panel" style="margin:0"><div style="font-weight:700;font-size:14px;margin-bottom:18px">Опубліковано за тиждень</div><div class="bars">'+wk.map((v,i)=>'<div class="bar"><div class="b" style="height:'+(v/mx*100)+'%;background:'+(i===7?'var(--brand)':'var(--brand-soft2)')+'"></div><div class="lab">Т'+(i+1)+'</div></div>').join('')+'</div></div>'
     +'<div class="panel" style="margin:0"><div style="font-weight:700;font-size:14px;margin-bottom:14px">За каналами</div>'
@@ -886,6 +906,7 @@ async function loadAnalytics(){
     +'<div class="panel" id="thAnPanel" style="margin:18px 0 0;display:none"></div>'
     +'<div class="panel" style="margin:18px 0 0"><div style="font-weight:700;font-size:14px;margin-bottom:6px">Останні публікації</div>'+(rec.length?rec.slice(0,12).map(r=>'<div style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--line)"><span style="font-size:15px">'+({telegram:"✈️",instagram:"📸",facebook:"📘",threads:"🧵"}[r.net]||"•")+'</span><div style="flex:1;min-width:0"><div style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc((r.content||"").replace(/\n+/g," ").slice(0,80))+'</div><div style="font-size:11px;color:var(--muted)">'+(CHN[r.net]?CHN[r.net][0]:r.net)+" · "+new Date(r.created_at).toLocaleString("uk")+'</div></div>'+(r.permalink?'<a href="'+esc(r.permalink)+'" target="_blank" rel="noopener" title="Відкрити пост у мережі" style="font-size:12px;font-weight:700;color:var(--brand);text-decoration:none;flex:none">↗</a>':'')+'</div>').join(""):'<div class="empty">Ще нічого не опубліковано. Опублікуй пост - і він зʼявиться тут.</div>')+'</div>';
   if($('topPatBtn')) $('topPatBtn').onclick=topPatterns;
+  if($('anAbBtn')) $('anAbBtn').onclick=()=>{ selectView('tools'); setTimeout(()=>{ const p=$('abModels'); if(p) p.closest('.panel').scrollIntoView({behavior:'smooth',block:'center'}); },250); };
   api('/analytics/benchmarks').then(b=>{
     const el=$('bmLive'); if(!el) return;
     const nets=Object.keys(b.networks||{});
