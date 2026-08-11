@@ -9,7 +9,7 @@
 // мусить бути КРИТИЧНОЮ, а не косметичною. Якщо хтось колись послабить її до «info» - тест упаде.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deterministicFindings } from "../dist/context-check.js";
+import { deterministicFindings, contextScore } from "../dist/context-check.js";
 import { stripPlaceholders } from "../dist/pipeline.js";
 
 const GOOD = {
@@ -94,4 +94,17 @@ test("stripPlaceholders прибирає плейсхолдер, але збер
   assert.equal(stripPlaceholders("біль → рішення → 30% зростання"), "біль → рішення → 30% зростання");
   assert.equal(stripPlaceholders("а → б → [цифра?]\nв → г → 12 кейсів"), "а → б\nв → г → 12 кейсів");
   assert.equal(stripPlaceholders(""), "");
+});
+
+test("оцінка не вироджується в одиницю, щойно знахідок стало більше", () => {
+  // після розширення розбору проста сума штрафів давала 1/10 практично всім - шкала, що завжди
+  // показує одиницю, не несе інформації й не мотивує нічого лагодити
+  const mk = (sev, n) => Array.from({ length: n }, () => ({ severity: sev }));
+  assert.equal(contextScore([]), 10, "чисто - десятка");
+  assert.equal(contextScore(mk("info", 5)), 9, "дрібниці майже не важать");
+  assert.ok(contextScore(mk("warn", 4)) >= 6, "чотири зауваження - ще не катастрофа");
+  assert.ok(contextScore(mk("critical", 1)) <= 8, "критичне відчутно бʼє");
+  assert.ok(contextScore(mk("critical", 3)) <= 5, "три критичних - явно погано");
+  assert.ok(contextScore(mk("critical", 20)) >= 1, "але дно існує");
+  assert.equal(contextScore(mk("critical", 20)), contextScore(mk("critical", 30)), "стеля штрафу тримає");
 });

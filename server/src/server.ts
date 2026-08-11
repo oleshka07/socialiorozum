@@ -5,6 +5,7 @@ import multipart from "@fastify/multipart";
 import cookie from "@fastify/cookie";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
@@ -3063,7 +3064,19 @@ app.get("/api/tg/post/:postId/publish-job", async (req: any, reply) => {
 
 // ===================== СТОРІНКИ =====================
 app.get("/tgapp", (_req, reply) => reply.sendFile("tgapp.html"));
-app.get("/app", (_req, reply) => reply.sendFile("app.html"));
+// 🧹 КЕШ-БАСТИНГ. `app.html` тягне `/app.js` без версії, тож браузер міг тримати СТАРИЙ файл після
+// деплою - і людина не бачила щойно випущених змін («не бачу цієї кнопки», хоча вона вже є).
+// Підставляємо в тег версію, обчислену з вмісту файлу: змінився файл - змінився URL.
+let appHtmlCached = "";
+function appHtml(): string {
+  if (appHtmlCached) return appHtmlCached;
+  const dir = join(__dirname, "..", "public");
+  const js = readFileSync(join(dir, "app.js"));
+  const v = createHash("sha1").update(js).digest("hex").slice(0, 10);
+  appHtmlCached = readFileSync(join(dir, "app.html"), "utf8").replace('src="/app.js"', `src="/app.js?v=${v}"`);
+  return appHtmlCached;
+}
+app.get("/app", (_req, reply) => reply.type("text/html; charset=utf-8").send(appHtml()));
 app.get("/B", (_req, reply) => reply.sendFile("b.html"));
 app.get("/b", (_req, reply) => reply.sendFile("b.html"));
 app.get("/login", (_req, reply) => reply.sendFile("auth.html"));
