@@ -64,7 +64,7 @@ const SETTINGS = [
   { key: "qa_gates", content: JSON.stringify({ director: true, aiaudit: true, storytelling: true }) },
   { key: "channel_rhythm", content: JSON.stringify({ threads: { days: [1, 3], times: ["09:00"], formats: [{ f: "carousel", share: 30 }] } }) },
   { key: "strategy_brief", content: "Бриф: інтеграція AI змінює правила гри для підрядників." },
-  { key: "voice_examples", content: "Ми втратили клієнта. Ключовий фактор - підрядник зник на два тижні." },
+  { key: "voice_examples", content: "Ми втратили клієнта.\nКлючовий фактор - підрядник зник на два тижні." },
 ];
 
 const API = {
@@ -124,7 +124,7 @@ const API = {
       { severity: "critical", field: "Бренд → Голос → Приклади постів", title: "У прикладах голосу 2 ознаки машинного тексту",
         why: "Промт наказує відтворювати ритм саме як у прикладах, а моделі імітують приклади охочіше, ніж виконують правила.",
         fix: "Прибери з прикладів: широке тире, «не просто X, а Y».",
-        key: "voice_examples", mode: "manual", quotes: ["ключовий фактор"] },
+        key: "voice_examples", mode: "manual", quotes: ["клієнта.\nКлючовий фактор"] },
       { severity: "warn", field: "Бренд → Бриф і цілі", title: "Стратегічний бриф написаний штампами",
         why: "У промті він помічений як джерело правди, тож штамп звідти протікає в кожен пост.", fix: "Перепиши бриф своєю мовою.",
         key: "strategy_brief", mode: "ai", quotes: ["змінює правила гри"] },
@@ -548,6 +548,7 @@ const run = async () => {
       ai: !!document.querySelector("#cfAi"),
       marked: !!document.querySelector(".modal mark"),
       filled: (document.getElementById("cfNew").value || "").includes("Ключовий фактор"),
+      state: (document.getElementById("cfState") || {}).textContent || "",
     }));
     await page.evaluate(() => document.querySelector("#cfX").click());
     // ② поле, яке переписати доречно: кнопка є і наповнює «стало»
@@ -557,7 +558,7 @@ const run = async () => {
     await page.waitForFunction(() => (document.getElementById("cfNew").value || "").includes("не втрачати гроші"), undefined, { timeout: 8000 });
     await page.click("#cfSave");
     await page.waitForFunction(() => !document.querySelector("#cfNew"), undefined, { timeout: 6000 });
-    return !manual.ai && manual.marked && manual.filled;
+    return !manual.ai && manual.marked && manual.filled && manual.state.includes("поки без змін");
   });
 
   await check("contextCheck", async () => {

@@ -16,8 +16,7 @@
 //     а ДНК бренду забороняє інфобіз»). Дорожчий, тому лише на вимогу.
 import { q, one } from "./db.js";
 import { chat, extractJsonObject } from "./openrouter.js";
-import { env } from "./env.js";
-import { buildLitePrompt, scanAiTraces, stripPlaceholders } from "./pipeline.js";
+import { buildLitePrompt, scanAiTraces, stripPlaceholders, mainModel } from "./pipeline.js";
 
 export type Finding = {
   severity: "critical" | "warn" | "info";
@@ -158,6 +157,14 @@ export function deterministicFindings(s: Record<string, string>, rubricShareSum 
   return out.sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity]);
 }
 
+// Модель для розбору й виправлень: та сама головна, що пише пости. Виклики разові й на вимогу,
+// тож економити тут - міняти якість поради на копійки.
+async function checkModel(ws: string): Promise<string> {
+  const rows = await q<{ key: string; content: string }>(`select key, content from settings_block where workspace_id=$1 and key='main_model'`, [ws]);
+  const s: Record<string, string> = {}; for (const r of rows) s[r.key] = r.content || "";
+  return mainModel(s);
+}
+
 // ---------------------------------------------------------------- шар 2: семантика (модель)
 // Шукає те, чого regex не побачить: конфлікти МІЖ блоками. Просимо називати конфлікт, казати, хто в
 // ньому переможе, і давати конкретну правку - інакше вийде безадресне «зробіть краще».
@@ -184,7 +191,10 @@ async function llmFindings(ws: string, system: string): Promise<Finding[]> {
     "НЕ вигадуй проблем: якщо блок просто порожній - це не суперечність. Не переказуй промт. Максимум 5 знахідок, найважливіші перші.\n" +
     'Поверни ЛИШЕ JSON: {"findings":[{"severity":"critical|warn|info","field":"де це в промті","title":"суть у 6-10 слів","why":"чому це псує пости, 1-2 речення","fix":"конкретна дія"}]}';
   try {
-    const raw = await chat(env.cheapModel, prompt, system.slice(0, 14000), { workspaceId: ws, step: "context_check", json: true, maxTokens: 1800 });
+    // ⚠️ ГОЛОВНА модель, не дешева. Це виклик РАЗ на вимогу, а якість формулювань тут і є продуктом:
+    // на дешевій виходили розмиті «змініть правила, щоб відповідати тону», з яких неможливо зрозуміти,
+    // що саме робити - тобто перевірка вироджувалась у список докорів.
+    const raw = await chat(await checkModel(ws), prompt, system.slice(0, 14000), { workspaceId: ws, step: "context_check", json: true, maxTokens: 2200 });
     const j = extractJsonObject<any>(raw);
     return (j?.findings || []).slice(0, 5).map((f: any) => ({
       severity: ["critical", "warn", "info"].includes(String(f?.severity)) ? f.severity : "warn",
@@ -260,7 +270,7 @@ export async function suggestFieldFix(ws: string, key: string, problem: string):
     (s.voice_stoplist ? `Ніколи не вживай: ${s.voice_stoplist.slice(0, 300)}. ` : "") +
     (s.brand_antiassoc ? `Бренд НІКОЛИ не асоціюємо з: ${s.brand_antiassoc.slice(0, 300)}. ` : "") +
     "Довжина - як в оригіналі або коротша. Поверни ЛИШЕ готовий текст, без пояснень і лапок.";
-  const out = await chat(env.cheapModel, system,
+  const out = await chat(await checkModel(ws), system,
     `ПРОБЛЕМА: ${problem.slice(0, 400)}
 
 ПОТОЧНИЙ ТЕКСТ:

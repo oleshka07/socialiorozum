@@ -1065,7 +1065,9 @@ function hlQuotes(text,quotes){
   (quotes||[]).forEach(qt=>{ const q=esc(String(qt||'').trim()); if(q.length<3) return;
     // ⚠️ регістронезалежно: слова зі стоп-листа приходять нормалізованими в нижній регістр, тож
     // точний збіг не підсвітив би «Ключовий фактор» у тексті - тобто саме те, на що вказує знахідка
-    const rx=new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi');
+    // пробіли/переноси прирівнюємо: scanAiTraces віддає цитату з \n, заміненими на пробіли, тож
+    // точний збіг НІКОЛИ не знаходився в оригіналі - саме тому підсвітки не було видно
+    const rx=new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/\s+/g,'[\\s]+'),'gi');
     h=h.replace(rx,'<mark style="background:var(--amber-soft);color:var(--ink);border-radius:3px">$&</mark>'); });
   return h;
 }
@@ -1077,26 +1079,31 @@ async function openCtxFix(fnd){
   ov.innerHTML='<div class="modal-card" style="max-width:900px;padding:20px;max-height:88vh;overflow:auto">'
     +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><b style="font-size:16px">✏️ '+esc(fnd.title)+'</b><button class="icon" id="cfX" style="margin-left:auto">✕</button></div>'
     +'<div class="hint" style="margin-bottom:12px">'+esc(fnd.fix||'')+'</div>'
+    +'<div class="btnrow" style="margin:0 0 12px;flex-wrap:wrap;align-items:center">'
+      +(aiOk?'<button class="primary" id="cfAi">✨ Запропонувати варіант</button><span style="font-size:12px;color:var(--muted)">перепише лише формулювання, факти й зміст лишить</span>'
+           :'<span style="font-size:12px;color:var(--muted)">✍️ Це поле пишеш лише ти: текст, написаний моделлю, перестане бути твоїм голосом - і наступні пости вчитимуться вже на ньому.</span>')
+    +'</div>'
     +'<div class="grid2" style="gap:14px;align-items:start">'
       +'<div><div style="font-size:11px;font-weight:800;letter-spacing:.07em;color:var(--faint);text-transform:uppercase;margin-bottom:5px">Було</div>'
         +'<div style="border:1px solid var(--line);border-radius:10px;padding:11px;font-size:12.5px;line-height:1.6;white-space:pre-wrap;max-height:44vh;overflow:auto;background:var(--surface2)">'+(cur?hlQuotes(cur,fnd.quotes):'<span style="color:var(--muted)">порожньо</span>')+'</div></div>'
-      +'<div><div style="font-size:11px;font-weight:800;letter-spacing:.07em;color:var(--faint);text-transform:uppercase;margin-bottom:5px">Стало ('+esc(CTX_FIELD_LABEL[fnd.key]||fnd.key)+')</div>'
+      +'<div><div style="font-size:11px;font-weight:800;letter-spacing:.07em;color:var(--faint);text-transform:uppercase;margin-bottom:5px">Стало ('+esc(CTX_FIELD_LABEL[fnd.key]||fnd.key)+') <span id="cfState" style="font-weight:500;text-transform:none;letter-spacing:0;color:var(--amber)">- поки без змін</span></div>'
         +'<textarea id="cfNew" class="txt" style="min-height:44vh;font-size:12.5px;line-height:1.6"></textarea></div>'
     +'</div>'
-    +'<div class="btnrow" style="margin-top:12px;flex-wrap:wrap;align-items:center">'
-      +(aiOk?'<button class="ghost" id="cfAi">✨ Запропонувати варіант</button>':'<span style="font-size:12px;color:var(--muted)">Це поле пишеш лише ти: текст, написаний моделлю, перестане бути твоїм голосом - і наступні пости вчитимуться вже на ньому.</span>')
-      +'<span style="flex:1"></span><button class="primary" id="cfSave">💾 Зберегти</button></div>'
+    +'<div class="btnrow" style="margin-top:12px"><span style="flex:1"></span><button class="primary" id="cfSave">💾 Зберегти</button></div>'
     +'<div id="cfMsg" style="font-size:12.5px;color:var(--muted);margin-top:8px;min-height:16px"></div></div>';
   document.body.appendChild(ov);
   const close=()=>ov.remove();
   ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
   ov.querySelector('#cfX').onclick=close;
   const ta=ov.querySelector('#cfNew'); ta.value=cur;
+  ta.addEventListener('input',()=>{ const stx=ov.querySelector('#cfState');
+    if(stx){ const ch=ta.value!==cur; stx.textContent=ch?'- відредаговано':'- поки без змін'; stx.style.color=ch?'var(--brand)':'var(--amber)'; } });
   const msg=ov.querySelector('#cfMsg');
   const ai=ov.querySelector('#cfAi');
   if(ai) ai.onclick=async()=>{ ai.disabled=true; msg.textContent='пишу варіант…'; aiBusy('✨ Готую виправлений варіант…');
     try{ const r=await api('/brand/context-fix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:fnd.key,problem:fnd.title+'. '+(fnd.why||'')})});
-      ta.value=r.suggestion||''; msg.textContent='готово - перечитай і, якщо треба, поправ своєю рукою'; }
+      ta.value=r.suggestion||''; const stx=ov.querySelector('#cfState'); if(stx){ stx.textContent='- варіант від AI'; stx.style.color='var(--brand)'; }
+      msg.textContent='готово - перечитай і, якщо треба, поправ своєю рукою'; }
     catch(e){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+e.message; }
     finally{ ai.disabled=false; aiDone(); } };
   ov.querySelector('#cfSave').onclick=async()=>{
