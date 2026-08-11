@@ -176,6 +176,10 @@ function applyRoute(){
     if(typeof openComposer==='function') openComposer(parts[1]);
     return true;
   }
+  // 🔗 deep-link на КОНКРЕТНИЙ матеріал: `#/material/<id>` веде з бота прямо в той запис щоденника.
+  // Фільтри стрічки скидаємо НАВМИСНО: якщо активний фільтр за типом чи стрічкою, потрібний матеріал
+  // просто не потрапив би в список, і лінк привів би у порожній екран.
+  if(v==='material'&&parts[1]){ openMaterialDeep(parts[1]); return true; }
   if(!ROUTE_VIEWS.includes(v)) return false;
   if(v!==curView) selectView(v,tab||undefined);
   else if(tab){ const r=ROUTE_TABS[v]; if(r&&r.keys.includes(tab)&&r.get()!==tab) r.set(tab); }
@@ -385,6 +389,20 @@ function renderMaterials(){
       if(a==='ideas'){ openMaterialIdeas(id); }
     });
   });
+}
+// Відкрити конкретний матеріал за адресою `#/material/<id>` (лінк «🌐 Перейти» з бота).
+// Стрічка може бути ще не завантажена (перехід із зовнішнього посилання одразу після старту),
+// тому спершу тягнемо матеріали, і лише тоді розгортаємо потрібний.
+async function openMaterialDeep(id){
+  selectView('create','materials');
+  MatFilter='Усі'; MatFeedFilter=null; MatOpen=id;
+  if(!Mats.length){ try{ await loadMaterials(); }catch(e){} }
+  MatOpen=id; renderMaterials();
+  const row=document.querySelector('[data-mat="'+id+'"]');
+  if(!row){ flash('Матеріал не знайдено - можливо, його прибрали зі стрічки'); return; }
+  row.scrollIntoView({behavior:'smooth',block:'center'});
+  row.classList.add('thl'); setTimeout(()=>row.classList.remove('thl'),2200);
+  try{ const f=await api('/materials/'+id); const el=$('matFull'); if(el) el.textContent=f.transcript||''; }catch(e){}
 }
 // вкладка «💡 Ідеї» (Створення): банк ідей окремою адресою - з бота, AI-продовжень і власних
 async function loadIdeasTab(){

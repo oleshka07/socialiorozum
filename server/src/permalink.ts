@@ -48,3 +48,14 @@ export function cabinetPostLink(baseUrl: string, postId: string): string {
   if (!b || !id) return "";
   return `${b}/app#/post/${id}`;
 }
+
+// Deep-link на КОНКРЕТНИЙ матеріал у стрічці Джерел. Потрібен ботові: під захопленим записом
+// щоденника кнопка має вести не «в застосунок узагалі», а рівно в той запис, щоб людина одразу
+// бачила, що саме збереглось. Кабінет за цією адресою сам скидає фільтри стрічки й розгортає запис -
+// інакше матеріал міг би бути відфільтрований і лінк вів би у порожній екран.
+export function cabinetMaterialLink(baseUrl: string, sourceId: string): string {
+  const b = String(baseUrl || "").replace(/\/+$/, "");
+  const id = String(sourceId || "").trim();
+  if (!b || !id) return "";
+  return `${b}/app#/material/${id}`;
+}

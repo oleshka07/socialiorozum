@@ -3,7 +3,7 @@
 // «https://t.me//123» на порожньому username, зібрати лінк із неповних даних.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { tgLink, fbLink, liLink, cabinetPostLink } from "../dist/permalink.js";
+import { tgLink, fbLink, liLink, cabinetPostLink, cabinetMaterialLink } from "../dist/permalink.js";
 
 test("tgLink: публічний канал за username", () => {
   assert.equal(tgLink("-1001234567890", 42, "mychannel"), "https://t.me/mychannel/42");
@@ -42,4 +42,13 @@ test("cabinetPostLink: deep-link у кабінет на конкретний п�
   assert.equal(cabinetPostLink("https://x.ua/", "abc"), "https://x.ua/app#/post/abc", "зайвий слеш зрізається");
   assert.equal(cabinetPostLink("", "abc"), "", "без базового URL лінка нема");
   assert.equal(cabinetPostLink("https://x.ua", ""), "", "без id лінка нема");
+});
+
+test("cabinetMaterialLink: deep-link у стрічку Джерел на конкретний матеріал", () => {
+  // кнопка «🌐 Перейти» під записом щоденника в боті веде саме сюди
+  assert.equal(cabinetMaterialLink("https://beta.socialio.rozum.one", "src-1"),
+    "https://beta.socialio.rozum.one/app#/material/src-1");
+  assert.equal(cabinetMaterialLink("https://x.ua/", "src-1"), "https://x.ua/app#/material/src-1", "зайвий слеш зрізається");
+  assert.equal(cabinetMaterialLink("", "src-1"), "", "без базового URL лінка нема");
+  assert.equal(cabinetMaterialLink("https://x.ua", ""), "", "без id лінка нема");
 });

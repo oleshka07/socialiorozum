@@ -9,6 +9,7 @@ import { logEvent } from "./log.js";
 import { liveSend } from "./tgbot.js";
 import * as tg from "./telegram.js";
 import { saveMedia } from "./media.js";
+import { cabinetMaterialLink } from "./permalink.js";
 import { chat, extractJsonArray } from "./openrouter.js";
 
 // ---- стан щоденника на воркспейс (settings_block key='diary_state') ----
@@ -76,7 +77,13 @@ const uaDate = (date: string): string => {
 
 // кнопки під підтвердженням запису: міст від сирої історії до контенту в 1 тап
 async function diaryButtons(ws: string, srcId: string): Promise<tg.TgButton[][]> {
-  const rows: tg.TgButton[][] = [[{ text: "✨ Зробити пост", data: `dpost:${srcId}` }, { text: "💡 Витягти ідеї", data: `dideas:${srcId}` }]];
+  // Середня кнопка - ПОСИЛАННЯ в кабінет, рівно на цей запис у стрічці Джерел (запит Олега).
+  // «Витягти ідеї» звідси прибрано: те саме є в кабінеті на розгорнутому матеріалі, а от подивитись,
+  // ЩО саме збереглось із голосової нотатки, з бота було ніяк.
+  const rows: tg.TgButton[][] = [[
+    { text: "✨ Зробити пост", data: `dpost:${srcId}` },
+    { text: "🌐 Перейти", url: cabinetMaterialLink(env.appBaseUrl, srcId) },
+  ]];
   try {
     const pro = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='pro'`, [ws]);
     if (pro?.content === "1") rows[0].push({ text: "🎬 Рілс", data: `dreel:${srcId}` });

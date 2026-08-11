@@ -168,6 +168,8 @@ let pubPolls = 0;
 function handleApi(method, path) {
   const key = method + " " + path.split("?")[0];
   if (key in API) return API[key];
+  let mm = /^\/materials\/([\w-]+)$/.exec(path);
+  if (mm && method === "GET") return { id: mm[1], transcript: "Повний текст запису щоденника про дзвінок." };
   let m = /^\/posts\/([0-9a-f-]+)\/full$/.exec(path);
   if (m) {
     const p = POSTS.find((x) => x.id === m[1]) || POSTS[0];
@@ -443,6 +445,25 @@ const run = async () => {
   });
 
   // ---------------------------------------------------------- 5. маршрутизація
+  await check("materialDeepLink", async () => {
+    // лінк «🌐 Перейти» з бота: адреса мусить відкрити САМЕ той запис, навіть коли у стрічці
+    // стоїть фільтр, під який він не підпадає (інакше лінк вів би в порожній екран)
+    await page.evaluate(() => { selectView("create", "materials"); MatFilter = "📡 RSS"; renderMaterials(); });
+    await page.waitForTimeout(200);
+    const hiddenFirst = await page.evaluate(() => !document.querySelector('[data-mat="m1"]'));
+    await page.evaluate(() => { location.hash = "#/material/m1"; });
+    await page.waitForFunction(() => {
+      const r = document.querySelector('[data-mat="m1"]');
+      const f = document.getElementById("matFull");
+      return r && f && f.textContent.includes("щоденника");
+    }, undefined, { timeout: 8000 });
+    const st = await page.evaluate(() => ({
+      filter: MatFilter, open: MatOpen,
+      view: document.querySelector(".viewsec.active").dataset.view, tab: cTab,
+    }));
+    return hiddenFirst && st.filter === "Усі" && st.open === "m1" && st.view === "create" && st.tab === "materials";
+  });
+
   await check("routing", async () => {
     await page.evaluate(() => { selectView("publish"); setPTab("plan"); });
     await page.waitForTimeout(250);
