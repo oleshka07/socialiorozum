@@ -768,11 +768,21 @@
         <div id="brandVisual" style="display:none">
           <div class="panel"><label class="fl">🎨 Провайдер генерації зображень</label><select id="imgProv"></select>
             <div class="fld" style="margin-top:12px"><label class="fl">Стиль зображень бренду</label><textarea class="txt" id="imgStyle" rows="3" placeholder="Напр.: тепла пастельна палітра, мінімалізм, живі фото людей замість ілюстрацій, без стокового вигляду…"></textarea><div class="hint">Як tone of voice, тільки для картинок: AI дотримується цього стилю в кожному згенерованому зображенні.</div></div>
-            <div class="hint">Недоступні провайдери підключає адміністратор сервісу.</div></div>
+            <div class="hint">Недоступні провайдери підключає адміністратор сервісу.</div>
+            <div style="margin-top:14px"><button class="ghost" id="imgCostBtn">💰 Скільки коштує одне зображення</button></div>
+            <div id="imgCost" style="display:none;margin-top:10px"></div></div>
           <div class="panel proonly" style="display:none">
             <label class="fl">🎬 Рендер відео-рілсів</label>
             <select id="reelRend"><option value="classic">Класичний - швидкий, субтитри знизу</option><option value="motion">Motion (бета) - анімований заголовок і «караоке»-титри</option></select>
             <div class="hint">Motion збирає рілс як у відео-редакторі: хук вистрибує великими літерами, слово, що звучить, підсвічується, зверху прогрес-бар. Рендер довший (2-5 хв) і йде на сервері; якщо щось піде не так - автоматично збереться класичний варіант.</div>
+            <label class="fl" style="margin-top:16px">🎥 Звідки брати картинку у відео</label>
+            <select id="reelVis"><option value="stock">Стокові кліпи (Pexels) - безкоштовно, як зараз</option><option value="ai">AI-відео (kie.ai) - платно, кадр під конкретний сценарій</option></select>
+            <div class="hint">Це <b>окремий</b> перемикач від рендера: він каже, звідки беруться кадри, а рендер - як вони склеюються. Обидва працюють у будь-якій комбінації. AI-відео вмикається тільки для нових рілсів; якщо генерація не вдасться (нема ключа, скінчились кредити, модель не встигла) - кадр мовчки візьметься зі стоку, тобто зламати наявний шлях неможливо.</div>
+            <div id="reelKieWrap" style="display:none;margin-top:12px">
+              <label class="fl">Модель відео</label>
+              <select id="reelKieModel"></select>
+              <div class="hint" id="reelKieCost">Перелік і ціни тягнуться з живого прайса kie.ai.</div>
+            </div>
           </div>
           <div class="panel proonly" style="display:none">
             <div class="ph" style="margin:0 0 6px">🎥 Мої відео-вставки для рілсів</div>
@@ -903,6 +913,11 @@
           <div class="hint">Видалення акаунта: дані одразу зникнуть з кабінету, остаточно зітруться через 14 днів. Передумаєш - просто увійди протягом цього часу.</div>
           <div class="hint" style="margin-top:10px">«Почати з чистого листа» - стерти весь контент (бренд, стратегію, пости, календар, медіа) і пройти онбординг заново. Підключені канали лишаються.</div>
           <div class="btnrow"><button class="ghost" id="accReset">🔄 Почати з чистого листа</button><button class="danger" id="accDelete">Видалити акаунт</button></div>
+        </div>
+        <div class="panel" id="admKeysPanel" style="display:none">
+          <div class="ph" style="margin:0 0 6px">🔑 Ключі провайдерів (адміністратор)</div>
+          <div class="hint" style="margin-bottom:10px">Ключі можна вставити просто тут - без SSH і перезапуску сервера. Значення застосовується одразу й <b>перекриває</b> те, що стоїть у <code>.env</code>; прибереш ключ - повернеться значення з <code>.env</code>, тож зламати робоче налаштування кліком неможливо. Введений ключ назад не показується (лише останні 4 символи) і ніде не логується.</div>
+          <div id="admKeys"></div>
         </div>
         </div>
         <div id="setChannels" style="display:none">

@@ -29,6 +29,9 @@ export const env = {
   pexels: {
     apiKey: process.env.PEXELS_API_KEY ?? "",     // безкоштовний сток b-roll для рілсів (опційно)
   },
+  kie: {                                          // kie.ai: AI-відео для рілсів + свіжі моделі зображень
+    apiKey: process.env.KIE_API_KEY ?? "",
+  },
   rsshub: {                                       // self-hosted RSSHub у тому ж compose (Telegram-джерела)
     baseUrl: (process.env.RSSHUB_BASE_URL ?? "http://rsshub:1200").replace(/\/$/, ""),
   },

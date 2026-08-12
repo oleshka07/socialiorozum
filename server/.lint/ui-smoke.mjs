@@ -154,7 +154,7 @@ const API = {
   "GET /integrations/transcription": { hasKey: false, webhookUrl: "", hasSecret: false, autoRun: false },
   "GET /integrations/images": { provider: "gemini", available: { openai: true, fal: false, gemini: true } },
   "GET /integrations/meta/pages": [],
-  "GET /account": { email: "smoke@rozum.one", created_at: iso(-30, 8), pro: false },
+  "GET /account": { email: "smoke@rozum.one", created_at: iso(-30, 8), pro: false, admin: true, media: { count: 3, bytes: 1048576 } },
   "GET /analytics/benchmarks": { networks: {}, posts: [] },
   "GET /analytics/threads": null,
   "GET /models/catalog": {
@@ -188,8 +188,41 @@ let aiJobPolls = 0;
 const AI_JOB_RESULT = new Map();
 
 // Пости: /full і /publish-state обслуговуються окремо (шлях із id).
-function handleApi(method, path) {
+// Ключі провайдерів: заглушка СТАНОВА, бо перевіряється саме перехід «не заданий → з адмінки»
+// і те, що введене значення назад НЕ приходить (у відповіді лише хвіст із 4 символів).
+const KEYS = [
+  { name: "OPENAI_API_KEY", label: "OpenAI", hint: "тексти й зображення", group: "text", set: true, source: "env", tail: "aB12" },
+  { name: "KIE_API_KEY", label: "kie.ai", hint: "AI-відео для рілсів", group: "video", set: false, source: "none", tail: "" },
+];
+const KIE_VIDEO = [
+  { id: "bytedance/seedance-v1-lite-t2v", category: "video", description: "швидка text-to-video", credits: 20, usd: 0.1, unit: "per 5s video", provider: "bytedance" },
+  { id: "google/veo3-fast", category: "video", description: "висока якість", credits: 80, usd: 0.4, unit: "per video", provider: "google" },
+];
+const KIE_IMAGE = [
+  { id: "qwen3/pro-text-to-image", category: "image", description: "фотореалізм", credits: 4, usd: 0.02, unit: "per image", provider: "qwen" },
+];
+
+function handleApi(method, path, body) {
   const key = method + " " + path.split("?")[0];
+  if (key === "GET /admin/keys") return { keys: KEYS, kie: { ready: KEYS[1].set, credits: KEYS[1].set ? 1200 : null } };
+  if (method === "PUT" && path.startsWith("/admin/keys/")) {
+    const name = path.split("/")[3];
+    const k = KEYS.find((x) => x.name === name);
+    const v = String((body && body.value) || "");
+    if (k && v) { k.set = true; k.source = "admin"; k.tail = v.slice(-4); }
+    return { ok: true };
+  }
+  if (key === "GET /pricing/media") {
+    const cat = /category=video/.test(path) ? "video" : "image";
+    return {
+      ours: cat === "image" ? [
+        { id: "fal", label: "FLUX.1 schnell (fal.ai)", note: "найдешевше", usd: 0.003, available: false },
+        { id: "openai", label: "OpenAI gpt-image-1", note: "тримає текст", usd: 0.011, available: true },
+      ] : [],
+      kie: cat === "video" ? KIE_VIDEO : KIE_IMAGE,
+      kieReady: KEYS[1].set,
+    };
+  }
   if (key in API) return API[key];
   let mm = /^\/materials\/([\w-]+)$/.exec(path);
   if (mm && method === "GET") return { id: mm[1], transcript: "Повний текст запису щоденника про дзвінок." };
@@ -243,9 +276,16 @@ const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const server = createServer((req, res) => {
   const url = req.url || "/";
   if (url.startsWith("/api/")) {
-    const body = handleApi(req.method, url.slice(4));
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify(body === undefined ? {} : body));
+    // тіло читаємо, бо перевірка ключів мусить бачити, ЩО САМЕ надіслав клієнт
+    let raw = "";
+    req.on("data", (c) => { raw += c; });
+    req.on("end", () => {
+      let parsed = null;
+      try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
+      const body = handleApi(req.method, url.slice(4), parsed);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(body === undefined ? {} : body));
+    });
     return;
   }
   if (url.startsWith("/thumb/") || url.startsWith("/media/")) {
@@ -719,6 +759,74 @@ const run = async () => {
     const revealed = (await $t("#abOut")).includes("anthropic/claude-x");
     return st.mats === 2 && st.slots === 4 && st.first === "openai/gpt-4o" && st.rest && st.main === "openai/gpt-4o" &&
       st.msg.includes("3 моделей") && guard && out.blind && out.variants && out.err && out.prompt && revealed;
+  });
+
+  // ---------------------------------------------------------- 7b. Ключі з адмінки + ціни
+  await check("adminKeys", async () => {
+    // головне тут - НЕ «панель намалювалась», а те, що введений ключ назад не приходить:
+    // у DOM після збереження мусить лишитись максимум хвіст із 4 символів
+    const SECRET = "kie-live-SuperSecret-7Zq9";
+    await page.evaluate(() => { selectView("settings"); setSTab("profile"); });
+    await page.waitForFunction(() => {
+      const b = document.getElementById("admKeysPanel");
+      return b && b.style.display !== "none" && document.querySelectorAll("#admKeys .card").length >= 2;
+    }, undefined, { timeout: 8000 });
+    const before = await $t("#admKeys");
+    await page.evaluate((v) => {
+      const c = [...document.querySelectorAll("#admKeys .card")].find((x) => x.getAttribute("data-key") === "KIE_API_KEY");
+      c.querySelector("input").value = v;
+      c.querySelector(".kSave").click();
+    }, SECRET);
+    await page.waitForFunction(() => {
+      const c = [...document.querySelectorAll("#admKeys .card")].find((x) => x.getAttribute("data-key") === "KIE_API_KEY");
+      return c && c.textContent.includes("з адмінки");
+    }, undefined, { timeout: 8000 });
+    const st = await page.evaluate((v) => {
+      const html = document.getElementById("admKeys").innerHTML;
+      const c = [...document.querySelectorAll("#admKeys .card")].find((x) => x.getAttribute("data-key") === "KIE_API_KEY");
+      return {
+        leaked: html.includes(v) || html.includes(v.slice(0, 12)),
+        tail: c.textContent.includes("7Zq9"),
+        cleared: c.querySelector("input").value === "",
+        credits: document.getElementById("admKeys").textContent.includes("кредит"),
+      };
+    }, SECRET);
+    return before.includes("не заданий") && before.includes("з .env") &&
+      !st.leaked && st.tail && st.cleared && st.credits;
+  });
+
+  await check("imgCost", async () => {
+    // питання Олега було «спершу зрозуміти вартість» - панель мусить давати ЦИФРУ, а не обіцянку
+    await page.evaluate(() => { selectView("brand"); setBTab("visual"); });
+    await page.waitForSelector("#imgCostBtn", { timeout: 6000 });
+    await page.click("#imgCostBtn");
+    await page.waitForFunction(() => document.querySelectorAll("#imgCost .card").length >= 3, undefined, { timeout: 8000 });
+    const t = await $t("#imgCost");
+    return t.includes("$0.003") && t.includes("$0.011") && t.includes("$0.020") && t.includes("kie.ai");
+  });
+
+  await check("reelVisual", async () => {
+    // перемикач ДОДАТКОВИЙ: стоковий шлях лишається дефолтним, а вибір моделі й ціна зʼявляються
+    // лише коли явно ввімкнули AI-відео
+    await page.evaluate(() => { selectView("brand"); setBTab("visual"); PRO = true; updateProUI(); });
+    await page.waitForSelector("#reelVis", { timeout: 6000 });
+    const def = await page.$eval("#reelVis", (el) => el.value);
+    const hiddenAtFirst = !(await vis("#reelKieWrap"));
+    await page.evaluate(() => { const s = document.getElementById("reelVis"); s.value = "ai"; s.onchange(); });
+    await page.waitForFunction(() => {
+      const s = document.getElementById("reelKieModel");
+      return s && s.options.length >= 2;
+    }, undefined, { timeout: 8000 });
+    const st = await page.evaluate(() => ({
+      shown: document.getElementById("reelKieWrap").style.display !== "none",
+      opts: document.getElementById("reelKieModel").options.length,
+      cost: document.getElementById("reelKieCost").textContent,
+    }));
+    await page.evaluate(() => { const s = document.getElementById("reelVis"); s.value = "stock"; s.onchange(); });
+    await page.waitForTimeout(150);
+    const backHidden = !(await vis("#reelKieWrap"));
+    return def === "stock" && hiddenAtFirst && st.shown && st.opts === 2 &&
+      st.cost.includes("$0.100") && st.cost.includes("$0.40") && backHidden;
   });
 
   await check("foldedPanels", async () => {

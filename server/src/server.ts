@@ -43,7 +43,9 @@ import { startThreadsAuto } from "./threads-auto.js";
 import { getSettingText } from "./settings.js";
 import { runAbTest, modelCatalog, abSpend } from "./abtest.js";
 import { contextReview, contextIssueCount, suggestFieldFix } from "./context-check.js";
-import { generateImageForPost, imageProviders, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto } from "./images.js";
+import { generateImageForPost, imageProviders, imageCosts, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto } from "./images.js";
+import { secretStatuses, setSecret, clearSecret, refreshSecrets } from "./secrets.js";
+import { kieCatalog, kieCredits, kieReady } from "./kie.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook } from "./tgbot.js";
 import { chat } from "./openrouter.js";
 
@@ -259,7 +261,9 @@ app.get("/api/account", async (req: any) => {
     `select email, email_verified, created_at, (password_hash is not null) as has_pw from app_user where id=$1`, [req.user.id]);
   const m = await one<{ n: number; bytes: string }>(
     `select count(*)::int n, coalesce(sum(size),0)::bigint bytes from media_asset where workspace_id=$1`, [req.user.workspace_id]);
-  return { email: u?.email, emailVerified: u?.email_verified, createdAt: u?.created_at, hasPassword: !!u?.has_pw, media: { count: m?.n || 0, bytes: Number(m?.bytes || 0) } };
+  return { email: u?.email, emailVerified: u?.email_verified, createdAt: u?.created_at, hasPassword: !!u?.has_pw,
+    admin: env.adminEmails.includes(String(u?.email || "").toLowerCase()),
+    media: { count: m?.n || 0, bytes: Number(m?.bytes || 0) } };
 });
 
 app.post("/api/account/password", async (req: any, reply) => {
@@ -389,6 +393,53 @@ app.get("/api/admin/logs", async (req: any, reply) => {
   const limit = Math.min(Number(req.query?.limit ?? 100), 500);
   return q(`select level, scope, message, meta, user_id, created_at
             from app_log order by created_at desc limit $1`, [limit]);
+});
+
+// ---- адмін: ключі провайдерів (замість правки .env по SSH) ----
+// Ключі інфраструктурні (спільні на весь сервіс), тож і гейт адмінський. Значення НІКОЛИ не
+// вертається клієнту - назовні їде `set`, джерело і останні 4 символи для впізнавання.
+function adminOnly(req: any, reply: any): boolean {
+  if (env.adminEmails.includes(String(req.user.email).toLowerCase())) return true;
+  reply.code(403).send({ error: "Лише адміністратор" });
+  return false;
+}
+
+app.get("/api/admin/keys", async (req: any, reply) => {
+  if (!adminOnly(req, reply)) return;
+  const keys = await secretStatuses();
+  return { keys, kie: { ready: kieReady(), credits: kieReady() ? await kieCredits() : null } };
+});
+
+app.put("/api/admin/keys/:name", async (req: any, reply) => {
+  if (!adminOnly(req, reply)) return;
+  try {
+    await setSecret(String(req.params.name), String(req.body?.value ?? ""), String(req.user.email));
+    // у лог іде ЛИШЕ імʼя ключа - значення не пишемо нікуди
+    await logEvent("info", "admin", `ключ ${req.params.name} оновлено з адмінки`);
+    return { ok: true };
+  } catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+
+app.delete("/api/admin/keys/:name", async (req: any, reply) => {
+  if (!adminOnly(req, reply)) return;
+  try {
+    await clearSecret(String(req.params.name));
+    await logEvent("info", "admin", `ключ ${req.params.name} прибрано з адмінки (діє значення з .env, якщо є)`);
+    return { ok: true };
+  } catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+
+// ---- скільки коштує одне зображення / одне відео ----
+// Питання Олега було саме таким: перш ніж міняти провайдера картинок, треба бачити ціну.
+// Наші три провайдери мають фіксовану ціну в коді, каталог kie тягнеться живим (ціни там міняються).
+app.get("/api/pricing/media", async (req: any) => {
+  const cat = req.query?.category === "video" ? "video" : "image";
+  const models = await kieCatalog();   // публічний прайс - тягнеться і без ключа
+  return {
+    ours: cat === "image" ? imageCosts() : [],
+    kie: models.filter((m) => m.category === cat).slice(0, 40),
+    kieReady: kieReady(),
+  };
 });
 
 // ===================== SETTINGS =====================
@@ -3119,6 +3170,8 @@ app.get("/data-deletion", (_req, reply) => reply.sendFile("data-deletion.html"))
 
 app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
   app.log.info(`socialio на ${addr}`);
+  // ключі з адмінки накладаються поверх .env ПЕРШИМ ділом - до того, як воркери підуть у мережу
+  refreshSecrets();
   startAutopost();
   startRssPoller();
   startGdrivePoller();

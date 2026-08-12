@@ -27,6 +27,21 @@ export function imageProviders(): Record<ImgProvider, boolean> {
   return { openai: !!env.openai.apiKey, fal: !!env.fal.apiKey, gemini: !!env.gemini.apiKey };
 }
 
+// Скільки коштує ОДНЕ зображення в кожного з наших провайдерів - щоб рішення «міняти чи ні»
+// приймалось за цифрою, а не за відчуттям. Ціни фіксовані в COSTS (вендори публікують їх сторінкою,
+// а не API), тож тут лише розкриваємо їх людською мовою.
+const IMG_LABELS: Record<ImgProvider, { label: string; note: string }> = {
+  openai: { label: "OpenAI gpt-image-1", note: "quality=low; найкраще тримає текст і композицію" },
+  fal: { label: "FLUX.1 schnell (fal.ai)", note: "найдешевше і найшвидше; деталі слабші" },
+  gemini: { label: "Gemini 2.5 Flash Image (Nano Banana)", note: "сильний у фотореалізмі й правках за описом" },
+};
+export function imageCosts(): { id: string; label: string; note: string; usd: number; available: boolean }[] {
+  const avail = imageProviders();
+  return (Object.keys(COSTS) as ImgProvider[]).map((p) => ({
+    id: p, label: IMG_LABELS[p].label, note: IMG_LABELS[p].note, usd: COSTS[p], available: avail[p],
+  })).sort((a, b) => a.usd - b.usd);
+}
+
 async function genOpenAI(prompt: string, aspect: Aspect): Promise<Img> {
   const r = await fetch("https://api.openai.com/v1/images/generations", {
     method: "POST",

@@ -620,3 +620,20 @@ create table if not exists post_digest (
   created_at timestamptz not null default now()
 );
 create index if not exists idx_postdigest_ws on post_digest(workspace_id, created_at desc);
+
+-- 🔑 КЛЮЧІ ПРОВАЙДЕРІВ, ЯКІ СТАВЛЯТЬСЯ З АДМІНКИ, А НЕ З .env.
+-- Було: будь-який новий ключ = правка `.env` на сервері + `docker compose up --force-recreate`,
+-- тобто SSH і деплой заради одного рядка. Через це «спробувати нового провайдера» коштувало
+-- окремої сесії й фактично не робилось.
+-- Стало: значення лежить тут, читається при старті й після кожного збереження, і НАКЛАДАЄТЬСЯ
+-- ПОВЕРХ `.env` (порожньо в таблиці = працює те, що в `.env`, тобто нічого не ламається).
+-- Таблиця НЕ привʼязана до воркспейсу свідомо: це інфраструктурні ключі оператора сервісу
+-- (той самий рівень, що й `.env`), а не налаштування орендаря.
+-- ⚠️ Значення НІКОЛИ не віддається клієнту й не пише́ться в лог - назовні йдуть лише останні
+-- 4 символи для впізнавання.
+create table if not exists app_secret (
+  name text primary key,
+  value text not null,
+  updated_at timestamptz not null default now(),
+  updated_by text
+);

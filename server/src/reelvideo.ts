@@ -12,6 +12,12 @@ import { q, one } from "./db.js";
 import { chat, extractJsonArray } from "./openrouter.js";
 import { MEDIA_DIR } from "./media.js";
 import { logEvent } from "./log.js";
+import { kieGenerate, kieReady } from "./kie.js";
+import { getSettingText } from "./settings.js";
+
+// Дефолтна відео-модель kie.ai. Це саме ДЕФОЛТ, а не список: вибір моделі живе в налаштуванні
+// `kie_video_model`, а сам перелік підтягується з живого каталогу цін (див. kie.ts).
+export const KIE_VIDEO_DEFAULT = "bytedance/seedance-v1-lite-t2v";
 
 type Seg = { label: string; text: string; visual: string };
 type Job = { status: "running" | "done" | "error"; filename?: string; error?: string; startedAt: number };
@@ -123,6 +129,27 @@ async function pexelsClip(query: string, dest: string): Promise<boolean> {
   return false;
 }
 
+// ---- 4b. kie.ai: згенерований AI-кліп замість стокового ----
+// Свідомо ДОДАТКОВИЙ шар, а не заміна: вмикається налаштуванням `reel_visual='ai'`, і будь-який
+// збій (нема ключа, скінчились кредити, модель не встигла) просто провалюється в наявний ланцюжок
+// сток → картинка поста → градієнт. Тобто увімкнення нового не може зламати те, що вже працює.
+async function kieClip(model: string, query: string, dest: string): Promise<boolean> {
+  if (!kieReady()) return false;
+  try {
+    const urls = await kieGenerate(model, {
+      prompt: `${query}. Vertical 9:16 cinematic b-roll, natural motion, no text, no captions, no logos.`,
+      aspect_ratio: "9:16",
+      duration: 5,
+    }, { timeoutMs: 5 * 60 * 1000 });
+    if (!urls[0]) return false;
+    await download(urls[0], dest, 120000);
+    return true;
+  } catch (e: any) {
+    await logEvent("warn", "reel", "kie.ai-кліп не вдався, беру сток: " + String(e.message).slice(0, 200));
+    return false;
+  }
+}
+
 // ---- 5. ASS-субтитри ----
 const assTime = (s: number) => {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = (s % 60).toFixed(2).padStart(5, "0");
@@ -150,6 +177,8 @@ export async function buildReelVideo(ws: string, postId: string, content: string
     // 6.2 відео-сегменти: власний b-roll (1-3 вставки з автором) → сток → фолбек картинка поста → градієнт
     const kws = await stockKeywords(ws, segs);
     const broll = await brollPlan(ws, segs.length);
+    const aiVisual = (await getSettingText(ws, "reel_visual")) === "ai";
+    const kieModel = (await getSettingText(ws, "kie_video_model")) || KIE_VIDEO_DEFAULT;
     for (let i = 0; i < segs.length; i++) {
       const seg = join(dir, `v${i}.mp4`), clip = join(dir, `c${i}.mp4`);
       const d = durs[i].toFixed(2);
@@ -157,6 +186,8 @@ export async function buildReelVideo(ws: string, postId: string, content: string
       const personal = broll.get(i);
       if (personal) {
         await run("ffmpeg", ["-y", "-stream_loop", "-1", "-i", join(MEDIA_DIR, personal), "-t", d, "-an", "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", seg], 180000);
+      } else if (aiVisual && await kieClip(kieModel, kws[i], clip)) {
+        await run("ffmpeg", ["-y", "-stream_loop", "-1", "-i", clip, "-t", d, "-an", "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", seg], 180000);
       } else if (await pexelsClip(kws[i], clip)) {
         await run("ffmpeg", ["-y", "-stream_loop", "-1", "-i", clip, "-t", d, "-an", "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", seg], 180000);
       } else if (bgImage) {

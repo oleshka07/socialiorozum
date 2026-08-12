@@ -1017,6 +1017,7 @@ async function loadSettings(){
     if(map.tone_of_voice_derived) renderDerived(map.tone_of_voice_derived);
     if($('vAddr')) $('vAddr').value=map.voice_address||'';
     if($('reelRend')) $('reelRend').value=map.reel_renderer||'classic';
+    if($('reelVis')){ $('reelVis').value=map.reel_visual||'stock'; if(map.kie_video_model&&$('reelKieModel')){ const o=document.createElement('option'); o.value=o.textContent=map.kie_video_model; $('reelKieModel').appendChild(o); $('reelKieModel').value=map.kie_video_model; } syncReelVis(); }
     if($('vEmoji')) $('vEmoji').value=map.voice_emoji||'';
     { let qg={}; try{ qg=JSON.parse(map.qa_gates||'{}'); }catch(e){ qg={}; }
       if($('qgDirector')) $('qgDirector').checked=!!qg.director;
@@ -1131,6 +1132,49 @@ for(const tid of Object.keys(SET)){ const el=$(tid); if(el) el.addEventListener(
 $('langSel').onchange=()=>saveSetting('output_language',$('langSel').value);
 if($('vAddr')) $('vAddr').onchange=()=>saveSetting('voice_address',$('vAddr').value);
 if($('reelRend')) $('reelRend').onchange=()=>saveSetting('reel_renderer',$('reelRend').value);
+if($('reelVis')) $('reelVis').onchange=()=>{ saveSetting('reel_visual',$('reelVis').value); syncReelVis(); };
+if($('reelKieModel')) $('reelKieModel').onchange=()=>{ saveSetting('kie_video_model',$('reelKieModel').value); showKieCost(); };
+// Селект відео-моделі наповнюється з ЖИВОГО прайса kie.ai, а не зі списку в коді: захардкоджений
+// перелік застаріє за місяць і - гірше - брехатиме про ціну. Тому й ціна показується поруч.
+let KieVid=null;
+function showKieCost(){
+  const o=$('reelKieCost'); if(!o||!KieVid) return;
+  const m=KieVid.find(x=>x.id===$('reelKieModel').value);
+  o.innerHTML = m ? ('Приблизно <b>$'+m.usd.toFixed(3)+'</b> за кліп'+(m.unit?' ('+esc(m.unit)+')':'')+'. У рілсі стільки кліпів, скільки бітів у сценарії - тобто ~$'+(m.usd*4).toFixed(2)+' за ролик із 4 бітів.')
+    : 'Перелік і ціни тягнуться з живого прайса kie.ai.';
+}
+async function syncReelVis(){
+  const w=$('reelKieWrap'); if(!w) return;
+  const on = $('reelVis') && $('reelVis').value==='ai';
+  w.style.display = on ? '' : 'none';
+  if(!on || KieVid) { showKieCost(); return; }
+  try{
+    const r=await api('/pricing/media?category=video');
+    KieVid=r.kie||[];
+    const cur=$('reelKieModel').value;
+    $('reelKieModel').innerHTML=KieVid.map(m=>'<option value="'+esc(m.id)+'">'+esc(m.id)+' - $'+m.usd.toFixed(3)+'</option>').join('');
+    if(cur && KieVid.some(m=>m.id===cur)) $('reelKieModel').value=cur;
+    if(!r.kieReady) $('reelKieCost').innerHTML='<span style="color:var(--amber)">Ключ kie.ai не доданий - AI-відео не запуститься, кадри й далі братимуться зі стоку. Додати: Налаштування → Профіль → 🔑 Ключі провайдерів.</span>';
+    else showKieCost();
+  }catch(e){ $('reelKieCost').textContent='⚠ не вдалося отримати перелік моделей: '+e.message; }
+}
+// 💰 Ціна одного зображення - щоб рішення «міняти провайдера чи ні» приймалось за цифрою.
+if($('imgCostBtn')) $('imgCostBtn').onclick=async()=>{
+  const box=$('imgCost'); if(box.style.display!=='none'){ box.style.display='none'; return; }
+  box.style.display=''; box.innerHTML='<div class="empty">…</div>';
+  try{
+    const r=await api('/pricing/media?category=image');
+    const row=(label,usd,note,ok)=>'<div class="card" style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><b>'+esc(label)+'</b><span style="color:var(--brand);font-weight:700">$'+usd.toFixed(3)+'</span></div><div class="hint">'+esc(note)+(ok===false?' · <span style="color:var(--amber)">ключ не доданий</span>':'')+'</div></div>';
+    let h='<div style="font-weight:700;font-size:13px;margin-bottom:6px">Підключені зараз</div>';
+    h+=r.ours.map(o=>row(o.label,o.usd,o.note,o.available)).join('');
+    if(r.kie.length){
+      h+='<div style="font-weight:700;font-size:13px;margin:14px 0 6px">Доступні через kie.ai '+(r.kieReady?'':'<span style="color:var(--amber);font-weight:400">(ключ ще не доданий)</span>')+'</div>';
+      h+=r.kie.slice(0,12).map(m=>row(m.id,m.usd,m.description||m.unit||'')).join('');
+      h+='<div class="hint" style="margin-top:8px">Ціни живі, з прайса kie.ai. Порівнюй із рядками вище: різниця в центах на зображення перетворюється на десятки доларів на сотні постів. Перемикати генерацію зображень на kie.ai поки НЕ будемо - спершу цифри.</div>';
+    } else h+='<div class="hint" style="margin-top:8px">Прайс kie.ai зараз недоступний - спробуй пізніше.</div>';
+    box.innerHTML=h;
+  }catch(e){ box.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
+};
 if($('vEmoji')) $('vEmoji').onchange=()=>saveSetting('voice_emoji',$('vEmoji').value);
 function saveQaGates(){ saveSetting('qa_gates',JSON.stringify({director:!!($('qgDirector')&&$('qgDirector').checked),aiaudit:!!($('qgAiaudit')&&$('qgAiaudit').checked),storytelling:!!($('qgStorytelling')&&$('qgStorytelling').checked)})); }
 ['qgDirector','qgAiaudit','qgStorytelling'].forEach(id=>{ const el=$(id); if(el) el.onchange=saveQaGates; });
@@ -2922,7 +2966,55 @@ $('ffImport').onclick=async()=>{
 async function loadAccount(){
   try{ const a=await api('/account'); const mb=(a.media.bytes/1048576).toFixed(1);
     $('accInfo').innerHTML='Email: <b>'+esc(a.email||'')+'</b>'+(a.emailVerified?' ✓':' (не підтверджено)')+' · Медіа: '+a.media.count+' файлів ('+mb+' МБ)'+(a.hasPassword?'':' · вхід лише через Google');
+    if(a.admin && $('admKeysPanel')){ $('admKeysPanel').style.display=''; loadAdminKeys(); }
   }catch(e){ $('accInfo').textContent='-'; }
+}
+
+// ---------- Ключі провайдерів (адмін) ----------
+// Значення сюди НЕ приходить - лише «стоїть/не стоїть», джерело і хвіст із 4 символів.
+// Тому поле завжди порожнє: воно для ВВЕДЕННЯ нового ключа, а не для редагування наявного.
+const KEYGRP={text:'📝 Тексти',image:'🖼 Зображення',video:'🎬 Відео та озвучка',other:'Інше'};
+async function loadAdminKeys(){
+  const box=$('admKeys'); if(!box) return;
+  box.innerHTML='<div class="empty">…</div>';
+  try{
+    const r=await api('/admin/keys');
+    const groups={};
+    for(const k of r.keys){ (groups[k.group]=groups[k.group]||[]).push(k); }
+    let h='';
+    if(r.kie.ready) h+='<div class="hint" style="margin-bottom:10px">kie.ai: ключ працює'+(r.kie.credits!=null?' · баланс <b>'+r.kie.credits+'</b> кредитів (≈ $'+(r.kie.credits*0.005).toFixed(2)+')':'')+'</div>';
+    for(const g of Object.keys(KEYGRP)){
+      const list=groups[g]; if(!list||!list.length) continue;
+      h+='<div style="font-weight:700;font-size:13px;margin:12px 0 6px">'+KEYGRP[g]+'</div>';
+      for(const k of list){
+        const badge = k.source==='admin' ? '<span style="color:var(--brand)">✓ з адмінки ····'+esc(k.tail)+'</span>'
+          : k.source==='env' ? '<span style="color:var(--muted)">✓ з .env ····'+esc(k.tail)+'</span>'
+          : '<span style="color:var(--amber)">не заданий</span>';
+        h+='<div class="card" style="margin-bottom:8px" data-key="'+esc(k.name)+'">'
+          +'<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap">'
+          +'<b>'+esc(k.label)+'</b> '+badge+'</div>'
+          +'<div class="hint" style="margin:4px 0 8px">'+esc(k.hint)+' <code>'+esc(k.name)+'</code></div>'
+          +'<div class="btnrow"><input class="txt" type="password" placeholder="вставити новий ключ" autocomplete="off" style="flex:1;min-width:180px">'
+          +'<button class="primary kSave">Зберегти</button>'
+          +(k.source==='admin'?'<button class="ghost kDel">Прибрати</button>':'')
+          +'<span class="kMsg" style="font-size:12px;color:var(--muted)"></span></div></div>';
+      }
+    }
+    box.innerHTML=h||'<div class="empty">Немає керованих ключів.</div>';
+    box.querySelectorAll('.card').forEach(c=>{
+      const name=c.getAttribute('data-key'), inp=c.querySelector('input'), msg=c.querySelector('.kMsg');
+      c.querySelector('.kSave').onclick=async()=>{
+        const v=inp.value.trim(); if(!v){ msg.style.color='var(--danger)'; msg.textContent='порожньо'; return; }
+        msg.style.color='var(--muted)'; msg.textContent='…';
+        try{ await api('/admin/keys/'+name,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:v})});
+          inp.value=''; loadAdminKeys(); }
+        catch(e){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+e.message; }
+      };
+      const del=c.querySelector('.kDel');
+      if(del) del.onclick=async()=>{ if(!confirm('Прибрати ключ з адмінки? Повернеться значення з .env, якщо воно там є.')) return;
+        try{ await api('/admin/keys/'+name,{method:'DELETE'}); loadAdminKeys(); }catch(e){ alert('⚠ '+e.message); } };
+    });
+  }catch(e){ box.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }
 $('accPwSave').onclick=async()=>{ const m=$('accPwMsg'); m.style.color='var(--muted)'; m.textContent='…'; try{ await api('/account/password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({currentPassword:$('accCurPw').value,newPassword:$('accNewPw').value})}); $('accCurPw').value=''; $('accNewPw').value=''; m.style.color='var(--brand)'; m.textContent='пароль змінено ✓'; }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
 $('accEmailSave').onclick=async()=>{ const m=$('accEmailMsg'); m.style.color='var(--muted)'; m.textContent='…'; try{ const r=await api('/account/email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('accNewEmail').value,password:$('accEmailPw').value})}); $('accEmailPw').value=''; $('accNewEmail').value=''; m.style.color='var(--brand)'; m.textContent='email змінено ✓'; if($('userEmail'))$('userEmail').textContent=r.email; loadAccount(); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
