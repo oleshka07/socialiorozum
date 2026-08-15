@@ -17,61 +17,113 @@
   --btn: var(--tg-theme-button-color, #2481cc);
   --btn-fg: var(--tg-theme-button-text-color, #fff);
   --line: color-mix(in srgb, var(--muted) 25%, transparent);
+  --ok:#1a9e5c; --warn:#c98a00; --bad:#d1453b;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
      padding:0 0 calc(16px + env(safe-area-inset-bottom))}
-.tabs{display:flex;gap:6px;padding:10px 12px;position:sticky;top:0;background:var(--bg);z-index:5;border-bottom:1px solid var(--line)}
-.tab{flex:1;text-align:center;padding:9px 4px;border-radius:10px;background:var(--card);font-size:13.5px;font-weight:600;cursor:pointer;user-select:none}
+.tabs{display:flex;gap:5px;padding:9px 10px;position:sticky;top:0;background:var(--bg);z-index:5;border-bottom:1px solid var(--line)}
+.tab{flex:1;text-align:center;padding:8px 2px;border-radius:10px;background:var(--card);font-size:12.5px;font-weight:600;cursor:pointer;user-select:none}
 .tab.on{background:var(--btn);color:var(--btn-fg)}
 .wrap{padding:12px}
 .card{background:var(--card);border-radius:12px;padding:12px 13px;margin-bottom:9px}
+.card.tap{cursor:pointer}
 .card h4{margin:0 0 4px;font-size:14.5px;font-weight:650}
-.meta{font-size:11.5px;color:var(--muted);margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.meta{font-size:11.5px;color:var(--muted);margin-top:6px;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
 .body{font-size:13.5px;color:var(--fg);opacity:.85;white-space:pre-wrap;word-break:break-word}
-.pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;border:1px solid var(--line);color:var(--muted)}
-.pill.ok{color:#1a9e5c;border-color:#1a9e5c}
-textarea{width:100%;min-height:170px;padding:11px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);font:inherit;resize:vertical}
+.row{display:flex;gap:9px;align-items:flex-start}
+.row .body{flex:1;min-width:0}
+.pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.pill.ok{color:var(--ok);border-color:var(--ok)}
+.pill.warn{color:var(--warn);border-color:var(--warn)}
+.pill.bad{color:var(--bad);border-color:var(--bad)}
+textarea{width:100%;min-height:150px;padding:11px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);font:inherit;resize:vertical}
+input.txt{width:100%;padding:10px 11px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--fg);font:inherit}
 .nets{display:flex;gap:7px;flex-wrap:wrap;margin:11px 0}
 .net{padding:7px 12px;border-radius:20px;border:1px solid var(--line);background:transparent;color:var(--muted);font-size:13px;cursor:pointer}
 .net.on{background:var(--btn);color:var(--btn-fg);border-color:var(--btn)}
+.net[disabled]{opacity:.5;cursor:default}
 button.go{width:100%;padding:13px;border:0;border-radius:12px;background:var(--btn);color:var(--btn-fg);font-size:15px;font-weight:700;cursor:pointer}
 button.go[disabled]{opacity:.55}
 /* специфічність: `button.go` (елемент+клас) сильніша за `.ghost`, тож другорядна кнопка
    малювалась основною - потрібен саме `button.go.ghost` */
 button.go.ghost{background:transparent;color:var(--link);border:1px solid var(--line);margin-top:8px;font-weight:600}
+button.go.danger{background:transparent;color:var(--bad);border:1px solid var(--line);margin-top:8px;font-weight:600}
+/* ряд дрібних дій: фото / AI / видалити - по три в рядок, щоб влазило на вузький екран */
+.acts{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:11px 0}
+.acts button{padding:10px 4px;border-radius:11px;border:1px solid var(--line);background:var(--card);color:var(--fg);font-size:12.5px;font-weight:600;cursor:pointer}
+.acts button[disabled]{opacity:.5}
+.thumb{width:100%;border-radius:11px;margin:10px 0;display:block}
+.thumb.sm{width:56px;height:56px;object-fit:cover;margin:0;flex:none}
 .empty{color:var(--muted);text-align:center;padding:34px 16px;font-size:14px}
 .msg{font-size:13px;margin-top:10px;min-height:18px}
+.chips{display:flex;gap:6px;margin-bottom:10px;overflow-x:auto;padding-bottom:2px}
+.chip{padding:6px 11px;border-radius:20px;border:1px solid var(--line);font-size:12.5px;color:var(--muted);cursor:pointer;white-space:nowrap}
+.chip.on{background:var(--btn);color:var(--btn-fg);border-color:var(--btn)}
+/* редактор - окремий екран поверх, а не модалка: на телефоні модалка з клавіатурою нечитабельна */
+.sheet{position:fixed;inset:0;background:var(--bg);z-index:20;overflow-y:auto;padding:12px 12px calc(20px + env(safe-area-inset-bottom))}
+.sheethead{display:flex;align-items:center;gap:10px;margin-bottom:12px;position:sticky;top:0;background:var(--bg);padding:4px 0 8px;z-index:2}
+.sheethead b{flex:1;font-size:15px}
+.back{background:none;border:0;color:var(--link);font-size:15px;font-weight:600;cursor:pointer;padding:4px 2px}
+.when{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:9px 0}
+.when button{padding:10px 4px;border-radius:11px;border:1px solid var(--line);background:var(--card);color:var(--fg);font-size:13px;cursor:pointer}
+.hint{font-size:12px;color:var(--muted);margin-top:6px}
 </style>
 </head>
 <body>
 <div class="tabs">
   <div class="tab on" data-t="new">✍️ Новий</div>
-  <div class="tab" data-t="drafts">📝 Чорновики</div>
+  <div class="tab" data-t="drafts">📝 Пости</div>
+  <div class="tab" data-t="plan">📅 План</div>
   <div class="tab" data-t="mats">📥 Джерела</div>
 </div>
 <div class="wrap" id="view"><div class="empty">Завантажую…</div></div>
+<div id="sheet"></div>
 
 <script>
 const TG = window.Telegram && window.Telegram.WebApp;
 if (TG) { TG.ready(); TG.expand(); }
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+const haptic = (kind) => { try { TG.HapticFeedback.notificationOccurred(kind); } catch (e) { /* не в Telegram */ } };
 
 // initData - підписаний Telegram рядок; сервер перевіряє підпис і знаходить кабінет. Іншої
 // автентифікації тут немає й не треба: кукі-сесії всередині Telegram все одно нема.
 const INIT = (TG && TG.initData) || '';
 async function api(path, opts) {
+  const o = opts || {};
+  const isForm = o.body instanceof FormData;
   const r = await fetch('/api/tg' + path, {
-    ...opts,
-    headers: { 'Content-Type': 'application/json', 'X-TG-Init-Data': INIT, ...(opts && opts.headers) },
+    ...o,
+    // для FormData Content-Type мусить ставити браузер сам (він додає boundary)
+    headers: { ...(isForm ? {} : { 'Content-Type': 'application/json' }), 'X-TG-Init-Data': INIT, ...(o.headers) },
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
   return j;
 }
 
-let NETS = [], tab = 'new', draft = { text: '', nets: [] };
+// Довгі AI-дії (зображення, переписування, генерація з матеріалу) - фонові джоби: один виклик
+// моделі не вкладається в 60-секундне вікно nginx, і синхронний запит показував би 504 на роботі,
+// яка насправді дорахувалась.
+async function runJob(path, body, onTick) {
+  const { jobId } = await api(path, { method: 'POST', body: JSON.stringify(body || {}) });
+  if (!jobId) throw new Error('сервер не почав задачу');
+  const t0 = Date.now();
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 1800));
+    let j = null;
+    try { j = await api('/job/' + jobId); } catch (e) { /* мережа моргнула - пробуємо далі */ }
+    if (j && j.status === 'done') return j.result || {};
+    if (j && j.status === 'error') throw new Error(j.error || 'не вдалося');
+    if (j && j.status === 'idle') throw new Error('задача загубилась (сервер перезапустився) - спробуй ще раз');
+    if (Date.now() - t0 > 6 * 60 * 1000) throw new Error('надто довго - спробуй ще раз');
+    if (onTick) onTick(Math.round((Date.now() - t0) / 1000));
+  }
+}
+
+let NETS = [], TZ = 'Europe/Kyiv', tab = 'new', draftFilter = 'active';
+let draft = { text: '', nets: [] };          // «Новий»: чернетка, якої ще нема в базі
 const NETNAME = { telegram:'✈️ Telegram', instagram:'📸 Instagram', facebook:'📘 Facebook', threads:'🧵 Threads', linkedin:'💼 LinkedIn' };
 const ORIGIN = { diary:'📔 щоденник', rss:'📡 RSS', bot:'🤖 з бота', manual:'✍️ нотатка', idea:'💡 ідея', plan:'📅 план',
                  instagram:'📸 Instagram', fireflies:'🎙 транскрипт', gdrive:'📁 Drive', brand:'✨ бренд', takes:'🧵 тейк', topic:'🎯 тема' };
@@ -84,22 +136,44 @@ document.querySelectorAll('.tab').forEach((el) => el.onclick = () => {
 
 function render() {
   if (tab === 'new') return renderNew();
-  if (tab === 'drafts') return renderList('/drafts', drawDraft, 'Чорновиків ще немає. Створи перший на вкладці «Новий».');
-  return renderList('/materials', drawMat, 'Джерел ще немає. Підключи RSS чи Instagram у кабінеті.');
+  if (tab === 'drafts') return renderDrafts();
+  if (tab === 'plan') return renderPlan();
+  return renderMats();
 }
 
+// ---------------------------------------------------------------- дати
+// Час рахуємо в поясі ВОРКСПЕЙСУ, а не телефона: інакше запланований у подорожі пост вийшов би
+// не тоді, коли людина очікує.
+function tzParts(d) {
+  const f = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false });
+  const p = {};
+  for (const x of f.formatToParts(d)) if (x.type !== 'literal') p[x.type] = x.value;
+  return { y:+p.year, mo:+p.month, d:+p.day, hh:(+p.hour) % 24, mi:+p.minute };
+}
+// локальна стінна дата в поясі воркспейсу → UTC (той самий двокроковий прийом, що на сервері)
+function zonedToUtc(y, mo, d, hh, mi) {
+  const guess = Date.UTC(y, mo - 1, d, hh, mi, 0);
+  const p = tzParts(new Date(guess));
+  const asLocal = Date.UTC(p.y, p.mo - 1, p.d, p.hh, p.mi);
+  return new Date(guess - (asLocal - guess));
+}
+const fmtWhen = (s) => { try { return new Intl.DateTimeFormat('uk-UA', { timeZone: TZ, weekday:'short', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }).format(new Date(s)); } catch (e) { return ''; } };
+const shortDate = (s) => { try { return new Intl.DateTimeFormat('uk-UA', { timeZone: TZ, day:'2-digit', month:'2-digit' }).format(new Date(s)); } catch (e) { return ''; } };
+
+// ---------------------------------------------------------------- ✍️ Новий
 function renderNew() {
   $('view').innerHTML =
     '<textarea id="t" placeholder="Про що пост? Пиши як є - опублікується саме твій текст."></textarea>'
     + '<div class="nets" id="nets"></div>'
-    + '<button class="go" id="pub">🚀 Опублікувати</button>'
-    + '<button class="go ghost" id="save">💾 Зберегти чернеткою</button>'
-    + '<div class="msg" id="m"></div>';
+    + '<button class="go" id="save">💾 Зберегти й відкрити</button>'
+    + '<button class="go ghost" id="pub">🚀 Опублікувати одразу</button>'
+    + '<div class="msg" id="m"></div>'
+    + '<div class="hint">У чернетці можна додати фото, попросити AI переписати, затвердити й запланувати.</div>';
   $('t').value = draft.text;
   $('t').oninput = (e) => { draft.text = e.target.value; };
   drawNets();
-  $('pub').onclick = () => submit(true);
-  $('save').onclick = () => submit(false);
+  $('save').onclick = () => createDraft(false);
+  $('pub').onclick = () => createDraft(true);
 }
 
 function drawNets() {
@@ -113,64 +187,293 @@ function drawNets() {
   });
 }
 
-async function submit(publish) {
+async function createDraft(publishNow) {
   const text = (draft.text || '').trim();
   if (text.length < 3) { $('m').textContent = 'Спершу напиши текст.'; return; }
-  if (publish && !draft.nets.length) { $('m').textContent = 'Обери хоч один канал.'; return; }
-  $('pub').disabled = $('save').disabled = true;
-  $('m').textContent = publish ? '🚀 Публікую…' : '💾 Зберігаю…';
+  $('save').disabled = $('pub').disabled = true;
+  $('m').textContent = '💾 Зберігаю…';
   try {
     const { id } = await api('/post', { method: 'POST', body: JSON.stringify({ text }) });
     const channels = {}; draft.nets.forEach((k) => channels[k] = { on: true });
     await api('/post/' + id, { method: 'PUT', body: JSON.stringify({ channels }) });
-    if (publish) {
-      // публікація - фонова джоба: Instagram і Threads обробляють медіа асинхронно (до 40с кожен),
-      // тож синхронний запит рвався об 60-секундний таймаут nginx і показував 504 на пості,
-      // який насправді виходив далі
-      await api('/post/' + id + '/publish', { method: 'POST' });
-      const t0 = Date.now();
-      for (;;) {
-        await new Promise((r) => setTimeout(r, 1500));
-        let j = null; try { j = await api('/post/' + id + '/publish-job'); } catch (e) { /* мережа моргнула - пробуємо далі */ }
-        if (j && j.status === 'done') { $('m').textContent = j.message || 'Готово'; break; }
-        if (j && j.status === 'error') throw new Error(j.error || 'публікація не вдалась');
-        if (Date.now() - t0 > 5 * 60 * 1000) throw new Error('публікація триває надто довго - перевір канал');
-        $('m').textContent = '🚀 Публікую… ' + Math.round((Date.now() - t0) / 1000) + 'с';
-      }
-      if (TG && TG.HapticFeedback) TG.HapticFeedback.notificationOccurred('success');
-    } else {
-      $('m').textContent = '💾 Збережено в Чорновики.';
-    }
-    draft = { text: '', nets: draft.nets };  // канали лишаємо - зазвичай постять в ті самі
-    $('t').value = '';
+    draft = { text: '', nets: draft.nets };   // канали лишаємо - зазвичай постять у ті самі
+    await openEditor(id, publishNow);
   } catch (e) {
     $('m').textContent = '⚠️ ' + e.message;
-  } finally { $('pub').disabled = $('save').disabled = false; }
+  } finally { if ($('save')) $('save').disabled = $('pub').disabled = false; }
 }
 
-async function renderList(path, draw, emptyText) {
+// ---------------------------------------------------------------- 📝 Пости
+const DRAFT_FILTERS = [['active','Активні'],['scheduled','🗓 Заплановані'],['published','✈️ Опубліковані']];
+async function renderDrafts() {
   $('view').innerHTML = '<div class="empty">Завантажую…</div>';
   try {
-    const { items } = await api(path);
-    $('view').innerHTML = items.length ? items.map(draw).join('') : '<div class="empty">' + emptyText + '</div>';
+    const { items } = await api('/drafts');
+    const pass = (p) => draftFilter === 'published' ? p.sent
+      : draftFilter === 'scheduled' ? (!p.sent && p.scheduled_at)
+      : !p.sent;
+    const list = items.filter(pass);
+    $('view').innerHTML =
+      '<div class="chips">' + DRAFT_FILTERS.map(([k, l]) =>
+        '<div class="chip' + (draftFilter === k ? ' on' : '') + '" data-f="' + k + '">' + l + '</div>').join('') + '</div>'
+      + (list.length ? list.map(drawDraft).join('')
+        : '<div class="empty">' + (draftFilter === 'active' ? 'Чорновиків немає. Створи перший на вкладці «Новий».' : 'Тут поки порожньо.') + '</div>');
+    $('view').querySelectorAll('.chip').forEach((c) => c.onclick = () => { draftFilter = c.dataset.f; renderDrafts(); });
+    $('view').querySelectorAll('.card[data-id]').forEach((c) => c.onclick = () => openEditor(c.dataset.id));
   } catch (e) { $('view').innerHTML = '<div class="empty">⚠️ ' + esc(e.message) + '</div>'; }
 }
 
-const shortDate = (s) => { try { return new Date(s).toLocaleDateString('uk-UA', { day:'2-digit', month:'2-digit' }); } catch (e) { return ''; } };
-
-function drawDraft(p) {
-  const nets = Object.keys(p.channels || {}).filter((k) => p.channels[k] && p.channels[k].on).map((k) => NETNAME[k] || k);
-  return '<div class="card"><div class="body">' + esc((p.content || '').slice(0, 300)) + ((p.content || '').length > 300 ? '…' : '') + '</div>'
-    + '<div class="meta">' + (p.sent ? '<span class="pill ok">✈️ опубліковано</span>' : (p.review === 'approved' ? '<span class="pill">✅ затверджено</span>' : '<span class="pill">чернетка</span>'))
-    + (nets.length ? '<span>' + esc(nets.join(', ')) + '</span>' : '') + '<span>' + shortDate(p.created_at) + '</span></div></div>';
+function statusPill(p) {
+  if (p.sent) return '<span class="pill ok">✈️ опубліковано</span>';
+  if (p.scheduled_at) return '<span class="pill warn">🗓 ' + fmtWhen(p.scheduled_at) + '</span>';
+  if (p.review === 'approved') return '<span class="pill ok">✅ затверджено</span>';
+  return '<span class="pill">чернетка</span>';
 }
 
-function drawMat(m) {
-  return '<div class="card"><h4>' + esc(m.title) + '</h4>'
-    + '<div class="body">' + esc((m.transcript || '').slice(0, 180)) + ((m.transcript || '').length > 180 ? '…' : '') + '</div>'
-    + '<div class="meta"><span class="pill">' + esc(ORIGIN[m.origin] || m.origin) + '</span>'
-    + (m.ai_score ? '<span class="pill">⭐ ' + m.ai_score + '/10</span>' : '')
-    + '<span>' + shortDate(m.created_at) + '</span></div></div>';
+function drawDraft(p) {
+  const nets = Object.keys(p.channels || {}).filter((k) => p.channels[k] && p.channels[k].on).map((k) => (NETNAME[k] || k).split(' ')[0]);
+  const txt = (p.content || '').slice(0, 220) + ((p.content || '').length > 220 ? '…' : '');
+  return '<div class="card tap" data-id="' + p.id + '"><div class="row">'
+    + (p.filename ? '<img class="thumb sm" src="/thumb/' + esc(p.filename) + '" alt="">' : '')
+    + '<div class="body">' + esc(txt) + '</div></div>'
+    + '<div class="meta">' + statusPill(p)
+    + (nets.length ? '<span>' + esc(nets.join(' ')) + '</span>' : '<span class="pill bad">без каналів</span>')
+    + '<span>' + shortDate(p.created_at) + '</span></div></div>';
+}
+
+// ---------------------------------------------------------------- 📅 План
+async function renderPlan() {
+  $('view').innerHTML = '<div class="empty">Завантажую…</div>';
+  try {
+    const { items } = await api('/schedule');
+    if (!items.length) { $('view').innerHTML = '<div class="empty">Нічого не заплановано. Відкрий чернетку й натисни «🗓 Запланувати».</div>'; return; }
+    $('view').innerHTML = items.map((s) => {
+      const nets = Object.keys(s.channels || {}).filter((k) => s.channels[k] && s.channels[k].on).map((k) => (NETNAME[k] || k).split(' ')[0]);
+      const st = s.status === 'posted' ? '<span class="pill ok">✈️ вийшов</span>'
+        : s.status === 'failed' ? '<span class="pill bad">⚠ не вийшов</span>'
+        : '<span class="pill warn">🗓 ' + fmtWhen(s.scheduled_at) + '</span>';
+      return '<div class="card tap" data-id="' + s.post_id + '"><div class="row">'
+        + (s.filename ? '<img class="thumb sm" src="/thumb/' + esc(s.filename) + '" alt="">' : '')
+        + '<div class="body">' + esc((s.content || '').slice(0, 160)) + '</div></div>'
+        + '<div class="meta">' + st + (nets.length ? '<span>' + esc(nets.join(' ')) + '</span>' : '')
+        + (s.result ? '<span>' + esc(String(s.result).slice(0, 60)) + '</span>' : '') + '</div></div>';
+    }).join('');
+    $('view').querySelectorAll('.card[data-id]').forEach((c) => c.onclick = () => openEditor(c.dataset.id));
+  } catch (e) { $('view').innerHTML = '<div class="empty">⚠️ ' + esc(e.message) + '</div>'; }
+}
+
+// ---------------------------------------------------------------- 📥 Джерела
+async function renderMats() {
+  $('view').innerHTML = '<div class="empty">Завантажую…</div>';
+  try {
+    const { items } = await api('/materials');
+    if (!items.length) { $('view').innerHTML = '<div class="empty">Джерел ще немає. Підключи RSS чи Instagram у кабінеті.</div>'; return; }
+    $('view').innerHTML = items.map((m) =>
+      '<div class="card"><h4>' + esc(m.title) + '</h4>'
+      + '<div class="body">' + esc((m.transcript || '').slice(0, 180)) + ((m.transcript || '').length > 180 ? '…' : '') + '</div>'
+      + '<div class="meta"><span class="pill">' + esc(ORIGIN[m.origin] || m.origin) + '</span>'
+      + (m.ai_score ? '<span class="pill">⭐ ' + m.ai_score + '/10</span>' : '')
+      + '<span>' + shortDate(m.created_at) + '</span></div>'
+      + '<button class="go ghost" data-mk="' + m.id + '">✨ Зробити пост</button></div>').join('');
+    $('view').querySelectorAll('[data-mk]').forEach((b) => b.onclick = async () => {
+      b.disabled = true; b.textContent = '✨ Пишу…';
+      try {
+        const r = await runJob('/material/' + b.dataset.mk + '/post', {}, (s) => { b.textContent = '✨ Пишу… ' + s + 'с'; });
+        haptic('success');
+        await openEditor(r.id);
+      } catch (e) { b.textContent = '⚠️ ' + e.message; b.disabled = false; }
+    });
+  } catch (e) { $('view').innerHTML = '<div class="empty">⚠️ ' + esc(e.message) + '</div>'; }
+}
+
+// ---------------------------------------------------------------- редактор поста
+let cur = null;   // повна картка відкритого поста
+
+async function openEditor(id, publishImmediately) {
+  $('sheet').innerHTML = '<div class="sheet"><div class="empty">Завантажую…</div></div>';
+  try { cur = await api('/post/' + id); } catch (e) { $('sheet').innerHTML = ''; alert('⚠️ ' + e.message); return; }
+  drawEditor();
+  if (publishImmediately) doPublish();
+}
+function closeEditor(reload) {
+  $('sheet').innerHTML = ''; cur = null;
+  if (reload) render();
+}
+
+function drawEditor() {
+  const p = cur, ch = p.channels || {};
+  const done = (p.sent || []).length > 0;
+  const netBtns = NETS.length ? NETS.map((k) => {
+    const isSent = (p.sent || []).includes(k);
+    return '<button class="net' + (ch[k] && ch[k].on ? ' on' : '') + '" data-n="' + k + '"' + (isSent ? ' disabled' : '') + '>'
+      + (isSent ? '✓ ' : '') + (NETNAME[k] || k) + '</button>';
+  }).join('') : '<span class="pill">Канали не підключені</span>';
+  const links = Object.keys(p.links || {}).map((k) =>
+    '<a class="pill ok" href="' + esc(p.links[k]) + '" target="_blank" rel="noopener">↗ ' + (NETNAME[k] || k) + '</a>').join(' ');
+
+  $('sheet').innerHTML = '<div class="sheet">'
+    + '<div class="sheethead"><button class="back" id="bk">‹ Назад</button><b>' + (done ? '✈️ Опублікований' : '📝 Чернетка') + '</b>'
+    + (p.review === 'approved' && !done ? '<span class="pill ok">✅</span>' : '') + '</div>'
+    + (p.filename ? '<img class="thumb" src="/media/' + esc(p.filename) + '" alt="">' : '')
+    + '<textarea id="et">' + esc(p.content || '') + '</textarea>'
+    + '<div class="acts">'
+    + '<button id="aPhoto">🖼 Фото</button>'
+    + '<button id="aAi">🎨 AI-фото</button>'
+    + '<button id="aRw">🤖 Переписати</button>'
+    + '</div>'
+    + (p.filename ? '<button class="go ghost" id="aDelPic">🗑 Прибрати фото</button>' : '')
+    + '<div class="nets" id="enets">' + netBtns + '</div>'
+    + (p.scheduled_at ? '<div class="meta"><span class="pill warn">🗓 ' + fmtWhen(p.scheduled_at) + '</span>'
+        + '<button class="back" id="aUnsched">скасувати</button></div>' : '')
+    + (links ? '<div class="meta">' + links + '</div>' : '')
+    + '<div class="msg" id="em"></div>'
+    + (done ? '' :
+        '<button class="go" id="aPub">🚀 Опублікувати зараз</button>'
+        + '<button class="go ghost" id="aWhen">🗓 Запланувати</button>'
+        + '<button class="go ghost" id="aAppr">' + (p.review === 'approved' ? '↩ Вернути в чернетки' : '✅ Затвердити') + '</button>'
+        + '<button class="go danger" id="aDel">🗑 Видалити</button>')
+    + '<input type="file" id="ef" accept="image/*" style="display:none">'
+    + '</div>';
+
+  $('bk').onclick = () => saveText().then(() => closeEditor(true));
+  $('enets').querySelectorAll('.net:not([disabled])').forEach((b) => b.onclick = async () => {
+    const k = b.dataset.n;
+    cur.channels = cur.channels || {};
+    cur.channels[k] = { ...(cur.channels[k] || {}), on: !(cur.channels[k] && cur.channels[k].on) };
+    await api('/post/' + cur.id, { method: 'PUT', body: JSON.stringify({ channels: cur.channels }) });
+    b.classList.toggle('on', cur.channels[k].on);
+  });
+  $('aPhoto').onclick = () => $('ef').click();
+  $('ef').onchange = uploadPhoto;
+  $('aAi').onclick = genImage;
+  $('aRw').onclick = aiRewrite;
+  if ($('aDelPic')) $('aDelPic').onclick = async () => {
+    await api('/post/' + cur.id + '/media', { method: 'DELETE' });
+    cur.filename = null; drawEditor();
+  };
+  if ($('aUnsched')) $('aUnsched').onclick = async () => {
+    await api('/post/' + cur.id + '/schedule', { method: 'DELETE' });
+    cur.scheduled_at = null; drawEditor();
+  };
+  if ($('aPub')) $('aPub').onclick = doPublish;
+  if ($('aWhen')) $('aWhen').onclick = drawWhen;
+  if ($('aAppr')) $('aAppr').onclick = async () => {
+    const r = await api('/post/' + cur.id + '/approve', { method: 'POST', body: JSON.stringify({ approved: cur.review !== 'approved' }) });
+    cur.review = r.review; haptic('success'); drawEditor();
+  };
+  if ($('aDel')) $('aDel').onclick = async () => {
+    if (!confirm('Видалити цю чернетку?')) return;
+    try { await api('/post/' + cur.id, { method: 'DELETE' }); closeEditor(true); }
+    catch (e) { $('em').textContent = '⚠️ ' + e.message; }
+  };
+}
+
+// текст зберігаємо на виході з редактора: автозбереження на кожен символ у чаті-застосунку
+// давало б запит на кожну літеру, а «Зберегти» окремою кнопкою люди забувають натиснути
+async function saveText() {
+  const el = $('et'); if (!el || !cur) return;
+  const t = el.value.trim();
+  if (!t || t === cur.content) return;
+  cur.content = t;
+  try { await api('/post/' + cur.id, { method: 'PUT', body: JSON.stringify({ text: t }) }); } catch (e) { /* покажемо на наступній дії */ }
+}
+
+async function uploadPhoto(e) {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  $('em').textContent = '🖼 Завантажую…';
+  try {
+    const fd = new FormData(); fd.append('file', f, f.name || 'photo.jpg');
+    const r = await api('/post/' + cur.id + '/media', { method: 'POST', body: fd });
+    cur.filename = r.filename; haptic('success'); drawEditor();
+  } catch (err) { $('em').textContent = '⚠️ ' + err.message; }
+}
+
+async function genImage() {
+  await saveText();
+  $('aAi').disabled = true; $('em').textContent = '🎨 Малюю…';
+  try {
+    const r = await runJob('/post/' + cur.id + '/image', { aspect: '4:5' }, (s) => { $('em').textContent = '🎨 Малюю… ' + s + 'с'; });
+    cur.filename = r.filename; haptic('success'); drawEditor();
+  } catch (e) { $('em').textContent = '⚠️ ' + e.message; if ($('aAi')) $('aAi').disabled = false; }
+}
+
+async function aiRewrite() {
+  await saveText();
+  const instruction = prompt('Що змінити? (порожньо - просто переписати в голосі бренду)') ;
+  if (instruction === null) return;
+  $('aRw').disabled = true; $('em').textContent = '🤖 Переписую…';
+  try {
+    const r = await runJob('/post/' + cur.id + '/rewrite', { instruction }, (s) => { $('em').textContent = '🤖 Переписую… ' + s + 'с'; });
+    cur.content = r.text; haptic('success'); drawEditor();
+  } catch (e) { $('em').textContent = '⚠️ ' + e.message; if ($('aRw')) $('aRw').disabled = false; }
+}
+
+function drawWhen() {
+  // повторний клік ховає вибір часу: інакше на екрані стояли б ДВІ кнопки «Запланувати» -
+  // підтвердження в пікері й та, що його відкрила, і незрозуміло, яка з них справжня
+  if ($('em').querySelector('.when')) { $('em').innerHTML = ''; $('aWhen').textContent = '🗓 Запланувати'; return; }
+  $('aWhen').textContent = '‹ Сховати вибір часу';
+  const n = tzParts(new Date());
+  const opts = [];
+  const mk = (shift, hh) => ({ at: zonedToUtc(n.y, n.mo, n.d + shift, hh, 0), label: (shift ? 'Завтра' : 'Сьогодні') + ' ' + String(hh).padStart(2, '0') + ':00' });
+  if (n.hh < 11) opts.push(mk(0, 12));
+  if (n.hh < 17) opts.push(mk(0, 18));
+  opts.push(mk(1, 9), mk(1, 12), mk(1, 18));
+  $('em').innerHTML = '<div class="when">'
+    + opts.map((o, i) => '<button data-w="' + i + '">' + o.label + '</button>').join('')
+    + '</div><input class="txt" id="ewx" placeholder="або своя дата: 21.08 14:30"><button class="go ghost" id="ewgo">✓ Поставити на цей час</button>';
+  $('em').querySelectorAll('[data-w]').forEach((b) => b.onclick = () => doSchedule(opts[+b.dataset.w].at));
+  $('ewgo').onclick = () => {
+    const m = String($('ewx').value || '').match(/(\d{1,2})[.\/](\d{1,2})(?:[.\/](\d{4}))?\D+(\d{1,2}):(\d{2})/);
+    // час ЛИШЕ через двокрапку - «01.08» це водночас 1 серпня і 01:08, а вгадування коштує
+    // посту, що вийшов не того дня (те саме правило, що в боті)
+    if (!m) { $('ewx').value = ''; $('ewx').placeholder = 'формат: 21.08 14:30'; return; }
+    doSchedule(zonedToUtc(m[3] ? +m[3] : tzParts(new Date()).y, +m[2], +m[1], +m[4], +m[5]));
+  };
+}
+
+async function doSchedule(at) {
+  $('em').textContent = '🗓 Плану…';
+  try {
+    const r = await api('/post/' + cur.id + '/schedule', { method: 'POST', body: JSON.stringify({ at: at.toISOString() }) });
+    haptic('success');
+    cur = await api('/post/' + cur.id);
+    drawEditor();
+    $('em').textContent = r.message || 'Заплановано';
+  } catch (e) { $('em').textContent = '⚠️ ' + e.message; }
+}
+
+async function doPublish() {
+  await saveText();
+  const ch = cur.channels || {};
+  const on = Object.keys(ch).filter((k) => ch[k] && ch[k].on && !(cur.sent || []).includes(k));
+  if (!on.length) { $('em').textContent = 'Обери хоч один канал, у який ще не публікували.'; return; }
+  if ($('aPub')) $('aPub').disabled = true;
+  $('em').textContent = '🚀 Публікую…';
+  try {
+    // публікація - фонова джоба: Instagram і Threads обробляють медіа асинхронно (до 40с кожен),
+    // тож синхронний запит рвався об 60-секундний таймаут nginx і показував 504 на пості,
+    // який насправді виходив далі
+    await api('/post/' + cur.id + '/publish', { method: 'POST' });
+    const t0 = Date.now();
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 1500));
+      let j = null; try { j = await api('/post/' + cur.id + '/publish-job'); } catch (e) { /* мережа моргнула */ }
+      if (j && j.status === 'done') { haptic('success'); break; }
+      if (j && j.status === 'error') throw new Error(j.error || 'публікація не вдалась');
+      if (Date.now() - t0 > 5 * 60 * 1000) throw new Error('публікація триває надто довго - перевір канал');
+      $('em').textContent = '🚀 Публікую… ' + Math.round((Date.now() - t0) / 1000) + 'с';
+    }
+    // перечитуємо ФАКТИЧНИЙ стан: частина мереж могла пройти, а частина ні - показувати
+    // «опубліковано» чи «не вийшло» цілком було б брехнею
+    cur = await api('/post/' + cur.id);
+    drawEditor();
+    $('em').textContent = (cur.sent || []).length ? '✅ Опубліковано: ' + cur.sent.map((k) => (NETNAME[k] || k)).join(', ') : 'Нічого не відправлено.';
+  } catch (e) {
+    try { cur = await api('/post/' + cur.id); drawEditor(); } catch (e2) { /* лишаємо як є */ }
+    $('em').textContent = '⚠️ ' + e.message;
+  }
 }
 
 (async function boot() {
@@ -178,6 +481,7 @@ function drawMat(m) {
   try {
     const me = await api('/me');
     NETS = me.nets || [];
+    TZ = me.tz || TZ;
     draft.nets = NETS.includes('telegram') ? ['telegram'] : [];
     render();
   } catch (e) { $('view').innerHTML = '<div class="empty">⚠️ ' + esc(e.message) + '</div>'; }

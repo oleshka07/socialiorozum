@@ -202,7 +202,66 @@ const KIE_IMAGE = [
   { id: "qwen3/pro-text-to-image", category: "image", description: "фотореалізм", credits: 4, usd: 0.02, unit: "per image", provider: "qwen" },
 ];
 
+// ---- Mini App (Telegram). Стан справжній: чернетка змінюється діями, як у житті, - інакше
+// перевірка «затвердив → бачу ✅» доводила б лише те, що заглушка вміє віддавати константу.
+const TGP = {
+  id: "tg-post-1",
+  content: "Пост із Mini App про підрядників",
+  channels: { telegram: { on: true } },
+  review: null, rubric: null, filename: null, scheduled_at: null, slot_id: null, sent: [], links: {},
+};
+function handleTg(method, path, body) {
+  if (path === "/me") return { ok: true, drafts: 2, materials: 2, nets: ["telegram", "threads"], tz: "Europe/Kyiv" };
+  if (path === "/materials") return { items: [{ id: "m1", title: "📔 Щоденник, 30 липня", origin: "diary", ai_score: 9, created_at: iso(0, 8), transcript: "Дзвінок з постачальником." }] };
+  if (path === "/drafts") {
+    return { items: [
+      { ...TGP, sent: TGP.sent.length > 0, sentNets: TGP.sent, created_at: iso(0, 9) },
+      { id: "tg-post-2", content: "Уже опублікований", channels: { telegram: { on: true } }, review: "approved", filename: "pic.jpg", scheduled_at: null, sent: true, sentNets: ["telegram"], created_at: iso(-2, 9) },
+    ] };
+  }
+  if (path === "/schedule") {
+    return { items: TGP.scheduled_at
+      ? [{ id: "sl1", post_id: TGP.id, scheduled_at: TGP.scheduled_at, status: "planned", result: null, content: TGP.content, channels: TGP.channels, filename: TGP.filename }]
+      : [] };
+  }
+  if (method === "POST" && path === "/post") return { ok: true, id: TGP.id };
+  let m = /^\/post\/([\w-]+)$/.exec(path);
+  if (m && method === "GET") return { ...TGP };
+  if (m && method === "PUT") {
+    if (typeof body?.text === "string" && body.text.trim()) TGP.content = body.text.trim();
+    if (body?.channels) TGP.channels = body.channels;
+    return { ok: true };
+  }
+  if (m && method === "DELETE") return { ok: true };
+  m = /^\/post\/([\w-]+)\/(\w[\w-]*)$/.exec(path);
+  if (m) {
+    const act = m[2];
+    if (act === "media" && method === "POST") { TGP.filename = "uploaded.jpg"; return { ok: true, filename: "uploaded.jpg" }; }
+    if (act === "media" && method === "DELETE") { TGP.filename = null; return { ok: true }; }
+    if (act === "approve") { TGP.review = body?.approved === false ? "review" : "approved"; return { ok: true, review: TGP.review }; }
+    if (act === "schedule" && method === "POST") { TGP.scheduled_at = body?.at; TGP.review = "approved"; return { ok: true, message: "🗓 Заплановано" }; }
+    if (act === "schedule" && method === "DELETE") { TGP.scheduled_at = null; return { ok: true }; }
+    if (act === "image") { tgJob = { kind: "image", polls: 0 }; return { jobId: "j-img" }; }
+    if (act === "rewrite") { tgJob = { kind: "rewrite", polls: 0 }; return { jobId: "j-rw" }; }
+    if (act === "publish") { tgPubPolls = 0; TGP.sent = ["telegram"]; TGP.links = { telegram: TG_LINK }; return { started: true, status: "running" }; }
+    if (act === "publish-job") { tgPubPolls++; return tgPubPolls < 2 ? { status: "running" } : { status: "done", message: "Опубліковано" }; }
+  }
+  m = /^\/material\/([\w-]+)\/post$/.exec(path);
+  if (m) { tgJob = { kind: "mat", polls: 0 }; return { jobId: "j-mat" }; }
+  if (/^\/job\//.test(path)) {
+    if (!tgJob) return { status: "idle" };
+    tgJob.polls++;
+    if (tgJob.polls < 2) return { status: "running" };
+    if (tgJob.kind === "image") { TGP.filename = "ai.jpg"; return { status: "done", result: { filename: "ai.jpg" } }; }
+    if (tgJob.kind === "rewrite") { TGP.content = "Переписаний AI варіант поста"; return { status: "done", result: { text: TGP.content } }; }
+    return { status: "done", result: { id: TGP.id } };
+  }
+  return {};
+}
+let tgJob = null, tgPubPolls = 0;
+
 function handleApi(method, path, body) {
+  if (path.startsWith("/tg/")) return handleTg(method, path.slice(3), body);
   const key = method + " " + path.split("?")[0];
   if (key === "GET /admin/keys") return { keys: KEYS, kie: { ready: KEYS[1].set, credits: KEYS[1].set ? 1200 : null } };
   if (method === "PUT" && path.startsWith("/admin/keys/")) {
@@ -293,7 +352,7 @@ const server = createServer((req, res) => {
     res.end(PNG);
     return;
   }
-  const file = url === "/app" || url === "/" ? "app.html" : url.split("?")[0].replace(/^\//, "");
+  const file = url === "/app" || url === "/" ? "app.html" : url === "/tgapp" ? "tgapp.html" : url.split("?")[0].replace(/^\//, "");
   const p = join(PUB, file);
   if (!existsSync(p) || !p.startsWith(PUB)) {
     res.writeHead(404).end("nope");
@@ -893,6 +952,114 @@ const run = async () => {
     await page.waitForTimeout(200);
     const st = await page.evaluate(() => ({ left: document.getElementById("owl").style.left, atHome: document.getElementById("owl").dataset.atHome }));
     return st.left !== before && st.atHome === "0";
+  });
+
+  // ---------------------------------------------------------- 12. Telegram Mini App (/tgapp)
+  // Окрема сторінка з ПІДМІНЕНИМ SDK Telegram: справжній скрипт telegram.org у пісочниці
+  // недосяжний, а без `initData` застосунок свідомо показує заглушку замість екрана.
+  const tgPage = await browser.newPage({ viewport: { width: 390, height: 820 } });
+  tgPage.on("pageerror", (e) => pageErrors.push("tgapp pageerror: " + e.message));
+  await tgPage.route("**/*", (route) => {
+    const u = route.request().url();
+    return u.includes("127.0.0.1:" + PORT) || u.includes("localhost:" + PORT) ? route.continue() : route.abort();
+  });
+  await tgPage.addInitScript(() => {
+    window.Telegram = { WebApp: { initData: "smoke-signed", ready() {}, expand() {}, HapticFeedback: { notificationOccurred() {} } } };
+    window.confirm = () => true; window.alert = () => {}; window.prompt = () => "коротше";
+  });
+  await tgPage.goto(`http://127.0.0.1:${PORT}/tgapp`, { waitUntil: "domcontentloaded" });
+  await tgPage.waitForFunction(() => document.querySelector("#view textarea"), undefined, { timeout: 15000 });
+  const tgTab = async (t) => {
+    await tgPage.click(`.tab[data-t="${t}"]`);
+    await tgPage.waitForTimeout(120);
+  };
+
+  // SMOKE_SHOTS=1 - зняти екрани Mini App у .lint/ (вони в .gitignore). Верстку телефона
+  // перевірками не побачиш: «дві однакові кнопки Запланувати» знайшлось саме скріншотом.
+  if (process.env.SMOKE_SHOTS) {
+    const shot = (n) => tgPage.screenshot({ path: join(HERE, `tgapp-${n}.png`), fullPage: true });
+    await shot("1-new");
+    await tgTab("drafts"); await tgPage.waitForSelector(".card[data-id]", { timeout: 8000 }); await shot("2-drafts");
+    await tgPage.click(".card[data-id]"); await tgPage.waitForSelector(".sheet #et", { timeout: 8000 }); await shot("3-editor");
+    await tgPage.click("#aWhen"); await tgPage.waitForSelector("#em .when button", { timeout: 6000 }); await shot("4-when");
+    await tgPage.click("#aWhen"); await tgPage.click(".sheet #bk"); await tgTab("new"); await tgPage.waitForTimeout(300);
+  }
+  await check("tgappNew", async () => {
+    // канали мусять доїхати з /me, а не бути захардкодженими в розмітці
+    const nets = await tgPage.$$eval("#nets .net", (els) => els.map((e) => e.textContent.trim()));
+    await tgPage.fill("#view textarea", "Новий пост із Mini App");
+    await tgPage.click("#save");
+    // збереження одразу відкриває редактор - інакше людина не знає, де шукати створене
+    await tgPage.waitForSelector(".sheet #et", { timeout: 8000 });
+    const opened = await tgPage.$eval(".sheet #et", (el) => el.value.length > 0);
+    await tgPage.click(".sheet #bk");
+    await tgPage.waitForTimeout(200);
+    return nets.length === 2 && nets[0].includes("Telegram") && opened;
+  });
+
+  await check("tgappEditor", async () => {
+    // фото з телефона, AI-фото і переписування - саме те, чого в застосунку не було
+    await tgTab("drafts");
+    await tgPage.waitForSelector(".card[data-id]", { timeout: 8000 });
+    await tgPage.click(".card[data-id]");
+    await tgPage.waitForSelector(".sheet #et", { timeout: 8000 });
+    const acts = await tgPage.$$eval(".sheet .acts button", (els) => els.map((e) => e.textContent.trim()));
+    await tgPage.click("#aAi");                              // AI-фото йде ДЖОБОЮ (перший опит «running»)
+    await tgPage.waitForSelector(".sheet img.thumb", { timeout: 12000 });
+    const pic = await tgPage.$eval(".sheet img.thumb", (el) => el.getAttribute("src"));
+    await tgPage.click("#aRw");                              // переписування - теж джоба
+    await tgPage.waitForFunction(() => document.querySelector(".sheet #et").value.includes("Переписаний"), undefined, { timeout: 12000 });
+    return acts.length === 3 && acts.some((a) => a.includes("Фото")) && pic.includes("ai.jpg");
+  });
+
+  await check("tgappApprove", async () => {
+    const before = await tgPage.$eval("#aAppr", (el) => el.textContent);
+    await tgPage.click("#aAppr");
+    await tgPage.waitForFunction(() => document.getElementById("aAppr").textContent.includes("Вернути"), undefined, { timeout: 6000 });
+    const badge = await tgPage.$eval(".sheethead", (el) => el.textContent);
+    return before.includes("Затвердити") && badge.includes("✅");
+  });
+
+  await check("tgappSchedule", async () => {
+    await tgPage.click("#aWhen");
+    await tgPage.waitForSelector("#em .when button", { timeout: 6000 });
+    const slots = await tgPage.$$eval("#em .when button", (els) => els.map((e) => e.textContent));
+    await tgPage.click("#em .when button");
+    await tgPage.waitForSelector("#aUnsched", { timeout: 8000 });   // після планування видно дату й «скасувати»
+    const pill = await tgPage.$eval(".sheet .meta .pill.warn", (el) => el.textContent);
+    // план мусить показати той самий пост - без цього «запланував» лишалось словом
+    await tgPage.click(".sheet #bk");
+    await tgTab("plan");
+    await tgPage.waitForSelector(".card[data-id]", { timeout: 8000 });
+    const planned = await tgPage.$eval("#view", (el) => el.textContent);
+    return slots.length >= 3 && pill.includes("🗓") && planned.includes("Переписаний");
+  });
+
+  await check("tgappPublish", async () => {
+    await tgTab("drafts");
+    await tgPage.waitForSelector(".card[data-id]", { timeout: 8000 });
+    await tgPage.click(".card[data-id]");
+    await tgPage.waitForSelector("#aPub", { timeout: 8000 });
+    await tgPage.click("#aPub");
+    // після публікації картка мусить перечитати ФАКТИЧНИЙ стан: канал стає ✓ і зʼявляється лінк
+    await tgPage.waitForFunction(() => document.querySelector(".sheet .meta a"), undefined, { timeout: 15000 });
+    const st = await tgPage.evaluate(() => ({
+      link: document.querySelector(".sheet .meta a").getAttribute("href"),
+      locked: !!document.querySelector('.sheet .net[disabled]'),
+      noPub: !document.getElementById("aPub"),
+      head: document.querySelector(".sheethead").textContent,
+    }));
+    return st.link.includes("t.me") && st.locked && st.noPub && st.head.includes("Опублікований");
+  });
+
+  await check("tgappMaterial", async () => {
+    await tgPage.click(".sheet #bk");
+    await tgTab("mats");
+    await tgPage.waitForSelector("[data-mk]", { timeout: 8000 });
+    await tgPage.click("[data-mk]");
+    // матеріал → пост іде джобою і одразу відкриває редактор із написаним текстом
+    await tgPage.waitForSelector(".sheet #et", { timeout: 15000 });
+    return (await tgPage.$eval(".sheet #et", (el) => el.value.length > 5));
   });
 
   await browser.close();

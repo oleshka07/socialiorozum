@@ -185,10 +185,11 @@ async function sendIdeaList(workspaceId: string, chatId: string): Promise<void> 
 // TG_MENU: підказки в ☰; кнопка ліворуч від поля вводу відкриває Mini App; постійна клавіатура
 // дублює найчастіші дії текстом (натиснув - Telegram надіслав саме цей рядок, ми його роутимо).
 const MINIAPP_URL = `${env.appBaseUrl}/tgapp`;
-const KB_NEW = "✍️ Новий пост", KB_APP = "🚀 Кабінет", KB_IDEAS = "💡 Ідеї", KB_DIARY = "📔 Щоденник", KB_DIGEST = "☀️ Зведення";
+const KB_NEW = "✍️ Новий пост", KB_APP = "🚀 Кабінет", KB_IDEAS = "💡 Ідеї", KB_DIARY = "📔 Щоденник", KB_PLAN = "📅 План", KB_DIGEST = "☀️ Зведення";
 async function registerMenu(token: string): Promise<void> {
   await tg.setMyCommands(token, [
     { command: "post", description: "Новий пост: текст, фото, канали, публікація" },
+    { command: "plan", description: "Що заплановано найближчим часом" },
     { command: "idea", description: "Банк ідей" },
     { command: "diary", description: "Записати в щоденник" },
     { command: "digest", description: "Зведення дня" },
@@ -197,8 +198,35 @@ async function registerMenu(token: string): Promise<void> {
 }
 const mainKeyboard = (): tg.TgKbButton[][] => [
   [{ text: KB_NEW }, { text: KB_APP, web_app: { url: MINIAPP_URL } }],
-  [{ text: KB_IDEAS }, { text: KB_DIARY }, { text: KB_DIGEST }],
+  [{ text: KB_PLAN }, { text: KB_IDEAS }, { text: KB_DIARY }, { text: KB_DIGEST }],
 ];
+
+// 📅 Що заплановано. Запланувати з бота було можна ще раніше, а ПОБАЧИТИ чергу - ніде: людина
+// не пам'ятала, що вже стоїть у розкладі, і планувала двічі або не планувала зовсім.
+async function sendPlan(ws: string, chatId: string): Promise<void> {
+  const rows = await q<{ post_id: string; scheduled_at: string; content: string; channels: any }>(
+    `select ss.post_id, ss.scheduled_at, p.content, coalesce(ss.channels, p.channels) as channels
+       from schedule_slot ss join post p on p.id=ss.post_id
+       join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+     where s.workspace_id=$1 and ss.status='planned' and ss.scheduled_at > now()
+     order by ss.scheduled_at limit 8`, [ws]);
+  if (!rows.length) {
+    await liveSend(ws, chatId, "plan", "📅 Нічого не заплановано.\n\nВідкрий чернетку (/post або «📝 Пости» в застосунку) і натисни «🗓 Запланувати».");
+    return;
+  }
+  const tzRow = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='timezone'`, [ws]);
+  const tz = tzRow?.content || "Europe/Kyiv";
+  const fmt = new Intl.DateTimeFormat("uk-UA", { timeZone: tz, weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const lines = rows.map((r) => {
+    const nets = Object.keys(r.channels || {}).filter((k) => r.channels[k] && r.channels[k].on);
+    const head = r.content.split("\n").find(Boolean) || "";
+    return `🗓 <b>${fmt.format(new Date(r.scheduled_at))}</b> · ${nets.join(", ") || "без каналів"}\n${escHtml(head.slice(0, 90))}`;
+  });
+  // кнопка веде в композер того самого поста - звідти можна перенести час або опублікувати одразу
+  const buttons = rows.slice(0, 4).map((r) => [{ text: `✍ ${fmt.format(new Date(r.scheduled_at))}`, data: `cc:${r.post_id}` }]);
+  await liveSend(ws, chatId, "plan", `📅 <b>Найближчі публікації</b>\n\n${lines.join("\n\n")}`, buttons);
+}
+const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 export async function handleUpdate(update: any, tokenOverride?: string): Promise<void> {
   const token = tokenOverride || env.telegram.botToken; if (!token) return;
@@ -225,11 +253,12 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
     }
 
     // кнопки постійної клавіатури приходять звичайним текстом - зводимо їх до тих самих дій
-    if (text === KB_NEW || text === KB_IDEAS || text === KB_DIARY || text === KB_DIGEST) {
+    if (text === KB_NEW || text === KB_IDEAS || text === KB_DIARY || text === KB_PLAN || text === KB_DIGEST) {
       const ws = await ownerWorkspace(fromId);
       if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio."); return; }
-      if (text === KB_IDEAS)  { await sendIdeaList(ws, chatId); return; }
-      if (text === KB_DIARY)  { await sendDiaryNow(ws, chatId); return; }
+      if (text === KB_IDEAS) { await sendIdeaList(ws, chatId); return; }
+      if (text === KB_DIARY) { await sendDiaryNow(ws, chatId); return; }
+      if (text === KB_PLAN)  { await sendPlan(ws, chatId); return; }
       if (text === KB_DIGEST) { await sendDigestNow(ws, chatId); return; }
       await cmp.expect(ws, "", "text", chatId);
       await tg.sendMessage(token, chatId, "📝 Надішли текст поста наступним повідомленням.");
@@ -258,6 +287,14 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
       const ws = await ownerWorkspace(fromId);
       if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio (кнопка «Підключити наш бот»)."); return; }
       await sendIdeaList(ws, chatId);
+      return;
+    }
+
+    // /plan — черга публікацій (запланувати з бота можна було й раніше, побачити чергу - ніде)
+    if (text.toLowerCase().startsWith("/plan")) {
+      const ws = await ownerWorkspace(fromId);
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio."); return; }
+      await sendPlan(ws, chatId);
       return;
     }
 
@@ -404,6 +441,7 @@ async function composeCallback(ws: string, chatId: string, data: string, cbq: an
     case "cp":  await cmp.expect(ws, postId, "photo", chatId); await tg.answerCallbackQuery(token, cbq.id, "Надішли фото"); await tg.sendMessage(token, chatId, "🖼 Надішли фото наступним повідомленням."); return true;
     case "ce":  await cmp.expect(ws, postId, "text", chatId);  await tg.answerCallbackQuery(token, cbq.id, "Надішли новий текст"); await tg.sendMessage(token, chatId, "✍ Надішли новий текст поста."); return true;
     case "cr":  await cmp.expect(ws, postId, "rewrite", chatId); await tg.answerCallbackQuery(token, cbq.id); await tg.sendMessage(token, chatId, "🤖 Що саме змінити? Напиши побажання (або «-», щоб просто переписати іншими словами)."); return true;
+    case "ca":  await tg.answerCallbackQuery(token, cbq.id, await cmp.toggleApprove(ws, postId)); await openCompose(ws, chatId, postId, token); return true;
     case "cgo": {
       await tg.answerCallbackQuery(token, cbq.id, "Публікую…");
       let out: string; try { out = await cmp.publishNow(ws, postId); } catch (e: any) { out = "⚠️ " + String(e.message).slice(0, 200); }

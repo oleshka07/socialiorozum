@@ -90,10 +90,10 @@ export async function createBotDraft(ws: string, text: string): Promise<string> 
   return p!.id;
 }
 
-type PostRow = { id: string; content: string; channels: any; filename: string | null };
+type PostRow = { id: string; content: string; channels: any; filename: string | null; review: string | null };
 async function loadPost(ws: string, postId: string): Promise<PostRow | null> {
   return one<PostRow>(
-    `select p.id, p.content, p.channels, ma.filename from post p
+    `select p.id, p.content, p.channels, p.review, ma.filename from post p
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
        left join media_asset ma on ma.id=p.media_id
      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
@@ -112,7 +112,7 @@ export async function composeCard(ws: string, postId: string): Promise<{ text: s
   const when = slot ? new Intl.DateTimeFormat("uk-UA", { timeZone: tz, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(slot.scheduled_at)) : "";
 
   const body = p.content.length > 600 ? p.content.slice(0, 600) + "…" : p.content;
-  const text = `📝 <b>Чернетка</b>\n\n${esc(body)}\n\n`
+  const text = `📝 <b>${p.review === "approved" ? "Затверджено" : "Чернетка"}</b>\n\n${esc(body)}\n\n`
     + `🖼 Фото: ${p.filename ? "є" : "нема"}\n`
     + `📢 Канали: ${chosen.length ? chosen.map(niceNet).join(", ") : "не обрано"}`
     + (when ? `\n🗓 Заплановано: ${when}` : "");
@@ -126,9 +126,19 @@ export async function composeCard(ws: string, postId: string): Promise<{ text: s
   }
   rows.push([{ text: p.filename ? "🖼 Змінити фото" : "🖼 Додати фото", data: `cp:${postId}` },
              { text: "✍ Текст", data: `ce:${postId}` }]);
-  rows.push([{ text: "🤖 Переписати (AI)", data: `cr:${postId}` }]);
+  rows.push([{ text: "🤖 Переписати (AI)", data: `cr:${postId}` },
+             { text: p.review === "approved" ? "↩ У чернетки" : "✅ Затвердити", data: `ca:${postId}` }]);
   rows.push([{ text: "🚀 Опублікувати", data: `cgo:${postId}` }, { text: "🗓 Запланувати", data: `cs:${postId}` }]);
   return { text, buttons: rows };
+}
+
+// «затверджено» - той самий прапорець `review`, що в Студії й Mini App: пост, схвалений з телефона,
+// має рахуватись схваленим і в кабінеті, інакше це два різні поняття з однією назвою
+export async function toggleApprove(ws: string, postId: string): Promise<string> {
+  const p = await loadPost(ws, postId); if (!p) throw new Error("пост не знайдено");
+  const on = p.review !== "approved";
+  await q(`update post set review=$2 where id=$1`, [postId, on ? "approved" : "review"]);
+  return on ? "✅ Затверджено" : "↩ Вернуто в чернетки";
 }
 
 const niceNet = (k: string) => (NETS.find((n) => n[0] === k) || [k, k])[1];

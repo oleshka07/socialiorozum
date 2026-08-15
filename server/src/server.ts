@@ -15,7 +15,7 @@ import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
 import { tgLink, fbLink, liLink } from "./permalink.js";
 import { verifyInitData } from "./tgauth.js";
-import { createBotDraft, publishNow, connectedNets } from "./tgcompose.js";
+import { createBotDraft, publishNow, connectedNets, schedule as tgSchedule, aiRewrite as tgRewrite } from "./tgcompose.js";
 import * as linkedin from "./linkedin.js";
 import * as youtube from "./youtube.js";
 import * as tiktok from "./tiktok.js";
@@ -133,7 +133,9 @@ if (env.beta.pin) {
 document.getElementById('p').addEventListener('keydown',e=>{if(e.key==='Enter')go();});</script></body></html>`;
   app.addHook("onRequest", async (req: any, reply) => {
     const url = (req.raw.url || "").split("?")[0];
-    if (url === "/health" || url === "/beta-pin" || url === "/favicon.svg" || url.startsWith("/api/webhooks/") || url.startsWith("/media/")) return;
+    // `/thumb/` тут разом із `/media/`: прев'ю в Mini App інакше отримало б PIN-сторінку замість
+    // картинки, а нової експозиції в ньому нема - це та сама картинка, лише менша
+    if (url === "/health" || url === "/beta-pin" || url === "/favicon.svg" || url.startsWith("/api/webhooks/") || url.startsWith("/media/") || url.startsWith("/thumb/")) return;
     // Mini App живе всередині Telegram - PIN там ввести ніде, а захист у нього свій (підпис initData)
     if (url === "/tgapp" || url.startsWith("/api/tg/")) return;
     if (req.cookies?.[PIN_COOKIE] === pinToken) return;
@@ -3071,7 +3073,10 @@ app.get("/api/tg/me", async (req: any, reply) => {
     one<{ c: string }>(`select count(*)::text c from source where workspace_id=$1 and archived=false`, [u.ws]),
     connectedNets(u.ws),
   ]);
-  return { ok: true, drafts: +(drafts?.c || 0), materials: +(mats?.c || 0), nets };
+  const tz = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='timezone'`, [u.ws]);
+  // таймзона потрібна клієнту, щоб «завтра о 9:00» означало 9:00 у ПОЯСІ ВОРКСПЕЙСУ, а не в
+  // тому, який стоїть на телефоні (людина в подорожі планувала б пости не туди)
+  return { ok: true, drafts: +(drafts?.c || 0), materials: +(mats?.c || 0), nets, tz: tz?.content || "Europe/Kyiv" };
 });
 
 // 📥 джерела/матеріали: свіже зверху, коротким тілом (у телефоні довгі полотна ніхто не читає)
@@ -3087,22 +3092,173 @@ app.get("/api/tg/materials", async (req: any, reply) => {
 // 📝 чорновики: те саме, що Студія, але лише найпотрібніше
 app.get("/api/tg/drafts", async (req: any, reply) => {
   const u = await tgGuard(req, reply); if (!u) return;
-  const rows = await q<{ id: string; content: string; review: string | null; channels: any; created_at: string }>(
-    `select p.id, p.content, p.review, p.channels, p.created_at from post p
+  const rows = await q<{ id: string; content: string; review: string | null; channels: any; created_at: string; filename: string | null; scheduled_at: string | null }>(
+    `select p.id, p.content, p.review, p.channels, p.created_at, ma.filename,
+            (select min(ss.scheduled_at) from schedule_slot ss where ss.post_id=p.id and ss.status='planned') as scheduled_at
+       from post p
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+       left join media_asset ma on ma.id=p.media_id
      where s.workspace_id=$1 and p.stage='final' and (p.review is null or p.review<>'archived')
-     order by p.created_at desc limit 30`, [u.ws]);
-  const ids = rows.map((r) => r.id);
-  const sent = new Set<string>();
-  if (ids.length) {
-    const rs = await q<{ post_id: string }>(
-      `select post_id from telegram_publish where status='sent' and post_id=any($1)
-       union select post_id from threads_publish where status='sent' and post_id=any($1)
-       union select post_id from meta_publish where status='sent' and post_id=any($1)
-       union select post_id from linkedin_publish where status='sent' and post_id=any($1)`, [ids]);
-    rs.forEach((r) => sent.add(r.post_id));
-  }
-  return { items: rows.map((r) => ({ ...r, sent: sent.has(r.id) })) };
+     order by p.created_at desc limit 40`, [u.ws]);
+  const sent = await sentMap(rows.map((r) => r.id));
+  return { items: rows.map((r) => ({ ...r, sent: (sent.get(r.id) || []).length > 0, sentNets: sent.get(r.id) || [] })) };
+});
+
+// які саме мережі вже отримали пост (не просто «так/ні» - у списку це різні статуси)
+async function sentMap(ids: string[]): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  if (!ids.length) return out;
+  const rs = await q<{ post_id: string; net: string }>(
+    `select post_id, 'telegram' as net from telegram_publish where status='sent' and post_id=any($1)
+     union all select post_id, 'threads' from threads_publish where status='sent' and post_id=any($1)
+     union all select post_id, channel from meta_publish where status='sent' and post_id=any($1)
+     union all select post_id, 'linkedin' from linkedin_publish where status='sent' and post_id=any($1)`, [ids]);
+  for (const r of rs) out.set(r.post_id, [...new Set([...(out.get(r.post_id) || []), r.net])]);
+  return out;
+}
+
+// власність поста в межах воркспейсу Mini App - один хелпер на всі дії нижче
+async function tgOwnPost(ws: string, postId: string): Promise<string | null> {
+  const r = await one<{ id: string }>(
+    `select p.id from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+     where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
+  return r?.id ?? null;
+}
+
+// 📄 повна картка поста для редактора Mini App
+app.get("/api/tg/post/:postId", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const p = await one<{ id: string; content: string; channels: any; review: string | null; rubric: string | null; filename: string | null }>(
+    `select p.id, p.content, p.channels, p.review, p.rubric, ma.filename from post p
+       join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+       left join media_asset ma on ma.id=p.media_id
+     where p.id=$1 and s.workspace_id=$2`, [req.params.postId, u.ws]);
+  if (!p) return reply.code(404).send({ error: "пост не знайдено" });
+  const slot = await one<{ id: string; scheduled_at: string }>(
+    `select id, scheduled_at from schedule_slot where post_id=$1 and status='planned' order by scheduled_at limit 1`, [p.id]);
+  const sent = (await sentMap([p.id])).get(p.id) || [];
+  return { ...p, scheduled_at: slot?.scheduled_at || null, slot_id: slot?.id || null, sent, links: await postPermalinks(u.ws, p.id).catch(() => ({})) };
+});
+
+// 🖼 фото з телефона. Без нього Mini App лишався «текстовим блокнотом», хоч усі мережі
+// показують пост із картинкою помітно краще.
+app.post("/api/tg/post/:postId/media", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const id = await tgOwnPost(u.ws, req.params.postId);
+  if (!id) return reply.code(404).send({ error: "пост не знайдено" });
+  try {
+    const part = await req.file();
+    if (!part) return reply.code(400).send({ error: "файл не надійшов" });
+    const m = await saveMedia(u.ws, { buffer: await part.toBuffer(), mime: part.mimetype || "image/jpeg", name: part.filename || "photo.jpg", source: "upload" });
+    if (m.kind !== "image") { await q(`delete from media_asset where id=$1`, [m.id]); return reply.code(400).send({ error: "потрібне зображення" }); }
+    await q(`update post set media_id=$2 where id=$1`, [id, m.id]);
+    return { ok: true, filename: m.filename };
+  } catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+
+// 🎨 AI-зображення: та сама точка, що й у кабінеті (стиль бренду, збереження бази під оверлей)
+app.post("/api/tg/post/:postId/image", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const id = await tgOwnPost(u.ws, req.params.postId);
+  if (!id) return reply.code(404).send({ error: "пост не знайдено" });
+  const job = startAiJob(u.ws, async () => ({ filename: await generateImageForPost(u.ws, id, { aspect: String(req.body?.aspect || "4:5"), prompt: String(req.body?.prompt || "") }) }));
+  return { jobId: job };
+});
+
+app.delete("/api/tg/post/:postId/media", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const id = await tgOwnPost(u.ws, req.params.postId);
+  if (!id) return reply.code(404).send({ error: "пост не знайдено" });
+  await q(`update post set media_id=null where id=$1`, [id]);
+  return { ok: true };
+});
+
+// ✅ затвердити / вернути в чернетки - той самий прапорець review, що й у Студії
+app.post("/api/tg/post/:postId/approve", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const id = await tgOwnPost(u.ws, req.params.postId);
+  if (!id) return reply.code(404).send({ error: "пост не знайдено" });
+  const on = req.body?.approved !== false;
+  await q(`update post set review=$2 where id=$1`, [id, on ? "approved" : "review"]);
+  return { ok: true, review: on ? "approved" : "review" };
+});
+
+// 🗓 планування: реюз тієї самої функції, що й композер у DM (перенос наявного слота, а не
+// другий INSERT - інакше пост вийшов би двічі)
+app.post("/api/tg/post/:postId/schedule", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const id = await tgOwnPost(u.ws, req.params.postId);
+  if (!id) return reply.code(404).send({ error: "пост не знайдено" });
+  const at = new Date(String(req.body?.at || ""));
+  if (isNaN(at.getTime())) return reply.code(400).send({ error: "не зрозумів дату" });
+  return { ok: true, message: await tgSchedule(u.ws, id, at) };
+});
+
+app.delete("/api/tg/post/:postId/schedule", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const id = await tgOwnPost(u.ws, req.params.postId);
+  if (!id) return reply.code(404).send({ error: "пост не знайдено" });
+  await q(`delete from schedule_slot where post_id=$1 and status='planned'`, [id]);
+  return { ok: true };
+});
+
+// 🤖 переписати текст у голосі бренду
+app.post("/api/tg/post/:postId/rewrite", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const id = await tgOwnPost(u.ws, req.params.postId);
+  if (!id) return reply.code(404).send({ error: "пост не знайдено" });
+  const job = startAiJob(u.ws, async () => ({ text: await tgRewrite(u.ws, id, String(req.body?.instruction || "").slice(0, 400)) }));
+  return { jobId: job };
+});
+
+// 🗑 видалення - те саме правило, що в кабінеті: опублікований пост стерти не можна,
+// бо разом із ним пішла б історія публікацій і аналітика
+app.delete("/api/tg/post/:postId", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const id = await tgOwnPost(u.ws, req.params.postId);
+  if (!id) return reply.code(404).send({ error: "пост не знайдено" });
+  const sent = await alreadySentNetworks(id);
+  if (sent.length) return reply.code(409).send({ error: "Пост уже опубліковано - видалення стерло б історію публікацій." });
+  await q(`delete from post where id=$1`, [id]);
+  return { ok: true };
+});
+
+// 📅 що заплановано (найближче зверху) - без цього людина не бачила, коли саме вийде пост
+app.get("/api/tg/schedule", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const rows = await q<{ id: string; post_id: string; scheduled_at: string; status: string; result: string | null; content: string; channels: any; filename: string | null }>(
+    `select ss.id, ss.post_id, ss.scheduled_at, ss.status, ss.result, p.content,
+            coalesce(ss.channels, p.channels) as channels, ma.filename
+       from schedule_slot ss join post p on p.id=ss.post_id
+       join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+       left join media_asset ma on ma.id=p.media_id
+     where s.workspace_id=$1 and ss.scheduled_at > now() - interval '2 days'
+     order by ss.scheduled_at limit 30`, [u.ws]);
+  return { items: rows };
+});
+
+// ✨ матеріал → пост у голосі бренду (той самий Lite-прохід, що й у кабінеті)
+app.post("/api/tg/material/:sourceId/post", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const src = await one<{ id: string }>(`select id from source where id=$1 and workspace_id=$2`, [req.params.sourceId, u.ws]);
+  if (!src) return reply.code(404).send({ error: "матеріал не знайдено" });
+  const job = startAiJob(u.ws, async () => {
+    const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src.id]);
+    await generatePostsOnePass(run!.id, 1);
+    const p = await one<{ id: string }>(`select id from post where run_id=$1 and stage='final' order by created_at desc limit 1`, [run!.id]);
+    if (!p) throw new Error("модель не повернула пост - спробуй ще раз");
+    return { id: p.id };
+  });
+  return { jobId: job };
+});
+
+// статус будь-якої AI-джоби Mini App (зображення / переписування / генерація з матеріалу):
+// довгі виклики не вкладаються у 60-секундне вікно nginx, тож усі вони фонові
+app.get("/api/tg/job/:jobId", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const j = aiJobs.get(req.params.jobId);
+  if (!j || j.ws !== u.ws) return { status: "idle" };
+  return { status: j.status, result: j.result, error: j.error };
 });
 
 // ✍️ створити пост із власного тексту (той самий шлях, що й у боті)
