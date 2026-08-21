@@ -126,7 +126,7 @@ let NETS = [], TZ = 'Europe/Kyiv', tab = 'new', draftFilter = 'active';
 let draft = { text: '', nets: [] };          // «Новий»: чернетка, якої ще нема в базі
 const NETNAME = { telegram:'✈️ Telegram', instagram:'📸 Instagram', facebook:'📘 Facebook', threads:'🧵 Threads', linkedin:'💼 LinkedIn' };
 const ORIGIN = { diary:'📔 щоденник', rss:'📡 RSS', bot:'🤖 з бота', manual:'✍️ нотатка', idea:'💡 ідея', plan:'📅 план',
-                 instagram:'📸 Instagram', fireflies:'🎙 транскрипт', gdrive:'📁 Drive', brand:'✨ бренд', takes:'🧵 тейк', topic:'🎯 тема' };
+                 instagram:'📸 Instagram', fireflies:'🎙 транскрипт', gdrive:'📁 Drive', brand:'✨ бренд', takes:'🧵 тейк', topic:'🎯 тема', meeting:'🎤 зустріч' };
 
 document.querySelectorAll('.tab').forEach((el) => el.onclick = () => {
   tab = el.dataset.t;

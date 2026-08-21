@@ -252,6 +252,7 @@ document.querySelectorAll('#sTabs .tab').forEach(x=>x.onclick=()=>setSTab(x.data
   const mv=(innerId,hostId)=>{ const el=$(innerId), host=$(hostId); if(!el||!host) return null; const p=el.closest('.panel'); if(p){ const g=p.parentElement; host.appendChild(p); if(g&&g.classList.contains('grid2')&&g.children.length<2) g.style.display='block'; } return p; };
   mv('gdStatus','toolsGdriveHost');   // 📁 Google Drive - просунута інтеграція, щоденним Джерелам не потрібна
   mv('ffKey','toolsTransHost');       // 🎙 Транскрибація (Fireflies) - підключається раз
+  mv('mtUrl','toolsTransHost');       // 🎤 свій транскрибатор (Vymova) - поруч, це той самий сценарій
   const tp=$('toolsPipeline'); if(tp) tp.onclick=()=>{
     if(!PRO){ flash('Конвеєр - інструмент режиму PRO (перемкни в меню акаунта)'); return; }
     selectView('create'); setLayout('pipeline'); };
@@ -362,7 +363,7 @@ $('toStudio').onclick=()=>setLayout('studio');
 
 // ---------- МАТЕРІАЛИ: стрічка сировини ----------
 let Mats=[], MatFilter='Усі', MatFeedFilter=null, MatOpen=null, Ideas=[];
-const MAT_TYPE={bot:'🤖 З бота',manual:'✍️ Нотатка',rss:'📡 RSS',fireflies:'🎙 Транскрипт',grain:'🎙 Транскрипт',meetgeek:'🎙 Транскрипт',gdrive:'📁 Drive',brand:'✨ Бренд',plan:'📅 План',idea:'💡 Ідея',diary:'📔 Щоденник'};
+const MAT_TYPE={bot:'🤖 З бота',manual:'✍️ Нотатка',rss:'📡 RSS',fireflies:'🎙 Транскрипт',grain:'🎙 Транскрипт',meetgeek:'🎙 Транскрипт',gdrive:'📁 Drive',brand:'✨ Бренд',plan:'📅 План',idea:'💡 Ідея',diary:'📔 Щоденник',meeting:'🎤 Зустріч'};
 async function loadMaterials(){ try{ const r=await api('/materials'); Mats=r.materials||[]; }catch(e){ Mats=[]; } try{ const ib=await api('/ideas'); Ideas=ib.ideas||[]; }catch(e){ Ideas=[]; } renderMaterials(); updateCounts(); }
 function matType(m){ return MAT_TYPE[m.origin]||m.origin; }
 function renderMaterials(){
@@ -1506,7 +1507,7 @@ function renderFinals(posts){
 async function saveContent(id,v){ try{ await api('/posts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:v})}); flashSaved(); }catch(e){} }
 let StudioFilter='all', StudioRubric='', StudioOrigin='', StudioFormat='';
 const INTENT_META={awareness:['🌱','знайомство','цінність новій аудиторії, без продажу'],nurture:['🤝','прогрів','будує довіру, мʼякий заклик'],sale:['💰','продаж','прямий оффер за сходами']};
-const ORIGIN_LABEL={bot:'🤖 з бота',manual:'✍️ вручну',rss:'📡 RSS',fireflies:'🎙 транскрипт',grain:'🎙 транскрипт',meetgeek:'🎙 транскрипт',brand:'✨ з бренду',gdrive:'📁 Drive',plan:'📅 з плану',diary:'📔 щоденник',takes:'🧵 тейк',idea:'💡 з ідеї'};
+const ORIGIN_LABEL={bot:'🤖 з бота',manual:'✍️ вручну',rss:'📡 RSS',fireflies:'🎙 транскрипт',grain:'🎙 транскрипт',meetgeek:'🎙 транскрипт',brand:'✨ з бренду',gdrive:'📁 Drive',plan:'📅 з плану',diary:'📔 щоденник',takes:'🧵 тейк',idea:'💡 з ідеї',meeting:'🎤 зустріч'};
 const SelPosts=new Set(); // масові дії
 // глобальний список усіх фінальних постів воркспейсу (НЕ привʼязаний до активного джерела/прогону)
 async function loadStudioPosts(){ try{ Finals=(await api('/posts/studio'))||[]; }catch(e){} SelPosts.clear(); renderStudio(); renderInbox(); if(typeof updateCounts==='function') updateCounts(); }
@@ -2943,7 +2944,37 @@ async function openTranscriberModal(){
   q('#trImport').onclick=async()=>{ const el=q('#trList'); el.innerHTML='<div class="empty"><span class="spin"></span> завантаження…</div>'; try{ const l=await api('/transcription/list'); if(!l.length){ el.innerHTML='<div class="empty">Немає зустрічей.</div>'; return; } el.innerHTML=''; l.forEach(t=>{ const d=document.createElement('div'); d.className='card'; d.style.cssText='cursor:pointer;margin-bottom:6px'; d.innerHTML='<b>'+esc(t.title||'Без назви')+'</b>'; d.onclick=async()=>{ el.innerHTML='<div class="empty"><span class="spin"></span> імпорт…</div>'; try{ const r=await api('/transcription/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:t.id})}); runId=r.runId; localStorage.setItem('kg_run',runId); close(); if($('onboarding')) $('onboarding').style.display='none'; go('create'); setLayout('studio'); await refresh(); flash('Імпортовано: '+(r.title||'')); if(typeof loadTasks==='function') loadTasks(); }catch(e){ el.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; } }; el.appendChild(d); }); }catch(e){ el.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; } };
 }
 if($('ffImport')) $('ffImport').onclick=openTranscriberModal;
-async function loadFF(){ try{ const c=await api('/integrations/transcription'); if(c.hasKey) $('ffKey').placeholder='•••••••• (ключ збережено)'; if($('ffHook')) $('ffHook').value=c.webhookUrl||''; if(c.hasSecret&&$('ffSecret')) $('ffSecret').placeholder='•••••••• (секрет збережено)'; if($('ffAuto')) $('ffAuto').checked=!!c.autoRun; }catch(e){} }
+async function loadFF(){ loadMeeting(); try{ const c=await api('/integrations/transcription'); if(c.hasKey) $('ffKey').placeholder='•••••••• (ключ збережено)'; if($('ffHook')) $('ffHook').value=c.webhookUrl||''; if(c.hasSecret&&$('ffSecret')) $('ffSecret').placeholder='•••••••• (секрет збережено)'; if($('ffAuto')) $('ffAuto').checked=!!c.autoRun; }catch(e){} }
+// ---------- 🎤 Свій транскрибатор (Vymova тощо) ----------
+// Ключа провайдера тут немає свідомо: сервіс шле весь транскрипт у тілі, тож приймачу нема куди
+// й нема чим ходити назад. Пароль - сам URL, тому поруч із ним завжди стоїть «перевипустити».
+async function loadMeeting(){
+  if(!$('mtUrl')) return;
+  try{
+    const c=await api('/integrations/meeting');
+    $('mtUrl').value=c.url||'';
+    if(c.hasSecret) $('mtSecret').placeholder='•••••••• (підпис увімкнено)';
+    $('mtAuto').checked=c.auto!==false;
+    if(c.imported) $('mtMsg').textContent='зустрічей імпортовано: '+c.imported;
+  }catch(e){ $('mtMsg').textContent='⚠ '+e.message; }
+}
+if($('mtCopy')) $('mtCopy').onclick=()=>{ const v=$('mtUrl').value; if(v){ navigator.clipboard.writeText(v); flashSaved(); } };
+if($('mtRotate')) $('mtRotate').onclick=async()=>{
+  if(!confirm('Перевипустити адресу? Стара одразу перестане приймати зустрічі - не забудь оновити її у своєму сервісі.')) return;
+  try{ await api('/integrations/meeting',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rotate:true})}); await loadMeeting(); $('mtMsg').style.color='var(--brand)'; $('mtMsg').textContent='нова адреса ✓ встав її у свій сервіс'; }
+  catch(e){ $('mtMsg').style.color='var(--danger)'; $('mtMsg').textContent='⚠ '+e.message; }
+};
+if($('mtSave')) $('mtSave').onclick=async()=>{
+  try{ await api('/integrations/meeting',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({secret:$('mtSecret').value,auto:$('mtAuto').checked})});
+    $('mtSecret').value=''; $('mtMsg').style.color='var(--brand)'; $('mtMsg').textContent='збережено ✓'; await loadMeeting(); }
+  catch(e){ $('mtMsg').style.color='var(--danger)'; $('mtMsg').textContent='⚠ '+e.message; }
+};
+if($('mtNoSig')) $('mtNoSig').onclick=async()=>{
+  try{ await api('/integrations/meeting',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({clearSecret:true})});
+    $('mtSecret').placeholder='секрет для HMAC - лише якщо твій сервіс уміє його слати';
+    $('mtMsg').style.color='var(--brand)'; $('mtMsg').textContent='підпис вимкнено - працює лише токен в адресі'; await loadMeeting(); }
+  catch(e){ $('mtMsg').style.color='var(--danger)'; $('mtMsg').textContent='⚠ '+e.message; }
+};
 $('ffHookCopy').onclick=()=>{ const v=$('ffHook').value; if(v){ navigator.clipboard.writeText(v); flashSaved(); } };
 $('ffSave').onclick=async()=>{ try{ await api('/integrations/transcription',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({apiKey:$('ffKey').value,webhookSecret:$('ffSecret').value,autoRun:$('ffAuto').checked})}); $('ffKey').value=''; $('ffSecret').value=''; $('ffMsg').style.color='var(--brand)'; $('ffMsg').textContent='збережено ✓'; await loadFF(); }catch(e){ $('ffMsg').style.color='var(--danger)'; $('ffMsg').textContent='⚠ '+e.message; } };
 $('ffNoSig').onclick=async()=>{ if(!confirm('Прибрати webhook-підпис? Вебхук прийматиметься лише за секретним токеном в URL - найнадійніше, якщо секрет не збігається з Fireflies.')) return; try{ await api('/integrations/transcription',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({clearSecret:true})}); $('ffMsg').style.color='var(--brand)'; $('ffMsg').textContent='підпис прибрано - вебхук тепер прийме ✓'; await loadFF(); }catch(e){ $('ffMsg').style.color='var(--danger)'; $('ffMsg').textContent='⚠ '+e.message; } };

@@ -1061,6 +1061,18 @@
           <label class="rchip" style="margin:8px 0"><input type="checkbox" id="ffAuto"> Авто-прогін Автопілота для імпортованих зустрічей</label>
           <div class="btnrow"><button class="primary" id="ffSave">Зберегти</button><button class="ghost" id="ffTest">Перевірити</button><button class="ghost" id="ffNoSig" type="button">Без підпису</button><span id="ffMsg" style="font-size:12px;color:var(--muted)"></span></div>
         </div>
+        <div class="panel" id="mtPanel">
+          <div class="ph" style="margin:0 0 6px">🎤 Свій транскрибатор (Vymova або будь-який сервіс)</div>
+          <div class="hint" style="margin-bottom:10px">Якщо зустрічі пише твій власний застосунок - віддай йому цю адресу, і кожна завершена зустріч сама стане матеріалом. На відміну від Fireflies, ключ не потрібен: сервіс надсилає весь транскрипт у тілі запиту. Імена спікерів зберігаються, службові репліки асистента відкидаються, а «Особисті нотатки» позначаються як <b>твої власні слова</b>.</div>
+          <div class="fld"><label class="fl">🔗 Адреса приймача - встав її у Vymova → Налаштування → «Вебхук після зустрічі»</label>
+            <div style="display:flex;gap:8px"><input class="txt" id="mtUrl" readonly style="font-size:12px"><button class="ghost" type="button" id="mtCopy">⧉</button><button class="ghost" type="button" id="mtRotate" title="Перевипустити - стара адреса одразу перестане працювати">🔑</button></div>
+            <div class="hint">Це і є пароль: у самій адресі довгий випадковий токен. Нікому її не показуй; засвітилась - тисни 🔑.</div></div>
+          <div class="fld" style="margin-top:10px"><label class="fl">Підпис тіла (необовʼязково)</label>
+            <input class="txt" type="password" id="mtSecret" placeholder="секрет для HMAC - лише якщо твій сервіс уміє його слати">
+            <div class="hint">Vymova за специфікацією не додає заголовків авторизації, тож без секрету теж працює. Задаси - вимагатимемо заголовок <code>X-Vymova-Signature: sha256=…</code> (HMAC-SHA256 сирого тіла). Це вже справжня автентифікація, а не лише «здогадайся адресу».</div></div>
+          <label class="rchip" style="margin:10px 0"><input type="checkbox" id="mtAuto" checked> Одразу писати 3 чернетки з кожної зустрічі</label>
+          <div class="btnrow"><button class="primary" id="mtSave">Зберегти</button><button class="ghost" id="mtNoSig" type="button">Без підпису</button><span id="mtMsg" style="font-size:12px;color:var(--muted)"></span></div>
+        </div>
         </div>
       </section>
 

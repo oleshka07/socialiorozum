@@ -260,6 +260,9 @@ function handleTg(method, path, body) {
 }
 let tgJob = null, tgPubPolls = 0;
 
+// приймач зустрічей: адреса СТАНОВА, бо перевіряється саме перевипуск (стара адреса вмирає)
+let mtToken = "tok-aaaa1111";
+
 function handleApi(method, path, body) {
   if (path.startsWith("/tg/")) return handleTg(method, path.slice(3), body);
   const key = method + " " + path.split("?")[0];
@@ -281,6 +284,12 @@ function handleApi(method, path, body) {
       kie: cat === "video" ? KIE_VIDEO : KIE_IMAGE,
       kieReady: KEYS[1].set,
     };
+  }
+  if (key === "GET /integrations/meeting")
+    return { url: "https://socialio.rozum.one/api/webhooks/meeting/" + mtToken, hasSecret: false, auto: true, imported: 2 };
+  if (key === "PUT /integrations/meeting") {
+    if (body?.rotate) mtToken = "tok-bbbb2222";
+    return { ok: true };
   }
   if (key in API) return API[key];
   let mm = /^\/materials\/([\w-]+)$/.exec(path);
@@ -952,6 +961,23 @@ const run = async () => {
     await page.waitForTimeout(200);
     const st = await page.evaluate(() => ({ left: document.getElementById("owl").style.left, atHome: document.getElementById("owl").dataset.atHome }));
     return st.left !== before && st.atHome === "0";
+  });
+
+  await check("meetingHook", async () => {
+    // приймач власного транскрибатора: адреса має доїхати з сервера (а не бути в розмітці),
+    // і перевипуск має її ЗМІНИТИ - інакше «засвітилась адреса» лікувати нічим
+    await page.evaluate(() => document.getElementById("umTools").click());
+    await page.waitForFunction(() => {
+      const el = document.querySelector("#toolsTransHost #mtUrl");
+      return el && el.value.includes("/api/webhooks/meeting/");
+    }, undefined, { timeout: 8000 });
+    const before = await page.$eval("#mtUrl", (el) => el.value);
+    const hint = await page.$eval("#mtPanel", (el) => el.textContent);
+    await page.click("#mtRotate");
+    await page.waitForFunction((v) => document.getElementById("mtUrl").value !== v, before, { timeout: 8000 });
+    const after = await page.$eval("#mtUrl", (el) => el.value);
+    return before.includes("tok-aaaa1111") && after.includes("tok-bbbb2222") &&
+      hint.includes("Особисті нотатки") && (await $t("#mtMsg")).includes("нова адреса");
   });
 
   // ---------------------------------------------------------- 12. Telegram Mini App (/tgapp)

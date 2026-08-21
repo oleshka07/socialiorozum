@@ -32,6 +32,7 @@ import { startAutopost } from "./autopost.js";
 import { startRssPoller, pullFeed } from "./rss-poller.js";
 import { resolveSource } from "./rss-resolver.js";
 import { MEDIA_DIR, saveMedia, deleteMediaFile, convertAllHeif, getThumb } from "./media.js";
+import { normalizeMeeting } from "./meetings.js";
 import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
 import * as gdrive from "./gdrive.js";
 import { publishPostToChannels, alreadySentNetworks, startReelPublishJob, reelPubJobs, reelSentNetworks } from "./publisher.js";
@@ -2993,6 +2994,98 @@ app.post("/api/webhooks/telegram/:secret", async (req: any, reply) => {
     return { ok: true };
   }
   handleUpdate(req.body).catch(() => {});
+  return { ok: true };
+});
+
+// 📥 ВЛАСНИЙ ТРАНСКРИБАТОР (Vymova тощо): зустріч приходить ЦІЛКОМ у тілі запиту.
+//
+// Три речі, які тут вирішені свідомо:
+//  1. `bodyLimit` 10 МБ на цей роут. Глобальний ліміт Fastify - 1 МБ, тобто тригодинна зустріч
+//     упиралась би в 413, і відправник вважав би це збоєм. Ліміт саме пороутовий, щоб решта API
+//     лишалась захищеною від велетенських тіл.
+//  2. Відповідаємо 200 ЯКОМОГА ШВИДШЕ. Відправник дає 30с на спробу і має лише 3 ретраї без
+//     черги - якщо тримати зʼєднання довше, подія втрачається назавжди. Тож усе важке
+//     (генерація постів) іде у фон уже після відповіді.
+//  3. Дублікат - НЕ перезапис. Специфікація радить перезаписувати, але у нас із матеріалу вже
+//     могли народитись пости; затерти текст під ними - це рівно той баг, який ми лікували в
+//     щоденнику. Повтор означає «перша відповідь загубилась у мережі», а дані фінальні - тож
+//     ідемпотентний no-op чесніший за перезапис.
+app.post("/api/webhooks/meeting/:token", { bodyLimit: 10 * 1024 * 1024 }, async (req: any, reply) => {
+  const cfg = await one<{ workspace_id: string; meeting_secret: string | null; meeting_auto: boolean | null }>(
+    `select workspace_id, meeting_secret, meeting_auto from transcription_config where meeting_token=$1`, [req.params.token]);
+  if (!cfg) return reply.code(404).send({ error: "unknown webhook" });
+
+  // Підпис - опційний: базовий захист це довгий токен в URL (так працює Vymova). Якщо відправник
+  // уміє слати HMAC - вмикаємо повноцінну автентифікацію тіла.
+  if (cfg.meeting_secret) {
+    const raw = req.rawBody || "";
+    const expected = createHmac("sha256", cfg.meeting_secret).update(raw).digest("hex");
+    const got = String(req.headers["x-vymova-signature"] || req.headers["x-signature"] || req.headers["x-hub-signature"] || "").replace(/^sha256=/, "");
+    const gb = Buffer.from(got), eb = Buffer.from(expected);
+    if (!(gb.length === eb.length && timingSafeEqual(gb, eb))) {
+      await logEvent("warn", "meeting", "вебхук: невірний підпис", null);
+      return reply.code(401).send({ error: "bad signature" });
+    }
+  }
+
+  const norm = normalizeMeeting(req.body, (t) => createHash("sha256").update(t).digest("hex").slice(0, 32));
+  if ("ignore" in norm) return { ok: true, ignored: norm.ignore };
+
+  // Вставка з вбудованою перевіркою дубля ОДНИМ запитом: два ретраї, що прийшли одночасно,
+  // інакше могли б обидва пройти повз `select` і створити два матеріали.
+  const src = await one<{ id: string }>(
+    `insert into source(workspace_id, origin, title, transcript, external_id)
+     select $1,'meeting',$2,$3,$4
+     where not exists (select 1 from source where workspace_id=$1 and external_id=$4)
+     returning id`,
+    [cfg.workspace_id, norm.title, norm.text, norm.externalId]);
+  if (!src) return { ok: true, duplicate: true };
+
+  const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src.id]);
+  // у лог - ЛИШЕ метадані: тіло це приватна розмова людей, йому не місце в журналі подій
+  await logEvent("info", "meeting", `зустріч «${norm.title}» (${norm.text.length} симв., спікерів: ${norm.speakers})`, { runId: run!.id });
+
+  if (cfg.meeting_auto !== false) {
+    // Lite-прохід ~40-60с - НЕ в межах запиту: відправник має 30с і без черги втратить подію,
+    // якщо ми не встигнемо відповісти
+    generatePostsOnePass(run!.id, 3).catch((e: any) => logEvent("error", "meeting", `авто-генерація: ${e.message}`, { runId: run!.id }));
+  }
+  return { ok: true, id: src.id, autopilot: cfg.meeting_auto !== false };
+});
+
+// ---- налаштування приймача (адреса, секрет, авто-генерація) ----
+app.get("/api/integrations/meeting", async (req: any) => {
+  const ws = req.user.workspace_id;
+  let c = await one<{ meeting_token: string | null; meeting_secret: string | null; meeting_auto: boolean }>(
+    `select meeting_token, meeting_secret, meeting_auto from transcription_config where workspace_id=$1`, [ws]);
+  if (!c?.meeting_token) {
+    await q(`insert into transcription_config(workspace_id, meeting_token) values($1,$2)
+             on conflict (workspace_id) do update set meeting_token=coalesce(transcription_config.meeting_token, excluded.meeting_token)`,
+      [ws, auth.newToken()]);
+    c = await one(`select meeting_token, meeting_secret, meeting_auto from transcription_config where workspace_id=$1`, [ws]);
+  }
+  const n = await one<{ c: string }>(`select count(*)::text c from source where workspace_id=$1 and origin='meeting'`, [ws]);
+  return {
+    url: `${env.appBaseUrl}/api/webhooks/meeting/${c!.meeting_token}`,
+    hasSecret: !!c!.meeting_secret,
+    auto: c!.meeting_auto !== false,
+    imported: +(n?.c || 0),
+  };
+});
+
+app.put("/api/integrations/meeting", async (req: any) => {
+  const ws = req.user.workspace_id;
+  if (req.body?.rotate === true) {
+    // перевипуск: стара адреса вмирає одразу - саме тому вона й має бути довгою і секретною
+    await q(`update transcription_config set meeting_token=$2, updated_at=now() where workspace_id=$1`, [ws, auth.newToken()]);
+    return { ok: true };
+  }
+  if (typeof req.body?.auto === "boolean")
+    await q(`update transcription_config set meeting_auto=$2, updated_at=now() where workspace_id=$1`, [ws, req.body.auto]);
+  if (req.body?.clearSecret === true)
+    await q(`update transcription_config set meeting_secret=null, updated_at=now() where workspace_id=$1`, [ws]);
+  else if (typeof req.body?.secret === "string" && req.body.secret.trim())
+    await q(`update transcription_config set meeting_secret=$2, updated_at=now() where workspace_id=$1`, [ws, req.body.secret.trim()]);
   return { ok: true };
 });
 

@@ -637,3 +637,14 @@ create table if not exists app_secret (
   updated_at timestamptz not null default now(),
   updated_by text
 );
+
+-- 📥 ВЛАСНИЙ ТРАНСКРИБАТОР (Vymova й будь-який самописний сервіс): окрема адреса вебхука,
+-- незалежна від Fireflies. Свідомо ОКРЕМІ колонки, а не переклад `provider` на нове значення:
+-- інакше воркспейс мусив би вибирати «або Fireflies, або свій», хоч вони не конфліктують.
+-- `meeting_secret` необовʼязковий: специфікація Vymova не додає заголовків авторизації, тож
+-- базовий захист - довгий токен в URL; секрет вмикає ще й підпис тіла (HMAC), коли відправник
+-- уміє його надсилати.
+alter table transcription_config add column if not exists meeting_token  text;
+alter table transcription_config add column if not exists meeting_secret text;
+alter table transcription_config add column if not exists meeting_auto   boolean not null default true;
+create unique index if not exists idx_transcfg_meeting on transcription_config(meeting_token);
