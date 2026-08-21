@@ -1072,6 +1072,16 @@
             <div class="hint">Той самий секрет, що в Vymova → Налаштування → «Секрет підпису вебхука». <b>Раджу задати:</b> адреса потрапляє в логи й проксі, а підпис (<code>X-Vymova-Signature: sha256=…</code>, HMAC-SHA256 сирого тіла) - це справжня автентифікація, а не «здогадайся адресу». Без секрету теж працює - старіші версії заголовка не шлють.</div></div>
           <label class="rchip" style="margin:10px 0"><input type="checkbox" id="mtAuto" checked> Одразу писати 3 чернетки з кожної зустрічі</label>
           <div class="btnrow"><button class="primary" id="mtSave">Зберегти</button><button class="ghost" id="mtNoSig" type="button">Без підпису</button><span id="mtMsg" style="font-size:12px;color:var(--muted)"></span></div>
+          <div style="border-top:1px solid var(--line);margin:14px 0 0;padding-top:12px">
+            <div class="ph" style="margin:0 0 6px;font-size:14px">🔄 Погодинна звірка з хмарою (страховка)</div>
+            <div class="hint" style="margin-bottom:10px">Вебхук вище дає швидкість, але спрацьовує лише якщо ми були живі в ту мить. Звірка раз на годину сама забирає все, що зʼявилось у хмарі після останньої перевірки - тож зустріч не загубиться навіть під час деплою чи збою. Подвійне отримання безпечне: зустрічі дедуплікуються за їхнім <code>meeting_id</code>.</div>
+            <div class="grid2">
+              <div class="fld"><label class="fl">Адреса хмари</label><input class="txt" id="mtPullUrl" placeholder="https://vymova.rozum.one" style="font-size:12px"></div>
+              <div class="fld"><label class="fl">Токен доступу</label><input class="txt" type="password" id="mtPullToken" placeholder="вставити токен"><div class="hint">Зберігається на сервері й назад НЕ показується - лише «задано».</div></div>
+            </div>
+            <div class="btnrow" style="margin-top:8px"><button class="ghost" id="mtPullTest" type="button">🔌 Перевірити зʼєднання</button><button class="ghost" id="mtPullNow" type="button">⬇ Звірити зараз</button><button class="ghost" id="mtPullOff" type="button">Вимкнути</button></div>
+            <div class="hint" id="mtPullState" style="margin-top:8px"></div>
+          </div>
         </div>
         </div>
       </section>

@@ -261,7 +261,7 @@ function handleTg(method, path, body) {
 let tgJob = null, tgPubPolls = 0;
 
 // приймач зустрічей: адреса СТАНОВА, бо перевіряється саме перевипуск (стара адреса вмирає)
-let mtToken = "tok-aaaa1111";
+let mtToken = "tok-aaaa1111", mtPull = false;
 
 function handleApi(method, path, body) {
   if (path.startsWith("/tg/")) return handleTg(method, path.slice(3), body);
@@ -286,7 +286,12 @@ function handleApi(method, path, body) {
     };
   }
   if (key === "GET /integrations/meeting")
-    return { url: "https://socialio.rozum.one/api/webhooks/meeting/" + mtToken, hasSecret: false, auto: true, imported: 2 };
+    return { url: "https://socialio.rozum.one/api/webhooks/meeting/" + mtToken, hasSecret: false, auto: true, imported: 2,
+             pull: { url: mtPull ? "https://vymova.rozum.one" : "", hasToken: mtPull, after: 7, at: iso(0, 9) } };
+  if (key === "POST /integrations/meeting/pull") {
+    mtPull = true;
+    return { ok: true, message: body?.testOnly ? "✅ Зʼєднання є. Найстаріша зустріч: «Зустріч 1»" : "✅ Забрано нових зустрічей: 2 (переглянуто 3, курсор 9)" };
+  }
   if (key === "PUT /integrations/meeting") {
     if (body?.rotate) mtToken = "tok-bbbb2222";
     return { ok: true };
@@ -978,6 +983,22 @@ const run = async () => {
     const after = await page.$eval("#mtUrl", (el) => el.value);
     return before.includes("tok-aaaa1111") && after.includes("tok-bbbb2222") &&
       hint.includes("Особисті нотатки") && (await $t("#mtMsg")).includes("нова адреса");
+  });
+
+  await check("meetingPull", async () => {
+    // звірка - страховка поверх вебхука: перевірка зʼєднання і прохід на вимогу мусять давати
+    // ЛЮДСЬКУ відповідь у панелі, інакше налаштувати її можна лише навмання
+    const off = await $t("#mtPullState");
+    await page.fill("#mtPullUrl", "https://vymova.rozum.one");
+    await page.fill("#mtPullToken", "vym_test-token");
+    await page.click("#mtPullTest");
+    await page.waitForFunction(() => document.getElementById("mtPullState").textContent.includes("Зʼєднання є"), undefined, { timeout: 8000 });
+    await page.click("#mtPullNow");
+    await page.waitForFunction(() => document.getElementById("mtPullState").textContent.includes("Забрано"), undefined, { timeout: 8000 });
+    const done = await $t("#mtPullState");
+    // токен назад НЕ приходить - у полі лишається лише те, що ввели, а стан каже «збережено»
+    const leak = await page.evaluate(() => document.getElementById("mtPanel").innerHTML.includes("vym_test-token"));
+    return off.includes("вимкнена") && done.includes("курсор") && !leak;
   });
 
   // ---------------------------------------------------------- 12. Telegram Mini App (/tgapp)

@@ -32,7 +32,8 @@ import { startAutopost } from "./autopost.js";
 import { startRssPoller, pullFeed } from "./rss-poller.js";
 import { resolveSource } from "./rss-resolver.js";
 import { MEDIA_DIR, saveMedia, deleteMediaFile, convertAllHeif, getThumb } from "./media.js";
-import { normalizeMeeting } from "./meetings.js";
+import { normalizeMeeting, saveMeeting } from "./meetings.js";
+import { startMeetingPull, testPull, pullOnce } from "./meetings-pull.js";
 import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
 import * as gdrive from "./gdrive.js";
 import { publishPostToChannels, alreadySentNetworks, startReelPublishJob, reelPubJobs, reelSentNetworks } from "./publisher.js";
@@ -3046,25 +3047,30 @@ app.post("/api/webhooks/meeting/:token", { bodyLimit: 10 * 1024 * 1024 }, async 
   // інакше могли б обидва пройти повз `select` і створити два матеріали.
   // Перевіряємо не лише новий ключ, а й запасні (`altIds`): зустріч могла лягти ще під
   // `file_name`, і без цього її повторна доставка створила б копію.
-  const keys = [norm.externalId, ...norm.altIds];
-  const src = await one<{ id: string }>(
-    `insert into source(workspace_id, origin, title, transcript, external_id)
-     select $1,'meeting',$2,$3,$4
-     where not exists (select 1 from source where workspace_id=$1 and external_id=any($5))
-     returning id`,
-    [cfg.workspace_id, norm.title, norm.text, norm.externalId, keys]);
-  if (!src) return { ok: true, duplicate: true };
-
-  const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src.id]);
-  // у лог - ЛИШЕ метадані: тіло це приватна розмова людей, йому не місце в журналі подій
-  await logEvent("info", "meeting", `зустріч «${norm.title}» (${norm.text.length} симв., спікерів: ${norm.speakers})`, { runId: run!.id });
-
-  if (cfg.meeting_auto !== false) {
+  // Збереження - той самий шлях, що й у погодинної звірки (`saveMeeting`): дедуплікація мусить
+  // працювати однаково, звідки б зустріч не приїхала, інакше push і pull створювали б по копії.
+  const r = await saveMeeting(norm, {
+    insertSource: async (title, text, key, altKeys) => {
+      const row = await one<{ id: string }>(
+        `insert into source(workspace_id, origin, title, transcript, external_id)
+         select $1,'meeting',$2,$3,$4
+         where not exists (select 1 from source where workspace_id=$1 and external_id=any($5))
+         returning id`, [cfg.workspace_id, title, text, key, altKeys]);
+      return row?.id ?? null;
+    },
+    startRun: async (sourceId) => {
+      const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [sourceId]);
+      return run!.id;
+    },
+    log: (lvl, msg, meta) => logEvent(lvl, "meeting", msg, meta as any),
     // Lite-прохід ~40-60с - НЕ в межах запиту: відправник має 30с і без черги втратить подію,
     // якщо ми не встигнемо відповісти
-    generatePostsOnePass(run!.id, 3).catch((e: any) => logEvent("error", "meeting", `авто-генерація: ${e.message}`, { runId: run!.id }));
-  }
-  return { ok: true, id: src.id, autopilot: cfg.meeting_auto !== false };
+    generate: cfg.meeting_auto !== false
+      ? (runId) => { generatePostsOnePass(runId, 3).catch((e: any) => logEvent("error", "meeting", `авто-генерація: ${e.message}`, { runId })); }
+      : undefined,
+  });
+  if (r.duplicate) return { ok: true, duplicate: true };
+  return { ok: true, id: r.id, autopilot: cfg.meeting_auto !== false };
 });
 
 // ---- налаштування приймача (адреса, секрет, авто-генерація) ----
@@ -3079,11 +3085,16 @@ app.get("/api/integrations/meeting", async (req: any) => {
     c = await one(`select meeting_token, meeting_secret, meeting_auto from transcription_config where workspace_id=$1`, [ws]);
   }
   const n = await one<{ c: string }>(`select count(*)::text c from source where workspace_id=$1 and origin='meeting'`, [ws]);
+  const p = await one<{ meeting_pull_url: string | null; meeting_pull_token: string | null; meeting_pull_after: string; meeting_pull_at: string | null }>(
+    `select meeting_pull_url, meeting_pull_token, meeting_pull_after, meeting_pull_at from transcription_config where workspace_id=$1`, [ws]);
   return {
     url: `${env.appBaseUrl}/api/webhooks/meeting/${c!.meeting_token}`,
     hasSecret: !!c!.meeting_secret,
     auto: c!.meeting_auto !== false,
     imported: +(n?.c || 0),
+    // ⚠️ сам токен звірки назовні НЕ віддається - лише «задано чи ні»
+    pull: { url: p?.meeting_pull_url || "", hasToken: !!p?.meeting_pull_token,
+            after: Number(p?.meeting_pull_after || 0), at: p?.meeting_pull_at || null },
   };
 });
 
@@ -3100,7 +3111,34 @@ app.put("/api/integrations/meeting", async (req: any) => {
     await q(`update transcription_config set meeting_secret=null, updated_at=now() where workspace_id=$1`, [ws]);
   else if (typeof req.body?.secret === "string" && req.body.secret.trim())
     await q(`update transcription_config set meeting_secret=$2, updated_at=now() where workspace_id=$1`, [ws, req.body.secret.trim()]);
+  if (typeof req.body?.pullUrl === "string")
+    await q(`update transcription_config set meeting_pull_url=$2, updated_at=now() where workspace_id=$1`, [ws, req.body.pullUrl.trim()]);
+  if (typeof req.body?.pullToken === "string" && req.body.pullToken.trim())
+    await q(`update transcription_config set meeting_pull_token=$2, updated_at=now() where workspace_id=$1`, [ws, req.body.pullToken.trim()]);
+  if (req.body?.clearPull === true)
+    await q(`update transcription_config set meeting_pull_url=null, meeting_pull_token=null, updated_at=now() where workspace_id=$1`, [ws]);
+  // курсор скидається окремо: це «перепройти архів заново», а не побічний ефект збереження полів
+  if (req.body?.resetCursor === true)
+    await q(`update transcription_config set meeting_pull_after='0' where workspace_id=$1`, [ws]);
   return { ok: true };
+});
+
+// 🔄 звірка: перевірка зʼєднання і прохід на вимогу (щоб не чекати годину)
+app.post("/api/integrations/meeting/pull", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const c = await one<any>(
+    `select workspace_id, meeting_pull_url, meeting_pull_token, meeting_pull_after, meeting_auto
+       from transcription_config where workspace_id=$1`, [ws]);
+  const url = String(req.body?.url || c?.meeting_pull_url || "").trim();
+  const token = String(req.body?.token || "").trim() || c?.meeting_pull_token || "";
+  if (!url || !token) return reply.code(400).send({ error: "Спершу вкажи адресу хмари й токен" });
+  try {
+    if (req.body?.testOnly) return { ok: true, message: await testPull(url, token) };
+    const r = await pullOnce({ ...c, meeting_pull_url: url, meeting_pull_token: token });
+    return { ok: true, message: r.added
+      ? `✅ Забрано нових зустрічей: ${r.added} (переглянуто ${r.seen}, курсор ${r.cursor})`
+      : `✅ Нового немає (переглянуто ${r.seen}, курсор ${r.cursor})` };
+  } catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
 
 app.post("/api/webhooks/fireflies/:token", async (req: any, reply) => {
@@ -3443,6 +3481,7 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
   startMetrics();
   startDiary();
   startThreadsAuto();
+  startMeetingPull();   // погодинна звірка з хмарою власного транскрибатора
   initTelegramBot();
   // одноразово полагодити залишкові iPhone HEIF -> JPEG (у фоні; ідемпотентно)
   convertAllHeif().then((n) => { if (n) app.log.info(`HEIF→JPEG конвертовано: ${n}`); }).catch((e: any) => app.log.error("convertAllHeif: " + e.message));

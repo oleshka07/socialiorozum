@@ -188,3 +188,66 @@ test("хеші НЕ виключають одне одного за наявно
   assert.ok(!r.altIds.includes("collide.md"), "file_name колізить за часом - у перевірку не йде");
   assert.ok(r.altIds.includes("sha:c1"), "хеш вмісту не колізить - лишається");
 });
+
+// ---- звірка з хмарою (pull) ----
+import { nextCursor, cloudRecordToBody, saveMeeting } from "../dist/meetings.js";
+
+test("курсор звірки рухається на максимальний побачений id", () => {
+  assert.equal(nextCursor(0, [1, 2, 3]), 3);
+  assert.equal(nextCursor(10, [11, 12]), 12);
+  assert.equal(nextCursor(5, []), 5, "порожня сторінка не зсуває курсор");
+});
+
+test("курсор НЕ відкочується назад і не ламається на сміттєвому id", () => {
+  // інакше одна крива відповідь змусила б звірку тягнути архів по колу
+  assert.equal(nextCursor(10, [3, 4]), 10);
+  assert.equal(nextCursor(7, [NaN, undefined, 9]), 9);
+});
+
+test("курсор іде далі й через биткий запис - один поганий не блокує решту", () => {
+  // рівно та проблема, яку відправник щойно полагодив у своїй черзі: інакше запис, який
+  // ніколи не забереться, зупинив би звірку назавжди
+  assert.equal(nextCursor(0, [1, 2, 3]), 3, "усі три пораховані, навіть якщо №2 не зберігся");
+});
+
+test("запис із хмари зводиться до того самого тіла, що й вебхук", () => {
+  // назви полів у детальному записі інші (`transcript_md`) - зводимо їх, а не дублюємо парсер
+  const b = cloudRecordToBody({ id: 7, meeting_id: "u-7", title: "З хмари",
+    finished_at: "2026-08-21T16:34:33+02:00", transcript_md: "# x\n\n**Я** *[00:01]*: Текст.", summary_md: "- підсумок" });
+  assert.equal(b.event, "meeting.completed");
+  assert.equal(b.meeting_id, "u-7");
+  assert.equal(b.transcript_markdown, "# x\n\n**Я** *[00:01]*: Текст.");
+  assert.equal(b.summary_markdown, "- підсумок");
+});
+
+test("звірка й вебхук дедуплікують ОДНАКОВО (спільний saveMeeting)", async () => {
+  // якби шляхи різнились, push і pull створювали б по копії тієї самої зустрічі - і схема
+  // «push для швидкості + звірка для гарантії» була б небезпечною
+  const stored = new Set();
+  const deps = {
+    insertSource: async (_t, _x, key, altKeys) => {
+      if (altKeys.some((k) => stored.has(k))) return null;
+      stored.add(key); return "src-" + key;
+    },
+    startRun: async () => "run-1",
+    log: async () => {},
+  };
+  const md = "# З\n\n**Я** *[00:05]*: Та сама зустріч про звіт за липень.";
+  const viaHook = normalizeMeeting({ meeting_id: "u-9", title: "З", transcript_markdown: md }, hash);
+  const viaPull = normalizeMeeting(cloudRecordToBody({ meeting_id: "u-9", title: "З", transcript_md: md }), hash);
+  assert.equal((await saveMeeting(viaHook, deps)).duplicate, false);
+  assert.equal((await saveMeeting(viaPull, deps)).duplicate, true, "та сама зустріч із двох каналів = один матеріал");
+});
+
+import { checkAuth } from "../dist/meetings-pull.js";
+
+test("токен і адреса звірки перевіряються З ЛЮДСЬКОЮ помилкою", () => {
+  // токен їде в HTTP-заголовку, а той приймає лише ASCII: кирилиця чи невидимий символ, що
+  // приліпився при копіюванні, інакше давали сире виключення рушія про ByteString
+  const msg = (u, t) => { try { checkAuth({ url: u, token: t }); return ""; } catch (e) { return e.message; } };
+  assert.match(msg("http://x.y", "пароль"), /не-латинський|повністю/);
+  assert.match(msg("http://x.y", "abc def"), /пробіл|повністю/);
+  assert.match(msg("vymova.rozum.one", "tok"), /https:\/\//);
+  assert.match(msg("http://x.y", "   "), /не задано токен/);
+  assert.equal(msg("https://vymova.rozum.one", "vym_AbC-123"), "", "нормальний токен проходить");
+});

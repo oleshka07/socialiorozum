@@ -150,3 +150,46 @@ export function normalizeMeeting(body: any, hashFallback: (s: string) => string)
     rawTranscript: md,
   };
 }
+
+// ---- збереження зустрічі (СПІЛЬНЕ для push-вебхука і pull-звірки) ----
+// Один шлях свідомо: дедуплікація мусить працювати ОДНАКОВО, звідки б зустріч не приїхала -
+// інакше push і pull створювали б по копії тієї самої зустрічі, і саме та схема, яку рекомендує
+// специфікація («push для швидкості + звірка для гарантії»), була б небезпечною.
+export type SaveDeps = {
+  insertSource: (title: string, text: string, key: string, altKeys: string[]) => Promise<string | null>;
+  startRun: (sourceId: string) => Promise<string>;
+  log: (level: "info" | "warn" | "error", msg: string, meta?: unknown) => Promise<void>;
+  generate?: (runId: string) => void;
+};
+export async function saveMeeting(norm: MeetingIn, d: SaveDeps): Promise<{ id: string; duplicate: boolean }> {
+  const sourceId = await d.insertSource(norm.title, norm.text, norm.externalId, [norm.externalId, ...norm.altIds]);
+  if (!sourceId) return { id: "", duplicate: true };
+  const runId = await d.startRun(sourceId);
+  // у лог - ЛИШЕ метадані: тіло це приватна розмова людей, йому не місце в журналі подій
+  await d.log("info", `зустріч «${norm.title}» (${norm.text.length} симв., спікерів: ${norm.speakers})`, { runId });
+  if (d.generate) d.generate(runId);
+  return { id: sourceId, duplicate: false };
+}
+
+// ---- звірка (pull): куди рухати курсор ----
+// Курсор рухаємо на МАКСИМАЛЬНИЙ побачений id, навіть якщо якийсь елемент не зберігся. Інакше
+// один назавжди биткий запис заблокував би всю звірку - рівно та проблема, яку відправник щойно
+// полагодив у себе в черзі. Збій видно в журналі, і його завжди можна перепройти, скинувши курсор.
+export function nextCursor(current: number, ids: number[]): number {
+  return ids.reduce((m, x) => (Number.isFinite(x) && x > m ? x : m), current);
+}
+
+// Запис зі списку хмари → тіло, яке розуміє `normalizeMeeting`. Назви полів у детальному записі
+// інші (`transcript_md`), тож зводимо їх до однієї форми, а не дублюємо парсер.
+export function cloudRecordToBody(rec: any): Record<string, unknown> {
+  return {
+    event: "meeting.completed",
+    meeting_id: rec?.meeting_id || "",
+    file_name: rec?.file_name || "",
+    title: rec?.title || "",
+    finished_at: rec?.finished_at || "",
+    transcript_markdown: rec?.transcript_md ?? rec?.transcript_markdown ?? "",
+    summary_markdown: rec?.summary_md ?? rec?.summary_markdown ?? "",
+    content_sha256: rec?.content_sha256 || "",
+  };
+}

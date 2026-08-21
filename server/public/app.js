@@ -2956,8 +2956,32 @@ async function loadMeeting(){
     if(c.hasSecret) $('mtSecret').placeholder='•••••••• (підпис увімкнено)';
     $('mtAuto').checked=c.auto!==false;
     if(c.imported) $('mtMsg').textContent='зустрічей імпортовано: '+c.imported;
+    const p=c.pull||{};
+    if($('mtPullUrl')) $('mtPullUrl').value=p.url||'';
+    if(p.hasToken&&$('mtPullToken')) $('mtPullToken').placeholder='•••••••• (токен збережено)';
+    if($('mtPullState')) $('mtPullState').innerHTML = p.url&&p.hasToken
+      ? ('Звірка увімкнена. Остання перевірка: '+(p.at?new Date(p.at).toLocaleString('uk-UA'):'ще не було')+' · дійшли до запису #'+(p.after||0)+'.')
+      : 'Звірка вимкнена - працює лише вебхук.';
   }catch(e){ $('mtMsg').textContent='⚠ '+e.message; }
 }
+// Звірка: перевірка й ручний прохід - щоб не чекати годину й одразу бачити, що не так.
+// Токен беремо з поля, ЯКЩО його щойно ввели; інакше сервер візьме збережений.
+async function mtPull(testOnly){
+  const st=$('mtPullState'); st.style.color='var(--muted)'; st.textContent='…';
+  try{
+    const r=await api('/integrations/meeting/pull',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({url:$('mtPullUrl').value.trim(),token:$('mtPullToken').value.trim(),testOnly:!!testOnly})});
+    st.style.color='var(--brand)'; st.textContent=r.message||'готово';
+    if(!testOnly){ if(curView==='create') loadMaterials(); setTimeout(loadMeeting,1200); }
+  }catch(e){ st.style.color='var(--danger)'; st.textContent='⚠ '+e.message; }
+}
+if($('mtPullTest')) $('mtPullTest').onclick=()=>mtPull(true);
+if($('mtPullNow')) $('mtPullNow').onclick=()=>mtPull(false);
+if($('mtPullOff')) $('mtPullOff').onclick=async()=>{
+  if(!confirm('Вимкнути погодинну звірку? Лишиться тільки вебхук.')) return;
+  try{ await api('/integrations/meeting',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({clearPull:true})});
+    $('mtPullUrl').value=''; $('mtPullToken').value=''; await loadMeeting(); }catch(e){ $('mtPullState').textContent='⚠ '+e.message; }
+};
 if($('mtCopy')) $('mtCopy').onclick=()=>{ const v=$('mtUrl').value; if(v){ navigator.clipboard.writeText(v); flashSaved(); } };
 if($('mtRotate')) $('mtRotate').onclick=async()=>{
   if(!confirm('Перевипустити адресу? Стара одразу перестане приймати зустрічі - не забудь оновити її у своєму сервісі.')) return;
@@ -2965,7 +2989,7 @@ if($('mtRotate')) $('mtRotate').onclick=async()=>{
   catch(e){ $('mtMsg').style.color='var(--danger)'; $('mtMsg').textContent='⚠ '+e.message; }
 };
 if($('mtSave')) $('mtSave').onclick=async()=>{
-  try{ await api('/integrations/meeting',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({secret:$('mtSecret').value,auto:$('mtAuto').checked})});
+  try{ await api('/integrations/meeting',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({secret:$('mtSecret').value,auto:$('mtAuto').checked,pullUrl:$('mtPullUrl').value.trim(),pullToken:$('mtPullToken').value.trim()})});
     $('mtSecret').value=''; $('mtMsg').style.color='var(--brand)'; $('mtMsg').textContent='збережено ✓'; await loadMeeting(); }
   catch(e){ $('mtMsg').style.color='var(--danger)'; $('mtMsg').textContent='⚠ '+e.message; }
 };

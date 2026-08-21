@@ -648,3 +648,13 @@ alter table transcription_config add column if not exists meeting_token  text;
 alter table transcription_config add column if not exists meeting_secret text;
 alter table transcription_config add column if not exists meeting_auto   boolean not null default true;
 create unique index if not exists idx_transcfg_meeting on transcription_config(meeting_token);
+
+-- 🔄 ЗВІРКА З ХМАРОЮ ВЛАСНОГО ТРАНСКРИБАТОРА (pull поверх push).
+-- Push дає швидкість, але залежить від того, чи ми були живі в ту мить; погодинна звірка забирає
+-- все, що зʼявилось після останнього побаченого `id`. Дедуплікація по `meeting_id` робить
+-- подвійне отримання безпечним, тож push і pull не конфліктують.
+-- ⚠️ `meeting_pull_token` - секрет: назовні НІКОЛИ не віддається (лише «задано / не задано»).
+alter table transcription_config add column if not exists meeting_pull_url   text;
+alter table transcription_config add column if not exists meeting_pull_token text;
+alter table transcription_config add column if not exists meeting_pull_after text not null default '0';
+alter table transcription_config add column if not exists meeting_pull_at    timestamptz;
