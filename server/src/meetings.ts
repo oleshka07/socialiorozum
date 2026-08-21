@@ -54,7 +54,8 @@ export function parseTranscriptMarkdown(md: string): ParsedMeeting {
 }
 
 export type MeetingIn = {
-  externalId: string;
+  externalId: string;    // ключ, під яким запишемо
+  altIds: string[];      // інші ключі, під якими зустріч могла лягти РАНІШЕ (перевіряємо на дубль)
   title: string;
   text: string;          // те, що піде в генерацію
   summary: string;
@@ -108,14 +109,28 @@ export function normalizeMeeting(body: any, hashFallback: (s: string) => string)
   if (!parsed.turns.length && !plain.trim() && summary) text = `# ${title}\n\n${summary}`;
   if (text.trim().length < 40) return { ignore: "порожня зустріч (нема тексту)" };
 
-  // Ключ дедуплікації. `file_name` за специфікацією стабільний і унікальний; коли його нема -
-  // рахуємо хеш вмісту. Ніколи не лишаємо ключ порожнім: без нього ретрай відправника
-  // (а він робить до 3 спроб) створив би дублікати матеріалу.
-  const externalId = String(b.file_name || b.meeting_id || b.id || "").trim() || `sha:${hashFallback(text)}`;
+  // Ключ дедуплікації. Порядок тут НЕ довільний і був колись зворотним - це помилка.
+  // `meeting_id` (UUID) присвоюється зустрічі на старті й переживає перейменування файлу та
+  // перезапуск застосунку. `file_name` виведений із ЧАСУ ПОЧАТКУ, тож дві зустрічі, розпочаті
+  // в одну хвилину на різних пристроях, злиплися б в одну - тобто друга зникла б без сліду.
+  // Тому file_name лише запасний (записи до серпня 2026), а без обох рахуємо хеш вмісту:
+  // порожній ключ означав би, що ретрай відправника створює дублікат матеріалу.
+  const uuid = String(b.meeting_id || b.meetingId || b.id || "").trim();
+  const fileName = String(b.file_name || b.fileName || "").trim();
+  const contentKey = `sha:${hashFallback(text)}`;
+  const externalId = uuid || fileName || contentKey;
+  // Запасні ключі для перевірки на дубль. `file_name` потрапляє сюди ЛИШЕ коли UUID немає
+  // (старі версії застосунку). Прогін наскрізь показав, чому: якщо тримати file_name у списку
+  // завжди, то нова зустріч, чий file_name збігся з уже імпортованою, мовчки вважалась би
+  // дублем і ЗНИКАЛА б - тобто запобіжник від колізії сам її й відтворював. Втратити зустріч
+  // непомітно гірше, ніж один раз побачити зайвий матеріал і видалити його.
+  // Хеш вмісту лишається в обох випадках: байт-у-байт та сама доставка - точно та сама зустріч.
+  const altIds = (uuid ? [contentKey] : [fileName, contentKey]).filter((x) => x && x !== externalId);
 
   const fin = new Date(String(b.finished_at || b.finishedAt || ""));
   return {
     externalId: externalId.slice(0, 200),
+    altIds: altIds.map((x) => x.slice(0, 200)),
     title: title.slice(0, 200),
     text: text.slice(0, 200000),
     summary: summary.slice(0, 8000),

@@ -84,9 +84,10 @@ test("повне тіло Vymova нормалізується", () => {
   const r = normalizeMeeting({
     event: "meeting.completed", app: "vymova", title: "Кемп Карлсбад",
     finished_at: "2026-08-19T16:48:12+02:00", file_name: "meeting_2026-08-19_15-00.md",
+    meeting_id: "550e8400-e29b-41d4-a716-446655440000",
     transcript_markdown: NEW_MD, summary_markdown: "- Виручка 668",
   }, hash);
-  assert.equal(r.externalId, "meeting_2026-08-19_15-00.md");
+  assert.equal(r.externalId, "550e8400-e29b-41d4-a716-446655440000");
   assert.equal(r.speakers, 3);
   assert.equal(r.finishedAt.toISOString(), "2026-08-19T14:48:12.000Z");
   assert.ok(r.summary.includes("668"));
@@ -117,4 +118,40 @@ test("порожня зустріч ігнорується, а нерозібр�
   const r = normalizeMeeting({ title: "Чужий формат", transcript_markdown: "щось геть інше", summary_markdown: "з".repeat(60) }, hash);
   assert.ok(!("ignore" in r), "підсумок є - матеріал не має пропадати мовчки");
   assert.ok(r.text.includes("Чужий формат"));
+});
+
+test("ключ дедуплікації - meeting_id, а НЕ file_name", () => {
+  // file_name виведений із часу початку: дві зустрічі, розпочаті в одну хвилину на різних
+  // пристроях, злиплися б в одну - і друга зникла б без сліду
+  const mk = (uuid) => normalizeMeeting({
+    meeting_id: uuid, file_name: "meeting_2026-08-19_15-00.md",
+    title: "Збіг у часі", transcript_markdown: `# x\n\n**Я** *[00:01]*: ${uuid} - зустріч про бюджет наступного кварталу.`,
+  }, hash);
+  const a = mk("550e8400-e29b-41d4-a716-446655440000");
+  const b = mk("111e8400-e29b-41d4-a716-446655440999");
+  assert.equal(a.externalId, "550e8400-e29b-41d4-a716-446655440000");
+  assert.notEqual(a.externalId, b.externalId, "однаковий file_name не має злипати різні зустрічі");
+});
+
+test("file_name лишається запасним ключем (записи до серпня 2026)", () => {
+  const r = normalizeMeeting({ file_name: "old_meeting.md", title: "Старий запис",
+    transcript_markdown: "# x\n\n**[00:01] Я:** Запис зі старої версії застосунку про кошторис." }, hash);
+  assert.equal(r.externalId, "old_meeting.md");
+});
+
+test("є UUID - file_name у перевірку дубля НЕ йде", () => {
+  // інакше нова зустріч, чий file_name збігся з уже імпортованою, мовчки вважалась би дублем
+  // і зникала б: запобіжник від колізії сам би її й відтворював (спіймано прогоном наскрізь)
+  const r = normalizeMeeting({ meeting_id: "uuid-1", file_name: "meeting_2026-08-19.md",
+    title: "Нова зустріч", transcript_markdown: "# x\n\n**Я** *[00:01]*: Текст зустрічі про терміни здачі обʼєкта." }, hash);
+  assert.equal(r.externalId, "uuid-1");
+  assert.ok(!r.altIds.includes("meeting_2026-08-19.md"), "file_name не має свопити чужу зустріч");
+  assert.ok(r.altIds.some((x) => x.startsWith("sha:")), "хеш вмісту лишається - байт-у-байт та сама доставка");
+});
+
+test("нема UUID - тоді file_name і є ключем, а хеш вмісту запасним", () => {
+  const r = normalizeMeeting({ file_name: "old.md", title: "Стара версія застосунку",
+    transcript_markdown: "# x\n\n**[00:01] Я:** Запис без UUID про кошторис і терміни." }, hash);
+  assert.equal(r.externalId, "old.md");
+  assert.ok(r.altIds.every((x) => x.startsWith("sha:")));
 });

@@ -1069,7 +1069,7 @@
             <div class="hint">Це і є пароль: у самій адресі довгий випадковий токен. Нікому її не показуй; засвітилась - тисни 🔑.</div></div>
           <div class="fld" style="margin-top:10px"><label class="fl">Підпис тіла (необовʼязково)</label>
             <input class="txt" type="password" id="mtSecret" placeholder="секрет для HMAC - лише якщо твій сервіс уміє його слати">
-            <div class="hint">Vymova за специфікацією не додає заголовків авторизації, тож без секрету теж працює. Задаси - вимагатимемо заголовок <code>X-Vymova-Signature: sha256=…</code> (HMAC-SHA256 сирого тіла). Це вже справжня автентифікація, а не лише «здогадайся адресу».</div></div>
+            <div class="hint">Той самий секрет, що в Vymova → Налаштування → «Секрет підпису вебхука». <b>Раджу задати:</b> адреса потрапляє в логи й проксі, а підпис (<code>X-Vymova-Signature: sha256=…</code>, HMAC-SHA256 сирого тіла) - це справжня автентифікація, а не «здогадайся адресу». Без секрету теж працює - старіші версії заголовка не шлють.</div></div>
           <label class="rchip" style="margin:10px 0"><input type="checkbox" id="mtAuto" checked> Одразу писати 3 чернетки з кожної зустрічі</label>
           <div class="btnrow"><button class="primary" id="mtSave">Зберегти</button><button class="ghost" id="mtNoSig" type="button">Без підпису</button><span id="mtMsg" style="font-size:12px;color:var(--muted)"></span></div>
         </div>

@@ -3033,12 +3033,15 @@ app.post("/api/webhooks/meeting/:token", { bodyLimit: 10 * 1024 * 1024 }, async 
 
   // Вставка з вбудованою перевіркою дубля ОДНИМ запитом: два ретраї, що прийшли одночасно,
   // інакше могли б обидва пройти повз `select` і створити два матеріали.
+  // Перевіряємо не лише новий ключ, а й запасні (`altIds`): зустріч могла лягти ще під
+  // `file_name`, і без цього її повторна доставка створила б копію.
+  const keys = [norm.externalId, ...norm.altIds];
   const src = await one<{ id: string }>(
     `insert into source(workspace_id, origin, title, transcript, external_id)
      select $1,'meeting',$2,$3,$4
-     where not exists (select 1 from source where workspace_id=$1 and external_id=$4)
+     where not exists (select 1 from source where workspace_id=$1 and external_id=any($5))
      returning id`,
-    [cfg.workspace_id, norm.title, norm.text, norm.externalId]);
+    [cfg.workspace_id, norm.title, norm.text, norm.externalId, keys]);
   if (!src) return { ok: true, duplicate: true };
 
   const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src.id]);
