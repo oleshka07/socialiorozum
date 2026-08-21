@@ -155,3 +155,36 @@ test("нема UUID - тоді file_name і є ключем, а хеш вміс�
   assert.equal(r.externalId, "old.md");
   assert.ok(r.altIds.every((x) => x.startsWith("sha:")));
 });
+
+test("хеш ВІДПРАВНИКА має пріоритет над нашим власним", () => {
+  // його рахується з сирого transcript_markdown, тож не залежить від того, як наш парсер
+  // сьогодні складає текст: інакше будь-яка правка meetingText тихо зробила б усі раніше
+  // прийняті зустрічі «новими»
+  const body = { title: "Без ідентифікаторів", content_sha256: "9f2cabc",
+    transcript_markdown: "# x\n\n**Я** *[00:01]*: Текст зустрічі про бюджет наступного кварталу." };
+  const r = normalizeMeeting(body, hash);
+  assert.equal(r.externalId, "sha:9f2cabc");
+  assert.ok(r.altIds.some((x) => x.startsWith("sha:") && x !== "sha:9f2cabc"), "наш хеш лишається запасним");
+});
+
+test("наш хеш лишається в запасних - зустріч, прийнята до появи content_sha256, не задвоїться", () => {
+  const md = "# x\n\n**Я** *[00:01]*: Текст зустрічі про бюджет наступного кварталу.";
+  const before = normalizeMeeting({ title: "Т", transcript_markdown: md }, hash);
+  const after = normalizeMeeting({ title: "Т", transcript_markdown: md, content_sha256: "новий" }, hash);
+  assert.ok(after.altIds.includes(before.externalId), "старий ключ мусить лишитись у перевірці");
+});
+
+test("сире transcript_markdown і заявлений хеш віддаються для перевірки цілості", () => {
+  const md = "# x\n\n**Я** *[00:01]*: Текст зустрічі про бюджет наступного кварталу.";
+  const r = normalizeMeeting({ meeting_id: "u1", title: "Т", transcript_markdown: md, content_sha256: "AABB" }, hash);
+  assert.equal(r.rawTranscript, md, "звіряти треба саме сире поле, а не наш перероблений текст");
+  assert.equal(r.senderSha, "AABB");
+});
+
+test("хеші НЕ виключають одне одного за наявності UUID, а file_name виключається", () => {
+  const r = normalizeMeeting({ meeting_id: "u1", file_name: "collide.md", content_sha256: "c1",
+    title: "Т", transcript_markdown: "# x\n\n**Я** *[00:01]*: Текст про терміни здачі обʼєкта." }, hash);
+  assert.equal(r.externalId, "u1");
+  assert.ok(!r.altIds.includes("collide.md"), "file_name колізить за часом - у перевірку не йде");
+  assert.ok(r.altIds.includes("sha:c1"), "хеш вмісту не колізить - лишається");
+});

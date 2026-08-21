@@ -3031,6 +3031,17 @@ app.post("/api/webhooks/meeting/:token", { bodyLimit: 10 * 1024 * 1024 }, async 
   const norm = normalizeMeeting(req.body, (t) => createHash("sha256").update(t).digest("hex").slice(0, 32));
   if ("ignore" in norm) return { ok: true, ignored: norm.ignore };
 
+  // Відправник заявляє SHA-256 транскрипта - звіряємо. Це ловить обрізаний посеред дороги
+  // transcript при цілому JSON (сам по собі побитий JSON упав би раніше на парсингу).
+  // ⚠️ НЕ фатально й свідомо: у відправника 4xx означає «відкласти назавжди», тож
+  // відповідати помилкою на розбіжність, яку могла дати навіть різниця в переносах рядків,
+  // означало б втратити зустріч. Краще прийняти і лишити слід у журналі.
+  if (norm.senderSha) {
+    const mine = createHash("sha256").update(norm.rawTranscript, "utf8").digest("hex");
+    if (mine !== norm.senderSha.toLowerCase())
+      await logEvent("warn", "meeting", `хеш транскрипта не збігся із заявленим (наш ${mine.slice(0, 12)}…, заявлений ${norm.senderSha.slice(0, 12)}…) - зустріч прийнято, але вміст міг доїхати не цілим`, null);
+  }
+
   // Вставка з вбудованою перевіркою дубля ОДНИМ запитом: два ретраї, що прийшли одночасно,
   // інакше могли б обидва пройти повз `select` і створити два матеріали.
   // Перевіряємо не лише новий ключ, а й запасні (`altIds`): зустріч могла лягти ще під

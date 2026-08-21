@@ -61,6 +61,8 @@ export type MeetingIn = {
   summary: string;
   finishedAt: Date | null;
   speakers: number;
+  senderSha: string;     // заявлений відправником хеш транскрипта (для перевірки цілості)
+  rawTranscript: string; // сире `transcript_markdown` - те, від чого цей хеш і рахувався
 };
 
 const SERVICE_SPEAKERS = new Set(["ai", "assistant", "асистент"]);
@@ -117,15 +119,23 @@ export function normalizeMeeting(body: any, hashFallback: (s: string) => string)
   // порожній ключ означав би, що ретрай відправника створює дублікат матеріалу.
   const uuid = String(b.meeting_id || b.meetingId || b.id || "").trim();
   const fileName = String(b.file_name || b.fileName || "").trim();
-  const contentKey = `sha:${hashFallback(text)}`;
-  const externalId = uuid || fileName || contentKey;
+  // Хеш вмісту від ВІДПРАВНИКА кращий за наш власний: він рахується з сирого
+  // `transcript_markdown`, тож не залежить від того, як саме наш парсер сьогодні складає текст.
+  // Якби ключем був хеш НАШОГО результату, будь-яка правка `meetingText` (навіть зміна
+  // заголовка секції нотаток) тихо зробила б усі раніше прийняті зустрічі «новими».
+  const senderSha = String(b.content_sha256 || b.contentSha256 || "").trim();
+  const senderKey = senderSha ? `sha:${senderSha}` : "";
+  const ownKey = `sha:${hashFallback(text)}`;   // фолбек для відправників без цього поля
+  const externalId = uuid || fileName || senderKey || ownKey;
   // Запасні ключі для перевірки на дубль. `file_name` потрапляє сюди ЛИШЕ коли UUID немає
   // (старі версії застосунку). Прогін наскрізь показав, чому: якщо тримати file_name у списку
   // завжди, то нова зустріч, чий file_name збігся з уже імпортованою, мовчки вважалась би
   // дублем і ЗНИКАЛА б - тобто запобіжник від колізії сам її й відтворював. Втратити зустріч
   // непомітно гірше, ніж один раз побачити зайвий матеріал і видалити його.
-  // Хеш вмісту лишається в обох випадках: байт-у-байт та сама доставка - точно та сама зустріч.
-  const altIds = (uuid ? [contentKey] : [fileName, contentKey]).filter((x) => x && x !== externalId);
+  // Хеші так не колізять (однаковий вміст = та сама зустріч), тож обидва лишаються завжди -
+  // зокрема й наш власний, щоб зустріч, прийнята до появи `content_sha256`, не задвоїлась.
+  const altIds = (uuid ? [senderKey, ownKey] : [fileName, senderKey, ownKey])
+    .filter((x) => x && x !== externalId);
 
   const fin = new Date(String(b.finished_at || b.finishedAt || ""));
   return {
@@ -136,5 +146,7 @@ export function normalizeMeeting(body: any, hashFallback: (s: string) => string)
     summary: summary.slice(0, 8000),
     finishedAt: isNaN(fin.getTime()) ? null : fin,
     speakers: new Set(parsed.turns.map((t) => t.speaker)).size,
+    senderSha,
+    rawTranscript: md,
   };
 }
