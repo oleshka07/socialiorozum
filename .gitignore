@@ -7,3 +7,6 @@ dist/
 .claude/
 graphify-out/.graphify_python
 graphify-out/.graphify_root
+
+# завантажені медіа користувачів - рантайм-дані, не код (на сервері живуть у тому ж чекауті)
+server/media/
