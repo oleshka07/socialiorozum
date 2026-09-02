@@ -272,7 +272,28 @@ app.post("/api/auth/reset", async (req: any, reply) => {
   const userId = await auth.consumeEmailToken(token, "reset");
   if (!userId) return reply.code(400).send({ error: "Посилання недійсне або застаріле" });
   await auth.setPassword(userId, password);
+  // Людина щойно довела, що володіє скринькою (лист скидання прийшов і токен спрацював) - це та сама
+  // перевірка, що й лист підтвердження. Без цього рядка «загубив лист підтвердження → скинув пароль»
+  // закінчувалось тим самим глухим кутом «Підтвердіть пошту» (відтворено в аудиті).
+  await auth.markVerified(userId);
   return { ok: true };
+});
+
+// Надіслати лист підтвердження ще раз. Роуту не було ЗОВСІМ - і той, кому лист упав у спам,
+// не міг ані увійти, ані зареєструватись знову (409), ані обійти через скидання пароля.
+// Відповідь завжди однакова, щоб не розкривати, чи існує адреса; ліміт і по IP, і по адресі,
+// щоб чужу скриньку не можна було завалити листами.
+app.post("/api/auth/resend", async (req: any, reply) => {
+  const email = String(req.body?.email ?? "").trim().toLowerCase();
+  if (rateLimited("resend:" + req.ip, 5) || (email && rateLimited("resend:" + email, 3, 10 * 60000)))
+    return reply.code(429).send({ error: "Забагато спроб. Зачекай кілька хвилин і спробуй ще раз." });
+  const u = emailOk(email) ? await auth.userByEmail(email) : null;
+  if (u && !u.email_verified) {
+    const token = await auth.createEmailToken(u.id, "verify");
+    try { await sendVerifyEmail(email, `${env.appBaseUrl}/api/auth/verify?token=${token}`); }
+    catch (e: any) { await logEvent("error", "email", `resend-лист НЕ надіслано (${email}): ${e.message}`, null, u.id); }
+  }
+  return { ok: true, message: "Якщо адреса зареєстрована й ще не підтверджена - лист уже в дорозі. Перевір і папку «Спам»." };
 });
 
 // ===================== ACCOUNT (профіль, гігієна, видалення) =====================
@@ -781,6 +802,10 @@ app.get("/api/channels/status", async (req: any) => {
     one<{ access_token: string | null }>(`select access_token from tiktok_config where workspace_id=$1`, [ws]),
   ]);
   return {
+    // До схвалення App Review OAuth Meta пройде лише для людей зі списку Testers. Поки META_PUBLIC
+    // не задано, кабінет показує Instagram як «для тестерів», а онбординг починає з тексту -
+    // інакше перший же екран пропонує стороннім дію, яка впаде.
+    metaPublic: env.meta.publicAccess,
     telegram: !!(tgc && tgc.bot_token && (tgc.channel_chat_id || tgc.group_chat_id)),
     threads: !!(th && th.access_token),
     facebook: !!(mt && mt.page_token),

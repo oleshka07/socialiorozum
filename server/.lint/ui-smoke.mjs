@@ -70,7 +70,7 @@ const SETTINGS = [
 const API = {
   "GET /auth/me": { email: "smoke@rozum.one" },
   "GET /settings": SETTINGS,
-  "GET /channels/status": { telegram: true, threads: true, instagram: false, facebook: false, linkedin: false },
+  "GET /channels/status": { metaPublic: false, telegram: true, threads: true, instagram: false, facebook: false, linkedin: false },
   "GET /tasks": {
     score: 45,
     context: { critical: 1, total: 2 },
@@ -949,10 +949,28 @@ const run = async () => {
     return !!topic && topic.on && st.tabs.length === 2 && st.chips === 3 && st.gen;
   });
 
+  await check("obTextFirst", async () => {
+    // до апруву Meta текстовий шлях мусить бути ГОЛОВНОЮ кнопкою, а Instagram - другорядною з чесною
+    // поміткою «для тестерів»; інакше перший дотик стороннього до сервісу закінчується помилкою OAuth
+    await page.evaluate(() => { showOnboarding(); });
+    await page.waitForFunction(() => document.getElementById("obNoIg"), undefined, { timeout: 6000 });
+    const st = await page.evaluate(() => {
+      const oc = document.getElementById("obNoIg").closest("#onboarding");
+      const txt = document.getElementById("obNoIg"), ig = [...oc.querySelectorAll("button")].find((b) => b.textContent.includes("Instagram"));
+      return { txtPrimary: txt.classList.contains("primary"), igPrimary: ig ? ig.classList.contains("primary") : null,
+        order: txt.compareDocumentPosition(ig) & Node.DOCUMENT_POSITION_FOLLOWING ? "text-first" : "ig-first",
+        note: oc.textContent.includes("тестерів"), title: document.getElementById("obTitle") ? document.getElementById("obTitle").textContent : oc.textContent.slice(0, 200) };
+    });
+    await page.evaluate(() => { document.getElementById("onboarding").style.display = "none"; });
+    return st.txtPrimary && st.igPrimary === false && st.order === "text-first" && st.note && !/Підключи Instagram/.test(st.title);
+  });
+
   await check("obNoIg", async () => {
     await page.evaluate(() => showOnboarding());
     await page.waitForSelector("#obNoIg", { timeout: 6000 });
-    const ok = (await $t("#obNoIg")).includes("без Instagram");
+    // напис свідомо без «без Instagram»: так текстовий шлях звучав як гірший варіант, а до апруву Meta
+    // він - головний
+    const ok = (await $t("#obNoIg")).includes("текстом");
     await page.evaluate(() => { document.getElementById("onboarding").style.display = "none"; });
     return ok;
   });

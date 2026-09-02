@@ -3180,7 +3180,7 @@ $('saveRubrics').onclick=async()=>{ try{ await api('/rubrics',{method:'PUT',head
 
 // ---------- онбординг ----------
 const OB_STEPS=[
-  {title:'Підключи Instagram', desc:'Ми прочитаємо твої останні пости й автоматично виведемо голос бренду - найшвидший старт. Або тисни «Далі», щоб пропустити.', key:'connect', type:'connect'},
+  {title:'Звідки взяти твій голос?', desc:'Найшвидше - з твоїх постів: або з Instagram, або вставиш їх текстом на наступному кроці. Тисни «Далі», щоб пропустити.', key:'connect', type:'connect'},
   {title:'Про що ваш бренд і для кого?', desc:'Кілька речень про те, чим ти займаєшся і для кого. Ми використаємо це як контекст у кожному пості.', key:'marketing_context', ph:'Ніша + аудиторія: хто ви, для кого пишете, який результат даєте…', req:true},
   {title:'Ваш голос - встав 3-5 своїх постів', desc:'За ними AI виведе твій тон голосу, щоб тексти звучали як ти, а не як AI.', key:'voice_examples', ph:'Приклади постів, щоб AI вивів ваш стиль…'},
   {title:'Перше джерело (необовʼязково)', desc:'Встав транскрипт сесії або просто думку - і ми одразу покажемо готові пости.', key:'__transcript', ph:'Встав транскрипт/нотатку - зробимо перший контент…'},
@@ -3267,10 +3267,19 @@ window.addEventListener('message',(ev)=>{ if(ev.origin!==location.origin) return
 async function renderObConnect(oc){
   oc.innerHTML='<div style="font-size:13px;color:var(--muted)">Перевіряю підключення…</div>';
   let st={}; try{ st=await api('/channels/status'); }catch(e){}
-  if(!(st&&st.instagram)){ oc.innerHTML='<button class="btn primary" style="display:inline-flex" onclick="return connectPopup(\'/api/integrations/meta/connect\')">📸 Підключити Instagram</button>'
-      +'<div style="font-size:12.5px;color:var(--muted);margin-top:8px">Відкриється в окремому вікні - кабінет не закриється. Після підключення автоматично виведемо твій голос.</div>'
-      +'<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><button class="ghost" id="obNoIg" style="font-size:13px">✍️ Почати без Instagram - розповім про бренд текстом</button>'
-      +'<div style="font-size:12px;color:var(--faint);margin-top:6px">Немає бізнес-Instagram? Не страшно: на наступних кроках опишеш бренд і вставиш свої тексти - голос виведемо з них.</div></div>';
+  if(!(st&&st.instagram)){
+    // До схвалення App Review Meta OAuth проходить лише тестерам. Показувати стороннім
+    // «Підключити Instagram» першою кнопкою = перший же дотик до сервісу закінчується помилкою.
+    // Тож поки META_PUBLIC не задано, головна дія - текст, Instagram - друга і з чесною поміткою.
+    const igBtn='<button class="btn'+(st.metaPublic?' primary':'')+'" style="display:inline-flex" onclick="return connectPopup(\'/api/integrations/meta/connect\')">📸 Підключити Instagram</button>';
+    const igHint=st.metaPublic
+      ? '<div style="font-size:12.5px;color:var(--muted);margin-top:8px">Відкриється в окремому вікні - кабінет не закриється. Після підключення автоматично виведемо твій голос.</div>'
+      : '<div style="font-size:12.5px;color:var(--muted);margin-top:8px">Підключення Instagram зараз працює лише для запрошених тестерів - ми чекаємо на схвалення Meta. Голос так само добре виводиться з твоїх текстів.</div>';
+    const txtBtn='<button class="btn'+(st.metaPublic?'':' primary')+'" id="obNoIg" style="display:inline-flex">✍️ Розповісти про бренд текстом</button>'
+      +'<div style="font-size:12px;color:var(--faint);margin-top:6px">На наступних кроках опишеш бренд і вставиш 3-5 своїх постів - голос виведемо з них.</div>';
+    oc.innerHTML = st.metaPublic
+      ? igBtn+igHint+'<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">'+txtBtn+'</div>'
+      : txtBtn+'<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">'+igBtn+igHint+'</div>';
     const ni=$('obNoIg'); if(ni) ni.onclick=()=>{ obIdx=1; renderOb(); };
     return; }
   let pages=[]; try{ pages=await api('/integrations/meta/pages'); }catch(e){}

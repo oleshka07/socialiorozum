@@ -107,6 +107,13 @@ async function api(p,body){
   return j;
 }
 function show(cls,text){ const m=$('msg'); m.className='msg '+cls; m.textContent=text; }
+// «Лист не дійшов» - найчастіший глухий кут: лист у спамі, а без нього ні увійти, ні зареєструватись
+// знову. Кнопка зʼявляється рівно там, де людина в це впирається: після реєстрації і на відмові входу.
+function offerResend(email){
+  const m=$('msg'); const b=document.createElement('button'); b.type='button'; b.className='ghost'; b.style.cssText='margin-top:8px;font-size:13px';
+  b.textContent='📨 Надіслати лист ще раз'; m.appendChild(document.createElement('br')); m.appendChild(b);
+  b.onclick=async()=>{ b.disabled=true; try{ const r=await api('/auth/resend',{email}); m.textContent=r.message||'Лист надіслано.'; m.className='msg ok'; }catch(err){ m.textContent=err.message; m.className='msg err'; } };
+}
 
 const CFG={
   login:   {title:'З поверненням 👋', sub:'Увійдіть у свій кабінет',                 btn:'Увійти',              email:1,pass:1,passLabel:'Пароль',
@@ -138,8 +145,11 @@ $('form').onsubmit=async(e)=>{
   const btn=$('submit'), old=btn.textContent; btn.disabled=true; btn.innerHTML='<span class="spin"></span>';
   try{
     const email=$('email').value.trim(), password=$('password').value;
-    if(mode==='login'){ await api('/auth/login',{email,password}); location.href='/app'; return; }
-    if(mode==='register'){ const r=await api('/auth/register',{email,password}); show('ok', r.message||'Перевірте пошту.'); $('email').value=''; $('password').value=''; }
+    if(mode==='login'){
+      try{ await api('/auth/login',{email,password}); location.href='/app'; return; }
+      catch(err){ show('err', err.message); if(/підтверд/i.test(err.message)) offerResend(email); return; }
+    }
+    if(mode==='register'){ const r=await api('/auth/register',{email,password}); show('ok', (r.message||'Перевірте пошту.')+' Не бачиш листа - перевір «Спам».'); offerResend(email); $('password').value=''; }
     if(mode==='forgot'){ const r=await api('/auth/request-reset',{email}); show('ok', r.message||'Перевірте пошту.'); }
     if(mode==='reset'){ await api('/auth/reset',{token,password}); show('ok','Пароль змінено! Перенаправляю на вхід…'); setTimeout(()=>location.href='/login',1500); }
   }catch(err){ show('err', err.message); }

@@ -68,6 +68,8 @@ export const env = {
   meta: {
     appId: process.env.META_APP_ID ?? "",
     appSecret: process.env.META_APP_SECRET ?? "",
+    // META_PUBLIC=1 після схвалення App Review: до того Instagram/Facebook підключаються лише тестерам
+    publicAccess: process.env.META_PUBLIC === "1",
   },
   adminEmails: (process.env.ADMIN_EMAILS ?? "o.stepeniev@swipescape.eu,stepenievgroup@gmail.com")
     .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
