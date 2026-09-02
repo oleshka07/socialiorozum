@@ -3037,10 +3037,29 @@ $('ffImport').onclick=async()=>{
 async function loadAccount(){
   try{ const a=await api('/account'); const mb=(a.media.bytes/1048576).toFixed(1);
     $('accInfo').innerHTML='Email: <b>'+esc(a.email||'')+'</b>'+(a.emailVerified?' ✓':' (не підтверджено)')+' · Медіа: '+a.media.count+' файлів ('+mb+' МБ)'+(a.hasPassword?'':' · вхід лише через Google');
-    if(a.admin && $('admKeysPanel')){ $('admKeysPanel').style.display=''; loadAdminKeys(); loadAdminSpend(); }
+    if(a.admin && $('admKeysPanel')){ $('admKeysPanel').style.display=''; loadAdminKeys(); loadAdminSpend(); loadAdminHealth(); }
   }catch(e){ $('accInfo').textContent='-'; }
 }
 
+// ---------- Стан сервісу (адмін) ----------
+// Моніторингу не було зовсім: про сплеск помилок дізнавались від користувача. Тут - зріз за добу
+// з того, що вже лежить у БД (app_log, llm_usage, job) плюс останні бекапи, якщо тека змонтована.
+async function loadAdminHealth(){
+  const box=$('admHealth'); if(!box) return;
+  try{
+    const h=await api('/admin/health');
+    const errs=(h.errors||[]).slice(0,8);
+    let out='<div class="grid2" style="gap:10px;margin-bottom:8px">'
+      +'<div class="card"><b style="font-size:20px;color:'+((h.errorCount||0)>0?'var(--danger)':'var(--brand)')+'">'+(h.errorCount||0)+'</b><div class="hint">помилок за добу'+((h.warnCount||0)?' · '+h.warnCount+' попереджень':'')+'</div></div>'
+      +'<div class="card"><b style="font-size:20px">$'+Number(h.spendToday||0).toFixed(2)+'</b><div class="hint">витрачено на AI сьогодні, усі кабінети</div></div>'
+      +'<div class="card"><b style="font-size:20px;color:'+((h.lostJobs||0)?'var(--amber)':'inherit')+'">'+(h.runningJobs||0)+' / '+(h.lostJobs||0)+'</b><div class="hint">джоб зараз біжить / втрачено при рестарті за добу</div></div>'
+      +'<div class="card"><b style="font-size:14px">'+(h.lastBackup?esc(h.lastBackup):'не видно')+'</b><div class="hint">останній бекап'+(h.lastBackup?'':' - тека не змонтована або ще жодного')+'</div></div></div>';
+    if(errs.length) out+='<div style="font-size:12.5px">'+errs.map(e=>'<div style="display:flex;gap:8px;padding:3px 0;border-top:1px solid var(--line2)"><span style="color:'+(e.level==='error'?'var(--danger)':'var(--amber)')+';min-width:44px">'+esc(e.level)+'</span><span style="min-width:90px;color:var(--muted)">'+esc(e.scope)+'</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(e.message)+'">'+esc(e.message)+'</span><span style="color:var(--faint)">×'+e.n+'</span></div>').join('')+'</div>';
+    else out+='<div class="hint">За добу - жодної помилки в журналі.</div>';
+    out+='<div class="hint" style="margin-top:8px">Зовнішню перевірку доступності (UptimeRobot / Better Stack на <code>/health</code>) сервіс сам поставити не може - це одна дія в їхньому кабінеті.</div>';
+    box.innerHTML=out;
+  }catch(e){ box.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
+}
 // ---------- Витрати по кабінетах (адмін) ----------
 // Стеля на кабінет живе на `workspace`, а не в settings_block: інакше кожен підняв би її собі сам.
 async function loadAdminSpend(){

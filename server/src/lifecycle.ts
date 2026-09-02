@@ -4,6 +4,7 @@
 //  (3) прибирання «осиротілих» файлів медіа з диска.
 import { q } from "./db.js";
 import { logEvent } from "./log.js";
+import { sweepJobs } from "./jobs.js";
 import { env } from "./env.js";
 import { MEDIA_DIR, deleteMediaFile } from "./media.js";
 import { sendInactivityWarningEmail } from "./email.js";
@@ -87,6 +88,13 @@ async function tick(): Promise<void> {
   // 4) осиротілі файли медіа
   try { await sweepOrphanMedia(); } catch { /* ignore */ }
   try { await sweepLegacyIgSafe(); } catch { /* ignore */ }
+  // журнал подій ріс без обмежень (спіймано аудитом): 30 днів історії достатньо і для розбору
+  // інцидентів, і для звіту оператора; info-шум - 7 днів, попередження й помилки - 30
+  try {
+    await q(`delete from app_log where created_at < now() - interval '30 days'`);
+    await q(`delete from app_log where level='info' and created_at < now() - interval '7 days'`);
+  } catch { /* ignore */ }
+  try { await sweepJobs(); } catch { /* ignore */ }
   // 5) 🧠 памʼять контенту: наздоганяємо пости, опубліковані ДО появи дистиляції. Порційно (ліміт
   // усередині) - кожен артефакт це виклик моделі, і разовий прохід по всьому архіву коштував би
   // відчутних грошей; за кілька проходів воркера архів наздожене себе сам.

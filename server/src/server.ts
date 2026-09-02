@@ -10,7 +10,7 @@ import { createHash, createHmac, timingSafeEqual, randomUUID } from "node:crypto
 import { env } from "./env.js";
 import { q, one } from "./db.js";
 import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, ideaMode, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, storytellingVerdict, normFormat, FORMATS, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet, topPatterns, generateThreadsTakes, repeatVariant, expandTake, threadsStarterPack, threadsNicheReview, suggestThreadReplies, DEFAULT_MAIN_MODEL } from "./pipeline.js";
-import { startReelJob, reelJobs, parseReelScript } from "./reelvideo.js";
+import { startReelJob, parseReelScript } from "./reelvideo.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
 import { tgLink, fbLink, liLink } from "./permalink.js";
@@ -34,10 +34,12 @@ import { resolveSource } from "./rss-resolver.js";
 import { MEDIA_DIR, saveMedia, deleteMediaFile, convertAllHeif, getThumb } from "./media.js";
 import { normalizeMeeting, saveMeeting } from "./meetings.js";
 import { spendStatus, SpendCapError, CAPS } from "./spend.js";
+import { startJob, getJob, getJobByKey, jobView, markLostJobs } from "./jobs.js";
+import { readdir, stat } from "node:fs/promises";
 import { startMeetingPull, testPull, pullOnce } from "./meetings-pull.js";
 import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
 import * as gdrive from "./gdrive.js";
-import { publishPostToChannels, alreadySentNetworks, startReelPublishJob, reelPubJobs, reelSentNetworks } from "./publisher.js";
+import { publishPostToChannels, alreadySentNetworks, startReelPublishJob, reelSentNetworks } from "./publisher.js";
 import { startLifecycleWorker } from "./lifecycle.js";
 import { startDigest } from "./digest.js";
 import { startMetrics, networkBenchmarks } from "./metrics.js";
@@ -493,6 +495,30 @@ app.put("/api/admin/spend/:workspaceId", async (req: any, reply) => {
   return { ok: true };
 });
 
+// ---- адмін: стан сервісу за добу (моніторингу не було зовсім - дізнавались від користувачів) ----
+app.get("/api/admin/health", async (req: any, reply) => {
+  if (!adminOnly(req, reply)) return;
+  const [errors, counts, spend, jobs] = await Promise.all([
+    q<any>(`select level, scope, left(message,140) as message, count(*)::int as n from app_log
+             where level in ('error','warn') and created_at > now() - interval '24 hours'
+             group by level, scope, left(message,140) order by n desc, level limit 20`),
+    one<any>(`select count(*) filter (where level='error')::int as errors, count(*) filter (where level='warn')::int as warns
+                from app_log where created_at > now() - interval '24 hours'`),
+    one<any>(`select coalesce(sum(cost),0)::float as usd from llm_usage where created_at >= date_trunc('day', now() at time zone 'utc') at time zone 'utc'`),
+    one<any>(`select count(*) filter (where status='running')::int as running,
+                     count(*) filter (where status='idle' and updated_at > now() - interval '24 hours')::int as lost from job`),
+  ]);
+  // тека бекапів змонтована в контейнер лише для читання (compose: /opt/socialio-backups:/backups:ro)
+  let lastBackup: string | null = null;
+  try {
+    const dir = process.env.BACKUP_DIR || "/backups";
+    const files = (await readdir(dir)).filter((f) => f.endsWith(".dump")).sort();
+    if (files.length) { const f = files[files.length - 1]; const st = await stat(join(dir, f)); lastBackup = `${f} (${Math.round(st.size / 1024)}K)`; }
+  } catch { /* теки нема - покажемо «не видно» */ }
+  return { errorCount: counts?.errors || 0, warnCount: counts?.warns || 0, spendToday: spend?.usd || 0,
+           runningJobs: jobs?.running || 0, lostJobs: jobs?.lost || 0, lastBackup, errors };
+});
+
 // ---- скільки коштує одне зображення / одне відео ----
 // Питання Олега було саме таким: перш ніж міняти провайдера картинок, треба бачити ціну.
 // Наші три провайдери мають фіксовану ціну в коді, каталог kie тягнеться живим (ціни там міняються).
@@ -571,7 +597,10 @@ app.post("/api/generate/from-brand", async (req: any, reply) => {
   const rows = await q<{ key: string; content: string }>(`select key, content from settings_block where workspace_id=$1`, [ws]);
   const s: Record<string, string> = {}; for (const r of rows) s[r.key] = r.content || "";
   const rubs = await q<{ name: string; description: string }>(`select name, description from rubric where workspace_id=$1 order by idx`, [ws]);
-  if (!(s.marketing_context || "").trim() && !rubs.length) return reply.code(400).send({ error: "Спершу заповни Базу бренду (ніша й аудиторія)" });
+  // Раніше захист пропускав, якщо є рубрики - а вони засіваються за замовчуванням, тож новачок
+  // одним кліком палив виклик gpt-4o на порожньому бренді (спіймано аудитом).
+  if (!(s.marketing_context || "").trim() && !(s.voice_examples || "").trim())
+    return reply.code(400).send({ error: "Спершу розкажи про бренд: ніша й аудиторія або 3-5 своїх постів (Бренд → Голос)" });
   const brief = [
     s.marketing_context ? `Бренд і аудиторія:\n${s.marketing_context}` : "",
     s.tone_of_voice ? `Голос бренду:\n${s.tone_of_voice}` : "",
@@ -589,27 +618,16 @@ app.post("/api/generate/from-brand", async (req: any, reply) => {
 // моделі на промті в 25 тис. символів у це вікно не вкладається - людина отримувала 504 на роботі,
 // яка НАСПРАВДІ виконувалась далі. Ту саму дірку ми вже закрили для публікації; тут вона
 // повторилась на перевірці контексту, тож механізм зроблено спільним, а не ще однією латкою.
-type AiJob = { ws: string; status: "running" | "done" | "error"; result?: any; error?: string; at: number };
-const aiJobs = new Map<string, AiJob>();
-const AIJOB_TTL = 15 * 60 * 1000;
-
-function startAiJob(ws: string, work: () => Promise<any>): string {
-  for (const [k, v] of aiJobs) if (v.status !== "running" && Date.now() - v.at > AIJOB_TTL) aiJobs.delete(k);
-  const id = randomUUID();
-  aiJobs.set(id, { ws, status: "running", at: Date.now() });
-  work()
-    .then((result) => aiJobs.set(id, { ws, status: "done", result, at: Date.now() }))
-    .catch(async (e: any) => {
-      aiJobs.set(id, { ws, status: "error", error: String(e?.message || e).slice(0, 300), at: Date.now() });
-      await logEvent("warn", "aijob", e?.message || String(e), { ws });
-    });
-  return id;
+// Стан - у таблиці `job` (jobs.ts), робота - в процесі. Після рестарту клієнт бачить `idle` з
+// причиною замість вічного спінера, а завершені прибираються lifecycle-воркером.
+async function startAiJob(ws: string, work: () => Promise<any>): Promise<string> {
+  return (await startJob("ai", null, ws, work)).id;
 }
 
 app.get("/api/jobs/:id", async (req: any, reply) => {
-  const j = aiJobs.get(req.params.id);
-  if (!j) return { status: "idle" };                                   // процес перезапустився - клієнт не висне
-  if (j.ws !== req.user.workspace_id) return reply.code(404).send({ error: "не знайдено" });
+  const j = await getJob(req.params.id);
+  if (!j) return { status: "idle" };
+  if (j.workspace_id !== req.user.workspace_id) return reply.code(404).send({ error: "не знайдено" });
   return { status: j.status, result: j.result, error: j.error };
 });
 
@@ -622,7 +640,7 @@ app.post("/api/brand/context-check", async (req: any) => {
   // швидкий (детермінований) шар віддаємо ОДРАЗУ - він без моделі й займає мілісекунди;
   // джоба потрібна лише глибокому розбору
   if (!deep) return await contextReview(ws, false);
-  return { jobId: startAiJob(ws, () => contextReview(ws, true)) };
+  return { jobId: await startAiJob(ws, () => contextReview(ws, true)) };
 });
 
 // Варіант виправлення ОДНОГО поля. Свідомо не «полагодь усе»: людина мусить бачити «було → стало»
@@ -630,7 +648,7 @@ app.post("/api/brand/context-check", async (req: any) => {
 app.post("/api/brand/context-fix", async (req: any) => {
   const ws = req.user.workspace_id;
   const key = String(req.body?.key || ""), problem = String(req.body?.problem || "");
-  return { jobId: startAiJob(ws, async () => ({ suggestion: await suggestFieldFix(ws, key, problem) })) };
+  return { jobId: await startAiJob(ws, async () => ({ suggestion: await suggestFieldFix(ws, key, problem) })) };
 });
 
 app.post("/api/brand/suggest-pains", async (req: any, reply) => {
@@ -858,31 +876,18 @@ app.post("/api/posts/:postId/adapt", async (req: any, reply) => {
 // nginx рве проксі-зʼєднання на 60с і віддає 504. Найгірше тут не сама помилка: публікація на сервері
 // ПРОДОВЖУВАЛАСЬ і зазвичай успішно завершувалась, тож людина бачила «⚠ 504» на реально
 // опублікованому пості. Тепер запит одразу вертає «почав», а клієнт полить статус.
-type PubJob = { status: "running" | "done" | "error"; results?: any[]; message?: string; error?: string; at: number };
-const publishJobs = new Map<string, PubJob>();
-const PUBJOB_TTL = 15 * 60 * 1000;
-
-function startPublishJob(postId: string, work: () => Promise<Partial<PubJob>>): PubJob {
-  // прибирання завершених джоб: Map інакше росла б увесь час життя процесу
-  for (const [k, v] of publishJobs) if (v.status !== "running" && Date.now() - v.at > PUBJOB_TTL) publishJobs.delete(k);
-  const cur = publishJobs.get(postId);
-  if (cur && cur.status === "running") return cur;   // подвійний клік не запускає другу публікацію
-  const job: PubJob = { status: "running", at: Date.now() };
-  publishJobs.set(postId, job);
-  work()
-    .then((out) => publishJobs.set(postId, { ...job, ...out, status: "done", at: Date.now() }))
-    .catch(async (e: any) => {
-      publishJobs.set(postId, { ...job, status: "error", error: String(e?.message || e).slice(0, 300), at: Date.now() });
-      await logEvent("error", "publish", e?.message || String(e), { postId });
-    });
-  return job;
+type PubJob = { status: string; results?: any[]; message?: string; error?: string };
+// (kind,key)=('publish',postId) - дедуп: подвійний клік не запускає другу публікацію
+async function startPublishJob(ws: string, postId: string, work: () => Promise<Partial<PubJob>>): Promise<PubJob> {
+  const j = await startJob("publish", postId, ws, work);
+  return jobView(j) as PubJob;
 }
 
 app.post("/api/posts/:postId/publish-all", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   const postId = req.params.postId;
   if (!(await postOwned(postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
-  const job = startPublishJob(postId, async () => {
+  const job = await startPublishJob(ws, postId, async () => {
     const results = await publishPostToChannels(ws, postId);
     if (!results.length) throw new Error("Оберіть хоча б одну мережу");
     // Публікація один раз на мережу: гасимо запланований слот ЛИШЕ якщо не лишилось не надісланих мереж
@@ -908,8 +913,7 @@ app.post("/api/posts/:postId/publish-all", async (req: any, reply) => {
 // клієнт у цьому разі просто перечитує реальний стан поста через /publish-state, а не висить вічно.
 app.get("/api/posts/:postId/publish-job", async (req: any, reply) => {
   if (!(await postOwned(req.params.postId, req.user.workspace_id))) return reply.code(404).send({ error: "пост не знайдено" });
-  const j = publishJobs.get(req.params.postId);
-  return j ? { status: j.status, results: j.results, message: j.message, error: j.error } : { status: "idle" };
+  return jobView(await getJobByKey("publish", req.params.postId));
 });
 
 // 🔗 Посилання на опублікований пост по мережах. Для постів, опублікованих ДО появи колонки
@@ -1132,16 +1136,16 @@ app.post("/api/posts/:postId/reel-video", async (req: any, reply) => {
   if (!post) return reply.code(404).send({ error: "пост не знайдено" });
   if (!env.azure.speechKey) return reply.code(400).send({ error: "Потрібен AZURE_SPEECH_KEY у .env (Azure Speech, безкоштовний тариф F0) + перезапуск стека" });
   if (parseReelScript(post.content || "").length < 2) return reply.code(400).send({ error: "Це не сценарій Reels - спершу зроби «🎬 Сценарій Reels» на матеріалі" });
-  const j = reelJobs.get(req.params.postId);
+  const j = await getJobByKey("reel", req.params.postId);
   if (j?.status === "running") return { ok: true, status: "running" };
-  startReelJob(ws, req.params.postId, post.content, post.filename);
+  await startReelJob(ws, req.params.postId, post.content, post.filename);
   return { ok: true, status: "running" };
 });
 app.get("/api/posts/:postId/reel-video", async (req: any, reply) => {
   if (!(await postOwned(req.params.postId, req.user.workspace_id))) return reply.code(404).send({ error: "пост не знайдено" });
-  const j = reelJobs.get(req.params.postId);
-  if (j) return j;
-  // після рестарту/для іншої вкладки: готовий рілс лежить на пості
+  const j = await getJobByKey("reel", req.params.postId);
+  if (j && j.status !== "idle") return jobView(j);
+  // після рестарту (job=idle) або для іншої вкладки: готовий рілс лежить на пості
   const p = await one<{ reel_video: string | null }>(`select reel_video from post where id=$1`, [req.params.postId]);
   return p?.reel_video ? { status: "done", filename: p.reel_video } : { status: "none" };
 });
@@ -1153,16 +1157,16 @@ app.post("/api/posts/:postId/reel-publish", async (req: any, reply) => {
   if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
   const nets = (Array.isArray(req.body?.nets) ? req.body.nets : []).filter((n: any) => ["instagram", "facebook", "youtube", "tiktok"].includes(n));
   if (!nets.length) return reply.code(400).send({ error: "обери хоча б одну мережу" });
-  const j = reelPubJobs.get(req.params.postId);
+  const j = await getJobByKey("reel-pub", req.params.postId);
   if (j?.status === "running") return { ok: true, status: "running" };
-  startReelPublishJob(ws, req.params.postId, nets);
+  await startReelPublishJob(ws, req.params.postId, nets);
   return { ok: true, status: "running" };
 });
 app.get("/api/posts/:postId/reel-publish", async (req: any, reply) => {
   if (!(await postOwned(req.params.postId, req.user.workspace_id))) return reply.code(404).send({ error: "пост не знайдено" });
-  const j = reelPubJobs.get(req.params.postId);
+  const j = await getJobByKey("reel-pub", req.params.postId);
   const sent = await reelSentNetworks(req.params.postId);
-  return j ? { ...j, sent } : { status: "none", sent };
+  return j && j.status !== "idle" ? { ...jobView(j), sent } : { status: "none", sent };
 });
 
 // Стокові фото Pexels: 2-3 варіанти під тему поста → юзер обирає → кроп під формат + база для тексту
@@ -2351,7 +2355,7 @@ app.post("/api/ab/generate", async (req: any) => {
   const b = req.body ?? {};
   const ws = req.user.workspace_id;
   // 4 моделі паралельно, кожна до хвилини - синхронна відповідь тут не мала шансів пережити nginx
-  return { jobId: startAiJob(ws, () => runAbTest(ws, {
+  return { jobId: await startAiJob(ws, () => runAbTest(ws, {
     sourceId: b.sourceId, postId: b.postId, text: b.text,
     models: Array.isArray(b.models) ? b.models : [], count: b.count,
   })) };
@@ -3371,7 +3375,7 @@ app.post("/api/tg/post/:postId/image", async (req: any, reply) => {
   const u = await tgGuard(req, reply); if (!u) return;
   const id = await tgOwnPost(u.ws, req.params.postId);
   if (!id) return reply.code(404).send({ error: "пост не знайдено" });
-  const job = startAiJob(u.ws, async () => ({ filename: await generateImageForPost(u.ws, id, { aspect: String(req.body?.aspect || "4:5"), prompt: String(req.body?.prompt || "") }) }));
+  const job = await startAiJob(u.ws, async () => ({ filename: await generateImageForPost(u.ws, id, { aspect: String(req.body?.aspect || "4:5"), prompt: String(req.body?.prompt || "") }) }));
   return { jobId: job };
 });
 
@@ -3417,7 +3421,7 @@ app.post("/api/tg/post/:postId/rewrite", async (req: any, reply) => {
   const u = await tgGuard(req, reply); if (!u) return;
   const id = await tgOwnPost(u.ws, req.params.postId);
   if (!id) return reply.code(404).send({ error: "пост не знайдено" });
-  const job = startAiJob(u.ws, async () => ({ text: await tgRewrite(u.ws, id, String(req.body?.instruction || "").slice(0, 400)) }));
+  const job = await startAiJob(u.ws, async () => ({ text: await tgRewrite(u.ws, id, String(req.body?.instruction || "").slice(0, 400)) }));
   return { jobId: job };
 });
 
@@ -3452,7 +3456,7 @@ app.post("/api/tg/material/:sourceId/post", async (req: any, reply) => {
   const u = await tgGuard(req, reply); if (!u) return;
   const src = await one<{ id: string }>(`select id from source where id=$1 and workspace_id=$2`, [req.params.sourceId, u.ws]);
   if (!src) return reply.code(404).send({ error: "матеріал не знайдено" });
-  const job = startAiJob(u.ws, async () => {
+  const job = await startAiJob(u.ws, async () => {
     const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src.id]);
     await generatePostsOnePass(run!.id, 1);
     const p = await one<{ id: string }>(`select id from post where run_id=$1 and stage='final' order by created_at desc limit 1`, [run!.id]);
@@ -3466,8 +3470,8 @@ app.post("/api/tg/material/:sourceId/post", async (req: any, reply) => {
 // довгі виклики не вкладаються у 60-секундне вікно nginx, тож усі вони фонові
 app.get("/api/tg/job/:jobId", async (req: any, reply) => {
   const u = await tgGuard(req, reply); if (!u) return;
-  const j = aiJobs.get(req.params.jobId);
-  if (!j || j.ws !== u.ws) return { status: "idle" };
+  const j = await getJob(req.params.jobId);
+  if (!j || j.workspace_id !== u.ws) return { status: "idle" };
   return { status: j.status, result: j.result, error: j.error };
 });
 
@@ -3499,14 +3503,13 @@ app.put("/api/tg/post/:postId", async (req: any, reply) => {
 // теж джобою. Клієнт полить `/api/tg/post/:id/publish-job`.
 app.post("/api/tg/post/:postId/publish", async (req: any, reply) => {
   const u = await tgGuard(req, reply); if (!u) return;
-  const job = startPublishJob(req.params.postId, async () => ({ message: await publishNow(u.ws, req.params.postId) }));
+  const job = await startPublishJob(u.ws, req.params.postId, async () => ({ message: await publishNow(u.ws, req.params.postId) }));
   return { started: true, status: job.status };
 });
 
 app.get("/api/tg/post/:postId/publish-job", async (req: any, reply) => {
   const u = await tgGuard(req, reply); if (!u) return;
-  const j = publishJobs.get(req.params.postId);
-  return j ? { status: j.status, message: j.message, error: j.error } : { status: "idle" };
+  return jobView(await getJobByKey("publish", req.params.postId));
 });
 
 // ===================== СТОРІНКИ =====================
@@ -3538,6 +3541,7 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
   app.log.info(`socialio на ${addr}`);
   // ключі з адмінки накладаються поверх .env ПЕРШИМ ділом - до того, як воркери підуть у мережу
   refreshSecrets();
+  markLostJobs().catch(() => {});   // усе, що «бігло» до рестарту, робота вже не виконує
   startAutopost();
   startRssPoller();
   startGdrivePoller();

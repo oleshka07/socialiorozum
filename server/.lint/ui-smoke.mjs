@@ -141,6 +141,8 @@ const API = {
     byStep: [{ step: "lite", calls: 2, cost: 0.018 }, { step: "post_digest", calls: 1, cost: 0.002 }],
     cap: { spentDay: 2.55, spentMonth: 7.1, capDay: 3, capMonth: 30 },
   },
+  "GET /admin/health": { errorCount: 2, warnCount: 5, spendToday: 1.23, runningJobs: 1, lostJobs: 0, lastBackup: "socialio-db-20260902-0320.dump (164K)",
+    errors: [{ level: "error", scope: "publish", message: "Telegram відмовив у доступі (403)", n: 2 }, { level: "warn", scope: "meeting", message: "хеш транскрипта не збігся", n: 5 }] },
   "GET /admin/spend": { defaults: { day: 3, month: 30, callsPerMin: 40 }, workspaces: [
     { id: "ws-1", emails: "smoke@rozum.one", day: 2.55, month: 7.1, calls: 12, spend_cap_day: null, spend_cap_month: null },
     { id: "ws-2", emails: "oleg@rozum.one", day: 0.4, month: 9.9, calls: 3, spend_cap_day: 0, spend_cap_month: 0 },
@@ -886,6 +888,14 @@ const run = async () => {
     const zeroCap = await page.$eval('#admSpend tr[data-ws="ws-2"] .sDay', (el) => el.value);
     return cap.includes("$2.55 із $3.00") && cap.includes("$7.10 із $30.00") && warnBar === "85%" &&
       rows[0].includes("smoke@rozum.one") && zeroCap === "0";
+  });
+
+  await check("adminHealth", async () => {
+    // зріз стану сервісу для оператора: цифри за добу і перелік помилок мусять доїхати з /admin/health
+    await page.evaluate(() => { selectView("settings"); setSTab("profile"); });
+    await page.waitForFunction(() => document.querySelector("#admHealth .card"), undefined, { timeout: 8000 });
+    const t = await $t("#admHealth");
+    return t.includes("помилок за добу") && t.includes("$1.23") && t.includes("Telegram відмовив") && t.includes("20260902-0320");
   });
 
   await check("imgCost", async () => {

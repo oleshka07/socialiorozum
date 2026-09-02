@@ -430,6 +430,14 @@
   .owl-bubble::after{ content:''; position:absolute; bottom:-8px; left:26px; width:16px; height:16px; background:var(--panel,#fff); border-right:1px solid var(--line); border-bottom:1px solid var(--line); transform:rotate(45deg); }
   .owl-bubble.flip{ left:auto; right:0; }
   .owl-bubble.flip::after{ left:auto; right:26px; }
+  /* Мобільний: сова НЕ літає до цілі (на вузькому екрані вона, летячи до вкладки вгорі, закривала
+     собою і вкладки, і підказку - спіймано аудитом), сидить у гнізді над нижньою навігацією, а
+     бульбашка тягнеться на ширину екрана й ніколи не перекриває шапку. */
+  @media (max-width:700px){
+    #owl{ left:12px!important; right:auto!important; top:auto!important; bottom:84px!important; transition:none; }
+    .owl-bubble, .owl-bubble.flip{ position:fixed; left:12px; right:12px; bottom:170px; width:auto; }
+    .owl-bubble::after, .owl-bubble.flip::after{ left:26px; right:auto; }
+  }
   .owl-bubble.below{ bottom:auto; top:86px; }
   .owl-bubble.below::after{ bottom:auto; top:-8px; border:none; border-left:1px solid var(--line); border-top:1px solid var(--line); }
   @keyframes owlPop{ from{opacity:0; transform:translateY(8px) scale(.94)} to{opacity:1; transform:none} }
@@ -918,6 +926,8 @@
           <div class="ph" style="margin:0 0 6px">🔑 Ключі провайдерів (адміністратор)</div>
           <div class="hint" style="margin-bottom:10px">Ключі можна вставити просто тут - без SSH і перезапуску сервера. Значення застосовується одразу й <b>перекриває</b> те, що стоїть у <code>.env</code>; прибереш ключ - повернеться значення з <code>.env</code>, тож зламати робоче налаштування кліком неможливо. Введений ключ назад не показується (лише останні 4 символи) і ніде не логується.</div>
           <div id="admKeys"></div>
+          <div class="ph" style="margin:18px 0 6px">🩺 Стан сервісу за 24 години</div>
+          <div id="admHealth"></div>
           <div class="ph" style="margin:18px 0 6px">💸 Витрати по кабінетах і стеля на AI</div>
           <div id="admSpend"></div>
         </div>

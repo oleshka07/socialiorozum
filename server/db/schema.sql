@@ -664,3 +664,21 @@ alter table transcription_config add column if not exists meeting_pull_at    tim
 -- той пишеться самим користувачем через PUT /api/settings/:key, і кожен підняв би собі стелю сам.
 alter table workspace add column if not exists spend_cap_day   numeric;
 alter table workspace add column if not exists spend_cap_month numeric;
+
+-- ⏳ ФОНОВІ ДЖОБИ - стан у БД, а не в памʼяті процесу (публікація, AI-дії, рілси).
+-- Деплой посеред публікації раніше лишав клієнта з вічним «idle» без пояснення; тепер після старту
+-- всі running стають idle з людською причиною, а завершені прибираються через добу (lifecycle).
+-- (kind,key) - ключ дедупу: подвійний клік «Опублікувати» не запускає другу публікацію.
+create table if not exists job (
+  id           uuid primary key,
+  workspace_id uuid references workspace(id) on delete cascade,
+  kind         text not null,
+  key          text,
+  status       text not null default 'running',
+  result       jsonb,
+  error        text,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+create index if not exists idx_job_kind_key on job(kind, key, created_at desc);
+create index if not exists idx_job_updated on job(updated_at);

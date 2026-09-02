@@ -15,6 +15,7 @@ import { adaptForChannels, reelCaption, threadsSplit } from "./pipeline.js";
 import { getSetting } from "./settings.js";
 import { tgLink, fbLink, liLink } from "./permalink.js";
 import { logEvent } from "./log.js";
+import { startJob } from "./jobs.js";
 import { ensurePostDigest } from "./memory.js";
 
 export async function thValidToken(ws: string): Promise<{ token: string; userId: string } | null> {
@@ -277,8 +278,6 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
 // Окремий шлях від текстових постів: IG (контейнер REELS), FB (відео Сторінки),
 // YouTube (Shorts), TikTok (чернетка юзеру - до аудиту застосунку прямий пост недоступний).
 // Фонова джоба (IG обробляє відео до ~3 хв - жоден HTTP-таймаут не переживе синхронний виклик).
-export type ReelPubJob = { status: "running" | "done" | "error"; results?: PubResult[]; error?: string; startedAt: number };
-export const reelPubJobs = new Map<string, ReelPubJob>();
 
 // мережі, куди рілс УЖЕ поїхав (щоб не публікувати вдруге)
 export async function reelSentNetworks(postId: string): Promise<string[]> {
@@ -369,9 +368,6 @@ export async function publishReelToChannels(ws: string, postId: string, nets: st
   return results;
 }
 
-export function startReelPublishJob(ws: string, postId: string, nets: string[]): void {
-  reelPubJobs.set(postId, { status: "running", startedAt: Date.now() });
-  publishReelToChannels(ws, postId, nets)
-    .then((results) => reelPubJobs.set(postId, { status: "done", results, startedAt: Date.now() }))
-    .catch(async (e) => { reelPubJobs.set(postId, { status: "error", error: String(e.message).slice(0, 300), startedAt: Date.now() }); await logEvent("error", "reel-pub", e.message); });
+export async function startReelPublishJob(ws: string, postId: string, nets: string[]): Promise<void> {
+  await startJob("reel-pub", postId, ws, async () => ({ results: await publishReelToChannels(ws, postId, nets) }));
 }

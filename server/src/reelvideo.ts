@@ -14,15 +14,13 @@ import { MEDIA_DIR } from "./media.js";
 import { logEvent } from "./log.js";
 import { kieGenerate, kieReady } from "./kie.js";
 import { getSettingText } from "./settings.js";
+import { startJob } from "./jobs.js";
 
 // Дефолтна відео-модель kie.ai. Це саме ДЕФОЛТ, а не список: вибір моделі живе в налаштуванні
 // `kie_video_model`, а сам перелік підтягується з живого каталогу цін (див. kie.ts).
 export const KIE_VIDEO_DEFAULT = "bytedance/seedance-v1-lite-t2v";
 
 type Seg = { label: string; text: string; visual: string };
-type Job = { status: "running" | "done" | "error"; filename?: string; error?: string; startedAt: number };
-export const reelJobs = new Map<string, Job>();
-
 // ---- утиліти ----
 function run(cmd: string, args: string[], timeoutMs = 120000): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -248,13 +246,11 @@ export async function buildReelVideo(ws: string, postId: string, content: string
 }
 
 // ---- 7. Фонова джоба (nginx-таймаути не страшні: старт → полінг статусу) ----
-export function startReelJob(ws: string, postId: string, content: string, bgImage: string | null): void {
-  reelJobs.set(postId, { status: "running", startedAt: Date.now() });
-  buildReelVideo(ws, postId, content, bgImage)
-    .then(async (filename) => {
-      reelJobs.set(postId, { status: "done", filename, startedAt: Date.now() });
-      // персист у пост - щоб рілс не загубився, навіть якщо юзер закрив сторінку/попап заблоковано
-      await q(`update post set reel_video=$2 where id=$1`, [postId, filename]).catch(() => {});
-    })
-    .catch(async (e) => { reelJobs.set(postId, { status: "error", error: String(e.message).slice(0, 300), startedAt: Date.now() }); await logEvent("error", "reel", e.message); });
+export async function startReelJob(ws: string, postId: string, content: string, bgImage: string | null): Promise<void> {
+  await startJob("reel", postId, ws, async () => {
+    const filename = await buildReelVideo(ws, postId, content, bgImage);
+    // персист у пост - щоб рілс не загубився, навіть якщо юзер закрив сторінку/попап заблоковано
+    await q(`update post set reel_video=$2 where id=$1`, [postId, filename]).catch(() => {});
+    return { filename };
+  });
 }
