@@ -29,6 +29,26 @@ export async function getThumb(name: string): Promise<Buffer | null> {
   } catch { return null; }
 }
 
+// Магічні байти замість заявленого mime. Список короткий і свідомий: те, що реально показують
+// мережі й обробляє sharp/ffmpeg. Усе інше - відмова з людською причиною.
+export function sniffKind(b: Buffer): { kind: "image" | "video"; mime: string } | null {
+  if (!b || b.length < 12) return null;
+  const hex = (o: number, n: number) => b.subarray(o, o + n).toString("hex");
+  const asc = (o: number, n: number) => b.subarray(o, o + n).toString("latin1");
+  if (hex(0, 3) === "ffd8ff") return { kind: "image", mime: "image/jpeg" };
+  if (hex(0, 8) === "89504e470d0a1a0a") return { kind: "image", mime: "image/png" };
+  if (asc(0, 4) === "GIF8") return { kind: "image", mime: "image/gif" };
+  if (asc(0, 4) === "RIFF" && asc(8, 4) === "WEBP") return { kind: "image", mime: "image/webp" };
+  if (asc(4, 4) === "ftyp") {
+    const brand = asc(8, 4).toLowerCase();
+    if (/^(heic|heix|hevc|mif1|msf1|heim|heis)/.test(brand)) return { kind: "image", mime: "image/heic" };
+    if (/^(qt)/.test(brand)) return { kind: "video", mime: "video/quicktime" };
+    return { kind: "video", mime: "video/mp4" };   // isom, mp42, avc1, M4V тощо
+  }
+  if (hex(0, 4) === "1a45dfa3") return { kind: "video", mime: "video/webm" };
+  return null;
+}
+
 export async function saveMedia(
   ws: string,
   opts: { buffer: Buffer; mime: string; name?: string; source?: string; externalId?: string }
@@ -44,11 +64,17 @@ export async function saveMedia(
       mime = "image/jpeg";
     } catch { /* конвертація не вдалась — зберігаємо як є */ }
   }
+  // Тип визначаємо ЗА ВМІСТОМ, а не за заявленим Content-Type: HTML під виглядом image/jpeg
+  // зберігався як .jpeg і лежав у бібліотеці сміттям, а прев'ю на ньому падало (спіймано аудитом).
+  // nosniff і правильний Content-Type рятували від XSS, але не від сміття й не від бінарників.
+  const sniffed = sniffKind(buffer);
+  if (!sniffed) throw new Error("Це не зображення і не відео - приймаємо JPG, PNG, WebP, GIF, HEIC, MP4, MOV, WebM");
+  if (sniffed.mime !== mime) mime = sniffed.mime;   // довіряємо байтам, не заголовку
   const ext = (mime.split("/")[1] || "bin").replace(/[^a-z0-9]/gi, "").slice(0, 5) || "bin";
   const id = randomUUID();
   const filename = `${id}.${ext}`;
   await writeFile(join(MEDIA_DIR, filename), buffer);
-  const kind = mime.startsWith("video") ? "video" : "image";
+  const kind = sniffed.kind;
   await q(
     `insert into media_asset(id, workspace_id, kind, mime, original_name, filename, size, source, external_id)
      values($1,$2,$3,$4,$5,$6,$7,$8,$9)`,

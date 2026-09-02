@@ -70,6 +70,17 @@ async function geminiChat(model: string, system: string, user: string, ctx?: Cha
   return text;
 }
 
+// Мережева помилка на шляху до моделі - людською. «fetch failed» / ECONNREFUSED / ENOTFOUND / timeout
+// доходили до користувача сирими (спіймано аудитом: модель вимкнено → «fetch failed» у кабінеті).
+// Це не помилка людини і не назавжди, тож текст каже: тимчасово, спробуй за хвилину.
+export function humanNetError(provider: string, e: any): string {
+  const name = String(e?.name || ""), msg = String(e?.message || e || ""), code = String(e?.cause?.code || e?.code || "");
+  if (name === "AbortError" || /timeout/i.test(msg)) return `Модель не відповіла за 60 секунд (${provider}) - спробуй ще раз; якщо повторюється, провайдер перевантажений.`;
+  if (/fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ECONNRESET|UND_ERR|network/i.test(msg + " " + code))
+    return `Модель тимчасово недоступна (нема звʼязку з ${provider}) - спробуй за хвилину.`;
+  return `${provider}: ${msg.slice(0, 200)}`;
+}
+
 // Особливості конкретних моделей, вивчені з їхніх же помилок (модель → що робити з тілом запиту).
 // Живе на процес: перезапуск просто перевчиться за один виклик.
 type Quirk = { renameMaxTokens?: boolean; drop?: string[] };
@@ -140,7 +151,7 @@ export async function chat(model: string, system: string, user: string, ctx?: Ch
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 60000);
     try { return await fetch(url, { method: "POST", headers, signal: controller.signal, body: JSON.stringify(body) }); }
-    catch (e: any) { if (e && e.name === "AbortError") throw new Error(`${provider} timeout 60s`); throw e; }
+    catch (e: any) { throw new Error(humanNetError(provider, e)); }
     finally { clearTimeout(timer); }
   };
 
@@ -160,6 +171,10 @@ export async function chat(model: string, system: string, user: string, ctx?: Ch
 
   if (!res.ok) {
     const t = await res.text();
+    // 5xx і 429 у провайдера - не наша помилка і не назавжди: кажемо людині саме це, а деталь
+    // лишаємо після крапки для оператора (вона потрапляє в журнал разом із повідомленням)
+    if (res.status >= 500 || res.status === 429)
+      throw new Error(`Модель тимчасово недоступна (${provider} ${res.status}) - спробуй за хвилину.${res.status === 429 ? " Якщо повторюється - вичерпано квоту провайдера." : ""}`);
     throw new Error(`${provider} ${res.status}: ${t.slice(0, 300)}`);
   }
   const j: any = await res.json();

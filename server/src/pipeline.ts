@@ -329,21 +329,33 @@ async function generateStrategyV2(workspaceId: string, s: Record<string, string>
 }
 
 // Компактний текстовий рендер брифу для інʼєкції у промти (Lite/канальні плани/атомізація).
-function renderBriefText(b: any): string {
+// Бриф іде в промпт під заголовком «джерело правди - не суперечити». Тому сюди НЕ можна писати
+// мітки з порожніми значеннями («Аудиторія: ; болі: ;») і вигадані дефолти («80/20», яких модель не
+// давала): модель читає їх як факти про бренд, і це той самий клас забруднення контексту, проти
+// якого будувалась «Перевірка контексту» - лише джерелом був наш власний код (спіймано аудитом).
+// Правило: рядок зʼявляється, тільки якщо в ньому є хоч одне НЕПОРОЖНЄ значення; порожні пари
+// всередині рядка відкидаються.
+export function renderBriefText(b: any): string {
   if (!b || typeof b !== "object") return "";
-  const arr = (x: any) => (Array.isArray(x) ? x.filter(Boolean).join("; ") : "");
+  const str = (x: any) => (typeof x === "string" ? x.trim() : "");
+  const arr = (x: any) => (Array.isArray(x) ? x.map(str).filter(Boolean).join("; ") : "");
+  const pairs = (label: string, items: [string, string][]) => {
+    const kept = items.filter(([, v]) => v);
+    return kept.length ? `${label}${kept.map(([k, v]) => `${k}: ${v}`).join("; ")}` : "";
+  };
   const pillars = Array.isArray(b.content_pillars)
-    ? b.content_pillars.map((p: any) => `${p?.name || ""} (${p?.funnel || ""}: ${arr(p?.angles)})`).filter(Boolean).join(" | ")
+    ? b.content_pillars.map((p: any) => { const n = str(p?.name); if (!n) return ""; const tail = [str(p?.funnel), arr(p?.angles)].filter(Boolean).join(": "); return tail ? `${n} (${tail})` : n; }).filter(Boolean).join(" | ")
     : "";
   const lines = [
-    b.positioning && `Позиціювання: ${b.positioning}`,
-    Array.isArray(b.differentiators) && b.differentiators.length && `Відмінності: ${arr(b.differentiators)}`,
-    b.icp && `Аудиторія: ${b.icp.audience || ""}; болі: ${arr(b.icp.pains)}; бажання: ${arr(b.icp.desires)}; заперечення: ${arr(b.icp.objections)}`,
-    b.brand_voice && `Голос: ${b.brand_voice.tone || ""}; робити: ${arr(b.brand_voice.dos)}; уникати: ${arr(b.brand_voice.donts)}`,
+    str(b.positioning) && `Позиціювання: ${str(b.positioning)}`,
+    arr(b.differentiators) && `Відмінності: ${arr(b.differentiators)}`,
+    b.icp && pairs("", [["Аудиторія", str(b.icp.audience)], ["болі", arr(b.icp.pains)], ["бажання", arr(b.icp.desires)], ["заперечення", arr(b.icp.objections)]]),
+    b.brand_voice && pairs("", [["Голос", str(b.brand_voice.tone)], ["робити", arr(b.brand_voice.dos)], ["уникати", arr(b.brand_voice.donts)]]),
     pillars && `Контент-пілери: ${pillars}`,
-    b.messaging && `Ключове повідомлення: ${b.messaging.value_prop || ""}; велика ідея: ${b.messaging.big_idea || ""}`,
-    b.offers_and_ctas && `Офер: ${b.offers_and_ctas.primary_offer || ""}; лід-магніт: ${b.offers_and_ctas.lead_magnet || ""}; мʼякий CTA: ${b.offers_and_ctas.soft_cta || ""}; жорсткий CTA: ${b.offers_and_ctas.hard_cta || ""}`,
-    `Цінність:промо = ${b.value_promotion_ratio || "80/20"}; Hero-Hub-Hygiene = ${b.hhh_split || "10/30/60"}`,
+    b.messaging && pairs("", [["Ключове повідомлення", str(b.messaging.value_prop)], ["велика ідея", str(b.messaging.big_idea)]]),
+    b.offers_and_ctas && pairs("", [["Офер", str(b.offers_and_ctas.primary_offer)], ["лід-магніт", str(b.offers_and_ctas.lead_magnet)], ["мʼякий CTA", str(b.offers_and_ctas.soft_cta)], ["жорсткий CTA", str(b.offers_and_ctas.hard_cta)]]),
+    // пропорції - ЛИШЕ якщо їх дала модель; вигаданий дефолт у «джерелі правди» - це брехня моделі
+    pairs("", [["Цінність:промо", str(b.value_promotion_ratio)], ["Hero-Hub-Hygiene", str(b.hhh_split)]]),
   ].filter(Boolean);
   return lines.join("\n");
 }
@@ -1020,6 +1032,19 @@ export async function threadsNicheReview(workspaceId: string): Promise<{ pattern
   return { patterns, ideasAdded };
 }
 
+// Теми плану з відповіді моделі. Приймаємо рядки і обʼєкти з полем theme|text|title|topic; все інше
+// відкидається (порожній рядок → фолбек «рубрика: ідея дня» нижче). Раніше обʼєкт без `theme` проходив
+// через String() і в календарі висів буквальний «[object Object]» (спіймано аудитом).
+export function parseThemes(raw: string): string[] {
+  let items: any[] = [];
+  try { items = extractJsonArray<any>(raw); } catch { return []; }
+  return items.map((x: any) => {
+    if (typeof x === "string") return x.trim();
+    if (x && typeof x === "object") { for (const k of ["theme", "text", "title", "topic"]) if (typeof x[k] === "string" && x[k].trim()) return x[k].trim(); }
+    return "";
+  });
+}
+
 // ---- Lite-скелет плану: ДЕТЕРМІНОВАНО зі стратегії (рубрики × best_days × теми) ----
 // Канало-незалежний, не залежить від крихкого LLM-плану → порожнім не буде, якщо є стратегія.
 export async function buildLiteSkeleton(workspaceId: string, horizonDays: number, postsPerWeek = 4, opts?: { topic?: string; network?: string }): Promise<{ day: number; rubric: string; theme: string; hook: string; format: ContentFormat }[]> {
@@ -1103,7 +1128,7 @@ export async function buildLiteSkeleton(workspaceId: string, horizonDays: number
         `\n\nПоверни ЛИШЕ валідний JSON-масив рівно з ${slots.length} рядків-тем, у тому ж порядку, що рубрики нижче. Мова: ${lang}.`;
       const user = slots.map((x, i) => `${i + 1}. [${x.rubric}]${x.format !== "post" ? ` [${x.format}]` : ""}${isInterest(i) ? " [ОСОБИСТЕ]" : ""}${isExperiment(i) ? " [ЕКСПЕРИМЕНТ]" : ""}`).join("\n");
       const raw = await chat(env.cheapModel, system, user, { workspaceId, step: "plan_themes" });
-      const arr = extractJsonArray<any>(raw).map((x: any) => String(x?.theme || x || "").trim());
+      const arr = parseThemes(raw);
       slots.forEach((x, i) => { x.theme = ((isExperiment(i) ? "🧪 " : "") + ((arr[i] || "").slice(0, 300) || `${x.rubric}: ідея дня`)).slice(0, 300); });
     } catch { slots.forEach((x, i) => { x.theme = x.theme || `${(isExperiment(i) ? "🧪 " : "")}${x.rubric}: ідея дня`; }); }
   }

@@ -21,8 +21,24 @@ async function tg<T = any>(token: string, method: string, body: Record<string, a
     clearTimeout(timer);
   }
   const j: any = await res.json().catch(() => ({}));
-  if (!j.ok) throw new Error(j.description ? String(j.description) : `Telegram HTTP ${res.status}`);
+  if (!j.ok) throw new Error(humanTgError(res.status, j.description));
   return j.result as T;
+}
+
+// Помилки Bot API - людською. «Telegram HTTP 403» нічого не каже власнику каналу; Telegram у
+// `description` завжди пояснює причину, і саме її треба перекласти в дію (LinkedIn і Meta вже мали
+// такі тексти, Telegram - ні; спіймано аудитом).
+export function humanTgError(status: number, description?: string): string {
+  const d = String(description || "");
+  if (/bot was blocked|bot was kicked|kicked from|not a member/i.test(d)) return "Бота видалили з каналу або заблокували - додай його адміном знову (Налаштування → Канали).";
+  if (/not enough rights|have no rights|CHAT_WRITE_FORBIDDEN|can't post/i.test(d)) return "Бот у каналі є, але без права публікувати - дай йому право «Публікувати повідомлення».";
+  if (/chat not found|chat_id is empty|channel not found/i.test(d)) return "Канал не знайдено - перевір підключення каналу в Налаштування → Канали.";
+  if (status === 401 || /Unauthorized/i.test(d)) return "Токен бота недійсний - перевипусти його в BotFather і встав у Налаштування → Канали.";
+  if (status === 429 || /Too Many Requests|retry after/i.test(d)) return "Telegram просить зачекати (забагато повідомлень) - автопостер повторить сам.";
+  if (/message is too long|caption is too long/i.test(d)) return "Текст задовгий для Telegram - скороти або дай сервісу підлаштувати під канал.";
+  if (/wrong file identifier|failed to get HTTP URL content|WEBPAGE_MEDIA_EMPTY|IMAGE_PROCESS_FAILED/i.test(d)) return "Telegram не зміг завантажити зображення - спробуй інше фото або прибери його.";
+  if (status === 403) return "Telegram відмовив у доступі (403): бот не адмін каналу або його видалили - перевір у Налаштування → Канали.";
+  return d ? `Telegram: ${d.slice(0, 160)}` : `Telegram HTTP ${status}`;
 }
 
 export const getMe = (token: string) => tg<{ id: number; username?: string; first_name?: string }>(token, "getMe");
