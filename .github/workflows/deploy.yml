@@ -46,6 +46,41 @@ jobs:
             else
               echo "⚠️ crontab на хості немає - keepalive не встановлено"
             fi
+            # 💾 БЕКАП на цьому ж боксі (блокер ④ з аудиту). Щоночі pg_dump бази + tar медіа-тому
+            # в /opt/socialio-backups, ротація 14 днів. Це захист від помилкової міграції, кривого
+            # деплою чи випадкового видалення - НЕ від втрати диска: копія поза сервером лишається
+            # окремою задачею (CLAUDE.md §7). Ставиться через деплой, бо це єдиний наш канал до хоста.
+            if command -v crontab >/dev/null 2>&1; then
+              cat > /opt/socialio-backup.sh <<'BKSH'
+            #!/bin/sh
+            # Бекап обох стеків socialio. Дамп береться ЗСЕРЕДИНИ контейнера БД тим самим користувачем,
+            # що задано в .env (нам не треба знати пароль - він уже в середовищі контейнера).
+            set -u
+            OUT=/opt/socialio-backups; mkdir -p "$OUT"; chmod 700 "$OUT"
+            STAMP=$(date -u +%Y%m%d-%H%M)
+            for d in /opt/socialio/server /opt/socialio-beta/server; do
+              [ -d "$d" ] || continue
+              cd "$d" || continue
+              name=$(grep -E '^COMPOSE_PROJECT_NAME=' .env 2>/dev/null | cut -d= -f2); name=${name:-socialio}
+              # база: pg_dump у custom-форматі (стискається, відновлюється pg_restore вибірково)
+              if docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' > "$OUT/$name-db-$STAMP.dump" 2>/dev/null \
+                 && [ -s "$OUT/$name-db-$STAMP.dump" ]; then echo "$STAMP $name db ok $(du -h "$OUT/$name-db-$STAMP.dump" | cut -f1)"
+              else echo "$STAMP $name db FAILED"; rm -f "$OUT/$name-db-$STAMP.dump"; fi
+              # медіа: том цілком (фото, відео, thumbs)
+              if docker run --rm -v "${name}_media:/m:ro" -v "$OUT:/b" alpine tar czf "/b/$name-media-$STAMP.tgz" -C /m . 2>/dev/null; then
+                echo "$STAMP $name media ok $(du -h "$OUT/$name-media-$STAMP.tgz" | cut -f1)"
+              else echo "$STAMP $name media FAILED"; rm -f "$OUT/$name-media-$STAMP.tgz"; fi
+            done
+            # ротація: старше 14 днів - геть
+            find "$OUT" -type f \( -name '*.dump' -o -name '*.tgz' \) -mtime +14 -delete
+            df -h /opt | tail -1 | awk '{print "disk", $4, "free"}'
+            BKSH
+              sed -i 's/^            //' /opt/socialio-backup.sh
+              chmod +x /opt/socialio-backup.sh
+              ( crontab -l 2>/dev/null | grep -v socialio-backup ; echo "20 3 * * * /opt/socialio-backup.sh >> /opt/socialio-backup.log 2>&1" ) | crontab - \
+                && echo "💾 backup-cron на місці (щоночі 03:20 UTC → /opt/socialio-backups, 14 днів)" || echo "⚠️ не вдалося поставити backup-cron"
+              echo "--- останні бекапи ---"; ls -lh /opt/socialio-backups 2>/dev/null | tail -6 || echo "(ще жодного)"
+            fi
             # 📋 Інвентар хоста. Бокс один на всі сервіси, тож коли щось «зникає» (28.07 контейнери
             # socialio знесло цілком - compose створював їх з нуля), треба бачити, ЩО саме лишилось.
             # Найважливіше - ТОМИ: видалення контейнера дані НЕ втрачає, а видалення тому втрачає.
