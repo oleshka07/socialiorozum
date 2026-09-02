@@ -152,7 +152,7 @@ async function slotToPost(workspaceId: string, slotId: string): Promise<{ id: st
   }
   const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [sourceId]);
   const idea = `${slot.theme}${slot.hook ? `. Гачок: ${slot.hook}` : ""}${slot.cta ? `. Заклик: ${slot.cta}` : ""}`;
-  await generatePostsOnePass(run!.id, 1, [idea]);
+  await generatePostsOnePass(run!.id, 1, [idea], undefined, { channels: slot.channel && slot.channel !== "all" ? [slot.channel] : [] });
   const post = await one<{ id: string; content: string }>(`select id, content from post where run_id=$1 and stage='final' limit 1`, [run!.id]);
   if (!post) return null;
   await q(`update post set rubric=coalesce($2, rubric), channels=coalesce(channels,'{}'::jsonb) || $3::jsonb where id=$1`,

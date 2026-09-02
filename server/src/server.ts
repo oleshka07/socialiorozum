@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { createHash, createHmac, timingSafeEqual, randomUUID } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, ideaMode, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, storytellingVerdict, normFormat, FORMATS, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet, topPatterns, generateThreadsTakes, repeatVariant, expandTake, threadsStarterPack, threadsNicheReview, suggestThreadReplies, DEFAULT_MAIN_MODEL, PLAN_MAX_PPW } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, ideaMode, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, storytellingVerdict, normFormat, FORMATS, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet, topPatterns, generateThreadsTakes, repeatVariant, expandTake, threadsStarterPack, threadsNicheReview, suggestThreadReplies, DEFAULT_MAIN_MODEL, PLAN_MAX_PPW, buildTopicFuel } from "./pipeline.js";
 import { startReelJob, parseReelScript } from "./reelvideo.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
@@ -34,7 +34,7 @@ import { resolveSource } from "./rss-resolver.js";
 import { MEDIA_DIR, saveMedia, deleteMediaFile, convertAllHeif, getThumb } from "./media.js";
 import { normalizeMeeting, saveMeeting } from "./meetings.js";
 import { spendStatus, SpendCapError, CAPS } from "./spend.js";
-import { spreadTimes } from "./textkind.js";
+import { spreadTimes, topicAngles } from "./textkind.js";
 import { startJob, getJob, getJobByKey, jobView, markLostJobs } from "./jobs.js";
 import { readdir, stat } from "node:fs/promises";
 import { startMeetingPull, testPull, pullOnce } from "./meetings-pull.js";
@@ -676,12 +676,13 @@ app.post("/api/generate/topic", async (req: any, reply) => {
   const count = Math.max(1, Math.min(10, Number(req.body?.count) || 3));
   const nets: string[] = Array.isArray(req.body?.channels) ? req.body.channels.map((x: any) => String(x)).filter((x: string) => PLAN_NETS.includes(x)) : [];
   try {
+    // матеріал = тема + паливо (матеріали зі стрічки, памʼять постів, біль) - інакше моделі нізвідки брати факти
     const src = await one<{ id: string }>(`insert into source(workspace_id, origin, title, transcript) values($1,'topic',$2,$3) returning id`,
-      [ws, topic.slice(0, 200), `Напрям для постів (пиши САМЕ про це, у голосі бренду): ${topic}`]);
+      [ws, topic.slice(0, 200), await buildTopicFuel(ws, topic)]);
     const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
-    // кожен пост - інший кут тієї самої теми
-    const ideas = Array.from({ length: count }, (_, i) => count > 1 ? `${topic} (кут ${i + 1}: свіжий ракурс, не повторюй попередні)` : topic);
-    await generatePostsOnePass(run!.id, count, ideas);
+    // кожен пост - інший ТИП кута (спостереження / помилка / контр-теза / інструкція…), а не «кут N»
+    const ideas = topicAngles(topic, count);
+    await generatePostsOnePass(run!.id, count, ideas, undefined, { channels: nets });
     if (nets.length) {
       const patch = JSON.stringify(Object.fromEntries(nets.map((n) => [n, { on: true }])));
       await q(`update post set channels=coalesce(channels,'{}'::jsonb) || $2::jsonb where run_id=$1 and stage='final'`, [run!.id, patch]);
@@ -2486,16 +2487,17 @@ app.post("/api/plan/slots/:id/generate", async (req: any, reply) => {
     let sourceId = slot.match_source_id;
     if (!useMaterial) {
       // генерація «з теми»: джерело-план (origin='plan') з самою темою як матеріалом
+      const fuel = await buildTopicFuel(ws, slot.theme.replace(/^🧪\s*/, ""));
       const src = await one<{ id: string }>(
         `insert into source(workspace_id, origin, title, transcript) values($1,'plan',$2,$3) returning id`,
-        [ws, slot.theme.slice(0, 200), `Тема поста: ${slot.theme}${slot.hook ? `\nГачок: ${slot.hook}` : ""}${slot.cta ? `\nЗаклик: ${slot.cta}` : ""}`]);
+        [ws, slot.theme.slice(0, 200), `Тема поста: ${slot.theme}${slot.hook ? `\nГачок: ${slot.hook}` : ""}${slot.cta ? `\nЗаклик: ${slot.cta}` : ""}\n\n${fuel}`]);
       sourceId = src!.id;
     }
     const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [sourceId]);
     // 🧪-слот (10% плану): експериментальний пост - подача, якої бренд ще не робив
     const expNote = slot.theme.startsWith("🧪") ? ". ЕКСПЕРИМЕНТ: зроби подачу, якої бренд ще не робив (інший ритм, структура, жанр чи сміливіший кут) - але голос і ДНК бренду збережи" : "";
     const idea = `${slot.theme.replace(/^🧪\s*/, "")}${slot.hook ? `. Гачок: ${slot.hook}` : ""}${slot.cta ? `. Заклик: ${slot.cta}` : ""}${expNote}`;
-    await generatePostsOnePass(run!.id, 1, [idea], [slot.format]);
+    await generatePostsOnePass(run!.id, 1, [idea], [slot.format], { channels: PLAN_NETS.includes(slot.channel) ? [slot.channel] : [] });
     const post = await one<{ id: string }>(`select id from post where run_id=$1 and stage='final' limit 1`, [run!.id]);
     if (!post) throw new Error("пост не згенерувався");
     // привʼязка пост<->слот + рубрика слота + канал слота увімкнений (тільки для реальної мережі; 'all' - без примусу каналу)

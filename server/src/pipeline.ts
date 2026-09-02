@@ -4,6 +4,7 @@ import { chat, extractJsonArray, extractJsonObject } from "./openrouter.js";
 // памʼять контенту: пост дистилюється ОДИН раз при публікації, генерація лише читає збережене
 // (було - стиснення 15 останніх постів окремим LLM-викликом на КОЖНІЙ генерації)
 import { usedDigest } from "./memory.js";
+import { topicKeywords } from "./textkind.js";
 import { env } from "./env.js";
 import { getSetting } from "./settings.js";
 
@@ -46,7 +47,27 @@ export const DEFAULT_PROMPTS: Record<StepKey, { model: string; content: string }
 const NO_DASH_RULE = "\n\nПунктуація: НІКОЛИ не використовуй широке тире («—») чи середнє тире («–») у тексті. Замінюй їх комою, двокрапкою, дефісом або розбивай на окремі речення.";
 
 // Бан хук-кліше + принцип кульмінації («Хук-майстер»): відкриття з найсильнішого моменту, не зі штучної інтриги.
-const HOOK_RULE = "\n\nГачки-кліше ЗАБОРОНЕНІ (штучна інтрига): «СТОП», «не гортай», «зупинись», «99% не знають», «шок», «ти не повіриш», «зараз розкажу», «УВАГА». За замовчуванням знайди КУЛЬМІНАЦІЮ матеріалу (найсильніший факт, цифру, момент чи висновок) і відкрий пост прямо з неї - це ПРІОРИТЕТНИЙ спосіб відкриття, якщо в матеріалі є конкретний факт/цифра/момент. (Якщо болі клієнта задані окремо - там своя інструкція про пріоритет.)";
+// ЄДИНИЙ протокол відкриття. Раніше було три правила гачка, і кожне називало себе пріоритетним
+// (приклади голосу / кульмінація матеріалу / біль клієнта) - модель задовольняла всі три найпростішим
+// способом: цифра першим рядком, риторичне питання в кінці, і так у кожному пості.
+const HOOK_RULE = "\n\nВІДКРИТТЯ ПОСТА (єдиний протокол): гачки-кліше ЗАБОРОНЕНІ («СТОП», «не гортай», «зупинись», «99% не знають», «шок», «ти не повіриш», «зараз розкажу», «УВАГА»). Є у вхідному матеріалі конкретний факт, цифра чи момент - відкривай ним. Немає - відкривай власним спостереженням або тезою автора (ствердженням, не питанням). Біль клієнта, якщо його задано, звучить ДРУГИМ реченням як відповідь «навіщо це читачу». Манеру відкриття (довжину першого рядка, характерні слова) бери з прикладів голосу автора, якщо вони є.";
+// Порожні питання-заглушки в кінці («а ви як?», «чи готові ви?») - головна ознака бота в опублікованих
+// постах: три пости поспіль мали форму «цифра. питання?».
+const QUESTION_RULE = "\n\nПИТАННЯ: у тексті максимум одне, і лише коли ти справді хочеш відповідь читача і поруч стоїть твоя власна думка чи відповідь. Порожні питання-заглушки («а ви як?», «чи готові ви?», «що будемо продавати?», «у кого вже є…?») ЗАБОРОНЕНІ, особливо наприкінці. Пост закінчується висновком, дією чи спостереженням автора.";
+// Промт вимагає конкретику в кількох місцях, а в режимі «тема» матеріалу нема - без цього правила
+// єдине джерело цифр у моделі це її фантазія («1 230 нових ресторанів за липень»).
+const FACTS_RULE = "\n\nЧЕСНІСТЬ ФАКТІВ: будь-яка цифра, відсоток, дата, назва компанії, дослідження чи закону береться ТІЛЬКИ з вхідного матеріалу, списку болей, історії бренду чи прикладів голосу. Нема там - пиши без цифр, спираючись на спостереження й досвід автора. Вигадана статистика гірша за її відсутність.";
+const varietyRule = (n: number): string => n > 1
+  ? `\n\nРІЗНОМАНІТТЯ НАБОРУ: у ${n} постах не повторюй двічі тип відкриття (факт / спостереження / теза / історія) і тип фіналу (висновок / порада-дія / справжнє питання). Однакова форма в кількох постах поспіль читається як бот.`
+  : "";
+// Плейбук і ліміт мережі ВСЕРЕДИНІ Lite, коли канал відомий: майстер-текст пишеться нативно, без другого
+// проходу адаптації (який переписував текст без прикладів голосу - і саме там голос губився).
+export const CHANNEL_LIMITS: Record<string, number> = { telegram: 1024, threads: 500, instagram: 2200, facebook: 2000, linkedin: 3000 };
+const CHANNEL_NAMES: Record<string, string> = { telegram: "Telegram", threads: "Threads", instagram: "Instagram", facebook: "Facebook", linkedin: "LinkedIn" };
+const CHANNEL_LEN_RULES: Record<string, string> = {
+  short: "ЦІЛЬОВА довжина: КОРОТКО, 50-150 символів, 1-2 живі речення, одна думка, без хештегів і без вступів",
+  long: "ЦІЛЬОВА довжина: розгорнуто, використовуй більшу частину ліміту мережі",
+};
 
 // Компактний каталог AI-слідів для української («Антидетектор»): детерміновані заборони поверх deai_rules юзера.
 const ANTI_AI_RULE = "\n\nAI-сліди, які ЗАБОРОНЕНО вживати: конструкція «не просто X, а Y»; канцелярит («здійснювати», «забезпечувати», «варто зазначити», «наразі», «даний»); пусті вступи («у сучасному світі», «давайте розберемось», «як відомо»); фінальні підсумки («отже, підсумуємо», «сподіваюсь, було корисно»); симетричні парні речення; слова-паразити «ключовий», «важливо розуміти», «варто памʼятати»; три однорідні прикметники поспіль.";
@@ -189,13 +210,14 @@ export function stripPlaceholders(text: string): string {
     .replace(/\[[^\]\n]{0,40}\?\]/g, "")   // [доказ?] [цифра?] [???]
     .replace(/[ \t]+/g, " ")
     .replace(/ *→ *(?=\n|$)/g, "")           // осиротіла стрілка після вирізаного доказу
+    .replace(/ *→ *[^→\n]{0,24}: *(?=\n|$)/g, "") // і осиротіла мітка «→ доказ:» без значення
     .replace(/[ \t]+\n/g, "\n")
     .trim();
 }
 
-export function painThesis(s: Record<string, string>): string {
+export function painThesis(s: Record<string, string>, opts?: { skipThesis?: boolean }): string {
   const parts: string[] = [];
-  if ((s.brand_thesis || "").trim())
+  if ((s.brand_thesis || "").trim() && !opts?.skipThesis)
     parts.push(`\n\nПОЗИЦІОНУВАННЯ (тримайся його в кожному пості): ${s.brand_thesis.trim().slice(0, 220)}.`);
   const pains = (s.pain_points || "").trim();
   if (pains)
@@ -204,7 +226,7 @@ export function painThesis(s: Record<string, string>): string {
     // постах зʼявлялись «докази», яких автор ніколи не називав. Юзер бачить плейсхолдер у кабінеті
     // як нагадування заповнити; модель його не бачить узагалі.
     parts.push(`\n\nБОЛІ КЛІЄНТА (список «біль → наше рішення → доказ»; ЄДИНЕ джерело проблематики - НЕ вигадуй інших болів; де доказу не наведено - НЕ вигадуй цифр, обійдись без них):\n${stripPlaceholders(pains).slice(0, 1400)}` +
-      `\n\nПРАВИЛО PROBLEM-MATCH (ПРІОРИТЕТ гачка над правилом кульмінації нижче): якщо вхідний матеріал НЕ дає сильного конкретного факту/цифри/моменту для гачка - відкривай пост БОЛЕМ клієнта його словами (як у списку), НЕ регаліями і не темою «про нішу»; якщо ж матеріал такий факт дає - користуйся ним (правило кульмінації), а біль клієнта звучить у 2-му реченні як контекст, навіщо це читачу. Далі 1-2 речення агітації: чого це коштує зараз і чим загрожує далі; «лиходій» - стара система/підхід/міф, ніколи не сама людина. І лише тоді - рішення. Кожен пост самодостатній: цінний навіть тому, хто бачить бренд уперше. Прямий продажний заклик - максимум у кожному ~5-му пості (решта - цінність без продажу).`);
+      `\n\nЯК ПРАЦЮВАТИ З БОЛЯМИ: біль звучить у 2-му реченні як контекст «навіщо це читачу» (саме відкриття - за протоколом відкриття поста). Далі 1-2 речення: чого це коштує зараз і чим загрожує далі; «лиходій» - стара система/підхід/міф, ніколи не сама людина. І лише тоді - рішення. Кожен пост самодостатній: цінний навіть тому, хто бачить бренд уперше.`);
   return parts.join("");
 }
 
@@ -562,6 +584,9 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
   const lang = (s.output_language || "Українська").trim();
   const v2 = s.prompt_engine !== "legacy";
   const tone = (s.tone_of_voice ? `\nГолос бренду (зберігай): ${s.tone_of_voice}` : "") + voicePassport(s);
+  // приклади голосу і тут: без них другий прохід переписував текст «правильно», але не голосом автора
+  const ex = (s.voice_examples || "").trim().slice(0, 2000);
+  const examples = ex ? `\n\nРЕАЛЬНІ пости автора - еталон ритму й лексики (не копіюй зміст):\n---\n${ex}\n---` : "";
   const deai = s.deai_rules ? `\nПравила «без AI» (зберігай): ${s.deai_rules}` : "";
   // V2: адаптація успадковує бриф і ПОВНІ плейбуки каналів (алгоритми 2025-26), не однорядкові правила
   const brief = v2 ? (s.strategy_brief || "").trim() : "";
@@ -596,10 +621,7 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
   // Закриває кейс «Threads під тренди на 50-100 символів» - юзер задає формат один раз у Налаштуваннях.
   let fmtCfg: Record<string, { len?: string; note?: string }> = {};
   try { fmtCfg = JSON.parse(s.channel_format || "{}"); } catch { /* некоректний JSON - стандартні формати */ }
-  const FMT_RULES: Record<string, string> = {
-    short: "ЦІЛЬОВА довжина: КОРОТКО, 50-150 символів, 1-2 живі речення, одна думка, без хештегів і без вступів",
-    long: "ЦІЛЬОВА довжина: розгорнуто, використовуй більшу частину ліміту мережі",
-  };
+  const FMT_RULES = CHANNEL_LEN_RULES;
   const fmtLines = want.map((c) => {
     const fc = fmtCfg[c]; if (!fc) return "";
     const parts = [FMT_RULES[String(fc.len || "")] || "", String(fc.note || "").trim().slice(0, 300)].filter(Boolean);
@@ -608,7 +630,7 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
   const fmtRule = fmtLines ? `\n\nФормат, який обрав користувач для конкретних мереж (ПРІОРИТЕТ над плейбуком):${fmtLines}` : "";
   const system = "Адаптуй пост під кожну вказану соцмережу, зберігаючи зміст, голос бренду й живу людську мову." +
     (brief ? `\n\n<strategy_brief>\n${brief}\n</strategy_brief>` : "") +
-    tone + deai + playbooks + critique + goalRule(s) + ctaRule + offerLadder(s) + structRules + fmtRule +
+    tone + examples + deai + playbooks + critique + goalRule(s) + ctaRule + offerLadder(s) + structRules + fmtRule + QUESTION_RULE + FACTS_RULE +
     "\n\nЖОРСТКІ ліміти довжини версій (НЕ перевищуй, це технічні ліміти мереж): telegram 1024, threads 500, instagram 2200, facebook 2000, linkedin 3000 символів." +
     NO_DASH_RULE + ANTI_AI_RULE + `\n\nПоверни ЛИШЕ валідний JSON-обʼєкт виду {${want.map((c) => `"${c}":"…"`).join(",")}}. Мова: ${lang}.`;
   const raw = await chat(v2 ? "openai/gpt-4o" : "openai/gpt-4o-mini", system, `Пост:\n---\n${content}`, { workspaceId, step: "format" });
@@ -643,7 +665,7 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
 // (особистий запис = єдине джерело фактів, вигадка заборонена); решта походжень працюють як раніше.
 export const OWN_WORDS_ORIGINS = ["diary"];
 export const IDEA_ORIGINS = ["idea"];
-export async function buildLitePrompt(workspaceId: string, count: number, ideas?: string[], formats?: string[], origin?: string): Promise<{ system: string; model: string }> {
+export async function buildLitePrompt(workspaceId: string, count: number, ideas?: string[], formats?: string[], origin?: string, opts?: { channels?: string[] }): Promise<{ system: string; model: string }> {
   const ownWords = (OWN_WORDS_ORIGINS.includes(String(origin || "")) ? OWN_WORDS_RULE : "") + (IDEA_ORIGINS.includes(String(origin || "")) ? IDEA_RULE : "");
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
@@ -671,9 +693,23 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
     : "";
   const n = ideas && ideas.length ? ideas.length : count;
   const v2 = s.prompt_engine !== "legacy";
+  // мережі призначення: одна відома мережа → плейбук і ліміт у промті, текст пишеться нативно
+  const nets = (opts?.channels || []).filter((c) => CHANNEL_LIMITS[c]);
+  const single = nets.length === 1 ? nets[0] : "";
+  let channelBlock = "";
+  if (single) {
+    let fmtCfg: Record<string, { len?: string; note?: string }> = {};
+    try { fmtCfg = JSON.parse(s.channel_format || "{}"); } catch { fmtCfg = {}; }
+    const fc = fmtCfg[single] || {};
+    const fmtLine = [CHANNEL_LEN_RULES[String(fc.len || "")] || "", String(fc.note || "").trim().slice(0, 300)].filter(Boolean).join(". ");
+    channelBlock = `\n\n<channel>\nЦей пост іде ЛИШЕ в ${CHANNEL_NAMES[single]}. Пиши одразу нативно для цієї мережі - це фінальний текст, другого проходу адаптації не буде.\n${CHANNEL_PLAYBOOK[single]}\nЖОРСТКИЙ ліміт: ${CHANNEL_LIMITS[single]} символів${single === "threads" ? " (довший не опублікується)" : ""}.${fmtLine ? `\nФормат, який обрав користувач: ${fmtLine}.` : ""}\n</channel>`;
+  } else if (nets.length > 1) {
+    channelBlock = `\n\n<channel>\nПост піде в: ${nets.map((c) => CHANNEL_NAMES[c]).join(", ")}. Пиши майстер-текст, який потім спакується під кожну; найкоротший ліміт серед них - ${Math.min(...nets.map((c) => CHANNEL_LIMITS[c]))} символів.\n</channel>`;
+  }
+  const noImage = single === "threads" || single === "linkedin";
   // памʼять між постами - лише v2 (legacy лишається незмінним для миттєвого відкату); нема опублікованих - без зайвого виклику
   const recentDigest = v2 ? await usedDigest(workspaceId) : "";
-  const outputFormat = `Поверни ЛИШЕ валідний JSON-масив обʼєктів: [{"text":"повний текст поста","image_prompt":"короткий опис зображення англійською для генерації - сцена/обʼєкти/настрій, без тексту на зображенні","rubric":"назва рубрики поста${rubs.length ? " (СТРОГО одна з переліку рубрик вище)" : ""}","intent":"намір поста: awareness (цінність новій аудиторії, БЕЗ продажу) | nurture (довіра й прогрів, мʼякий заклик) | sale (прямий продаж за сходами офферів)"}, …]. Розподіл намірів у наборі: більшість awareness, частина nurture, sale - не більш як ~1 із 5 (ціль «гроші/ліди» - можна 1 із 4; «ріст/авторитет» - рідше). Мова текстів постів: ${lang}.`;
+  const outputFormat = `Поверни ЛИШЕ валідний JSON-масив обʼєктів: [{"text":"повний текст поста","image_prompt":"${noImage ? "порожній рядок - пост іде текстом без зображення" : "короткий опис зображення англійською для генерації - сцена/обʼєкти/настрій, без тексту на зображенні"}","rubric":"назва рубрики поста${rubs.length ? " (СТРОГО одна з переліку рубрик вище)" : ""}","intent":"намір поста: awareness (цінність новій аудиторії, БЕЗ продажу) | nurture (довіра й прогрів, мʼякий заклик) | sale (прямий продаж за сходами офферів)"}, …]. Розподіл намірів у наборі: більшість awareness, частина nurture, sale - не більш як ~1 із 5 (ціль «гроші/ліди» - можна 1 із 4; «ріст/авторитет» - рідше). Мова текстів постів: ${lang}.`;
 
   if (v2) {
     // V2 (бібліотека промтів): XML-структура + multishot (реальні пости автора) - гачок вчиться з ВЛАСНИХ
@@ -684,29 +720,34 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
     // Порядок секцій: роль → бриф → бренд → зразки → правила → задача → формат.
     const brief = (s.strategy_brief || "").trim();
     const examples = (s.voice_examples || "").trim().slice(0, 3000);
+    // Роль - ВІД ІМЕНІ автора, не «копірайтер»: роль копірайтера зміщувала перспективу на «ви, читачу»
+    // («чи готові ви стати постачальником?») замість власного досвіду практика («у 8 із 10 бізнесів,
+    // які до мене приходять…»). Дедуп: коли є бриф, аудиторія й позиціювання беруться лише з нього.
     const system =
-      "<role>Ти елітний direct-response копірайтер і SMM-автор із 15+ роками досвіду. Пишеш нативно для соцмереж і НІКОЛИ не звучиш як AI чи «загальний» контент.</role>" +
-      (brief ? `\n\n<strategy_brief>\nДжерело правди - не суперечити:\n${brief}\n</strategy_brief>` : "") +
+      "<role>Ти пишеш ВІД ІМЕНІ автора бренду: практика, який щодня бачить це у власній роботі й у бізнесах клієнтів. Перша особа. Ти ділишся тим, що бачив, зрозумів і радиш, а не ставиш читачу питання-вікторини і не описуєш його бізнес збоку. Пишеш нативно для соцмереж і НІКОЛИ не звучиш як AI чи «загальний» контент.</role>" +
+      (brief ? `\n\n<strategy_brief>\nДжерело правди про бренд, аудиторію й позиціювання - не суперечити:\n${brief}\n</strategy_brief>` : "") +
       "\n\n<brand>" +
-      (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") +
-      (s.tone_of_voice ? `\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) + painThesis(s) +
+      (s.marketing_context && !brief ? `\nБренд і аудиторія: ${s.marketing_context}` : "") +
+      (s.tone_of_voice ? `\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) + painThesis(s, { skipThesis: /позицію/i.test(brief) }) +
       (s.deai_rules ? `\nПравила «без AI»: ${s.deai_rules}` : "") +
       "\n</brand>" +
       (examples ? `\n\n<voice_examples>\nРЕАЛЬНІ пости автора - еталон голосу. Відтворюй ритм, лексику, звертання й розмір абзаців САМЕ як тут, але НЕ копіюй зміст:\n---\n${examples}\n---\n</voice_examples>` : "") +
       (s.primary_goal && GOAL_LABELS[s.primary_goal] ? `\n\n<business_goal>\nГоловна бізнес-ціль контенту: ${GOAL_LABELS[s.primary_goal]}. Кожен пост має конкретно просувати до неї - жодного контенту заради контенту.${offerLadder(s)}\n</business_goal>` : offerLadder(s)) +
+      channelBlock +
+      // Порядок у <rules> свідомий: службове (рубрики, тире, AI-сліди) - спочатку; чотири правила, що
+      // визначають людяність (відкриття, чесність фактів, питання, різноманіття) - ОСТАННІМИ перед задачею.
       "\n\n<rules>" +
-      "\n- Кожен пост ОДРАЗУ фінальний: жива людська мова, без канцеляризмів, без «варто зазначити/у сучасному світі», без шаблонних списків заради списків." +
-      "\n- Фреймворк під стадію воронки поста: AIDA або PAS - холодна аудиторія (awareness); BAB - короткі залучальні пости; FAB/4P - тепла аудиторія (consideration/conversion); СТОРІ - для постів-історій: гачок з кульмінації → проблема зі ставками (читач бачить у ній себе) → шлях з «брудною серединою» (реальні сумніви, помилки, невизначеність - НЕ суцільні перемоги) → урок з конкретними кроками → мʼякий CTA." +
-      "\n- Конкретика замість епітетів: не «я працьовитий», а історія чи цифра, що це ДОВОДИТЬ (не «винахідливий», а «стіл зробив із дверей»). Прогрес резонує сильніше за перфектність; невдачі будують довіру сильніше за перемоги - але бери їх ЛИШЕ з матеріалу чи історії бренду, не вигадуй." +
-      (examples
-        ? "\n- Гачок (перший рядок вирішує все): вивчи, ЯК САМЕ автор відкриває пости у &lt;voice_examples&gt; вище (довжина першого рядка, характерні слова, чи задає питання чи стверджує) і склади 3 варіанти гачка САМЕ в його манері - не з готового списку типів, а з його власного почерку. Залиш найсильніший."
-        : "\n- Гачок (перший рядок вирішує все): подумки склади 3 варіанти різних типів (цікавісний розрив, патерн-перебій, контр-теза, попередження про помилку, число/список, пряма обіцянка) і залиш у пості НАЙСИЛЬНІШИЙ - своїх прикладів голосу ще нема, тому цей список лише орієнтир, а не шаблон під копіювання формулювань.") +
-      "\n- Один чіткий мʼякий заклик на пост, не більше." +
+      "\n- Кожен пост ОДРАЗУ фінальний: жива людська мова, без шаблонних списків заради списків." +
+      "\n- Структура під зміст, а не навпаки: РОЗБІР (спостереження → чому так стається → чого це коштує → що робити) або ІСТОРІЯ (момент → що пішло не так → що зрозумів → що робить інакше). Короткий пост може бути однією думкою без структури." +
+      "\n- Конкретика замість епітетів: не «я працьовитий», а історія чи приклад, що це ДОВОДИТЬ (не «винахідливий», а «стіл зробив із дверей»). Невдачі будують довіру сильніше за перемоги - але бери їх ЛИШЕ з матеріалу чи історії бренду." +
       rubricsText + formatRules + ownWords + recentDigest.replace(/^\n+/, "\n- ") +
       NO_DASH_RULE.replace(/^\n+/, "\n- ") +
-      HOOK_RULE.replace(/^\n+/, "\n- ") +
       ANTI_AI_RULE.replace(/^\n+/, "\n- ") +
       OBJECTION_RULE.replace(/^\n+/, "\n- ") +
+      HOOK_RULE.replace(/^\n+/, "\n- ") +
+      FACTS_RULE.replace(/^\n+/, "\n- ") +
+      QUESTION_RULE.replace(/^\n+/, "\n- ") +
+      varietyRule(n).replace(/^\n+/, "\n- ") +
       "\n</rules>" +
       `\n\n<task>\nЗгенеруй рівно ${n} різних постів за вхідним матеріалом.${ideasText}\n</task>` +
       `\n\n<output_format>\n${outputFormat}\n</output_format>`;
@@ -720,8 +761,8 @@ export async function buildLitePrompt(workspaceId: string, count: number, ideas?
     (s.marketing_context ? `\n\nБренд і аудиторія: ${s.marketing_context}` : "") +
     (s.tone_of_voice ? `\n\nГолос бренду (суворо дотримуйся): ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) + painThesis(s) +
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
-    rubricsText + formatRules + ownWords + ideasText + goalRule(s) + offerLadder(s) + HOOK_RULE + ANTI_AI_RULE + OBJECTION_RULE +
-    NO_DASH_RULE + `\n\nЗгенеруй рівно ${n} різних постів. ${outputFormat}`;
+    rubricsText + formatRules + ownWords + ideasText + goalRule(s) + offerLadder(s) + channelBlock + HOOK_RULE + ANTI_AI_RULE + OBJECTION_RULE +
+    NO_DASH_RULE + FACTS_RULE + QUESTION_RULE + varietyRule(n) + `\n\nЗгенеруй рівно ${n} різних постів. ${outputFormat}`;
   return { system, model: mainModel(s) };
 }
 
@@ -776,11 +817,11 @@ export function parseLitePosts(out: string): LitePost[] {
 
 // formats (опційно): формат на КОЖНУ ідею у тому ж порядку - слот плану / вибрана ідея Розвідника
 // вже знають, який формат замовлено, і цей вибір має доїхати до post.format, а не губитись.
-export async function generatePostsOnePass(runId: string, count: number, ideas?: string[], formats?: string[]): Promise<number> {
+export async function generatePostsOnePass(runId: string, count: number, ideas?: string[], formats?: string[], opts?: { channels?: string[] }): Promise<number> {
   const { workspace_id, transcript, origin } = await runContext(runId);
   const sel = (ideas || []).map((t) => String(t).trim()).filter(Boolean);
   const n = Math.max(1, Math.min(12, sel.length ? sel.length : (Number(count) || 6)));
-  const { system, model } = await buildLitePrompt(workspace_id, n, sel.length ? sel : undefined, formats, origin);
+  const { system, model } = await buildLitePrompt(workspace_id, n, sel.length ? sel : undefined, formats, origin, opts);
   // max_tokens масштабується від к-сті постів - інакше дефолтний ліміт 1500 (openrouter.ts) на 8-12
   // постів або обрізає JSON (пости мовчки губляться), або примушує модель стискати кожен пост до куцого
   // варіанту ЧЕРЕЗ БРАК МІСЦЯ, а не тому що це найкращий текст.
@@ -800,8 +841,57 @@ export async function generatePostsOnePass(runId: string, count: number, ideas?:
       [runId, p.text, p.image_prompt || null, p.rubric || null, p.intent, normFormat(formats?.[i])]);
     if (row) ids.push(row.id);
   }
+  // Одна відома мережа: текст уже нативний → manual_adapt, щоб публікація НЕ переписувала його вдруге
+  const nets = (opts?.channels || []).filter((c) => CHANNEL_LIMITS[c]);
+  if (nets.length === 1 && ids.length)
+    await q(`update post set channels = coalesce(channels,'{}'::jsonb) || $2::jsonb where id = any($1)`,
+      [ids, JSON.stringify({ [nets[0]]: { on: true }, manual_adapt: true, native: nets[0] })]);
   await runQaGates(workspace_id, ids);
   return posts.length;
+}
+
+// ---- Паливо для режиму «Написати про тему» і «пост із теми плану» ----
+// Один рядок теми = нуль фактів; промт при цьому просить конкретику → модель вигадувала цифри.
+// Тягнемо зі стрічки 3 матеріали по темі (факти брати звідси), з памʼяті постів - що автор уже писав
+// (не повторювати), з болей - відповідний рядок. Пошук за грубими стемами ключових слів.
+export async function buildTopicFuel(workspaceId: string, topic: string): Promise<string> {
+  const words = topicKeywords(topic);
+  // релевантність = скільки стемів теми зустрілось; для теми з 3+ словами вимагаємо ≥2 збігів,
+  // інакше «власник» тягнув матеріал про базу клієнтів у пост про втому власника
+  const need = words.length >= 3 ? 2 : 1;
+  const score = (t: string) => { const l = (t || "").toLowerCase(); return words.filter((w) => l.includes(w)).length; };
+  let mats: { title: string; transcript: string; origin: string }[] = [];
+  let past: { hook: string; thesis: string; facts: string }[] = [];
+  if (words.length) {
+    const pat = words.map((w) => `%${w}%`);
+    const orM = pat.map((_, i) => `(coalesce(title,'') ilike $${i + 2} or coalesce(transcript,'') ilike $${i + 2})`).join(" or ");
+    try {
+      const cand = await q<{ title: string; transcript: string; origin: string }>(`select title, transcript, origin from source
+        where workspace_id=$1 and archived=false and origin not in ('plan','topic','takes','idea','brand','final')
+          and created_at > now() - interval '120 days' and (${orM})
+        order by created_at desc limit 12`, [workspaceId, ...pat]);
+      mats = cand.map((m) => ({ m, sc: score(`${m.title} ${m.transcript}`) })).filter((x) => x.sc >= need)
+        .sort((a, b) => b.sc - a.sc).slice(0, 3).map((x) => x.m);
+    } catch { mats = []; }
+    const orP = pat.map((_, i) => `(coalesce(topics,'') ilike $${i + 2} or coalesce(thesis,'') ilike $${i + 2})`).join(" or ");
+    try {
+      const cand = await q<{ hook: string; thesis: string; facts: string; topics: string }>(`select hook, thesis, facts, topics from post_digest where workspace_id=$1 and (${orP}) order by created_at desc limit 12`, [workspaceId, ...pat]);
+      past = cand.map((p) => ({ p, sc: score(`${p.topics} ${p.thesis}`) })).filter((x) => x.sc >= need)
+        .sort((a, b) => b.sc - a.sc).slice(0, 3).map((x) => x.p);
+    } catch { past = []; }
+  }
+  const s = await loadSettings(workspaceId);
+  const painLines = stripPlaceholders(s.pain_points || "").split("\n").map((l) => l.trim()).filter((l) => l && score(l) >= need).slice(0, 2);
+  let out = `Напрям для постів (пиши САМЕ про це, у голосі бренду): ${topic}`;
+  if (mats.length)
+    out += "\n\nМАТЕРІАЛИ АВТОРА ПО ТЕМІ (факти й цифри брати ЛИШЕ звідси; нема потрібного - пиши без цифр):\n" +
+      mats.map((m) => `### ${(m.title || "").slice(0, 120)}\n${(m.transcript || "").replace(/\s+/g, " ").slice(0, 700)}`).join("\n\n");
+  else out += "\n\nМатеріалів по цій темі у стрічці немає: пиши зі спостережень і досвіду автора, БЕЗ вигаданих цифр і досліджень.";
+  if (painLines.length) out += "\n\nБІЛЬ КЛІЄНТА, дотичний до теми:\n" + painLines.join("\n");
+  if (past.length)
+    out += "\n\nЩО АВТОР УЖЕ ПИСАВ ПО ЦІЙ ТЕМІ (не повторюй ці тези й відкриття, розвивай далі):\n" +
+      past.map((p) => `- ${[p.thesis, p.facts].filter(Boolean).join(" · ")}${p.hook ? ` (відкриття було: «${String(p.hook).slice(0, 80)}»)` : ""}`).join("\n");
+  return out;
 }
 
 // ---- V2 Крок 3: контент-план по каналах (Prompts 2-7, лише канали socialio) ----
@@ -901,15 +991,16 @@ export async function generateThreadsTakes(workspaceId: string, count: number): 
   const system =
     "Ти автор Threads, який пише короткі живі тейки у голосі бренду." +
     (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") +
-    (s.tone_of_voice ? `\nГолос бренду (суворо): ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) +
+    (s.tone_of_voice ? `\nГолос бренду (суворо): ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) + painThesis(s) +
+    ((s.voice_examples || "").trim() ? `\n\nРЕАЛЬНІ пости автора - еталон голосу (ритм, лексика, звертання; зміст не копіюй):\n---\n${s.voice_examples.trim().slice(0, 2500)}\n---` : "") +
     `\n\nПравила тейків: кожен ≤280 символів; ОДНА самостійна думка; перший рядок чіпляє; розмовно, як думка вголос у курилці, не «пост із стрічки бренду»; міксуй типи - спостереження з життя/роботи, контр-теза до загальноприйнятого, пряме питання до аудиторії, факт із конкретною цифрою, чесне зізнання. Без хештегів, без емодзі-декору, без закликів лайкнути/підписатися.` +
-    goalRule(s) + NO_DASH_RULE + HOOK_RULE + ANTI_AI_RULE +
+    goalRule(s) + NO_DASH_RULE + HOOK_RULE + ANTI_AI_RULE + FACTS_RULE + QUESTION_RULE + varietyRule(n) +
     `\n\nЗгенеруй рівно ${n} різних тейків. Поверни ЛИШЕ валідний JSON-обʼєкт формату {"takes":["тейк 1","тейк 2",…]}. Мова: ${lang}.`;
   // без примусового JSON-режиму модель інколи ігнорує інструкцію й відповідає прозою (уточнення/відмова,
   // особливо коли нема палива) - звідси «порожня відповідь»; json-режим + один ретрай прибирають це майже завжди
   let takes: string[] = [];
   for (let attempt = 0; attempt < 2 && !takes.length; attempt++) {
-    const raw = await chat("openai/gpt-4o", system, fuel, { workspaceId, step: "threads_takes", json: true });
+    const raw = await chat(mainModel(s), system, fuel, { workspaceId, step: "threads_takes", json: true });
     try { takes = extractJsonObject<{ takes: any[] }>(raw).takes.map((x) => String(x || "").trim()).filter(Boolean).slice(0, n); } catch { takes = []; }
   }
   takes = takes.map((t) => (t.length <= 495 ? t : t.slice(0, 494).replace(/\s+\S*$/, "") + "…"));
@@ -1305,11 +1396,12 @@ export async function rewritePost(workspaceId: string, text: string, instruction
   const system = task +
     (brief ? `\n\nСТРАТЕГІЧНИЙ БРИФ (тримай бренд): ${brief}` : "") +
     (s.tone_of_voice ? `\n\nГолос бренду: ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) + painThesis(s) +
+    ((s.voice_examples || "").trim() ? `\n\nРЕАЛЬНІ пости автора - еталон голосу (зміст не копіюй):\n---\n${s.voice_examples.trim().slice(0, 2000)}\n---` : "") +
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
-    goalRule(s) + ANTI_AI_RULE +
+    goalRule(s) + ANTI_AI_RULE + FACTS_RULE + QUESTION_RULE +
     (OWN_WORDS_ORIGINS.includes(String(origin || "")) ? OWN_WORDS_RULE : "") +
     NO_DASH_RULE + `\n\nПоверни лише текст поста. Мова: ${lang}.`;
-  return chat("openai/gpt-4o", system, `---\n${text}`, { workspaceId, step: "regenerate" });
+  return chat(mainModel(s), system, `---\n${text}`, { workspaceId, step: "regenerate" });
 }
 
 // ---- «Директор»: вердикт, чи веде чернетка до головної бізнес-цілі ----

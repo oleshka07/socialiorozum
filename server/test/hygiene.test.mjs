@@ -66,3 +66,29 @@ test("щільний темп розкладає часи рівномірно �
   assert.equal(spreadTimes(100).length, 24);
   for (const t of spreadTimes(5)) assert.match(t, /^\d{2}:\d{2}$/);
 });
+
+// ---- режим «тема»: ключові слова для пошуку палива і типізовані кути замість «кут N»
+import { topicKeywords, topicAngles, TOPIC_ANGLES } from "../dist/textkind.js";
+
+test("ключові слова теми: стеми ловлять відмінки, службові слова відкинуті", () => {
+  const k = topicKeywords("Зроби пости для тредс про клієнтську базу, її важливість і актуальність");
+  assert.deepEqual(k, ["клієнт", "баз"]);
+  assert.ok("база клієнтів лежить мертва".includes(k[1]) && "база клієнтів лежить мертва".includes(k[0]));
+  assert.deepEqual(topicKeywords("про для"), []);
+  assert.ok(topicKeywords("втома власника після літа і як з нею працювати керівнику").length <= 6);
+});
+
+test("кути теми: різні типи, один пост - без кута", () => {
+  assert.deepEqual(topicAngles("клієнтська база", 1), ["клієнтська база"]);
+  const a = topicAngles("клієнтська база", 3);
+  assert.equal(a.length, 3);
+  assert.ok(a[0].includes(TOPIC_ANGLES[0]) && a[1].includes(TOPIC_ANGLES[1]) && a[2].includes(TOPIC_ANGLES[2]));
+  assert.equal(new Set(a).size, 3);
+  assert.equal(topicAngles("x", 10).length, 10);
+});
+
+test("порожня мітка «→ доказ:» не їде в модель разом із плейсхолдером", async () => {
+  const { stripPlaceholders } = await import("../dist/pipeline.js");
+  assert.equal(stripPlaceholders("біль → рішення → доказ: [доказ?]"), "біль → рішення");
+  assert.equal(stripPlaceholders("біль → рішення → доказ: 4% → 9%"), "біль → рішення → доказ: 4% → 9%");
+});
