@@ -155,6 +155,7 @@
   .cdot{width:18px;height:18px;border-radius:50%;display:inline-grid;place-items:center;vertical-align:middle;margin-right:3px}
   .netchip{font-size:13px;font-weight:600;padding:6px 12px;border-radius:9px;border:1px solid var(--line2);background:transparent;color:var(--muted)}
   .netchip.on{background:var(--brand-soft);border-color:var(--brand);color:var(--brand)}
+  .netchip.warn{border-style:dashed;color:var(--amber,#b26a00);border-color:var(--amber,#b26a00);background:transparent}
   .netchip:disabled{opacity:.4;cursor:not-allowed}
   /* канал у композері = складена кнопка: ліва частина обирає мережу, права (✨) підлаштовує текст
      САМЕ під неї (фідбек Олега: одна кнопка «під канали» переписувала все й скасувати було нічим) */
@@ -587,8 +588,12 @@
               <textarea id="planTopic" class="txt" rows="2" placeholder="Теми/напрями, які хочеш висвітлити - впишемо їх у скелет. Напр.: запуск нового тарифу; кейс клієнта; помилки новачків…" style="margin-bottom:10px;font-size:13px"></textarea>
               <div class="btnrow" style="margin:0;align-items:center;flex-wrap:wrap">
                 <label style="font-size:12px;color:var(--muted)">днів <input id="planHorizon" class="txt" type="number" value="14" min="7" max="90" style="width:60px;display:inline-block;padding:7px 9px"></label>
-                <label id="planPpwWrap" style="font-size:12px;color:var(--muted)">постів/тиж <input id="planPpw" class="txt" type="number" value="4" min="1" max="14" style="width:54px;display:inline-block;padding:7px 9px"></label>
+                <label id="planPpwWrap" style="font-size:12px;color:var(--muted)">постів/тиж <input id="planPpw" class="txt" type="number" value="4" min="1" max="84" style="width:54px;display:inline-block;padding:7px 9px"></label>
                 <span id="planEst" style="font-size:12px;font-weight:700;color:var(--brand)"></span>
+              </div>
+              <div id="planPace" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px;font-size:12px;color:var(--muted)">темп:
+                <span class="cchip" data-ppw="7">щодня</span><span class="cchip" data-ppw="14">2 на день</span><span class="cchip" data-ppw="28">кожні 6 год</span><span class="cchip" data-ppw="56">кожні 3 год</span>
+                <span class="qh" title="Для щільного темпу (Threads кожні 3 години) часи публікацій розкладаються рівномірно 08:00-22:00; свої часи на мережу - у панелі «📡 Ритм каналів».">?</span>
               </div>
               <div class="btnrow" style="margin-top:8px">
                 <button class="primary" id="planGenBtn">↻ Згенерувати скелет</button>

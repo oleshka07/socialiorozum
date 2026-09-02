@@ -12,6 +12,7 @@ import { sendDigestNow } from "./digest.js";
 import { isDiaryPending, appendDiaryText, attachDiaryMedia, attachMediaToEntry, diaryPhotoTarget, transcribeVoice, skipDiaryToday, sendDiaryNow, weekDiaryText } from "./diary.js";
 import { cabinetPostLink } from "./permalink.js";
 import * as cmp from "./tgcompose.js";
+import { looksLikeReadyPost } from "./textkind.js";
 const postDeepLink = (postId: string) => cabinetPostLink(env.appBaseUrl, postId);
 
 let BOT_ID = 0;
@@ -162,14 +163,20 @@ async function slotToPost(workspaceId: string, slotId: string): Promise<{ id: st
 
 // зберегти надіслану думку як ідею (origin='bot') + підтвердження живим меседжем
 async function captureIdea(workspaceId: string, chatId: string, text: string): Promise<void> {
-  const r = await one<{ id: string }>(`insert into idea_bank(workspace_id, text, origin) values($1,$2,'bot') returning id`, [workspaceId, text.slice(0, 500)]);
+  // 500 символів обрізали готовий пост тестера посередині - тепер уміщається повний текст.
+  const r = await one<{ id: string }>(`insert into idea_bank(workspace_id, text, origin) values($1,$2,'bot') returning id`, [workspaceId, text.slice(0, 3000)]);
+  // «📝 Опублікувати як є» = взяти текст ДОСЛІВНО й одразу відкрити композер (канали/фото/час);
+  // «✨ Переписати AI» = AI зробить пост із думки. Дві різні наміри - дві різні кнопки, і ПЕРШОЮ стоїть
+  // та, що відповідає тексту: готовий пост → «як є» (фідбек тестера: «написав одне - опублікувалось інше»
+  // це якраз натиснута верхня кнопка AI на готовому тексті), коротка думка → AI.
+  const ready = looksLikeReadyPost(text);
+  const raw = { text: "📝 Опублікувати як є (мій текст без змін)", data: `idea_raw:${r!.id}` };
+  const ai = { text: ready ? "✨ Переписати AI (зміст збережу)" : "✨ Зробити пост з думки (AI)", data: `idea_post:${r!.id}` };
   await liveSend(workspaceId, chatId, "capture",
-    `💡 Збережено в Банк ідей:\n«${text.slice(0, 140)}»`,
-    // «✨ Зробити пост» = AI перепише думку в пост; «📝 Це вже готовий пост» = взяти текст ДОСЛІВНО
-    // й одразу відкрити композер (канали/фото/час). Дві різні наміри - дві різні кнопки.
-    [[{ text: "✨ Зробити пост зараз", data: `idea_post:${r!.id}` }],
-     [{ text: "📝 Це вже готовий пост", data: `idea_raw:${r!.id}` }],
-     [{ text: "📋 Усі ідеї", data: "idea_list" }]]);
+    (ready ? `📝 Схоже на готовий пост. Зберіг у Банк ідей:\n«${text.slice(0, 140)}…»\n\nОпублікувати як є - текст піде без змін.`
+           : `💡 Збережено в Банк ідей:\n«${text.slice(0, 140)}»`),
+    ready ? [[raw], [ai], [{ text: "📋 Усі ідеї", data: "idea_list" }]]
+          : [[ai], [raw], [{ text: "📋 Усі ідеї", data: "idea_list" }]]);
 }
 
 // список банку ідей (живий меседж, category='idea_list')

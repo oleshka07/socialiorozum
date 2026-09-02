@@ -37,7 +37,7 @@ const POSTS = [
   },
   {
     id: P2, content: "Затверджений пост про ціни", review: "approved",
-    channels: { telegram: { on: true } }, rubric: "Освіта", source_origin: "manual",
+    channels: { telegram: { on: true }, instagram: { on: true } }, rubric: "Освіта", source_origin: "manual",
     format: "post", intent: "sale", sent: [], links: {},
   },
   {
@@ -957,6 +957,42 @@ const run = async () => {
     await page.evaluate(() => { const x = document.querySelector(".modal #amX"); if (x) x.click(); });
     const topic = st.tabs.find((t) => t.m === "topic");
     return !!topic && topic.on && st.tabs.length === 2 && st.chips === 3 && st.gen;
+  });
+
+  // фідбек тестера: «писав текст на 3 публікаціях, перемкнувся на 5 - текст зник»
+  await check("topicKeepsText", async () => {
+    await page.evaluate(() => openAddMaterial());
+    await page.waitForSelector(".modal #amTopic", { timeout: 4000 });
+    await page.type(".modal #amTopic", "чому база клієнтів - головний капітал");
+    await page.evaluate(() => { const c = document.querySelector('.modal #amCountChips [data-n="5"]'); if (c) c.click(); });
+    await page.waitForTimeout(150);
+    const st = await page.evaluate(() => ({
+      text: (document.querySelector(".modal #amTopic") || {}).value || "",
+      five: !!document.querySelector('.modal #amCountChips [data-n="5"].on'),
+    }));
+    await page.evaluate(() => { const x = document.querySelector(".modal #amX"); if (x) x.click(); });
+    return st.five && st.text === "чому база клієнтів - головний капітал";
+  });
+
+  // фідбек тестера: «не можу зняти з публікації Telegram» - увімкнена, але НЕ підключена мережа
+  // блокувалась як «не підключено» і не знімалась; тепер її можна зняти, а вимкнену - як і раніше, ні
+  await check("offNotConnected", async () => {
+    await page.evaluate((id) => openComposer(id), P2); // instagram on, у статусі каналів - не підключено
+    await page.waitForSelector(".cmp-ov #cmpChips .netgrp", { timeout: 6000 });
+    const before = await page.evaluate(() => {
+      const ig = document.querySelector('#cmpChips .netchip[data-net="instagram"]');
+      const fb = document.querySelector('#cmpChips .netchip[data-net="facebook"]'); // off + не підключено
+      return { igOn: ig.classList.contains("on"), igWarn: ig.classList.contains("warn"), igEnabled: !ig.disabled, fbDisabled: fb.disabled, prev: document.querySelectorAll("#cmpPrev .pvcard, #cmpPrev [data-pv]").length };
+    });
+    await page.evaluate(() => document.querySelector('#cmpChips .netchip[data-net="instagram"]').click());
+    await page.waitForTimeout(150);
+    const after = await page.evaluate(() => {
+      const ig = document.querySelector('#cmpChips .netchip[data-net="instagram"]');
+      return { igOn: ig.classList.contains("on"), igDisabled: ig.disabled };
+    });
+    await page.evaluate(() => { const b = document.querySelector("#cmpBack"); if (b) b.click(); });
+    await page.waitForTimeout(200);
+    return before.igOn && before.igWarn && before.igEnabled && before.fbDisabled && !after.igOn && after.igDisabled;
   });
 
   await check("obTextFirst", async () => {

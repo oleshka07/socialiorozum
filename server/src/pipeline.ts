@@ -120,6 +120,16 @@ const OWN_WORDS_RULE =
   "\n- Якщо матеріалу мало на повний пост - зроби пост КОРОТШИМ. Короткий і правдивий кращий за довгий і добитий загальними словами." +
   "\n- Переформулювати, скорочувати й структурувати думки автора МОЖНА і треба - вигадувати за нього не можна.";
 
+// Матеріал = ОДНА думка/готовий текст автора (Банк ідей, бот). Без цього правила коротка ідея
+// тонула в брендовому контексті: «Цю публікацію написало АІ» → пост про управління проєктами
+// (фідбек тестера). Ідея - не «тема довкола», а ХРЕБЕТ поста.
+const IDEA_RULE =
+  "\n\nРЕЖИМ «ДУМКА АВТОРА» (вхідний матеріал - це власна думка чи вже написаний текст автора для ОДНОГО поста):" +
+  "\n- Пост має бути САМЕ про цю думку, а не про тему бренду, до якої вона дотична. Тезу, цифри, дати, порівняння й питання автора збережи ДОСЛІВНО чи майже дослівно - вони і є зміст." +
+  "\n- Якщо текст уже читається як готовий пост - лише вирівняй його за голосом бренду й прибери шорсткості; зміст, порядок думок і фінал не змінюй, нічого не додавай від себе." +
+  "\n- Якщо це коротка думка - розгорни її на 2-4 речення ВЛАСНИМИ висновками з неї ж, без вигаданих фактів, кейсів, інструментів і цифр. Мало матеріалу - короткий пост, не добитий загальними словами." +
+  "\n- Заборонено підміняти думку автора іншою темою, навіть «доречнішою» для бренду.";
+
 // «Директор»: головна бізнес-ціль контенту - фільтр «веде до цілі чи контент заради контенту».
 export const GOAL_LABELS: Record<string, string> = {
   money: "продажі та гроші (контент має підводити до покупки)",
@@ -632,8 +642,9 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
 // origin - походження матеріалу: 'diary' вмикає режим «з власних слів автора»
 // (особистий запис = єдине джерело фактів, вигадка заборонена); решта походжень працюють як раніше.
 export const OWN_WORDS_ORIGINS = ["diary"];
+export const IDEA_ORIGINS = ["idea"];
 export async function buildLitePrompt(workspaceId: string, count: number, ideas?: string[], formats?: string[], origin?: string): Promise<{ system: string; model: string }> {
-  const ownWords = OWN_WORDS_ORIGINS.includes(String(origin || "")) ? OWN_WORDS_RULE : "";
+  const ownWords = (OWN_WORDS_ORIGINS.includes(String(origin || "")) ? OWN_WORDS_RULE : "") + (IDEA_ORIGINS.includes(String(origin || "")) ? IDEA_RULE : "");
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
   const rubs = await q<{ name: string; share: number; description: string }>(
@@ -1047,6 +1058,8 @@ export function parseThemes(raw: string): string[] {
 
 // ---- Lite-скелет плану: ДЕТЕРМІНОВАНО зі стратегії (рубрики × best_days × теми) ----
 // Канало-незалежний, не залежить від крихкого LLM-плану → порожнім не буде, якщо є стратегія.
+export const PLAN_MAX_PPW = 84;
+export const PLAN_MAX_SLOTS = 400;
 export async function buildLiteSkeleton(workspaceId: string, horizonDays: number, postsPerWeek = 4, opts?: { topic?: string; network?: string }): Promise<{ day: number; rubric: string; theme: string; hook: string; format: ContentFormat }[]> {
   const topic = (opts?.topic || "").trim();
   const NET_HINT: Record<string, string> = {
@@ -1068,8 +1081,9 @@ export async function buildLiteSkeleton(workspaceId: string, horizonDays: number
   const bag: string[] = [];
   for (const r of rubrics) { const w = Math.max(1, Math.round((Number(r.share) || 25) / 10)); for (let k = 0; k < w; k++) bag.push(r.name); }
   // кількість слотів = «постів на тиждень» × кількість тижнів у горизонті
-  const ppw = Math.max(1, Math.min(14, Math.round(postsPerWeek) || 4));
-  const totalTarget = Math.max(1, Math.min(120, Math.round((horizonDays / 7) * ppw)));
+  // Стеля 84/тиж = 12/день: тестер хоче Threads кожні 3 години (8/день = 56/тиж), старі 14/тиж це не вміщали.
+  const ppw = Math.max(1, Math.min(PLAN_MAX_PPW, Math.round(postsPerWeek) || 4));
+  const totalTarget = Math.max(1, Math.min(PLAN_MAX_SLOTS, Math.round((horizonDays / 7) * ppw)));
   // Розкладка: слоти РІВНОМІРНО по всьому горизонту, БЕЗ дублювання дат (поки target ≤ днів).
   // best_days - лише «магніт»: якщо поруч (±2 дні) є вільний найкращий день, слот присувається туди.
   // Друге коло (target > днів) знову йде рівномірно - по 2-й пост на день. Так «30 днів × 10/тиж»
@@ -1125,11 +1139,20 @@ export async function buildLiteSkeleton(workspaceId: string, horizonDays: number
           : "") +
         (interests ? `\nСлоти з позначкою [ОСОБИСТЕ] - НЕ про нішу, а «людські» теми з інтересів автора (${interests.slice(0, 300)}): особистий погляд, історія чи спостереження, що робить автора живою людиною.` : "") +
         "\nСлоти з позначкою [ЕКСПЕРИМЕНТ] - тема чи формат, яких бренд ще НЕ робив: незвичний кут, інший жанр подачі, сміливіша теза." +
-        `\n\nПоверни ЛИШЕ валідний JSON-масив рівно з ${slots.length} рядків-тем, у тому ж порядку, що рубрики нижче. Мова: ${lang}.`;
-      const user = slots.map((x, i) => `${i + 1}. [${x.rubric}]${x.format !== "post" ? ` [${x.format}]` : ""}${isInterest(i) ? " [ОСОБИСТЕ]" : ""}${isExperiment(i) ? " [ЕКСПЕРИМЕНТ]" : ""}`).join("\n");
-      const raw = await chat(env.cheapModel, system, user, { workspaceId, step: "plan_themes" });
-      const arr = parseThemes(raw);
-      slots.forEach((x, i) => { x.theme = ((isExperiment(i) ? "🧪 " : "") + ((arr[i] || "").slice(0, 300) || `${x.rubric}: ідея дня`)).slice(0, 300); });
+        `\n\nПоверни ЛИШЕ валідний JSON-масив рівно з {{N}} рядків-тем, у тому ж порядку, що рубрики нижче. Мова: ${lang}.`;
+      // Теми - порціями по 40: 400 тем одним викликом не вміщаються в ліміт відповіді, JSON обривається,
+      // і ВЕСЬ план падав би у фолбек «рубрика: ідея дня». Порції йдуть паралельно.
+      const CH = 40;
+      const chunks: number[][] = [];
+      for (let i = 0; i < slots.length; i += CH) chunks.push(slots.slice(i, i + CH).map((_, j) => i + j));
+      const results = await Promise.all(chunks.map(async (idxs) => {
+        const user = idxs.map((i, j) => { const x = slots[i]; return `${j + 1}. [${x.rubric}]${x.format !== "post" ? ` [${x.format}]` : ""}${isInterest(i) ? " [ОСОБИСТЕ]" : ""}${isExperiment(i) ? " [ЕКСПЕРИМЕНТ]" : ""}`; }).join("\n");
+        try {
+          const raw = await chat(env.cheapModel, system.replace("{{N}}", String(idxs.length)), user, { workspaceId, step: "plan_themes", maxTokens: Math.min(6000, 400 + idxs.length * 40) });
+          return parseThemes(raw);
+        } catch { return [] as string[]; }
+      }));
+      chunks.forEach((idxs, c) => idxs.forEach((i, j) => { const x = slots[i]; x.theme = ((isExperiment(i) ? "🧪 " : "") + ((results[c][j] || "").slice(0, 300) || `${x.rubric}: ідея дня`)).slice(0, 300); }));
     } catch { slots.forEach((x, i) => { x.theme = x.theme || `${(isExperiment(i) ? "🧪 " : "")}${x.rubric}: ідея дня`; }); }
   }
   return slots;

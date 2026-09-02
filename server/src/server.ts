@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { createHash, createHmac, timingSafeEqual, randomUUID } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, ideaMode, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, storytellingVerdict, normFormat, FORMATS, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet, topPatterns, generateThreadsTakes, repeatVariant, expandTake, threadsStarterPack, threadsNicheReview, suggestThreadReplies, DEFAULT_MAIN_MODEL } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, ideaMode, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, storytellingVerdict, normFormat, FORMATS, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet, topPatterns, generateThreadsTakes, repeatVariant, expandTake, threadsStarterPack, threadsNicheReview, suggestThreadReplies, DEFAULT_MAIN_MODEL, PLAN_MAX_PPW } from "./pipeline.js";
 import { startReelJob, parseReelScript } from "./reelvideo.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
@@ -34,6 +34,7 @@ import { resolveSource } from "./rss-resolver.js";
 import { MEDIA_DIR, saveMedia, deleteMediaFile, convertAllHeif, getThumb } from "./media.js";
 import { normalizeMeeting, saveMeeting } from "./meetings.js";
 import { spendStatus, SpendCapError, CAPS } from "./spend.js";
+import { spreadTimes } from "./textkind.js";
 import { startJob, getJob, getJobByKey, jobView, markLostJobs } from "./jobs.js";
 import { readdir, stat } from "node:fs/promises";
 import { startMeetingPull, testPull, pullOnce } from "./meetings-pull.js";
@@ -740,7 +741,8 @@ app.post("/api/sources/rss/:id/pull", async (req: any, reply) => {
 
 // останні підтягнуті джерела (RSS/Fireflies/ручні) - щоб їх можна було відкрити в роботі
 app.get("/api/sources/recent", async (req: any) =>
-  q(`select s.id, s.title, s.origin, s.created_at, r.id as run_id
+  q(`select s.id, s.title, s.origin, s.created_at, r.id as run_id,
+            left(regexp_replace(coalesce(s.transcript,''), '\\s+', ' ', 'g'), 110) as excerpt
      from source s join pipeline_run r on r.source_id=s.id
      where s.workspace_id=$1 order by s.created_at desc limit 20`, [req.user.workspace_id]));
 
@@ -2413,7 +2415,7 @@ app.post("/api/plan/generate", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   try {
     const horizon = Math.max(7, Math.min(90, Number(req.body?.horizon) || 14));
-    const ppw = Math.max(1, Math.min(14, Number(req.body?.posts_per_week) || 4));
+    const ppw = Math.max(1, Math.min(PLAN_MAX_PPW, Number(req.body?.posts_per_week) || 4));
     const topic = String(req.body?.topic || "").trim().slice(0, 1000);
     const anchor = new Date(); anchor.setUTCHours(12, 0, 0, 0);
     // мережі, обрані для плану (порожньо = один спільний скелет 'all', легасі-поведінка)
@@ -2914,6 +2916,8 @@ app.post("/api/schedule/auto", async (req: any) => {
   } catch { rhythm = {}; }
   const hasCustom = (n: string) => { const r = rhythm[n]; return !!(r && ((r.days && r.days.length) || r.time || (r.times && r.times.length) || (r.rubrics && r.rubrics.length))); };
   const rhIdx: Record<string, number> = {}; // кілька часів мережі → ротація між ПОСТАМИ (2-3 слоти/день у Threads)
+  // скільки постів припадає на день у цьому розподілі (для мереж зі своїм ритмом, де часів менше)
+  let perDayHint = 1;
   let count = 0;
   // розкласти один пост від базової дати (Y,Mo,D): спільний слот для мереж-спадкоємців + окремі за ритмами
   const placePost = async (u: { id: string; channels: any; rubric: string | null }, Y: number, Mo: number, D: number, baseTime: string): Promise<void> => {
@@ -2943,6 +2947,7 @@ app.post("/api/schedule/auto", async (req: any) => {
       const okT = (x: any) => /^\d{1,2}:\d{2}$/.test(String(x || ""));
       const listT = (Array.isArray(r.times) ? r.times.filter(okT).map(String) : []);
       if (!listT.length && okT(r.time)) listT.push(String(r.time));
+      if (perDayHint > listT.length && perDayHint > 1) { const sp = spreadTimes(perDayHint); listT.splice(0, listT.length, ...sp); }
       const t = listT.length ? listT[(rhIdx[n] || 0) % listT.length] : baseTime;
       rhIdx[n] = (rhIdx[n] || 0) + 1;
       const [h, m] = t.split(":").map(Number);
@@ -2978,10 +2983,15 @@ app.post("/api/schedule/auto", async (req: any) => {
     if (bestDays.length && !bestDays.includes(c.getUTCDay())) continue;
     dayDates.push({ Y: c.getUTCFullYear(), Mo: c.getUTCMonth() + 1, D: c.getUTCDate() });
   }
+  // Постів на день більше, ніж часів у стратегії → часи розкладаються рівномірно 08:00-22:00
+  // (8/день = кожні 2 години), інакше друге коло сідало б на ТОЙ САМИЙ час і пости злипались.
+  const perDay = dayDates.length ? Math.ceil(rest.length / dayDates.length) : 1;
+  perDayHint = perDay;
+  const dayTimes = perDay > times.length ? spreadTimes(perDay) : times;
   for (let idx = 0; idx < rest.length && dayDates.length; idx++) {
     const day = dayDates[idx % dayDates.length];
     const pass = Math.floor(idx / dayDates.length); // 0 = перший пост дня, 1 = другий тощо
-    await placePost(rest[idx], day.Y, day.Mo, day.D, times[pass % times.length]);
+    await placePost(rest[idx], day.Y, day.Mo, day.D, dayTimes[pass % dayTimes.length]);
   }
   return { ok: true, count };
 });

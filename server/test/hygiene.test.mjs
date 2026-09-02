@@ -44,3 +44,25 @@ test("мережева помилка до моделі - «тимчасово �
   assert.match(humanNetError("OpenRouter", Object.assign(new Error("x"), { name: "AbortError" })), /не відповіла за 60 секунд/);
   assert.match(humanNetError("OpenAI", Object.assign(new Error("connect"), { cause: { code: "ECONNREFUSED" } })), /нема звʼязку/);
 });
+
+// ---- фідбек тестера (бета, вересень): бот підміняв готовий пост AI-версією; план не вміщав «кожні 3 години»
+import { looksLikeReadyPost, spreadTimes } from "../dist/textkind.js";
+
+test("готовий пост розпізнається як готовий, коротка думка - ні", () => {
+  assert.equal(looksLikeReadyPost("Цю публікацію написало АІ"), false);
+  assert.equal(looksLikeReadyPost("ідея: пост про втому власників"), false);
+  assert.equal(looksLikeReadyPost(
+    "Влітку звикли, що відпочиваємо, відновлюємось і т. д… Аналітика стану бізнесу: різниця між опитуваннями березня та червня 2026 року - втома власника та керівного персоналу зросла з 20,2% до 32,8%. Ви як відчуваєте цю різницю? За 10-бальною шкалою на скільки втомлені?"), true);
+  // два повних речення без великої довжини - теж готовий текст (краще помилитись у бік «як є»)
+  assert.equal(looksLikeReadyPost("Клієнтська база - головний капітал бізнесу. Але 8 із 10 власників не відкривали її з минулого року."), true);
+});
+
+test("щільний темп розкладає часи рівномірно в межах дня", () => {
+  assert.deepEqual(spreadTimes(8), ["08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00", "22:00"]);
+  assert.deepEqual(spreadTimes(1), ["15:00"]);
+  assert.deepEqual(spreadTimes(2), ["08:00", "22:00"]);
+  assert.equal(spreadTimes(3)[1], "15:00");
+  assert.equal(spreadTimes(0).length, 1);
+  assert.equal(spreadTimes(100).length, 24);
+  for (const t of spreadTimes(5)) assert.match(t, /^\d{2}:\d{2}$/);
+});

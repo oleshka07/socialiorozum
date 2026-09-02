@@ -470,13 +470,13 @@ function openAddMaterial(){
   const card=document.createElement('div'); card.className='modal-card'; card.style.cssText='max-width:560px;padding:20px';
   ov.appendChild(card); document.body.appendChild(ov); const close=()=>ov.remove();
   ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
-  let mode='topic', topicCount=3;
+  let mode='topic', topicCount=3, topicText=''; // текст живе поза render(): перемикання «3»→«5» перемальовує картку, і без цього набране зникало
   function render(){
     card.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><b style="font-size:16px">＋ Додати контент</b><button class="icon" id="amX" style="margin-left:auto">✕</button></div>'
       +'<div class="tabs" style="margin-bottom:14px"><div class="tab'+(mode==='topic'?' on':'')+'" data-m="topic">✍️ Написати про тему</div><div class="tab'+(mode==='material'?' on':'')+'" data-m="material">📥 Додати матеріал</div></div>'
       +(mode==='topic'
         ? '<div class="hint" style="margin-bottom:8px">Задай напрям - про що саме зробити пост(и). Ми напишемо у голосі бренду. Це вирішує «AI пише не про те».</div>'
-          +'<textarea class="txt" id="amTopic" rows="4" placeholder="Напр.: чому наш новий тариф вигідніший; помилка, яку роблять новачки в холодних дзвінках; кейс клієнта, що виріс на 25%…"></textarea>'
+          +'<textarea class="txt" id="amTopic" rows="4" placeholder="Напр.: чому наш новий тариф вигідніший; помилка, яку роблять новачки в холодних дзвінках; кейс клієнта, що виріс на 25%…">'+esc(topicText)+'</textarea>'
           +'<div style="font-size:12.5px;font-weight:600;color:var(--ink2);margin:14px 0 7px">Скільки постів</div>'
           +'<div style="display:flex;gap:6px" id="amCountChips">'+[1,3,5].map(n=>'<div class="cchip'+(n===topicCount?' on':'')+'" data-n="'+n+'">'+n+'</div>').join('')+'</div>'
           +'<div class="btnrow" style="margin-top:18px"><button class="primary" id="amGen" style="width:100%">✨ Зробити пост(и) про це</button></div>'
@@ -487,6 +487,7 @@ function openAddMaterial(){
     card.querySelector('#amX').onclick=close;
     card.querySelectorAll('[data-m]').forEach(t=>t.onclick=()=>{ mode=t.dataset.m; render(); });
     if(mode==='topic'){
+      card.querySelector('#amTopic').addEventListener('input',e=>{ topicText=e.target.value; });
       card.querySelectorAll('#amCountChips [data-n]').forEach(c=>c.onclick=()=>{ topicCount=+c.dataset.n; render(); });
       card.querySelector('#amGen').onclick=async()=>{ const topic=card.querySelector('#amTopic').value.trim(); if(!topic){ flash('Напиши, про що зробити пост'); return; }
         close(); aiBusy('✨ Пишу '+topicCount+' пост(и) про: «'+topic.slice(0,50)+'»…'); selectView('create'); setCTab('posts'); setLayout('studio');
@@ -750,9 +751,12 @@ if($('planGenBtn')) $('planGenBtn').onclick=async()=>{
 };
 // живий підрахунок «скільки постів вийде»: днів/7 × постів/тиж × кількість обраних мереж
 function updPlanEst(){ const el=$('planEst'); if(!el) return; const h=+$('planHorizon').value||14, p=+$('planPpw').value||4;
-  const nets=Math.max(1,planSelectedNets().length); const per=Math.max(1,Math.min(120,Math.round(h/7*p)));
+  const nets=Math.max(1,planSelectedNets().length); const per=Math.max(1,Math.min(400,Math.round(h/7*p)));
+  document.querySelectorAll('#planPace [data-ppw]').forEach(c=>c.classList.toggle('on',+c.dataset.ppw===p));
   el.textContent='≈ '+(per*nets)+' постів'+(nets>1?(' ('+per+'×'+nets+' мереж)'):''); }
 if($('planHorizon')){ $('planHorizon').addEventListener('input',updPlanEst); $('planPpw').addEventListener('input',updPlanEst); updPlanEst(); }
+// темп одним кліком: «кожні 3 год» = 8/день = 56/тиж (запит тестера під Threads)
+document.querySelectorAll('#planPace [data-ppw]').forEach(c=>c.onclick=()=>{ $('planPpw').value=c.dataset.ppw; updPlanEst(); });
 if($('planMatchBtn')) $('planMatchBtn').onclick=async()=>{
   const m=$('planMsg'); m.style.color='var(--muted)'; m.textContent='шукаю матеріали під слоти…'; aiBusy('🔗 Підбираю наявні матеріали під теми плану…');
   try{ const r=await api('/plan/match',{method:'POST'}); m.style.color='var(--brand)'; m.textContent=r.matched?('підібрано матеріалів: '+r.matched+' ✓'):'нових метчів нема (додай матеріали в «Матеріали»)'; await loadPlan(); }
@@ -1961,7 +1965,10 @@ async function openComposer(postId, opts){
         +(own?' style="border-radius:0"':'')
         +' title="'+(own?'Своя версія тексту для цієї мережі. Клік - підлаштувати заново':'Підлаштувати текст саме під цю мережу (решта мереж не зміняться)')+'">'+(own?'✨✓':'✨')+'</button>';
       const rev=own?'<button class="netseg" data-revert="'+k+'" title="Вернути мій текст (прибрати окрему версію для цієї мережі)">↺</button>':'';
-      const chip='<button class="netchip'+(on&&!dimmed?' on':'')+'" data-net="'+k+'"'+((!conn||sent||dimmed)?' disabled':'')+' style="'+(dimmed?'opacity:.35':'')+'" title="'+(sent?'вже опубліковано':(dimmed?'у режимі гілки пост їде лише в Threads (вимкни 🧵, щоб обрати інші мережі)':(conn?'':'не підключено')))+'">'+(sent?'✓ ':'')+n[1]+'</button>';
+      // Мережа УВІМКНЕНА, але не підключена (пост із бота/плану чи канал відключили): чіп мусить лишатись
+      // клікабельним, щоб її можна було ЗНЯТИ - інакше «не можу зняти Telegram» (фідбек тестера).
+      const lockOff=sent||dimmed||(!conn&&!on);
+      const chip='<button class="netchip'+(on&&!dimmed?' on':'')+(on&&!conn?' warn':'')+'" data-net="'+k+'"'+(lockOff?' disabled':'')+' style="'+(dimmed?'opacity:.35':'')+'" title="'+(sent?'вже опубліковано':(dimmed?'у режимі гілки пост їде лише в Threads (вимкни 🧵, щоб обрати інші мережі)':(conn?'':(on?'мережа не підключена - клік, щоб зняти її з поста':'не підключено'))))+'">'+(sent?'✓ ':'')+(on&&!conn?'⚠ ':'')+n[1]+'</button>';
       return '<span class="netgrp">'+chip+seg+rev+'</span>'; }).join('');
     box.querySelectorAll('.netchip').forEach(b=>{ if(b.disabled) return; b.onclick=()=>{ const k=b.dataset.net; C[k]=C[k]||{text:''}; C[k].on=!C[k].on; renderChips(); renderPrev(); }; });
     box.querySelectorAll('[data-adapt]').forEach(b=>{ if(b.disabled) return; b.onclick=()=>adaptOne(b.dataset.adapt,b); });
@@ -2856,9 +2863,11 @@ async function loadRecent(){
   const o=$('recList'); if(!o) return;
   try{ const rows=await api('/sources/recent');
     if(!rows.length){ o.innerHTML='<div class="empty">Поки порожньо.</div>'; return; }
-    const ICON={rss:'📡',fireflies:'🎙️',manual:'📝'};
-    o.innerHTML=rows.map(s=>'<div class="card" data-run="'+s.run_id+'" style="display:flex;justify-content:space-between;gap:8px;align-items:center"><div style="min-width:0"><div>'+(ICON[s.origin]||'📄')+' '+esc(s.title||'(без назви)')+'</div><div style="font-size:12px;color:var(--muted)">'+esc(s.origin||'')+' · '+new Date(s.created_at).toLocaleString()+'</div></div><button class="ghost recOpen">Відкрити</button></div>').join('');
-    o.querySelectorAll('.card[data-run]').forEach(c=>{ c.querySelector('.recOpen').onclick=async()=>{ runId=c.dataset.run; localStorage.setItem('kg_run',runId); updRunLabel(); go('create'); setLayout('studio'); try{ await refresh(); }catch(e){} }; });
+    const ICON={rss:'📡',fireflies:'🎙️',manual:'📝',diary:'📔',bot:'🤖',idea:'💡',topic:'✍️',plan:'📅',meeting:'🎤',takes:'🧵',gdrive:'📁'};
+    // «Відкрити» веде в САМ матеріал (повний текст у стрічці Матеріалів), а не в Студію з порожнім
+    // контекстом - тестер бачив лише заголовки й «перекидає на меню створення і все».
+    o.innerHTML=rows.map(s=>'<div class="card" data-run="'+s.run_id+'" data-src="'+s.id+'" style="display:flex;justify-content:space-between;gap:8px;align-items:center"><div style="min-width:0"><div>'+(ICON[s.origin]||'📄')+' '+esc(s.title||'(без назви)')+'</div><div style="font-size:12px;color:var(--muted)">'+esc(ORIGIN_LABEL[s.origin]||s.origin||'')+' · '+new Date(s.created_at).toLocaleString()+(s.excerpt?(' · '+esc(s.excerpt)):'')+'</div></div><button class="ghost recOpen" title="Відкрити повний текст у Матеріалах">Відкрити</button></div>').join('');
+    o.querySelectorAll('.card[data-run]').forEach(c=>{ c.querySelector('.recOpen').onclick=async()=>{ runId=c.dataset.run; localStorage.setItem('kg_run',runId); updRunLabel(); await openMaterialDeep(c.dataset.src); }; });
   }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }
 $('recReload').onclick=()=>loadRecent();
