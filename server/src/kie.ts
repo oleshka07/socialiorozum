@@ -8,6 +8,8 @@
 // Каталог і ціни тягнуться з живого прайса kie.ai, бо захардкоджений перелік застаріє за місяць
 // і - що гірше - брехатиме про ціну. Той самий урок, що з версією LinkedIn і з `fixUnsupportedParam`.
 import { env } from "./env.js";
+import { q } from "./db.js";
+import { assertSpend, noteSpend } from "./spend.js";
 
 const BASE = "https://api.kie.ai";
 const PRICING_URL = `${BASE}/client/v1/model-pricing/page`;
@@ -107,7 +109,7 @@ export async function kieCatalog(): Promise<KieModel[]> {
 }
 
 // ---- генерація: створити задачу → дочекатись результату ----
-type CreateOpts = { timeoutMs?: number; pollMs?: number };
+type CreateOpts = { timeoutMs?: number; pollMs?: number; ws?: string };
 
 async function createTask(model: string, input: Record<string, unknown>): Promise<string> {
   const d = await kieFetch("/api/v1/jobs/createTask", { method: "POST", body: JSON.stringify({ model, input }) }, 60000);
@@ -135,6 +137,7 @@ async function taskResult(taskId: string): Promise<{ state: "pending" | "success
  */
 export async function kieGenerate(model: string, input: Record<string, unknown>, opts: CreateOpts = {}): Promise<string[]> {
   if (!kieReady()) throw new Error("Не доданий ключ kie.ai - Налаштування → Профіль → Ключі провайдерів");
+  if (opts.ws) await assertSpend(opts.ws);   // 💸 відео дорожче за все інше - стеля перед стартом задачі
   let taskId: string;
   try {
     taskId = await createTask(model, input);
@@ -150,6 +153,11 @@ export async function kieGenerate(model: string, input: Record<string, unknown>,
     const st = await taskResult(taskId);
     if (st.state === "success") {
       if (!st.urls.length) throw new Error("kie.ai: задача успішна, але без результату");
+      // облік: ціна з живого каталогу (може бути невідома - тоді 0, але виклик усе одно видно в usage)
+      if (opts.ws) {
+        const usd = (await kieCatalog().catch(() => [] as KieModel[])).find((m) => m.id === model)?.usd || 0;
+        try { await q(`insert into llm_usage(workspace_id, step, model, cost) values($1,'video',$2,$3)`, [opts.ws, model, usd]); noteSpend(opts.ws, usd); } catch { /* облік не критичний */ }
+      }
       return st.urls;
     }
     if (st.state === "fail") throw new Error(`kie.ai: ${st.error}`);

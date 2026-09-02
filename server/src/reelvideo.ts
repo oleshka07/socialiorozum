@@ -133,14 +133,14 @@ async function pexelsClip(query: string, dest: string): Promise<boolean> {
 // Свідомо ДОДАТКОВИЙ шар, а не заміна: вмикається налаштуванням `reel_visual='ai'`, і будь-який
 // збій (нема ключа, скінчились кредити, модель не встигла) просто провалюється в наявний ланцюжок
 // сток → картинка поста → градієнт. Тобто увімкнення нового не може зламати те, що вже працює.
-async function kieClip(model: string, query: string, dest: string): Promise<boolean> {
+async function kieClip(ws: string, model: string, query: string, dest: string): Promise<boolean> {
   if (!kieReady()) return false;
   try {
     const urls = await kieGenerate(model, {
       prompt: `${query}. Vertical 9:16 cinematic b-roll, natural motion, no text, no captions, no logos.`,
       aspect_ratio: "9:16",
       duration: 5,
-    }, { timeoutMs: 5 * 60 * 1000 });
+    }, { timeoutMs: 5 * 60 * 1000, ws });
     if (!urls[0]) return false;
     await download(urls[0], dest, 120000);
     return true;
@@ -186,7 +186,7 @@ export async function buildReelVideo(ws: string, postId: string, content: string
       const personal = broll.get(i);
       if (personal) {
         await run("ffmpeg", ["-y", "-stream_loop", "-1", "-i", join(MEDIA_DIR, personal), "-t", d, "-an", "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", seg], 180000);
-      } else if (aiVisual && await kieClip(kieModel, kws[i], clip)) {
+      } else if (aiVisual && await kieClip(ws, kieModel, kws[i], clip)) {
         await run("ffmpeg", ["-y", "-stream_loop", "-1", "-i", clip, "-t", d, "-an", "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", seg], 180000);
       } else if (await pexelsClip(kws[i], clip)) {
         await run("ffmpeg", ["-y", "-stream_loop", "-1", "-i", clip, "-t", d, "-an", "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", seg], 180000);

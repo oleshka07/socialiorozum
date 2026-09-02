@@ -1,4 +1,5 @@
 import { env } from "./env.js";
+import { assertSpend, noteSpend } from "./spend.js";
 import { q } from "./db.js";
 
 // usage: опційний «вихідний» обʼєкт - chat() заповнює його токенами й вартістю ЦЬОГО виклику.
@@ -21,6 +22,8 @@ const OPENAI_PRICES: Record<string, [number, number]> = {
   "gpt-4o": [2.5, 10],
   "gpt-4o-mini": [0.15, 0.6],
 };
+// консервативна оцінка для моделей поза прайсом - лише для стелі витрат (див. нижче)
+const FALLBACK_PRICE: [number, number] = [2.5, 10];
 
 // ціни Gemini ($/1M токенів). Ставимо 0 — цільовий сценарій це БЕЗКОШТОВНИЙ тариф Gemini для дешевих кроків.
 // (Якщо перейдете на платний тариф - підставте реальні ставки, напр. gemini-2.5-flash ≈ [0.30, 2.50].)
@@ -62,7 +65,7 @@ async function geminiChat(model: string, system: string, user: string, ctx?: Cha
     const cost = (pin / 1e6) * cin + (pout / 1e6) * cout;
     // ціна «відома» лише для моделей із нашого прайсу; для gemini-2.5-flash це навмисний 0 (free tier)
     if (ctx?.usage) Object.assign(ctx.usage, { prompt_tokens: pin, completion_tokens: pout, cost, costKnown: !!GEMINI_PRICES[apiModel] });
-    if (ctx?.workspaceId) try { await q(`insert into llm_usage(workspace_id, step, model, prompt_tokens, completion_tokens, cost) values($1,$2,$3,$4,$5,$6)`, [ctx.workspaceId, ctx.step ?? null, model, pin, pout, cost]); } catch { /* облік не критичний */ }
+    if (ctx?.workspaceId) try { await q(`insert into llm_usage(workspace_id, step, model, prompt_tokens, completion_tokens, cost) values($1,$2,$3,$4,$5,$6)`, [ctx.workspaceId, ctx.step ?? null, model, pin, pout, cost]); noteSpend(ctx.workspaceId, cost); } catch { /* облік не критичний */ }
   }
   return text;
 }
@@ -102,6 +105,9 @@ export function fixUnsupportedParam(apiModel: string, body: any, errText: string
 }
 
 export async function chat(model: string, system: string, user: string, ctx?: ChatCtx): Promise<string> {
+  // 💸 Стеля витрат - ТУТ, бо через цю функцію проходить кожен платний виклик (див. spend.ts).
+  // Виклики без воркспейсу (їх нема, але про всяк випадок) не капаються - і не обліковуються.
+  if (ctx?.workspaceId) await assertSpend(ctx.workspaceId);
   // "google/*" → напряму в Gemini, якщо є GEMINI_API_KEY; інакше падає у OpenRouter (він теж уміє google/gemini-*)
   if (model.startsWith("google/") && env.gemini.apiKey) return geminiChat(model, system, user, ctx);
   // моделі "openai/*" ідуть напряму в OpenAI, якщо заданий OPENAI_API_KEY (дешевше за наценку OpenRouter)
@@ -167,6 +173,14 @@ export async function chat(model: string, system: string, user: string, ctx?: Ch
       const [pin, pout] = OPENAI_PRICES[apiModel];
       cost = ((u.prompt_tokens || 0) / 1e6) * pin + ((u.completion_tokens || 0) / 1e6) * pout;
     }
+    // 💸 Ціна невідома (модель поза прайсом, провайдер не повернув cost) - для СТЕЛІ витрат
+    // рахуємо консервативно за тарифом gpt-4o. Інакше невідома модель була б «безкоштовною», і
+    // стеля її не бачила б - рівно та дірка, через яку витрати тікають. costKnown лишається false,
+    // щоб у Аналітиці це чесно показувалось як оцінка, а не факт.
+    if (!costKnown && !cost && (u.prompt_tokens || u.completion_tokens)) {
+      const [pin, pout] = FALLBACK_PRICE;
+      cost = ((u.prompt_tokens || 0) / 1e6) * pin + ((u.completion_tokens || 0) / 1e6) * pout;
+    }
     if (ctx?.usage) Object.assign(ctx.usage, { prompt_tokens: u.prompt_tokens || 0, completion_tokens: u.completion_tokens || 0, cost, costKnown,
       truncated: j.choices?.[0]?.finish_reason === "length" });
     if (ctx?.workspaceId) try {
@@ -174,6 +188,7 @@ export async function chat(model: string, system: string, user: string, ctx?: Ch
         `insert into llm_usage(workspace_id, step, model, prompt_tokens, completion_tokens, cost) values($1,$2,$3,$4,$5,$6)`,
         [ctx.workspaceId, ctx.step ?? null, model, u.prompt_tokens || 0, u.completion_tokens || 0, cost]
       );
+      noteSpend(ctx.workspaceId, cost);
     } catch { /* облік не критичний */ }
   }
   return stripDashes(j.choices?.[0]?.message?.content ?? "");

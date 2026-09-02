@@ -658,3 +658,9 @@ alter table transcription_config add column if not exists meeting_pull_url   tex
 alter table transcription_config add column if not exists meeting_pull_token text;
 alter table transcription_config add column if not exists meeting_pull_after text not null default '0';
 alter table transcription_config add column if not exists meeting_pull_at    timestamptz;
+
+-- 💸 СТЕЛЯ ВИТРАТ НА AI: окремому кабінету адмін може задати свою (null = дефолт із .env,
+-- SPEND_CAP_USD_DAY / SPEND_CAP_USD_MONTH; 0 = без обмеження). Свідомо НЕ в settings_block:
+-- той пишеться самим користувачем через PUT /api/settings/:key, і кожен підняв би собі стелю сам.
+alter table workspace add column if not exists spend_cap_day   numeric;
+alter table workspace add column if not exists spend_cap_month numeric;

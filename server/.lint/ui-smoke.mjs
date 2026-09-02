@@ -139,7 +139,12 @@ const API = {
     prompt_tokens: 1000, completion_tokens: 500, cost: 0.02, calls: 3,
     byModel: [{ model: "openai/gpt-4o", calls: 2, cost: 0.018 }, { model: "openai/gpt-4o-mini", calls: 1, cost: 0.002 }],
     byStep: [{ step: "lite", calls: 2, cost: 0.018 }, { step: "post_digest", calls: 1, cost: 0.002 }],
+    cap: { spentDay: 2.55, spentMonth: 7.1, capDay: 3, capMonth: 30 },
   },
+  "GET /admin/spend": { defaults: { day: 3, month: 30, callsPerMin: 40 }, workspaces: [
+    { id: "ws-1", emails: "smoke@rozum.one", day: 2.55, month: 7.1, calls: 12, spend_cap_day: null, spend_cap_month: null },
+    { id: "ws-2", emails: "oleg@rozum.one", day: 0.4, month: 9.9, calls: 3, spend_cap_day: 0, spend_cap_month: 0 },
+  ] },
   "GET /media": [{ id: "md1", filename: "pic.jpg", source: "upload", created_at: iso(0, 8) }],
   "GET /sources/recent": [],
   "GET /sources/rss": { feeds: [] },
@@ -866,6 +871,21 @@ const run = async () => {
     }, SECRET);
     return before.includes("не заданий") && before.includes("з .env") &&
       !st.leaked && st.tail && st.cleared && st.credits;
+  });
+
+  await check("spendCap", async () => {
+    // стеля має бути видимою ДО того, як людина в неї впреться: бар у Аналітиці з сумою «із $X»,
+    // і адмін бачить таблицю по кабінетах із полями для власної стелі
+    await page.evaluate(() => selectView("analytics"));
+    await page.waitForFunction(() => document.getElementById("capBox"), undefined, { timeout: 8000 });
+    const cap = await $t("#capBox");
+    const warnBar = await page.$eval("#capBarС", (el) => el.style.width);   // 2.55/3 = 85% → амбер
+    await page.evaluate(() => { selectView("settings"); setSTab("profile"); });
+    await page.waitForFunction(() => document.querySelectorAll("#admSpend tr[data-ws]").length >= 2, undefined, { timeout: 8000 });
+    const rows = await page.$$eval("#admSpend tr[data-ws]", (els) => els.map((e) => e.textContent));
+    const zeroCap = await page.$eval('#admSpend tr[data-ws="ws-2"] .sDay', (el) => el.value);
+    return cap.includes("$2.55 із $3.00") && cap.includes("$7.10 із $30.00") && warnBar === "85%" &&
+      rows[0].includes("smoke@rozum.one") && zeroCap === "0";
   });
 
   await check("imgCost", async () => {

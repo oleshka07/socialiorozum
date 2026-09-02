@@ -33,6 +33,7 @@ import { startRssPoller, pullFeed } from "./rss-poller.js";
 import { resolveSource } from "./rss-resolver.js";
 import { MEDIA_DIR, saveMedia, deleteMediaFile, convertAllHeif, getThumb } from "./media.js";
 import { normalizeMeeting, saveMeeting } from "./meetings.js";
+import { spendStatus, SpendCapError, CAPS } from "./spend.js";
 import { startMeetingPull, testPull, pullOnce } from "./meetings-pull.js";
 import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
 import * as gdrive from "./gdrive.js";
@@ -180,6 +181,21 @@ async function runOwned(runId: string, ws: string) {
 }
 
 app.get("/health", async () => ({ ok: true }));
+
+// ---- Глобальний обробник помилок ----
+// Дві речі, які інакше доходили до людини сирими: (1) стеля витрат - людське повідомлення і код 402,
+// щоб клієнт відрізняв «ліміт» від «зламалось»; (2) невалідний uuid у будь-якому :id давав 500 з
+// текстом Postgres «invalid input syntax for type uuid» (9/9 перевірених роутів) - це і витік
+// внутрішньої інформації, і шум у логах. Тепер 22P02 = «не знайдено», а решта збоїв БД - 500 без
+// деталей запиту (деталь лишається в серверному лозі).
+app.setErrorHandler((err: any, req: any, reply) => {
+  if (err instanceof SpendCapError || err?.code === "spend_cap") return reply.code(402).send({ error: err.message, code: "spend_cap" });
+  if (err?.code === "22P02") return reply.code(404).send({ error: "не знайдено" });
+  if (err?.validation) return reply.code(400).send({ error: err.message });
+  const status = Number(err?.statusCode) || 500;
+  if (status >= 500) { req.log.error({ err, url: req.raw?.url }, "unhandled"); return reply.code(status).send({ error: "Внутрішня помилка сервера - спробуй ще раз, ми вже бачимо її в журналі" }); }
+  return reply.code(status).send({ error: err?.message || "помилка" });
+});
 
 // ===================== AUTH =====================
 app.post("/api/auth/register", async (req: any, reply) => {
@@ -431,6 +447,29 @@ app.delete("/api/admin/keys/:name", async (req: any, reply) => {
     await logEvent("info", "admin", `ключ ${req.params.name} прибрано з адмінки (діє значення з .env, якщо є)`);
     return { ok: true };
   } catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+
+// ---- адмін: витрати по кабінетах і стеля на окремий кабінет ----
+app.get("/api/admin/spend", async (req: any, reply) => {
+  if (!adminOnly(req, reply)) return;
+  const rows = await q<any>(
+    `select w.id, w.spend_cap_day, w.spend_cap_month,
+            (select string_agg(email, ', ') from app_user u where u.workspace_id=w.id) as emails,
+            coalesce((select sum(cost) from llm_usage l where l.workspace_id=w.id and l.created_at >= date_trunc('day', now() at time zone 'utc') at time zone 'utc'),0)::float as day,
+            coalesce((select sum(cost) from llm_usage l where l.workspace_id=w.id and l.created_at >= date_trunc('month', now() at time zone 'utc') at time zone 'utc'),0)::float as month,
+            coalesce((select count(*) from llm_usage l where l.workspace_id=w.id and l.created_at >= date_trunc('day', now() at time zone 'utc') at time zone 'utc'),0)::int as calls
+       from workspace w order by month desc, day desc limit 100`);
+  return { defaults: { day: CAPS.day, month: CAPS.month, callsPerMin: CAPS.callsPerMin }, workspaces: rows };
+});
+
+app.put("/api/admin/spend/:workspaceId", async (req: any, reply) => {
+  if (!adminOnly(req, reply)) return;
+  const norm = (v: any) => (v === null || v === "" || v === undefined) ? null : (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : undefined);
+  const day = norm(req.body?.day), month = norm(req.body?.month);
+  if (day === undefined || month === undefined) return reply.code(400).send({ error: "стеля - число ≥ 0 (0 = без обмеження) або порожньо (дефолт)" });
+  await q(`update workspace set spend_cap_day=$2, spend_cap_month=$3 where id=$1`, [req.params.workspaceId, day, month]);
+  await logEvent("info", "admin", `стеля витрат для ${req.params.workspaceId}: день ${day ?? "дефолт"}, місяць ${month ?? "дефолт"}`);
+  return { ok: true };
 });
 
 // ---- скільки коштує одне зображення / одне відео ----
@@ -2271,7 +2310,8 @@ app.get("/api/usage", async (req: any) => {
                                  coalesce(sum(cost),0)::float as cost
                             from llm_usage where workspace_id=$1 and created_at > now() - interval '30 days'
                            group by step order by cost desc, calls desc`, [ws]);
-  return { ...(total || {}), byModel, byStep };
+  const cap = await spendStatus(ws, true);
+  return { ...(total || {}), byModel, byStep, cap: { spentDay: cap.spent.day, spentMonth: cap.spent.month, capDay: cap.caps.day, capMonth: cap.caps.month } };
 });
 
 // ===================== 🧪 ПОРІВНЯННЯ МОДЕЛЕЙ =====================

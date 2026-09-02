@@ -9,6 +9,7 @@ import { env } from "./env.js";
 import { q, one } from "./db.js";
 import { saveMedia, MEDIA_DIR, deleteMediaFile } from "./media.js";
 import { chat, extractJsonArray } from "./openrouter.js";
+import { assertSpend, noteSpend } from "./spend.js";
 
 export type ImgProvider = "openai" | "fal" | "gemini";
 export type Aspect = "1:1" | "4:5" | "16:9";
@@ -97,11 +98,12 @@ export async function generateImage(ws: string, prompt: string, providerOverride
   const avail = imageProviders();
   const p = (providerOverride && avail[providerOverride]) ? providerOverride : await resolveProvider(ws);
   if (!p) throw new Error("Не налаштовано жодного провайдера зображень — додай ключ (OPENAI_API_KEY / FAL_KEY / GEMINI_API_KEY) у .env");
+  await assertSpend(ws);   // 💸 зображення - найдорожча одиниця ($0.04), стеля обовʼязкова
   const a = normAspect(aspect);
   // gemini не має параметра розміру — підказуємо пропорції в промті
   const gemPrompt = a === "1:1" ? prompt : `${prompt} Формат зображення: ${a === "4:5" ? "вертикальний 4:5" : "горизонтальний 16:9"}.`;
   const img = p === "openai" ? await genOpenAI(prompt, a) : p === "fal" ? await genFal(prompt, a) : await genGemini(gemPrompt);
-  try { await q(`insert into llm_usage(workspace_id, step, model, cost) values($1,'image',$2,$3)`, [ws, p, COSTS[p] || 0]); } catch { /* облік не критичний */ }
+  try { await q(`insert into llm_usage(workspace_id, step, model, cost) values($1,'image',$2,$3)`, [ws, p, COSTS[p] || 0]); noteSpend(ws, COSTS[p] || 0); } catch { /* облік не критичний */ }
   return img;
 }
 
