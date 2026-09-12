@@ -10,7 +10,9 @@ import {
   toolSpecs, handleRpc, handleBody, MCP_LATEST, TOOLS,
 } from "../dist/mcp.js";
 
-const WS = "00000000-0000-0000-0000-000000000000";
+// Контекст виклику: хто, у якому кабінеті. initialize/ping/tools/list до БД не ходять, тож
+// підробленого контексту достатньо - саме ці гілки тут і перевіряються.
+const CTX = { token: "a".repeat(64), userId: "u1", wsId: "00000000-0000-0000-0000-000000000000", wsTitle: "Бренд", wsCount: 1 };
 const HEX64 = "a".repeat(64);
 
 test("negotiateVersion: відому версію повертаємо ТУ САМУ, невідому - свою найновішу", () => {
@@ -90,6 +92,21 @@ test("toolSpecs: схема кожного інструмента валідна
   }
 });
 
+test("toolSpecs: у кожного інструмента є вибір кабінету, крім самих кабінетних", () => {
+  // Без цього аргументу разова дія в іншому бренді неможлива, а з ним у list/switch_workspace -
+  // безглузда рекурсія («перемкни кабінет у кабінеті»).
+  const specs = toolSpecs();
+  const meta = ["list_workspaces", "switch_workspace"];
+  for (const t of specs) {
+    const has = Object.prototype.hasOwnProperty.call(t.inputSchema.properties, "workspace");
+    if (meta.includes(t.name)) continue;
+    assert.equal(has, true, `${t.name} без аргументу workspace`);
+  }
+  const sw = specs.find((t) => t.name === "switch_workspace");
+  assert.deepEqual(sw.inputSchema.required, ["workspace"]);
+  assert.equal(specs.find((t) => t.name === "list_workspaces").annotations.readOnlyHint, true);
+});
+
 test("toolSpecs: інструменти лише читають або лише пишуть - readOnly не бреше", () => {
   const byName = Object.fromEntries(toolSpecs().map((t) => [t.name, t]));
   for (const n of ["workspace_info", "brand_voice", "list_drafts", "get_post", "analytics"])
@@ -99,7 +116,7 @@ test("toolSpecs: інструменти лише читають або лише 
 });
 
 test("handleRpc initialize: віддаємо капабіліті, версію й інструкцію", async () => {
-  const r = await handleRpc(WS, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26" } });
+  const r = await handleRpc(CTX, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26" } });
   assert.equal(r.id, 1);
   assert.equal(r.result.protocolVersion, "2025-03-26");
   assert.ok(r.result.capabilities.tools);
@@ -108,32 +125,32 @@ test("handleRpc initialize: віддаємо капабіліті, версію 
 });
 
 test("handleRpc tools/list: список непорожній і з коректним конвертом JSON-RPC", async () => {
-  const r = await handleRpc(WS, { jsonrpc: "2.0", id: "x", method: "tools/list" });
+  const r = await handleRpc(CTX, { jsonrpc: "2.0", id: "x", method: "tools/list" });
   assert.equal(r.jsonrpc, "2.0");
   assert.equal(r.id, "x");
   assert.ok(r.result.tools.length >= 10);
 });
 
 test("handleRpc: ping, нотифікації без відповіді, невідомий метод = -32601", async () => {
-  assert.deepEqual((await handleRpc(WS, { jsonrpc: "2.0", id: 2, method: "ping" })).result, {});
-  assert.equal(await handleRpc(WS, { jsonrpc: "2.0", method: "notifications/initialized" }), null);
-  const r = await handleRpc(WS, { jsonrpc: "2.0", id: 3, method: "space/invaders" });
+  assert.deepEqual((await handleRpc(CTX, { jsonrpc: "2.0", id: 2, method: "ping" })).result, {});
+  assert.equal(await handleRpc(CTX, { jsonrpc: "2.0", method: "notifications/initialized" }), null);
+  const r = await handleRpc(CTX, { jsonrpc: "2.0", id: 3, method: "space/invaders" });
   assert.equal(r.error.code, -32601);
 });
 
 test("handleRpc: биті повідомлення - Invalid Request, а не падіння", async () => {
-  assert.equal((await handleRpc(WS, null)).error.code, -32600);
-  assert.equal((await handleRpc(WS, { method: "ping" })).error.code, -32600);        // без jsonrpc
-  assert.equal((await handleRpc(WS, { jsonrpc: "2.0", id: 1 })).error.code, -32600); // без method
+  assert.equal((await handleRpc(CTX, null)).error.code, -32600);
+  assert.equal((await handleRpc(CTX, { method: "ping" })).error.code, -32600);        // без jsonrpc
+  assert.equal((await handleRpc(CTX, { jsonrpc: "2.0", id: 1 })).error.code, -32600); // без method
 });
 
 test("handleBody: батч повертає масив, самі нотифікації - нічого (HTTP 202)", async () => {
-  const many = await handleBody(WS, [
+  const many = await handleBody(CTX, [
     { jsonrpc: "2.0", id: 1, method: "ping" },
     { jsonrpc: "2.0", method: "notifications/initialized" },
     { jsonrpc: "2.0", id: 2, method: "tools/list" },
   ]);
   assert.equal(many.length, 2);
   assert.deepEqual(many.map((m) => m.id), [1, 2]);
-  assert.equal(await handleBody(WS, [{ jsonrpc: "2.0", method: "notifications/cancelled" }]), null);
+  assert.equal(await handleBody(CTX, [{ jsonrpc: "2.0", method: "notifications/cancelled" }]), null);
 });

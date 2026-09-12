@@ -22,7 +22,8 @@
 import { randomBytes } from "node:crypto";
 import { q, one } from "./db.js";
 import { env } from "./env.js";
-import { getSettingText, setSetting } from "./settings.js";
+import { getSettingText } from "./settings.js";
+import { listWorkspaces, isMember } from "./workspaces.js";
 import { connectedNets, parseWhen, zonedToUtc } from "./tgcompose.js";
 import { publishPostToChannels, alreadySentNetworks } from "./publisher.js";
 import { generatePostsOnePass, normFormat, GOAL_LABELS } from "./pipeline.js";
@@ -59,6 +60,10 @@ export const sseEncode = (payload: unknown): string => `event: message\ndata: ${
 type RpcId = string | number | null;
 export const rpcResult = (id: RpcId, result: unknown) => ({ jsonrpc: "2.0", id, result });
 export const rpcError = (id: RpcId, code: number, message: string) => ({ jsonrpc: "2.0", id, error: { code, message } });
+
+// Помилка, яку має ПРОЧИТАТИ модель (а не трактувати як збій протоколу): по специфікації такі
+// повертаються всередині результату з isError, тоді Claude бачить текст і може виправитись сам.
+class ToolError extends Error {}
 
 // ============================================================================
 // 2. АРГУМЕНТИ (модель може прислати що завгодно - нормалізуємо, а не падаємо)
@@ -112,47 +117,75 @@ export function parseIsoAt(raw: string, tz: string): Date | null {
 // 3. ТОКЕН І ВОРКСПЕЙС
 // ============================================================================
 
-const TOKEN_KEY = "mcp_token";
-const USED_KEY = "mcp_last_used";
+// Токен належить ЛЮДИНІ (таблиця mcp_token), а не кабінету: один конектор у Claude дає доступ до
+// всіх брендів, у які людину пустили. Активний кабінет зберігається поруч із токеном - так само,
+// як активний кабінет сесії живе в сесії.
+export type McpCtx = { token: string; userId: string; wsId: string; wsTitle: string; wsCount: number };
 
-export async function mcpToken(ws: string): Promise<string> {
-  const cur = await getSettingText(ws, TOKEN_KEY);
-  return isMcpToken(cur) ? cur : "";
+export async function mcpTokenFor(userId: string): Promise<string> {
+  const r = await one<{ token: string }>(`select token from mcp_token where user_id=$1 order by created_at desc limit 1`, [userId]);
+  return r?.token || "";
 }
 
-export async function issueMcpToken(ws: string): Promise<string> {
+export async function issueMcpToken(userId: string, activeWsId?: string): Promise<string> {
   const t = randomBytes(32).toString("hex");
-  await setSetting(ws, TOKEN_KEY, t);
+  // одна людина - одна адреса: перевипуск має вбивати стару, інакше «відкликав» нічого не значить
+  await q(`delete from mcp_token where user_id=$1`, [userId]);
+  // стартує в тому кабінеті, з якого адресу створили; далі конектор має власний активний кабінет
+  // і НЕ ходить за перемиканням у браузері (інакше клік у кабінеті тихо міняв би бренд у Claude)
+  await q(`insert into mcp_token(token, user_id, active_workspace_id) values($1,$2,$3)`, [t, userId, activeWsId ?? null]);
   return t;
 }
 
+export const revokeMcpToken = (userId: string) => q(`delete from mcp_token where user_id=$1`, [userId]);
 export const mcpUrl = (token: string): string => `${env.appBaseUrl}/mcp/${token}`;
+export const mcpLastUsed = async (userId: string): Promise<string> =>
+  (await one<{ t: string }>(`select last_used_at::text as t from mcp_token where user_id=$1`, [userId]))?.t || "";
 
-export async function workspaceByToken(token: unknown): Promise<string | null> {
-  if (!isMcpToken(token)) return null;   // гард ДО запиту в БД: інакше сміття зматчиться з іншим ключем
-  const r = await one<{ workspace_id: string }>(
-    `select workspace_id from settings_block where key=$1 and content=$2`, [TOKEN_KEY, token]);
-  return r?.workspace_id ?? null;
+// Один запит на HTTP-виклик: хто це, у якому кабінеті зараз і скільки їх узагалі.
+// Членство перевіряється тим самим join - відкликаний доступ повертає людину в домашній кабінет.
+export async function resolveToken(token: unknown): Promise<McpCtx | null> {
+  if (!isMcpToken(token)) return null;   // гард ДО запиту в БД
+  const r = await one<{ user_id: string; ws_id: string; ws_title: string; ws_count: number }>(
+    `select t.user_id,
+            coalesce(m.workspace_id, u.workspace_id) as ws_id,
+            coalesce(nullif(btrim(w.title),''), replace(w.name,'user:','')) as ws_title,
+            (select count(*) from workspace_member where user_id = t.user_id)::int as ws_count
+       from mcp_token t
+       join app_user u on u.id = t.user_id
+       left join workspace_member m on m.workspace_id = t.active_workspace_id and m.user_id = t.user_id
+       left join workspace w on w.id = coalesce(m.workspace_id, u.workspace_id)
+      where t.token = $1 and u.deleted_at is null`, [token]);
+  if (!r) return null;
+  return { token: String(token), userId: r.user_id, wsId: r.ws_id, wsTitle: r.ws_title || "кабінет", wsCount: r.ws_count || 1 };
+}
+
+// Кабінет, названий у аргументі: приймаємо id, його початок або частину назви - модель пише як
+// їй зручно, а помилитись тут дорого (пост поїхав би не в той бренд).
+async function resolveWsArg(userId: string, raw: unknown): Promise<{ id: string; title: string }> {
+  const want = String(raw ?? "").trim().toLowerCase();
+  const list = await listWorkspaces(userId);
+  if (!want) throw new ToolError("Вкажи кабінет. Список: list_workspaces.");
+  const hit = list.filter((w) => w.id === want || w.id.startsWith(want) || w.title.toLowerCase().includes(want));
+  if (!hit.length) throw new ToolError(`Кабінет «${raw}» не знайдено. Доступні: ${list.map((w) => w.title).join(", ") || "жодного"}.`);
+  if (hit.length > 1) throw new ToolError(`Під «${raw}» підходить кілька: ${hit.map((w) => w.title).join(", ")}. Уточни.`);
+  return { id: hit[0].id, title: hit[0].title };
 }
 
 // «Остання активність конектора» - щоб у кабінеті було видно, що підключення живе. Пишемо не
 // частіше разу на 5 хв: інакше кожен tools/call давав би зайвий UPDATE.
 const usedAt = new Map<string, number>();
-function touchUsed(ws: string): void {
+function touchUsed(token: string): void {
   const now = Date.now();
-  if (now - (usedAt.get(ws) || 0) < 5 * 60_000) return;
-  usedAt.set(ws, now);
-  setSetting(ws, USED_KEY, new Date().toISOString()).catch(() => {});
+  if (now - (usedAt.get(token) || 0) < 5 * 60_000) return;
+  usedAt.set(token, now);
+  q(`update mcp_token set last_used_at=now() where token=$1`, [token]).catch(() => {});
 }
-export const mcpLastUsed = (ws: string) => getSettingText(ws, USED_KEY);
 
 // ============================================================================
 // 4. ДОПОМІЖНЕ ДЛЯ ІНСТРУМЕНТІВ
 // ============================================================================
 
-// Помилка, яку має ПРОЧИТАТИ модель (а не трактувати як збій протоколу): по специфікації такі
-// повертаються всередині результату з isError, тоді Claude бачить текст і може виправитись сам.
-class ToolError extends Error {}
 
 const wsTz = async (ws: string) => (await getSettingText(ws, "timezone")) || "Europe/Kyiv";
 const short = (id: string) => "#" + String(id).slice(0, 8);
@@ -233,14 +266,42 @@ type ToolDef = {
   properties: Record<string, any>;
   required?: string[];
   readOnly?: boolean;
-  run: (ws: string, a: Record<string, any>) => Promise<string>;
+  run: (ws: string, a: Record<string, any>, ctx: McpCtx) => Promise<string>;
 };
 
 const S = (description: string, extra: Record<string, any> = {}) => ({ type: "string", description, ...extra });
 const N = (description: string, extra: Record<string, any> = {}) => ({ type: "integer", description, ...extra });
 const NETS_ARG = { type: "array", items: { type: "string", enum: NETS }, description: "Мережі: telegram, instagram, facebook, threads, linkedin." };
 
+// Інструменти кабінетів свідомо БЕЗ аргументу workspace (див. WS_ARG): перемикати кабінет,
+// перебуваючи в іншому кабінеті, - це зайва плутанина на рівному місці.
 export const TOOLS: ToolDef[] = [
+  {
+    name: "list_workspaces",
+    title: "Кабінети (бренди)",
+    description: "Список кабінетів, до яких у власника конектора є доступ, і який зараз активний. Якщо кабінет один - усе працює як завжди, питання вибору не виникає.",
+    properties: {},
+    readOnly: true,
+    run: async (_ws, _a, ctx) => {
+      const list = await listWorkspaces(ctx.userId);
+      if (list.length < 2) return `Кабінет один: ${ctx.wsTitle}. Усі інструменти працюють із ним.`;
+      return ["Кабінети (активний позначено ▸):", ...list.map((w) =>
+        `${w.id === ctx.wsId ? "▸" : " "} ${short(w.id)} ${w.title}${w.role === "owner" ? " (власник)" : ""}`),
+        "", "Перемкнути: switch_workspace. Разова дія в іншому кабінеті: аргумент workspace у будь-якому інструменті."].join("\n");
+    },
+  },
+  {
+    name: "switch_workspace",
+    title: "Перемкнути кабінет",
+    description: "Зробити інший кабінет (бренд) активним для всіх наступних викликів. Перемикання зберігається між чатами - воно живе на конекторі, а не в розмові.",
+    properties: { workspace: S("Назва кабінету або його id зі списку list_workspaces.") },
+    required: ["workspace"],
+    run: async (_ws, a, ctx) => {
+      const w = await resolveWsArg(ctx.userId, a.workspace);
+      await q(`update mcp_token set active_workspace_id=$2 where token=$1`, [ctx.token, w.id]);
+      return `Активний кабінет: ${w.title}. Наступні виклики підуть саме в нього.`;
+    },
+  },
   {
     name: "workspace_info",
     title: "Стан кабінету",
@@ -696,6 +757,10 @@ export const TOOLS: ToolDef[] = [
 const TOOL_BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
 
 // Опис інструментів у вигляді, якого чекає клієнт MCP.
+// Разовий вибір кабінету без перемикання: дешевий запобіжник від «опублікував не в той бренд».
+const WS_ARG = { type: "string", description: "Кабінет (бренд) для ЦЬОГО виклику, якщо їх кілька: назва або id зі списку list_workspaces. Без нього - активний кабінет." };
+const WS_TOOLS = ["list_workspaces", "switch_workspace"];
+
 export function toolSpecs(): unknown[] {
   return TOOLS.map((t) => ({
     name: t.name,
@@ -703,7 +768,7 @@ export function toolSpecs(): unknown[] {
     description: t.description,
     inputSchema: {
       type: "object",
-      properties: t.properties,
+      properties: WS_TOOLS.includes(t.name) ? t.properties : { ...t.properties, workspace: WS_ARG },
       ...(t.required?.length ? { required: t.required } : {}),
       additionalProperties: false,
     },
@@ -724,6 +789,7 @@ export const SERVER_INSTRUCTIONS = [
   "Робочий порядок: 1) brand_voice - прочитай голос бренду; 2) напиши текст САМ у цьому голосі;",
   "3) create_draft - збережи; 4) publish_post або schedule_post. Так генерація нічого не коштує власнику.",
   "generate_posts викликай лише коли тебе прямо просять «згенеруй силами socialio» - він витрачає AI-кредити кабінету.",
+  "Якщо кабінетів кілька (list_workspaces), спершу переконайся, що активний саме той бренд: перемкни switch_workspace або передай workspace у виклику. Кожна відповідь називає кабінет у першому рядку - звіряйся з ним перед публікацією.",
   "Факти не вигадуй: бери їх з list_materials / get_material або питай автора.",
   "Перед публікацією показуй текст людині - опублікований пост відкликати не можна.",
 ].join(" ");
@@ -732,12 +798,20 @@ export const SERVER_INSTRUCTIONS = [
 // 6. ДИСПЕТЧЕР JSON-RPC
 // ============================================================================
 
-export async function callTool(ws: string, name: string, args: Record<string, any>): Promise<{ content: unknown[]; isError?: boolean }> {
+export async function callTool(ctx: McpCtx, name: string, args: Record<string, any>): Promise<{ content: unknown[]; isError?: boolean }> {
   const tool = TOOL_BY_NAME.get(name);
   if (!tool) return { content: [{ type: "text", text: `Невідомий інструмент: ${name}` }], isError: true };
   try {
-    const text = await tool.run(ws, args || {});
-    return { content: [{ type: "text", text: text || "Готово." }] };
+    const a = args || {};
+    // разовий кабінет із аргументу; за замовчуванням - активний
+    const target = a.workspace && !WS_TOOLS.includes(name) ? await resolveWsArg(ctx.userId, a.workspace) : null;
+    const wsId = target?.id || ctx.wsId;
+    if (target && !(await isMember(ctx.userId, wsId))) throw new ToolError("Немає доступу до цього кабінету.");
+    const text = await tool.run(wsId, a, ctx);
+    // Коли кабінетів кілька, КОЖНА відповідь називає бренд. Без цього людина не побачить, що
+    // модель працює не в тому кабінеті, аж поки пост не вийде не там.
+    const head = ctx.wsCount > 1 && !WS_TOOLS.includes(name) ? `[Кабінет: ${target?.title || ctx.wsTitle}]\n` : "";
+    return { content: [{ type: "text", text: head + (text || "Готово.") }] };
   } catch (e: any) {
     // Помилки інструмента повертаємо В РЕЗУЛЬТАТІ (isError), а не як помилку протоколу: так модель
     // бачить причину й може виправитись сама, а клієнт не рве зʼєднання.
@@ -748,7 +822,7 @@ export async function callTool(ws: string, name: string, args: Record<string, an
 }
 
 // Одне повідомлення JSON-RPC → одна відповідь (або null для нотифікацій, на які відповідати не можна).
-export async function handleRpc(ws: string, msg: any): Promise<any | null> {
+export async function handleRpc(ctx: McpCtx, msg: any): Promise<any | null> {
   if (!msg || typeof msg !== "object" || msg.jsonrpc !== "2.0" || typeof msg.method !== "string")
     return rpcError(msg?.id ?? null, -32600, "Invalid Request");
   const id: RpcId = msg.id === undefined ? null : msg.id;
@@ -768,8 +842,8 @@ export async function handleRpc(ws: string, msg: any): Promise<any | null> {
       return rpcResult(id, { tools: toolSpecs() });
     case "tools/call": {
       const name = String(msg.params?.name || "");
-      touchUsed(ws);
-      return rpcResult(id, await callTool(ws, name, msg.params?.arguments || {}));
+      touchUsed(ctx.token);
+      return rpcResult(id, await callTool(ctx, name, msg.params?.arguments || {}));
     }
     // Ресурсів і промтів ми не оголошуємо, але деякі клієнти все одно їх питають - порожній
     // список дешевший за помилку в їхньому інтерфейсі.
@@ -783,11 +857,11 @@ export async function handleRpc(ws: string, msg: any): Promise<any | null> {
 }
 
 // Тіло запиту (одне повідомлення або батч 2025-03-26) → тіло відповіді; null = відповідати нічим (202).
-export async function handleBody(ws: string, body: any): Promise<any | null> {
+export async function handleBody(ctx: McpCtx, body: any): Promise<any | null> {
   if (Array.isArray(body)) {
     const out = [];
-    for (const m of body) { const r = await handleRpc(ws, m); if (r) out.push(r); }
+    for (const m of body) { const r = await handleRpc(ctx, m); if (r) out.push(r); }
     return out.length ? out : null;
   }
-  return handleRpc(ws, body);
+  return handleRpc(ctx, body);
 }

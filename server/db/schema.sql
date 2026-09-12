@@ -682,3 +682,52 @@ create table if not exists job (
 );
 create index if not exists idx_job_kind_key on job(kind, key, created_at desc);
 create index if not exists idx_job_updated on job(updated_at);
+
+-- ============================================================================
+-- 🏢 МУЛЬТИ-ВОРКСПЕЙС: одна людина - кілька кабінетів (брендів).
+-- До цього звʼязок був жорстко 1:1 (`app_user.workspace_id`), тож щоб вести другий бренд, треба
+-- було заводити окремий акаунт і виходити-заходити. Тепер доступ описує ОКРЕМА таблиця, а
+-- `app_user.workspace_id` лишається «домашнім» кабінетом (фолбек і місце, куди сідає новий юзер).
+-- Ключове рішення: активний кабінет живе в СЕСІЇ, а не в юзері - тож resolve лишається одним
+-- запитом у `userBySession`, і жоден із 174 роутів, що читають `req.user.workspace_id`, не змінюється.
+-- ============================================================================
+create table if not exists workspace_member (
+  workspace_id uuid not null references workspace(id) on delete cascade,
+  user_id      uuid not null references app_user(id) on delete cascade,
+  role         text not null default 'member',      -- owner|member
+  created_at   timestamptz not null default now(),
+  primary key (workspace_id, user_id)
+);
+create index if not exists idx_wsmember_user on workspace_member(user_id);
+-- бекфіл: кожен наявний юзер - власник свого домашнього кабінету (ідемпотентно)
+insert into workspace_member(workspace_id, user_id, role)
+  select workspace_id, id, 'owner' from app_user on conflict do nothing;
+
+-- людська назва кабінету: `workspace.name` технічний і унікальний («user:пошта»), показувати його
+-- в перемикачі не можна
+alter table workspace add column if not exists title text;
+
+-- активний кабінет сесії; null = домашній. Членство перевіряється при КОЖНОМУ resolve (join нижче
+-- в auth.ts), тож відкликаний доступ діє негайно, без чистки сесій.
+alter table user_session add column if not exists active_workspace_id uuid references workspace(id) on delete set null;
+
+-- 🔌 MCP-токен тепер належить ЛЮДИНІ, а не кабінету: один конектор у Claude бачить усі бренди,
+-- між якими людина має доступ. Жив у `settings_block` - переїжджає сюди разом із наявними адресами,
+-- щоб уже видані посилання не померли.
+create table if not exists mcp_token (
+  token               text primary key,
+  user_id             uuid not null references app_user(id) on delete cascade,
+  active_workspace_id uuid references workspace(id) on delete set null,
+  last_used_at        timestamptz,
+  created_at          timestamptz not null default now()
+);
+create index if not exists idx_mcptoken_user on mcp_token(user_id);
+insert into mcp_token(token, user_id, active_workspace_id)
+  select sb.content, u.id, sb.workspace_id
+    from settings_block sb join app_user u on u.workspace_id = sb.workspace_id
+   where sb.key = 'mcp_token' and sb.content ~ '^[0-9a-f]{64}$'
+  on conflict (token) do nothing;
+-- прибираємо старе джерело правди ЛИШЕ для тих токенів, що реально переїхали
+delete from settings_block sb
+ where sb.key in ('mcp_token','mcp_last_used')
+   and (sb.key = 'mcp_last_used' or exists (select 1 from mcp_token t where t.token = sb.content));

@@ -159,6 +159,11 @@ const API = {
   "GET /integrations/tiktok": { connected: false, available: false },
   "GET /integrations/gdrive": { connected: false, available: false },
   "GET /integrations/transcription": { hasKey: false, webhookUrl: "", hasSecret: false, autoRun: false },
+  "GET /workspaces": { items: [{ id: "11111111-1111-1111-1111-111111111111", title: "Бренд А", role: "owner" },
+                                { id: "22222222-2222-2222-2222-222222222222", title: "Бренд Б", role: "member" }],
+                        active: "11111111-1111-1111-1111-111111111111", home: "11111111-1111-1111-1111-111111111111" },
+  "GET /workspaces/members": { items: [{ user_id: "u1", email: "smoke@rozum.one", role: "owner" },
+                                       { user_id: "u2", email: "friend@rozum.one", role: "member" }], owner: true, me: "u1" },
   "GET /integrations/mcp": { connected: true, url: "https://socialio.rozum.one/mcp/" + "a1b2c3d4".repeat(8), lastUsed: iso(-1, 10), tools: 16 },
   "GET /integrations/images": { provider: "gemini", available: { openai: true, fal: false, gemini: true } },
   "GET /integrations/meta/pages": [],
@@ -802,6 +807,16 @@ const run = async () => {
 
   // MCP-панель: адреса підтягнулась із сервера І модалка «Як підключити» реально відкривається -
   // саме в ній найлегше тихо зламати рядок, бо вона будується конкатенацією HTML.
+  // Перемикач брендів: зʼявляється лише коли кабінетів кілька, активний позначений, а в Профілі
+  // видно учасників. Саме тут легко тихо зламати мульти-воркспейс і не помітити.
+  await check("wsSwitcher", async () => {
+    const box = await page.$eval("#wsSwitch", (el) => el.style.display).catch(() => "none");
+    const list = await page.$eval("#wsList", (el) => el.innerText).catch(() => "");
+    const active = await page.$eval("#wsList", (el) => (el.querySelector("[data-ws]")?.innerText || "")).catch(() => "");
+    const mem = await page.$eval("#wsMembers", (el) => el.innerText).catch(() => "");
+    return box !== "none" && list.includes("Бренд А") && list.includes("Бренд Б") && active.includes("✓") && mem.includes("friend@rozum.one");
+  });
+
   await check("mcpPanel", async () => {
     const url = await page.$eval("#mcpUrl", (el) => el.value).catch(() => "");
     if (!url.includes("/mcp/")) return false;

@@ -1,6 +1,7 @@
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { q, one } from "./db.js";
 import { DEFAULT_SETTINGS, DEFAULT_RUBRICS } from "./defaults.js";
+import { addMember } from "./workspaces.js";
 
 const SESSION_DAYS = 30;
 const VERIFY_HOURS = 24;
@@ -46,21 +47,22 @@ export async function createWorkspaceWithDefaults(name: string): Promise<string>
   return ws!.id;
 }
 
-export type User = { id: string; email: string; email_verified: boolean; workspace_id: string };
+export type User = { id: string; email: string; email_verified: boolean; workspace_id: string; home_workspace_id: string };
 
 export async function createUser(email: string, password: string): Promise<User> {
   const wsId = await createWorkspaceWithDefaults("user:" + email.toLowerCase());
   const u = await one<User>(
     `insert into app_user(email, password_hash, workspace_id) values($1,$2,$3)
-     returning id, email, email_verified, workspace_id`,
+     returning id, email, email_verified, workspace_id, workspace_id as home_workspace_id`,
     [email.toLowerCase(), hashPassword(password), wsId]
   );
+  await addMember(wsId, u!.id, "owner");
   return u!;
 }
 export async function findOrCreateGoogleUser(email: string, googleId: string): Promise<User> {
   const e = email.toLowerCase();
   const existing = await one<User>(
-    `select id, email, email_verified, workspace_id from app_user where email=$1`, [e]);
+    `select id, email, email_verified, workspace_id, workspace_id as home_workspace_id from app_user where email=$1`, [e]);
   if (existing) {
     // вхід через Google теж скасовує заплановане видалення
     await q(`update app_user set email_verified=true, google_id=coalesce(google_id,$2), deleted_at=null where id=$1`, [existing.id, googleId]);
@@ -69,15 +71,16 @@ export async function findOrCreateGoogleUser(email: string, googleId: string): P
   const wsId = await createWorkspaceWithDefaults("user:" + e);
   const u = await one<User>(
     `insert into app_user(email, password_hash, email_verified, workspace_id, google_id)
-     values($1, null, true, $2, $3) returning id, email, email_verified, workspace_id`,
+     values($1, null, true, $2, $3) returning id, email, email_verified, workspace_id, workspace_id as home_workspace_id`,
     [e, wsId, googleId]
   );
+  await addMember(wsId, u!.id, "owner");
   return u!;
 }
 
 export const userByEmail = (email: string) =>
   one<User & { password_hash: string; deleted_at: string | null }>(
-    `select id, email, email_verified, workspace_id, password_hash, deleted_at from app_user where email=$1`,
+    `select id, email, email_verified, workspace_id, workspace_id as home_workspace_id, password_hash, deleted_at from app_user where email=$1`,
     [email.toLowerCase()]
   );
 export const setPassword = (userId: string, password: string) =>
@@ -97,8 +100,14 @@ export async function createSession(userId: string): Promise<string> {
 export async function userBySession(token: string | undefined): Promise<User | null> {
   if (!token) return null;
   return one<User>(
-    `select u.id, u.email, u.email_verified, u.workspace_id
-     from user_session s join app_user u on u.id = s.user_id
+    `select u.id, u.email, u.email_verified,
+            coalesce(m.workspace_id, u.workspace_id) as workspace_id,
+            u.workspace_id as home_workspace_id
+     from user_session s
+     join app_user u on u.id = s.user_id
+     -- членство перевіряється ТУТ, у тому ж запиті: якщо доступ відкликали, join не зматчиться
+     -- і людина мовчки повертається у свій домашній кабінет замість того, щоб далі бачити чужий
+     left join workspace_member m on m.workspace_id = s.active_workspace_id and m.user_id = u.id
      where s.token=$1 and s.expires_at > now() and u.deleted_at is null`,
     [token]
   );

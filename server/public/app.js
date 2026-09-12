@@ -2911,6 +2911,54 @@ $('mediaUpload').onclick=async()=>{
 
 // ---------- Google Drive ----------
 
+// ---------- 🏢 кабінети (бренди): перемикач у меню аватара + доступи в Профілі ----------
+// Активний кабінет живе в СЕСІЇ на сервері, тож після перемикання просто перезавантажуємо сторінку:
+// так гарантовано оновляться всі 20+ списків, а не половина, яку ми згадали б оновити руками.
+let Wss=[], WsActive='';
+async function loadWorkspaces(){
+  try{ const r=await api('/workspaces'); Wss=r.items||[]; WsActive=r.active||''; renderWsSwitch(WsActive);
+    const t=$('wsTitle'), cur=Wss.find(w=>w.id===WsActive); if(t&&cur&&!t.value) t.value=cur.title||''; }catch(e){}
+}
+function renderWsSwitch(active){
+  const box=$('wsSwitch'), list=$('wsList'); if(!box||!list) return;
+  if(Wss.length<2){ box.style.display='none'; return; }   // один кабінет - жодного зайвого вибору
+  box.style.display='';
+  list.innerHTML=Wss.map(w=>'<div class="umitem" data-ws="'+esc(w.id)+'" style="display:flex;gap:8px;align-items:center">'
+    +'<span style="width:14px;color:var(--brand)">'+(w.id===active?'✓':'')+'</span>'
+    +'<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(w.title)+'</span>'
+    +(w.role==='owner'?'<span style="font-size:10px;color:var(--faint)">власник</span>':'')+'</div>').join('');
+  list.querySelectorAll('[data-ws]').forEach(el=>el.onclick=async()=>{
+    if(el.dataset.ws===active) return;
+    try{ await api('/workspaces/switch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:el.dataset.ws})}); location.reload(); }
+    catch(e){ flash('⚠ '+e.message); }
+  });
+}
+async function loadWsMembers(){
+  const box=$('wsMembers'); if(!box) return;
+  try{
+    const r=await api('/workspaces/members');
+    box.innerHTML=(r.items||[]).map(m=>'<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)">'
+      +'<span style="flex:1;font-size:13px">'+esc(m.email)+(m.role==='owner'?' <span style="font-size:10px;color:var(--faint)">власник</span>':'')+'</span>'
+      +(r.owner&&m.role!=='owner'?'<button class="ghost" data-rev="'+esc(m.user_id)+'" style="padding:3px 9px;font-size:12px">Прибрати</button>':'')+'</div>').join('')
+      ||'<div class="hint">Доступ має лише ти.</div>';
+    box.querySelectorAll('[data-rev]').forEach(b=>b.onclick=async()=>{
+      if(!confirm('Прибрати доступ до цього кабінету?')) return;
+      try{ await api('/workspaces/revoke',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:b.dataset.rev})}); loadWsMembers(); flash('Доступ прибрано'); }
+      catch(e){ flash('⚠ '+e.message); }
+    });
+  }catch(e){}
+}
+if($('wsGrantBtn')) $('wsGrantBtn').onclick=async()=>{
+  const email=($('wsGrantEmail').value||'').trim(); if(!email) return;
+  try{ await api('/workspaces/grant',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+    $('wsGrantEmail').value=''; $('wsMsg').textContent='доступ видано ✓'; loadWsMembers(); }
+  catch(e){ $('wsMsg').textContent='⚠ '+e.message.replace(/^\d+:\s*/,''); }
+};
+if($('wsTitleSave')) $('wsTitleSave').onclick=async()=>{
+  try{ await api('/workspaces/title',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:$('wsTitle').value})});
+    flash('Назву збережено'); loadWorkspaces(); }catch(e){ flash('⚠ '+e.message); }
+};
+
 // ---------- 🔌 MCP: кабінет як інструмент Claude ----------
 // Адреса конектора = пароль від кабінету, тому: показуємо лише власнику, копіюємо кнопкою (щоб не
 // виділяли мишкою й не губили символ), перевипуск через підтвердження - стара адреса мре одразу.
@@ -3568,7 +3616,7 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
   if(_mtq){ go('settings'); alert(_mtq==='ok'?'Facebook/Instagram підключено ✓':(_mtq==='nopage'?'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).':'Не вдалося підключити Facebook/Instagram.')); }
   if(_gdq){ go('sources'); alert(_gdq==='ok'?'Google Drive підключено ✓':'Не вдалося підключити Google Drive.'); }
   await loadPrompts();
-  loadRubrics(); loadStrategy(); loadFF(); loadMcp(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadTasks(); loadStudioPosts(); loadGoalCta(); loadMagnets();
+  loadRubrics(); loadStrategy(); loadFF(); loadMcp(); loadWorkspaces(); loadWsMembers(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadTasks(); loadStudioPosts(); loadGoalCta(); loadMagnets();
   loadMaterials(); // стрічка + лічильник
   // ⚠️ вкладку Створення тут БІЛЬШЕ НЕ смикаємо: раніше цей рядок безумовно кликав setCTab і
   // перебивав адресу (#/create/ideas відкривався й одразу з'їжджав на Чорновики). Початкову вкладку

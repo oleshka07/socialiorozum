@@ -498,6 +498,10 @@
         <div class="avatar" id="avatar" title="Акаунт і налаштування" style="cursor:pointer">О<span id="avProBadge" style="display:none;position:absolute;top:-4px;right:-5px;font-size:10px">⚡</span></div>
         <div id="userMenu" class="usermenu" style="display:none">
           <div style="padding:11px 14px;border-bottom:1px solid var(--line)"><div style="font-weight:700;font-size:13.5px" id="umName">Акаунт <span id="umPro" style="display:none;color:var(--brand)">⚡ PRO</span></div><div id="userEmail" style="font-size:11.5px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:210px"></div></div>
+          <div id="wsSwitch" style="display:none;border-bottom:1px solid var(--line)">
+            <div style="padding:9px 14px 4px;font-size:11px;font-weight:800;letter-spacing:.06em;color:var(--faint)">КАБІНЕТ</div>
+            <div id="wsList" style="padding-bottom:6px"></div>
+          </div>
           <div style="padding:10px 14px;display:flex;align-items:center;gap:10px"><span style="flex:1;font-size:13px;font-weight:600">Режим</span><div class="modeseg"><span id="segLite" class="on">Lite</span><span id="segPro" class="pro">⚡ PRO</span></div></div>
           <div style="padding:4px 14px 10px;display:flex;align-items:center;gap:10px"><span style="flex:1;font-size:13px;font-weight:600">Тема</span><button class="icon" id="themeToggle" title="Тема" style="width:33px;height:33px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path id="themeIcon" d="M21 12.8A9 9 0 1111.2 3a7 7 0 109.8 9.8z"></path></svg></button></div>
           <div style="padding:0 14px 10px;display:flex;align-items:center;gap:10px"><span style="flex:1;font-size:13px;font-weight:600">Мова застосунку</span><select id="appLang" style="width:auto;font-size:12.5px;padding:6px 9px" disabled title="Мультимовність скоро"><option>Українська</option></select></div>
@@ -922,6 +926,14 @@
           <div class="btnrow" style="margin-top:14px"><button id="accExport">📤 Експорт моїх даних (JSON)</button></div>
         </div>
         <div class="panel" style="border-color:var(--danger)">
+          <div class="ph">🏢 Кабінет і доступи</div>
+          <div class="hint">Кабінет = окремий бренд зі своїм контентом, каналами й голосом. Даси доступ іншому акаунту - людина перемикатиметься між брендами в меню аватара, а її конектор Claude побачить обидва.</div>
+          <div class="fld" style="margin-top:10px"><label class="fl">Назва цього кабінету (видно лише тобі й тим, кому дав доступ)</label><div style="display:flex;gap:8px"><input class="txt" id="wsTitle" placeholder="напр. Бренд А"><button class="ghost" type="button" id="wsTitleSave">Зберегти</button></div></div>
+          <div id="wsMembers" class="out" style="margin-top:10px"></div>
+          <div class="fld" style="margin-top:8px"><label class="fl">Дати доступ за поштою (людина має вже мати акаунт)</label><div style="display:flex;gap:8px"><input class="txt" id="wsGrantEmail" type="email" placeholder="pошта@приклад.com"><button class="primary" type="button" id="wsGrantBtn">Дати доступ</button></div></div>
+          <span id="wsMsg" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+        <div class="panel">
           <div class="ph" style="color:var(--danger)">⚠ Небезпечна зона</div>
           <div class="hint">Видалення акаунта: дані одразу зникнуть з кабінету, остаточно зітруться через 14 днів. Передумаєш - просто увійди протягом цього часу.</div>
           <div class="hint" style="margin-top:10px">«Почати з чистого листа» - стерти весь контент (бренд, стратегію, пости, календар, медіа) і пройти онбординг заново. Підключені канали лишаються.</div>
@@ -1143,7 +1155,7 @@
         </div>
         <div class="panel">
           <div class="ph">🔌 Підключення до Claude (MCP)</div>
-          <div class="hint">Дай своєму Claude (підписка Pro/Max: claude.ai, застосунок або Claude Code) руки в кабінеті: він прочитає голос бренду, напише пост САМ у чаті, збереже його сюди, опублікує чи поставить у календар. Жодних API-ключів - і текст, написаний у чаті, не витрачає AI-кредити socialio.</div>
+          <div class="hint">Дай своєму Claude (підписка Pro/Max: claude.ai, застосунок або Claude Code) руки в кабінеті: він прочитає голос бренду, напише пост САМ у чаті, збереже його сюди, опублікує чи поставить у календар. Жодних API-ключів - і текст, написаний у чаті, не витрачає AI-кредити socialio. Якщо кабінетів кілька, конектор бачить усі: у чаті достатньо сказати «перемкнись на <бренд>». Активний кабінет у Claude свій - перемикач у меню аватара його не рухає.</div>
           <div class="fld" style="margin-top:10px"><label class="fl">Твоя адреса конектора - це як пароль, нікому не давай</label><div style="display:flex;gap:8px"><input class="txt" id="mcpUrl" readonly placeholder="(ще не створена)" style="font-size:12px"><button class="ghost" type="button" id="mcpCopy">Копіювати</button></div></div>
           <div class="btnrow" style="margin-top:8px;flex-wrap:wrap"><button class="primary" id="mcpCreate">Створити адресу</button><button class="ghost" type="button" id="mcpHow">📖 Як підключити</button><button class="ghost" type="button" id="mcpRevoke" style="display:none">Відключити</button><span id="mcpMsg" style="font-size:12px;color:var(--muted)"></span></div>
         </div>

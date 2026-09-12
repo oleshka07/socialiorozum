@@ -54,7 +54,8 @@ import { secretStatuses, setSecret, clearSecret, refreshSecrets } from "./secret
 import { kieCatalog, kieCredits, kieReady } from "./kie.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook } from "./tgbot.js";
 import { chat } from "./openrouter.js";
-import { handleBody, wantsSse, sseEncode, workspaceByToken, mcpToken, issueMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
+import { handleBody, wantsSse, sseEncode, resolveToken, mcpTokenFor, issueMcpToken, revokeMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
+import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle } from "./workspaces.js";
 
 // ============================================================================
 // ЗМІСТ ФАЙЛУ (182 роути; шукай за банером «===== НАЗВА =====» або шляхом роуту)
@@ -3269,6 +3270,53 @@ app.post("/api/webhooks/fireflies/:token", async (req: any, reply) => {
   }
 });
 
+// ===================== 🏢 КАБІНЕТИ (БРЕНДИ) =====================
+// Одна людина - кілька кабінетів. Активний живе в СЕСІЇ (user_session.active_workspace_id), тож
+// перемикання не чіпає ані юзера, ані решту роутів: усі вони читають req.user.workspace_id, який
+// уже резолвиться з урахуванням членства (auth.userBySession).
+const isUuid = (v: unknown) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v ?? ""));
+app.get("/api/workspaces", async (req: any) => ({
+  items: await listWorkspaces(req.user.id),
+  active: req.user.workspace_id,
+  home: req.user.home_workspace_id,
+}));
+
+app.post("/api/workspaces/switch", async (req: any, reply) => {
+  const id = String(req.body?.id ?? "");
+  if (!isUuid(id)) return reply.code(400).send({ error: "невірний кабінет" });   // гард ДО запиту: чужий формат валить uuid-колонку
+  if (!(await isMember(req.user.id, id))) return reply.code(403).send({ error: "Немає доступу до цього кабінету" });
+  await q(`update user_session set active_workspace_id=$2 where token=$1`, [req.cookies?.[COOKIE], id]);
+  return { ok: true };
+});
+
+app.put("/api/workspaces/title", async (req: any, reply) => {
+  if (!(await isOwner(req.user.id, req.user.workspace_id))) return reply.code(403).send({ error: "Перейменувати може лише власник" });
+  await wsSetTitle(req.user.workspace_id, String(req.body?.title ?? ""));
+  return { ok: true };
+});
+
+// доступи до ПОТОЧНОГО кабінету: список, видати за поштою, відкликати
+app.get("/api/workspaces/members", async (req: any) => ({
+  items: await wsMembers(req.user.workspace_id),
+  owner: await isOwner(req.user.id, req.user.workspace_id),
+  me: req.user.id,
+}));
+app.post("/api/workspaces/grant", async (req: any, reply) => {
+  if (!(await isOwner(req.user.id, req.user.workspace_id))) return reply.code(403).send({ error: "Давати доступ може лише власник кабінету" });
+  const r = await grantAccess(req.user.workspace_id, String(req.body?.email ?? ""));
+  if (!r.ok) return reply.code(400).send({ error: r.error });
+  await logEvent("info", "workspace", `доступ видано: ${String(req.body?.email ?? "")}`, null, req.user.id);
+  return { ok: true };
+});
+app.post("/api/workspaces/revoke", async (req: any, reply) => {
+  if (!(await isOwner(req.user.id, req.user.workspace_id))) return reply.code(403).send({ error: "Відкликати доступ може лише власник кабінету" });
+  const uid = String(req.body?.userId ?? "");
+  if (!isUuid(uid)) return reply.code(400).send({ error: "невірний користувач" });
+  const r = await revokeAccess(req.user.workspace_id, uid);
+  if (!r.ok) return reply.code(400).send({ error: r.error });
+  return { ok: true };
+});
+
 // ===================== 🔌 MCP: КАБІНЕТ ЯК ІНСТРУМЕНТ CLAUDE =====================
 // Підписка Claude (claude.ai / десктоп / Claude Code) підключається сюди як «Custom connector» і
 // отримує руки в кабінеті: прочитати бренд, покласти чернетку, опублікувати, запланувати. Наш AI
@@ -3285,23 +3333,23 @@ function mcpCors(reply: any) {
   reply.header("Access-Control-Expose-Headers", "mcp-session-id, mcp-protocol-version");
   reply.header("Cache-Control", "no-store");
 }
-async function mcpWorkspace(req: any): Promise<string | null> {
+async function mcpContext(req: any) {
   const hdr = String(req.headers["authorization"] || "");
   const bearer = /^bearer\s+/i.test(hdr) ? hdr.replace(/^bearer\s+/i, "").trim() : "";
   const token = String(req.params?.token || "") || bearer || String(req.headers["x-socialio-token"] || "") || String(req.query?.token || "");
-  return workspaceByToken(token);
+  return resolveToken(token);
 }
 const mcpPost = async (req: any, reply: any) => {
   mcpCors(reply);
   if (rateLimited("mcp:" + req.ip, 240))
     return reply.code(429).send({ jsonrpc: "2.0", id: null, error: { code: -32000, message: "Забагато запитів - зачекай хвилину" } });
-  const ws = await mcpWorkspace(req);
-  if (!ws) {
+  const ctx = await mcpContext(req);
+  if (!ctx) {
     reply.header("WWW-Authenticate", 'Bearer realm="socialio"');
     return reply.code(401).send({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "Недійсна адреса MCP. Візьми свою в кабінеті: Інструменти → Підключення до Claude." } });
   }
   let out: any = null;
-  try { out = await handleBody(ws, (req as any).body); }
+  try { out = await handleBody(ctx, (req as any).body); }
   catch (e: any) {
     await logEvent("error", "mcp", e?.message || String(e), null);
     return reply.code(500).send({ jsonrpc: "2.0", id: (req as any).body?.id ?? null, error: { code: -32603, message: e?.message || "внутрішня помилка" } });
@@ -3336,18 +3384,18 @@ app.options("/mcp/:token", mcpOptions);
 
 // ---- керування адресою з кабінету (це вже звичайні /api/ роути під кукі-сесією) ----
 app.get("/api/integrations/mcp", async (req: any) => {
-  const ws = req.user.workspace_id;
-  const token = await mcpToken(ws);
-  return { connected: !!token, url: token ? mcpUrl(token) : "", lastUsed: token ? await mcpLastUsed(ws) : "", tools: MCP_TOOLS.length };
+  const token = await mcpTokenFor(req.user.id);
+  return { connected: !!token, url: token ? mcpUrl(token) : "", lastUsed: token ? await mcpLastUsed(req.user.id) : "",
+           tools: MCP_TOOLS.length, workspaces: (await listWorkspaces(req.user.id)).length };
 });
 app.post("/api/integrations/mcp/rotate", async (req: any) => {
   // перевипуск = стара адреса одразу мертва (токен зберігається один на воркспейс)
-  const url = mcpUrl(await issueMcpToken(req.user.workspace_id));
+  const url = mcpUrl(await issueMcpToken(req.user.id, req.user.workspace_id));
   await logEvent("info", "mcp", "видано нову адресу MCP", null, req.user.id);
   return { ok: true, url };
 });
 app.post("/api/integrations/mcp/revoke", async (req: any) => {
-  await q(`delete from settings_block where workspace_id=$1 and key='mcp_token'`, [req.user.workspace_id]);
+  await revokeMcpToken(req.user.id);
   await logEvent("info", "mcp", "адресу MCP відкликано", null, req.user.id);
   return { ok: true };
 });
