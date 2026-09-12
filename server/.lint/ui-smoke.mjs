@@ -159,6 +159,7 @@ const API = {
   "GET /integrations/tiktok": { connected: false, available: false },
   "GET /integrations/gdrive": { connected: false, available: false },
   "GET /integrations/transcription": { hasKey: false, webhookUrl: "", hasSecret: false, autoRun: false },
+  "GET /integrations/mcp": { connected: true, url: "https://socialio.rozum.one/mcp/" + "a1b2c3d4".repeat(8), lastUsed: iso(-1, 10), tools: 16 },
   "GET /integrations/images": { provider: "gemini", available: { openai: true, fal: false, gemini: true } },
   "GET /integrations/meta/pages": [],
   "GET /account": { email: "smoke@rozum.one", created_at: iso(-30, 8), pro: false, admin: true, media: { count: 3, bytes: 1048576 } },
@@ -798,6 +799,24 @@ const run = async () => {
   await check("toolsView", async () =>
     (await has("#toolsGdriveHost #gdStatus")) && (await has("#toolsTransHost #ffKey")) &&
     (await has("#toolsPipeline")) && (await has("#viewPrompt")));
+
+  // MCP-панель: адреса підтягнулась із сервера І модалка «Як підключити» реально відкривається -
+  // саме в ній найлегше тихо зламати рядок, бо вона будується конкатенацією HTML.
+  await check("mcpPanel", async () => {
+    const url = await page.$eval("#mcpUrl", (el) => el.value).catch(() => "");
+    if (!url.includes("/mcp/")) return false;
+    // тиснемо з JS: мишкою не вийде - зверху висить модалка онбордингу й перехоплює клік
+    await page.evaluate(() => document.getElementById("mcpHow").click());
+    await page.waitForTimeout(250);
+    const got = await page.evaluate(() => {
+      const card = [...document.querySelectorAll(".modal .modal-card")].pop(); // своя модалка - остання в body
+      if (!card) return null;
+      // команда для Claude Code лежить у value інпута, а не в тексті - innerText її НЕ бачить
+      return { text: card.innerText, cli: [...card.querySelectorAll("input")].map((i) => i.value).join(" ") };
+    });
+    await page.evaluate(() => document.querySelector("#mhX")?.click());
+    return !!got && got.text.includes("Add custom connector") && got.cli.includes("claude mcp add");
+  });
 
   await check("aiSpend", async () => {
     // розріз витрат + ВИДИМИЙ вхід у порівняння моделей (раніше панель була лише в меню аватара,
