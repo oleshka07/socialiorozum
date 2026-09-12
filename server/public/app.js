@@ -2926,13 +2926,21 @@ function renderWsSwitch(active){
   list.innerHTML=Wss.map(w=>'<div class="umitem" data-ws="'+esc(w.id)+'" style="display:flex;gap:8px;align-items:center">'
     +'<span style="width:14px;color:var(--brand)">'+(w.id===active?'✓':'')+'</span>'
     +'<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(w.title)+'</span>'
-    +(w.role==='owner'?'<span style="font-size:10px;color:var(--faint)">власник</span>':'')+'</div>').join('');
+    +(w.role==='owner'?'<span style="font-size:10px;color:var(--faint)">власник</span>':'')+'</div>').join('')
+    +'<div class="umitem" id="wsAddMenu" style="color:var(--brand)">＋ Додати бренд</div>';
+  const add=$('wsAddMenu'); if(add) add.onclick=addBrand;
   list.querySelectorAll('[data-ws]').forEach(el=>el.onclick=async()=>{
     if(el.dataset.ws===active) return;
     try{ await api('/workspaces/switch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:el.dataset.ws})}); location.reload(); }
     catch(e){ flash('⚠ '+e.message); }
   });
 }
+async function addBrand(){
+  const title=(prompt('Назва нового бренду:','')||'').trim(); if(!title) return;
+  try{ await api('/workspaces',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title})}); location.reload(); }
+  catch(e){ flash('⚠ '+e.message); }
+}
+if($('wsAddBtn')) $('wsAddBtn').onclick=addBrand;
 async function loadWsMembers(){
   const box=$('wsMembers'); if(!box) return;
   try{

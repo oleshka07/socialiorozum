@@ -72,7 +72,10 @@
   #aiBusy .orb{width:9px;height:9px;border-radius:50%;background:currentColor;flex:0 0 auto;animation:obPulse 1s ease-in-out infinite}
   /* v3: верхня навігація замість сайдбара */
   .layout{display:block !important}
-  .topnav{position:sticky;top:0;z-index:30;background:color-mix(in srgb, var(--bg) 90%, transparent);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;padding:9px 22px}
+  /* z-index 50, а не 30: у .topnav лежить меню аватара, і хоч воно саме має z-index 80, це значення
+     діє ЛИШЕ всередині контексту накладання, який створює сам .topnav. Липка плашка розділу
+     (.pagehead, 45) була вище за контекст - і накривала випадне меню зверху. */
+  .topnav{position:sticky;top:0;z-index:50;background:color-mix(in srgb, var(--bg) 90%, transparent);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;padding:9px 22px}
   .topnav .wordmark{font-size:18px}
   .topnav-tabs{display:flex;align-items:center;gap:3px;min-width:0;overflow-x:auto;scrollbar-width:none}
   .topnav-tabs::-webkit-scrollbar{display:none}
@@ -929,6 +932,7 @@
           <div class="ph">🏢 Кабінет і доступи</div>
           <div class="hint">Кабінет = окремий бренд зі своїм контентом, каналами й голосом. Даси доступ іншому акаунту - людина перемикатиметься між брендами в меню аватара, а її конектор Claude побачить обидва.</div>
           <div class="fld" style="margin-top:10px"><label class="fl">Назва цього кабінету (видно лише тобі й тим, кому дав доступ)</label><div style="display:flex;gap:8px"><input class="txt" id="wsTitle" placeholder="напр. Бренд А"><button class="ghost" type="button" id="wsTitleSave">Зберегти</button></div></div>
+          <div class="btnrow" style="margin-top:8px"><button class="ghost" type="button" id="wsAddBtn">＋ Додати бренд</button><span class="hint" style="margin:0">Створить порожній кабінет і перемкне в нього - далі короткий онбординг бренду.</span></div>
           <div id="wsMembers" class="out" style="margin-top:10px"></div>
           <div class="fld" style="margin-top:8px"><label class="fl">Дати доступ за поштою (людина має вже мати акаунт)</label><div style="display:flex;gap:8px"><input class="txt" id="wsGrantEmail" type="email" placeholder="pошта@приклад.com"><button class="primary" type="button" id="wsGrantBtn">Дати доступ</button></div></div>
           <span id="wsMsg" style="font-size:12px;color:var(--muted)"></span>

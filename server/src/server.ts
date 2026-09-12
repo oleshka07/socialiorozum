@@ -55,7 +55,7 @@ import { kieCatalog, kieCredits, kieReady } from "./kie.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook } from "./tgbot.js";
 import { chat } from "./openrouter.js";
 import { handleBody, wantsSse, sseEncode, resolveToken, mcpTokenFor, issueMcpToken, revokeMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
-import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle } from "./workspaces.js";
+import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember } from "./workspaces.js";
 
 // ============================================================================
 // ЗМІСТ ФАЙЛУ (182 роути; шукай за банером «===== НАЗВА =====» або шляхом роуту)
@@ -3280,6 +3280,19 @@ app.get("/api/workspaces", async (req: any) => ({
   active: req.user.workspace_id,
   home: req.user.home_workspace_id,
 }));
+
+// Новий бренд усередині того самого акаунта: до цього другий бренд вимагав окремої реєстрації на
+// іншу пошту, що для однієї людини з кількома проєктами - зайвий обряд.
+app.post("/api/workspaces", async (req: any) => {
+  const title = String(req.body?.title ?? "").trim().slice(0, 60) || "Новий бренд";
+  // workspace.name унікальний і технічний (у домашнього це «user:пошта») - людська назва живе в title
+  const wsId = await auth.createWorkspaceWithDefaults(`ws:${req.user.id}:${Date.now()}`);
+  await wsSetTitle(wsId, title);
+  await addMember(wsId, req.user.id, "owner");
+  await q(`update user_session set active_workspace_id=$2 where token=$1`, [req.cookies?.[COOKIE], wsId]);
+  await logEvent("info", "workspace", `створено кабінет: ${title}`, null, req.user.id);
+  return { ok: true, id: wsId };
+});
 
 app.post("/api/workspaces/switch", async (req: any, reply) => {
   const id = String(req.body?.id ?? "");

@@ -814,7 +814,44 @@ const run = async () => {
     const list = await page.$eval("#wsList", (el) => el.innerText).catch(() => "");
     const active = await page.$eval("#wsList", (el) => (el.querySelector("[data-ws]")?.innerText || "")).catch(() => "");
     const mem = await page.$eval("#wsMembers", (el) => el.innerText).catch(() => "");
-    return box !== "none" && list.includes("Бренд А") && list.includes("Бренд Б") && active.includes("✓") && mem.includes("friend@rozum.one");
+    return box !== "none" && list.includes("Бренд А") && list.includes("Бренд Б") && active.includes("✓")
+      && list.includes("Додати бренд") && mem.includes("friend@rozum.one");
+  });
+
+  // Меню аватара мусить бути НАД липкою плашкою розділу. Раніше .pagehead (z-index 45) накривав
+  // його зверху, бо z-index 80 у меню діяв лише всередині контексту, який створює .topnav (30).
+  // Перевіряємо не стилі, а факт: що саме лежить у точці перетину.
+  // ⚠️ Онбординг ХОВАЄМО, а не видаляємо: наступні перевірки (obTextFirst/obNoIg) працюють із тим
+  // самим вузлом, і його видалення валить їх - стан сторінки тут спільний на всю сюїту.
+  await check("menuOverTop", async () => {
+    await page.evaluate(() => {
+      const ob = document.getElementById("onboarding");
+      if (ob) { ob.dataset.smokePrev = ob.style.display; ob.style.display = "none"; }
+      document.getElementById("avatar")?.click();
+    });
+    await page.waitForTimeout(280);                       // у меню анімація появи - міряємо після неї
+    const res = await page.evaluate(() => {
+      const menu = document.getElementById("userMenu"), head = document.querySelector(".pagehead");
+      const open = !!menu && menu.style.display !== "none";
+      if (!open || !head) return { open, hit: "" };
+      const m = menu.getBoundingClientRect(), h = head.getBoundingClientRect();
+      const y = Math.min(m.bottom, h.bottom) - 6, x = m.left + m.width / 2;
+      if (y <= m.top || y <= h.top) return { open, hit: "menu", note: "не перетинаються" };
+      // elementsFromPoint (МНОЖИНА) - бо в цій точці може лежати ще щось стороннє (бульбашка сови):
+      // питання не «хто зверху за все», а чи меню вище за ПЛАШКУ РОЗДІЛУ.
+      const stack = document.elementsFromPoint(x, y);
+      const iMenu = stack.findIndex((e) => menu.contains(e));
+      const iHead = stack.findIndex((e) => e === head || head.contains(e));
+      return { open, iMenu, iHead, hit: iMenu >= 0 && (iHead < 0 || iMenu < iHead) ? "menu" : "pagehead" };
+    });
+    await page.evaluate(() => {
+      document.getElementById("avatar")?.click();
+      const ob = document.getElementById("onboarding");
+      if (ob) { ob.style.display = ob.dataset.smokePrev || ""; delete ob.dataset.smokePrev; }
+    });
+    await page.waitForTimeout(120);
+    if (!res.open || res.hit !== "menu") console.log("   ↳ menuOverTop:", JSON.stringify(res));
+    return res.open && res.hit === "menu";
   });
 
   await check("mcpPanel", async () => {
