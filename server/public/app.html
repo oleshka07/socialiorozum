@@ -1049,6 +1049,12 @@
             <button class="ghost" id="viewPrompt" title="Переглянути спільний промт генерації - що саме бачить AI">👁 Промт генерації</button>
           </div>
         </div>
+        <div class="panel">
+          <div class="ph">🔌 Підключення до Claude (MCP)</div>
+          <div class="hint">Дай своєму Claude (підписка Pro/Max: claude.ai, застосунок або Claude Code) руки в кабінеті: він прочитає голос бренду, напише пост САМ у чаті, збереже його сюди, опублікує чи поставить у календар. Жодних API-ключів - і текст, написаний у чаті, не витрачає AI-кредити socialio.</div>
+          <div class="fld" style="margin-top:10px"><label class="fl">Твоя адреса конектора - це як пароль, нікому не давай</label><div style="display:flex;gap:8px"><input class="txt" id="mcpUrl" readonly placeholder="(ще не створена)" style="font-size:12px"><button class="ghost" type="button" id="mcpCopy">Копіювати</button></div></div>
+          <div class="btnrow" style="margin-top:8px;flex-wrap:wrap"><button class="primary" id="mcpCreate">Створити адресу</button><button class="ghost" type="button" id="mcpHow">📖 Як підключити</button><button class="ghost" type="button" id="mcpRevoke" style="display:none">Відключити</button><span id="mcpMsg" style="font-size:12px;color:var(--muted)"></span></div>
+        </div>
         <div id="toolsGdriveHost"></div>
         <div id="toolsTransHost"></div>
       </section>

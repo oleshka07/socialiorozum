@@ -611,7 +611,9 @@ async function recentContentDigest(workspaceId: string): Promise<string> {
 // Зібрати спільний системний промт Lite-генерації (для самої генерації + для перегляду користувачем).
 // origin - походження матеріалу: 'diary' вмикає режим «з власних слів автора»
 // (особистий запис = єдине джерело фактів, вигадка заборонена); решта походжень працюють як раніше.
-export const OWN_WORDS_ORIGINS = ["diary"];
+// + "mcp": текст, що приїхав із чату Claude, автор уже вважає своїм - переробка має лишатись
+// вірною йому, а не добивати пустоту списками-порадниками (та сама причина, що й для щоденника).
+export const OWN_WORDS_ORIGINS = ["diary", "mcp"];
 export async function buildLitePrompt(workspaceId: string, count: number, ideas?: string[], formats?: string[], origin?: string): Promise<{ system: string; model: string }> {
   const ownWords = OWN_WORDS_ORIGINS.includes(String(origin || "")) ? OWN_WORDS_RULE : "";
   const s = await loadSettings(workspaceId);

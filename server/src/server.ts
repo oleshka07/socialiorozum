@@ -43,6 +43,7 @@ import { getSettingText } from "./settings.js";
 import { generateImageForPost, imageProviders, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto } from "./images.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook } from "./tgbot.js";
 import { chat } from "./openrouter.js";
+import { handleBody, wantsSse, sseEncode, workspaceByToken, mcpToken, issueMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
 
 // ============================================================================
 // ЗМІСТ ФАЙЛУ (182 роути; шукай за банером «===== НАЗВА =====» або шляхом роуту)
@@ -57,6 +58,7 @@ import { chat } from "./openrouter.js";
 //   INTEGRATIONS: telegram → meta → threads → linkedin → youtube → tiktok → gdrive (OAuth-мости)
 //   PLAN/MATERIALS/IDEAS: /api/plan/*, /api/materials/*, /api/ideas/*
 //   SCHEDULE/PUBLISH: /api/schedule/*, /api/posts/:id/publish-all, /api/published
+//   MCP: /mcp[/:token] (Claude як клієнт) + /api/integrations/mcp*
 //   WEBHOOKS/PAGES: /api/webhooks/*, статичні сторінки, listen + старт воркерів
 // TODO(рефакторинг, окрема сесія): фізичний розріз на src/routes/* по одному
 // модулю за раз із деплоєм після кожного (інтеграції перемішані з post-роутами -
@@ -131,6 +133,8 @@ document.getElementById('p').addEventListener('keydown',e=>{if(e.key==='Enter')g
     if (url === "/health" || url === "/beta-pin" || url === "/favicon.svg" || url.startsWith("/api/webhooks/") || url.startsWith("/media/")) return;
     // Mini App живе всередині Telegram - PIN там ввести ніде, а захист у нього свій (підпис initData)
     if (url === "/tgapp" || url.startsWith("/api/tg/")) return;
+    // MCP: клієнт - сервер Claude, кукі й PIN там взяти ніде; доступ дає токен у самій адресі
+    if (url === "/mcp" || url.startsWith("/mcp/")) return;
     if (req.cookies?.[PIN_COOKIE] === pinToken) return;
     if (url.startsWith("/api/")) return reply.code(401).send({ error: "beta: потрібен PIN" });
     return reply.type("text/html").send(pinPage);
@@ -2858,6 +2862,89 @@ app.post("/api/webhooks/fireflies/:token", async (req: any, reply) => {
     await logEvent("error", "transcription", `вебхук getTranscript: ${e.message}`, null);
     return reply.code(500).send({ error: e.message });
   }
+});
+
+// ===================== 🔌 MCP: КАБІНЕТ ЯК ІНСТРУМЕНТ CLAUDE =====================
+// Підписка Claude (claude.ai / десктоп / Claude Code) підключається сюди як «Custom connector» і
+// отримує руки в кабінеті: прочитати бренд, покласти чернетку, опублікувати, запланувати. Наш AI
+// при цьому не працює - отже, жодних витрат на генерацію. Деталі протоколу й інструменти - у mcp.ts.
+//
+// Роути свідомо ПОЗА /api/: кукі-хук їх не стосується (клієнт - сервер Claude, а не браузер юзера),
+// автентифікація інша - токен у шляху /mcp/<64 hex> або заголовок Authorization: Bearer.
+function mcpCors(reply: any) {
+  // Дозволяємо будь-яке походження: автентифікація не кукою, тож CORS тут нічого не захищає, а
+  // браузерні клієнти MCP (інспектор) без цього просто не працюють.
+  reply.header("Access-Control-Allow-Origin", "*");
+  reply.header("Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS");
+  reply.header("Access-Control-Allow-Headers", "content-type, authorization, accept, mcp-session-id, mcp-protocol-version, x-socialio-token");
+  reply.header("Access-Control-Expose-Headers", "mcp-session-id, mcp-protocol-version");
+  reply.header("Cache-Control", "no-store");
+}
+async function mcpWorkspace(req: any): Promise<string | null> {
+  const hdr = String(req.headers["authorization"] || "");
+  const bearer = /^bearer\s+/i.test(hdr) ? hdr.replace(/^bearer\s+/i, "").trim() : "";
+  const token = String(req.params?.token || "") || bearer || String(req.headers["x-socialio-token"] || "") || String(req.query?.token || "");
+  return workspaceByToken(token);
+}
+const mcpPost = async (req: any, reply: any) => {
+  mcpCors(reply);
+  if (rateLimited("mcp:" + req.ip, 240))
+    return reply.code(429).send({ jsonrpc: "2.0", id: null, error: { code: -32000, message: "Забагато запитів - зачекай хвилину" } });
+  const ws = await mcpWorkspace(req);
+  if (!ws) {
+    reply.header("WWW-Authenticate", 'Bearer realm="socialio"');
+    return reply.code(401).send({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "Недійсна адреса MCP. Візьми свою в кабінеті: Інструменти → Підключення до Claude." } });
+  }
+  let out: any = null;
+  try { out = await handleBody(ws, (req as any).body); }
+  catch (e: any) {
+    await logEvent("error", "mcp", e?.message || String(e), null);
+    return reply.code(500).send({ jsonrpc: "2.0", id: (req as any).body?.id ?? null, error: { code: -32603, message: e?.message || "внутрішня помилка" } });
+  }
+  if (!out) return reply.code(202).send();           // самі лише нотифікації - відповідати нічим
+  // JSON за замовчуванням; SSE - лише якщо клієнт JSON не приймає (див. wantsSse у mcp.ts)
+  if (wantsSse(String(req.headers.accept || ""))) {
+    reply.hijack();
+    reply.raw.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", Connection: "keep-alive", "Access-Control-Allow-Origin": "*" });
+    reply.raw.end(sseEncode(out));
+    return;
+  }
+  return reply.type("application/json").send(out);
+};
+app.post("/mcp", mcpPost);
+app.post("/mcp/:token", mcpPost);
+// Потік «сервер→клієнт» нам не потрібен (самі нічого не ініціюємо), а специфікація прямо дозволяє
+// його не підтримувати - тоді сервер відповідає 405.
+const mcpGet = async (req: any, reply: any) => {
+  mcpCors(reply);
+  return reply.code(405).header("Allow", "POST, DELETE, OPTIONS")
+    .send({ jsonrpc: "2.0", id: null, error: { code: -32000, message: "MCP через POST (Streamable HTTP)" } });
+};
+app.get("/mcp", mcpGet);
+app.get("/mcp/:token", mcpGet);
+const mcpDelete = async (_req: any, reply: any) => { mcpCors(reply); return reply.code(204).send(); }; // сесій не тримаємо
+app.delete("/mcp", mcpDelete);
+app.delete("/mcp/:token", mcpDelete);
+const mcpOptions = async (_req: any, reply: any) => { mcpCors(reply); return reply.code(204).send(); };
+app.options("/mcp", mcpOptions);
+app.options("/mcp/:token", mcpOptions);
+
+// ---- керування адресою з кабінету (це вже звичайні /api/ роути під кукі-сесією) ----
+app.get("/api/integrations/mcp", async (req: any) => {
+  const ws = req.user.workspace_id;
+  const token = await mcpToken(ws);
+  return { connected: !!token, url: token ? mcpUrl(token) : "", lastUsed: token ? await mcpLastUsed(ws) : "", tools: MCP_TOOLS.length };
+});
+app.post("/api/integrations/mcp/rotate", async (req: any) => {
+  // перевипуск = стара адреса одразу мертва (токен зберігається один на воркспейс)
+  const url = mcpUrl(await issueMcpToken(req.user.workspace_id));
+  await logEvent("info", "mcp", "видано нову адресу MCP", null, req.user.id);
+  return { ok: true, url };
+});
+app.post("/api/integrations/mcp/revoke", async (req: any) => {
+  await q(`delete from settings_block where workspace_id=$1 and key='mcp_token'`, [req.user.workspace_id]);
+  await logEvent("info", "mcp", "адресу MCP відкликано", null, req.user.id);
+  return { ok: true };
 });
 
 // ===================== 📱 TELEGRAM MINI APP =====================

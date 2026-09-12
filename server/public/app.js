@@ -334,7 +334,7 @@ $('toStudio').onclick=()=>setLayout('studio');
 
 // ---------- МАТЕРІАЛИ: стрічка сировини ----------
 let Mats=[], MatFilter='Усі', MatFeedFilter=null, MatOpen=null, Ideas=[];
-const MAT_TYPE={bot:'🤖 З бота',manual:'✍️ Нотатка',rss:'📡 RSS',fireflies:'🎙 Транскрипт',grain:'🎙 Транскрипт',meetgeek:'🎙 Транскрипт',gdrive:'📁 Drive',brand:'✨ Бренд',plan:'📅 План',idea:'💡 Ідея',diary:'📔 Щоденник'};
+const MAT_TYPE={mcp:'🔌 З Claude',bot:'🤖 З бота',manual:'✍️ Нотатка',rss:'📡 RSS',fireflies:'🎙 Транскрипт',grain:'🎙 Транскрипт',meetgeek:'🎙 Транскрипт',gdrive:'📁 Drive',brand:'✨ Бренд',plan:'📅 План',idea:'💡 Ідея',diary:'📔 Щоденник'};
 async function loadMaterials(){ try{ const r=await api('/materials'); Mats=r.materials||[]; }catch(e){ Mats=[]; } try{ const ib=await api('/ideas'); Ideas=ib.ideas||[]; }catch(e){ Ideas=[]; } renderMaterials(); updateCounts(); }
 function matType(m){ return MAT_TYPE[m.origin]||m.origin; }
 function renderMaterials(){
@@ -1305,7 +1305,7 @@ function renderFinals(posts){
 async function saveContent(id,v){ try{ await api('/posts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:v})}); flashSaved(); }catch(e){} }
 let StudioFilter='all', StudioRubric='', StudioOrigin='', StudioFormat='';
 const INTENT_META={awareness:['🌱','знайомство','цінність новій аудиторії, без продажу'],nurture:['🤝','прогрів','будує довіру, мʼякий заклик'],sale:['💰','продаж','прямий оффер за сходами']};
-const ORIGIN_LABEL={bot:'🤖 з бота',manual:'✍️ вручну',rss:'📡 RSS',fireflies:'🎙 транскрипт',grain:'🎙 транскрипт',meetgeek:'🎙 транскрипт',brand:'✨ з бренду',gdrive:'📁 Drive',plan:'📅 з плану',diary:'📔 щоденник',takes:'🧵 тейк',idea:'💡 з ідеї'};
+const ORIGIN_LABEL={mcp:'🔌 з Claude',bot:'🤖 з бота',manual:'✍️ вручну',rss:'📡 RSS',fireflies:'🎙 транскрипт',grain:'🎙 транскрипт',meetgeek:'🎙 транскрипт',brand:'✨ з бренду',gdrive:'📁 Drive',plan:'📅 з плану',diary:'📔 щоденник',takes:'🧵 тейк',idea:'💡 з ідеї'};
 const SelPosts=new Set(); // масові дії
 // глобальний список усіх фінальних постів воркспейсу (НЕ привʼязаний до активного джерела/прогону)
 async function loadStudioPosts(){ try{ Finals=(await api('/posts/studio'))||[]; }catch(e){} SelPosts.clear(); renderStudio(); renderInbox(); if(typeof updateCounts==='function') updateCounts(); }
@@ -2529,6 +2529,58 @@ $('mediaUpload').onclick=async()=>{
 };
 
 // ---------- Google Drive ----------
+
+// ---------- 🔌 MCP: кабінет як інструмент Claude ----------
+// Адреса конектора = пароль від кабінету, тому: показуємо лише власнику, копіюємо кнопкою (щоб не
+// виділяли мишкою й не губили символ), перевипуск через підтвердження - стара адреса мре одразу.
+async function loadMcp(){
+  const inp=$('mcpUrl'); if(!inp) return;
+  try{
+    const c=await api('/integrations/mcp');
+    inp.value=c.url||'';
+    $('mcpCreate').textContent=c.connected?'🔄 Перевипустити адресу':'Створити адресу';
+    $('mcpRevoke').style.display=c.connected?'':'none';
+    const m=$('mcpMsg');
+    if(m) m.textContent=!c.connected?'':(c.lastUsed?('Claude звертався: '+new Date(c.lastUsed).toLocaleString('uk-UA')+' · інструментів: '+c.tools):'Ще жодного звернення - підключи конектор у Claude (інструментів: '+c.tools+')');
+  }catch(e){}
+}
+function openMcpHow(){
+  const url=($('mcpUrl')&&$('mcpUrl').value)||'(спершу створи адресу)';
+  const ov=document.createElement('div'); ov.className='modal';
+  ov.innerHTML='<div class="modal-card" style="max-width:600px;padding:20px;max-height:86vh;overflow:auto">'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="font-size:16px">🔌 Як підключити кабінет до Claude</b><button class="icon" id="mhX" style="margin-left:auto">✕</button></div>'
+    +'<div class="hint">Працює на підписці Claude Pro/Max - окремо за API платити не треба.</div>'
+    +'<ol style="font-size:13px;line-height:1.65;padding-left:18px;margin:12px 0">'
+    +'<li><b>Скопіюй адресу</b> з панелі (кнопка «Копіювати»).</li>'
+    +'<li>У Claude: <b>Settings → Connectors → Add custom connector</b>, встав адресу, натисни Add.</li>'
+    +'<li>У чаті увімкни конектор <b>socialio</b> (іконка інструментів під полем вводу).</li>'
+    +'<li>Перевір: напиши «<i>покажи мої чернетки</i>».</li>'
+    +'</ol>'
+    +'<div class="fld"><label class="fl">Claude Code (у терміналі) - одна команда</label><input class="txt" readonly style="font-size:12px" value="claude mcp add --transport http socialio '+esc(url)+'"></div>'
+    +'<div class="ph" style="margin:14px 0 6px">Що просити в чаті</div>'
+    +'<div style="font-size:13px;line-height:1.7">'
+    +'• «<i>візьми голос мого бренду і напиши 3 пости про X, збережи чернетками</i>» - пише сам Claude, наші AI-кредити не витрачаються;<br>'
+    +'• «<i>що в мене в чернетках?</i>», «<i>покажи матеріали</i>»;<br>'
+    +'• «<i>опублікуй #a1b2c3d4 в telegram</i>», «<i>заплануй на завтра 9:00</i>»;<br>'
+    +'• «<i>що вийшло за місяць?</i>» - аналітика з посиланнями.'
+    +'</div>'
+    +'<div class="hint" style="margin-top:12px">⚠️ Адреса = доступ до кабінету: не публікуй її і не вставляй у чужі чати. Якщо десь засвітилась - тисни «Перевипустити адресу», стара помре одразу.</div>'
+    +'</div>';
+  document.body.appendChild(ov); const close=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#mhX').onclick=close;
+}
+if($('mcpCopy')) $('mcpCopy').onclick=()=>{ const v=$('mcpUrl').value; if(v){ navigator.clipboard.writeText(v); flash('Адресу скопійовано'); } };
+if($('mcpCreate')) $('mcpCreate').onclick=async()=>{
+  const had=!!$('mcpUrl').value;
+  if(had&&!confirm('Перевипустити адресу? Стара перестане працювати одразу - у Claude доведеться додати конектор заново.')) return;
+  try{ const r=await api('/integrations/mcp/rotate',{method:'POST'}); $('mcpUrl').value=r.url; await loadMcp(); flash(had?'Нова адреса готова':'Адресу створено'); openMcpHow(); }
+  catch(e){ flash('⚠ '+e.message); }
+};
+if($('mcpRevoke')) $('mcpRevoke').onclick=async()=>{
+  if(!confirm('Відключити Claude? Адреса перестане працювати, кабінет лишиться як є.')) return;
+  try{ await api('/integrations/mcp/revoke',{method:'POST'}); await loadMcp(); flash('Відключено'); }catch(e){ flash('⚠ '+e.message); }
+};
+if($('mcpHow')) $('mcpHow').onclick=()=>openMcpHow();
 async function loadGdrive(){
   const st=$('gdStatus'); if(!st) return;
   try{ const c=await api('/integrations/gdrive'); const conn=$('gdConnect'), dis=$('gdDisconnect'), box=$('gdFolderBox');
@@ -2983,7 +3035,7 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
   if(_mtq){ go('settings'); alert(_mtq==='ok'?'Facebook/Instagram підключено ✓':(_mtq==='nopage'?'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).':'Не вдалося підключити Facebook/Instagram.')); }
   if(_gdq){ go('sources'); alert(_gdq==='ok'?'Google Drive підключено ✓':'Не вдалося підключити Google Drive.'); }
   await loadPrompts();
-  loadRubrics(); loadStrategy(); loadFF(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadTasks(); loadStudioPosts(); loadGoalCta(); loadMagnets();
+  loadRubrics(); loadStrategy(); loadFF(); loadMcp(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadTasks(); loadStudioPosts(); loadGoalCta(); loadMagnets();
   loadMaterials(); // стрічка + лічильник
   // ⚠️ вкладку Створення тут БІЛЬШЕ НЕ смикаємо: раніше цей рядок безумовно кликав setCTab і
   // перебивав адресу (#/create/ideas відкривався й одразу з'їжджав на Чорновики). Початкову вкладку
