@@ -1,6 +1,8 @@
 import { env } from "./env.js";
-import { assertSpend, noteSpend } from "./spend.js";
+import { assertSpend, assertRate, noteSpend } from "./spend.js";
 import { q } from "./db.js";
+import { isCliModel, cliAllowedFor, cliChat, CliUnavailable } from "./claudecli.js";
+import { logEvent } from "./log.js";
 
 // usage: опційний «вихідний» обʼєкт - chat() заповнює його токенами й вартістю ЦЬОГО виклику.
 // Потрібен там, де ціна конкретного виклику є частиною результату (порівняння моделей): читати її
@@ -116,6 +118,27 @@ export function fixUnsupportedParam(apiModel: string, body: any, errText: string
 }
 
 export async function chat(model: string, system: string, user: string, ctx?: ChatCtx): Promise<string> {
+  // 🤖 "claude-cli/*" → Claude через ПІДПИСКУ (сайдкар із Claude Code CLI), без оплати токенів.
+  // Стоїть ПЕРЕД доларовою стелею свідомо: цей виклик грошей не витрачає, тож блокувати його
+  // стелею було б неправдою; частотне обмеження лишається - воно береже квоту підписки.
+  // Будь-яка причина «не вийшло» (кабінету не дозволено, сайдкара немає - як на проді, - квота
+  // вичерпана, таймаут) закінчується однаково: мовчки далі звичайним API-шляхом. Користувач не
+  // має ані бачити цього, ані лишатись без відповіді через чужу інфраструктуру.
+  if (isCliModel(model)) {
+    if (ctx?.workspaceId) assertRate(ctx.workspaceId);
+    if (await cliAllowedFor(ctx?.workspaceId)) {
+      try {
+        const r = await cliChat(model, system, user, ctx);
+        // costKnown=true з ціною 0 - це факт, а не «ціна невідома»: підписку вже сплачено.
+        if (ctx?.usage) Object.assign(ctx.usage, { prompt_tokens: r.inTokens, completion_tokens: r.outTokens, cost: 0, costKnown: true });
+        return stripDashes(r.text);
+      } catch (e: any) {
+        if (!(e instanceof CliUnavailable)) throw e;
+        logEvent("warn", "claude-cli", `фолбек на ${env.claudeCli.fallbackModel}: ${String(e.message).slice(0, 200)}`).catch(() => {});
+      }
+    }
+    model = env.claudeCli.fallbackModel;
+  }
   // 💸 Стеля витрат - ТУТ, бо через цю функцію проходить кожен платний виклик (див. spend.ts).
   // Виклики без воркспейсу (їх нема, але про всяк випадок) не капаються - і не обліковуються.
   if (ctx?.workspaceId) await assertSpend(ctx.workspaceId);

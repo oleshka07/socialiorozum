@@ -97,7 +97,18 @@ jobs:
             # порт бети - 8081 (APP_PORT живе в її .env, у цій ssh-сесії його нема, тож literal)
             for i in $(seq 1 30); do
               code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8081/health" || true)
-              if [ "$code" = "200" ]; then echo "✅ health 200 (спроба $i)"; exit 0; fi
+              if [ "$code" = "200" ]; then
+                echo "✅ health 200 (спроба $i)"
+                # 🤖 Стан сайдкара підписки. Крок навмисно НЕ валить деплой: сайдкар опційний
+                # (profiles: cli), і його відсутність означає лише «працюємо через API, як завжди».
+                if docker compose ps --services 2>/dev/null | grep -q '^claude-cli$'; then
+                  docker compose exec -T app wget -qO- --timeout=5 http://claude-cli:8090/health \
+                    && echo "" || echo "⚠️ сайдкар claude-cli не відповідає - генерація піде через API"
+                else
+                  echo "ℹ️ claude-cli вимкнено (нема COMPOSE_PROFILES=cli у .env) - усе через API"
+                fi
+                exit 0
+              fi
               sleep 2
             done
             echo "❌ застосунок не віддав health 200 за 60с"

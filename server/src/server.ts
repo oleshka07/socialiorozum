@@ -56,6 +56,7 @@ import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUserna
 import { chat } from "./openrouter.js";
 import { handleBody, wantsSse, sseEncode, resolveToken, mcpTokenFor, issueMcpToken, revokeMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
 import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember } from "./workspaces.js";
+import { CLI_MODELS, cliAllowedFor, cliHealth, forgetCliAllowed, cliCooldown } from "./claudecli.js";
 
 // ============================================================================
 // ЗМІСТ ФАЙЛУ (182 роути; шукай за банером «===== НАЗВА =====» або шляхом роуту)
@@ -482,13 +483,27 @@ app.delete("/api/admin/keys/:name", async (req: any, reply) => {
 app.get("/api/admin/spend", async (req: any, reply) => {
   if (!adminOnly(req, reply)) return;
   const rows = await q<any>(
-    `select w.id, w.spend_cap_day, w.spend_cap_month,
+    `select w.id, w.spend_cap_day, w.spend_cap_month, w.cli_enabled,
             (select string_agg(email, ', ') from app_user u where u.workspace_id=w.id) as emails,
             coalesce((select sum(cost) from llm_usage l where l.workspace_id=w.id and l.created_at >= date_trunc('day', now() at time zone 'utc') at time zone 'utc'),0)::float as day,
             coalesce((select sum(cost) from llm_usage l where l.workspace_id=w.id and l.created_at >= date_trunc('month', now() at time zone 'utc') at time zone 'utc'),0)::float as month,
             coalesce((select count(*) from llm_usage l where l.workspace_id=w.id and l.created_at >= date_trunc('day', now() at time zone 'utc') at time zone 'utc'),0)::int as calls
        from workspace w order by month desc, day desc limit 100`);
-  return { defaults: { day: CAPS.day, month: CAPS.month, callsPerMin: CAPS.callsPerMin }, workspaces: rows };
+  const cli = await cliHealth();
+  const cd = cliCooldown();
+  return { defaults: { day: CAPS.day, month: CAPS.month, callsPerMin: CAPS.callsPerMin }, workspaces: rows,
+    cli: { ...cli, cooldown: cd.down ? cd.why : "" } };
+});
+
+// 🤖 Дозвіл на Claude через ПІДПИСКУ для конкретного кабінету. Тільки адмін і тільки поштучно:
+// токен підписки належить людині, тож «увімкнути всім» тут не лише дорого за квотою, а й неправильно.
+app.put("/api/admin/cli/:workspaceId", async (req: any, reply) => {
+  if (!adminOnly(req, reply)) return;
+  const on = req.body?.enabled === true || req.body?.enabled === "true";
+  await q(`update workspace set cli_enabled=$2 where id=$1`, [req.params.workspaceId, on]);
+  forgetCliAllowed(req.params.workspaceId);   // інакше рішення чекало б 60с кешу
+  await logEvent("info", "admin", `Claude CLI для ${req.params.workspaceId}: ${on ? "увімкнено" : "вимкнено"}`);
+  return { ok: true, enabled: on };
 });
 
 app.put("/api/admin/spend/:workspaceId", async (req: any, reply) => {
@@ -2350,15 +2365,27 @@ app.get("/api/usage", async (req: any) => {
                             from llm_usage where workspace_id=$1 and created_at > now() - interval '30 days'
                            group by step order by cost desc, calls desc`, [ws]);
   const cap = await spendStatus(ws, true);
-  return { ...(total || {}), byModel, byStep, cap: { spentDay: cap.spent.day, spentMonth: cap.spent.month, capDay: cap.caps.day, capMonth: cap.caps.month } };
+  // 🤖 Скільки віддали б за API те, що зробила підписка (Claude CLI). Без цього рядка «економія»
+  // лишалась би відчуттям: у `cost` такі виклики чесно нулі, тобто в таблиці витрат їх не видно.
+  const saved = await one<{ usd: number; calls: number }>(
+    `select coalesce(sum(alt_cost),0)::float as usd, count(*)::int as calls
+       from llm_usage where workspace_id=$1 and alt_cost > 0 and created_at > now() - interval '30 days'`, [ws]);
+  return { ...(total || {}), byModel, byStep, saved: saved || { usd: 0, calls: 0 },
+    cap: { spentDay: cap.spent.day, spentMonth: cap.spent.month, capDay: cap.caps.day, capMonth: cap.caps.month } };
 });
 
 // ===================== 🧪 ПОРІВНЯННЯ МОДЕЛЕЙ =====================
 // «Контент слабкий через модель чи через промт?» - без прогону на тому самому матеріалі це вгадування.
 app.get("/api/models/catalog", async (req: any) => {
-  const [cat, spend] = await Promise.all([modelCatalog(), abSpend(req.user.workspace_id)]);
-  const s = await getSettingText(req.user.workspace_id, "main_model");
-  return { models: cat.rows, live: cat.live, current: s.trim() || DEFAULT_MAIN_MODEL, defaultModel: DEFAULT_MAIN_MODEL, spend };
+  const ws = req.user.workspace_id;
+  const [cat, spend, cliOn] = await Promise.all([modelCatalog(), abSpend(ws), cliAllowedFor(ws)]);
+  const s = await getSettingText(ws, "main_model");
+  // Моделі підписки показуємо ЛИШЕ кабінету, якому адмін це дозволив: у списку не має бути опції,
+  // яка мовчки впаде у фолбек (а без дозволу вона впаде саме так). Ціна 0 - це факт, не заглушка.
+  const cliRows = cliOn ? CLI_MODELS.map((m) => ({ id: m.id, name: m.label, in: 0, out: 0, ctx: 200000 })) : [];
+  const cli = cliOn ? await cliHealth() : { up: false };
+  return { models: [...cliRows, ...cat.rows], live: cat.live, current: s.trim() || DEFAULT_MAIN_MODEL, defaultModel: DEFAULT_MAIN_MODEL, spend,
+    cli: { allowed: cliOn, up: !!cli.up } };
 });
 
 app.post("/api/ab/generate", async (req: any) => {

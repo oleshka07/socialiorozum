@@ -33,6 +33,24 @@ services:
     expose:
       - "1200"
 
+  # 🤖 Claude Code CLI як сайдкар: «руки» підписки замість оплати за токени API.
+  # profiles: ["cli"] -> сервіс існує ЛИШЕ там, де в .env стоїть COMPOSE_PROFILES=cli (бета).
+  # На проді його немає взагалі, тож застосунок не достукається і мовчки піде звичайним шляхом
+  # через API - фолбек тут структурний, а не прапорець, який можна забути перемкнути.
+  # Токен передається ЛИШЕ сюди (не в env_file застосунку): підписка не має лежати в процесі,
+  # який обробляє дані користувачів. Без published ports - тільки внутрішня мережа compose.
+  claude-cli:
+    build: ./claude-cli
+    profiles: ["cli"]
+    restart: unless-stopped
+    environment:
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      CLI_MAX_TURNS: ${CLI_MAX_TURNS:-2}
+      CLI_TIMEOUT_MS: ${CLI_TIMEOUT_MS:-240000}
+    mem_limit: 700m
+    expose:
+      - "8090"
+
   app:
     build: .
     restart: unless-stopped

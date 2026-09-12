@@ -139,14 +139,17 @@ const API = {
     prompt_tokens: 1000, completion_tokens: 500, cost: 0.02, calls: 3,
     byModel: [{ model: "openai/gpt-4o", calls: 2, cost: 0.018 }, { model: "openai/gpt-4o-mini", calls: 1, cost: 0.002 }],
     byStep: [{ step: "lite", calls: 2, cost: 0.018 }, { step: "post_digest", calls: 1, cost: 0.002 }],
+    saved: { usd: 1.47, calls: 21 },
     cap: { spentDay: 2.55, spentMonth: 7.1, capDay: 3, capMonth: 30 },
   },
   "GET /admin/health": { errorCount: 2, warnCount: 5, spendToday: 1.23, runningJobs: 1, lostJobs: 0, lastBackup: "socialio-db-20260902-0320.dump (164K)",
     errors: [{ level: "error", scope: "publish", message: "Telegram відмовив у доступі (403)", n: 2 }, { level: "warn", scope: "meeting", message: "хеш транскрипта не збігся", n: 5 }] },
-  "GET /admin/spend": { defaults: { day: 3, month: 30, callsPerMin: 40 }, workspaces: [
-    { id: "ws-1", emails: "smoke@rozum.one", day: 2.55, month: 7.1, calls: 12, spend_cap_day: null, spend_cap_month: null },
-    { id: "ws-2", emails: "oleg@rozum.one", day: 0.4, month: 9.9, calls: 3, spend_cap_day: 0, spend_cap_month: 0 },
-  ] },
+  "GET /admin/spend": { defaults: { day: 3, month: 30, callsPerMin: 40 },
+    cli: { up: true, tokenSet: true, busy: 0, queued: 0, cooldown: "" },
+    workspaces: [
+      { id: "ws-1", emails: "smoke@rozum.one", day: 2.55, month: 7.1, calls: 12, spend_cap_day: null, spend_cap_month: null, cli_enabled: false },
+      { id: "ws-2", emails: "oleg@rozum.one", day: 0.4, month: 9.9, calls: 3, spend_cap_day: 0, spend_cap_month: 0, cli_enabled: true },
+    ] },
   "GET /media": [{ id: "md1", filename: "pic.jpg", source: "upload", created_at: iso(0, 8) }],
   "GET /sources/recent": [],
   "GET /sources/rss": { feeds: [] },
@@ -286,6 +289,13 @@ function handleApi(method, path, body) {
     const v = String((body && body.value) || "");
     if (k && v) { k.set = true; k.source = "admin"; k.tail = v.slice(-4); }
     return { ok: true };
+  }
+  // 🤖 Дозвіл на Claude через підписку: заглушка СТАНОВА, щоб перевірка доводила «поставив →
+  // збереглось», а не вміння віддати константу
+  if (method === "PUT" && path.startsWith("/admin/cli/")) {
+    const w = API["GET /admin/spend"].workspaces.find((x) => x.id === path.split("/")[3]);
+    if (w) w.cli_enabled = body?.enabled === true;
+    return { ok: true, enabled: !!(w && w.cli_enabled) };
   }
   if (key === "GET /pricing/media") {
     const cat = /category=video/.test(path) ? "video" : "image";
@@ -967,6 +977,36 @@ const run = async () => {
     const zeroCap = await page.$eval('#admSpend tr[data-ws="ws-2"] .sDay', (el) => el.value);
     return cap.includes("$2.55 із $3.00") && cap.includes("$7.10 із $30.00") && warnBar === "85%" &&
       rows[0].includes("smoke@rozum.one") && zeroCap === "0";
+  });
+
+  await check("cliAdmin", async () => {
+    // 🤖 Claude через підписку. Дві межі разом: (а) адмін бачить, ЧИ живий сайдкар - без цього рядка
+    // «чому мої генерації знову платні» діагностується лише в логах, бо фолбек навмисно тихий;
+    // (б) дозвіл ставиться ПОКАБІНЕТНО і реально зберігається - заглушка станова, тож перевірка
+    // падає, якщо чекбокс декоративний. Плюс «заощаджено» в Аналітиці: виклики через підписку мають
+    // cost=0, тобто в таблиці витрат їх не видно взагалі, і без цього рядка економія недоказова.
+    await page.evaluate(() => { selectView("settings"); setSTab("profile"); });
+    await page.waitForFunction(() => document.getElementById("admCli"), undefined, { timeout: 8000 });
+    const status = await $t("#admCli");
+    const was = await page.$eval('#admSpend tr[data-ws="ws-1"] .sCli', (el) => el.checked);
+    await page.evaluate(() => {
+      const tr = document.querySelector('#admSpend tr[data-ws="ws-1"]');
+      tr.dataset.smokeOld = "1";                     // мітка на СТАРОМУ вузлі - див. нижче
+      tr.querySelector(".sCli").checked = true;
+      tr.querySelector(".sSave").click();
+    });
+    // Чекаємо саме на ПЕРЕМАЛЬОВАНИЙ рядок (мітки на ньому вже немає), інакше перевірка читала б
+    // моє ж DOM-присвоєння й проходила навіть тоді, коли кліком нічого не зберігається.
+    await page.waitForFunction(() => {
+      const tr = document.querySelector('#admSpend tr[data-ws="ws-1"]');
+      return tr && !tr.dataset.smokeOld;
+    }, undefined, { timeout: 8000 });
+    const saved = await page.$eval('#admSpend tr[data-ws="ws-1"] .sCli', (el) => el.checked);
+    await page.evaluate(() => selectView("analytics"));
+    await page.waitForFunction(() => document.getElementById("cliSaved"), undefined, { timeout: 8000 });
+    const savedLine = await $t("#cliSaved");
+    return status.includes("сайдкар живий") && was === false && saved === true &&
+      savedLine.includes("$1.47") && savedLine.includes("21");
   });
 
   await check("adminHealth", async () => {

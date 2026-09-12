@@ -84,9 +84,18 @@ export async function spendStatus(ws: string, fresh = false): Promise<{ spent: S
   return { spent, caps };
 }
 
+/**
+ * Лише частотний шар, без доларів. Потрібен для викликів, які нічого не коштують (Claude через
+ * ПІДПИСКУ): блокувати їх доларовою стелею було б неправдою - грошей вони не витрачають, - але
+ * обмеження «N викликів за хвилину» лишається, бо воно захищає квоту підписки й сам сервіс.
+ */
+export function assertRate(ws: string): void {
+  if (overCallRate(ws)) throw new SpendCapError(capMessage("rate", { day: 0, month: 0 }, CAPS));
+}
+
 /** Кидає SpendCapError, якщо цьому воркспейсу вже не можна витрачати. Викликається ПЕРЕД платним запитом. */
 export async function assertSpend(ws: string): Promise<void> {
-  if (overCallRate(ws)) throw new SpendCapError(capMessage("rate", { day: 0, month: 0 }, CAPS));
+  assertRate(ws);
   const { spent, caps } = await spendStatus(ws);
   const v = capVerdict(spent, caps);
   if (!v.ok) throw new SpendCapError(capMessage(v.reason, spent, caps));

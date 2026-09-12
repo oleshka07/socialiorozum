@@ -933,6 +933,10 @@ async function loadAnalytics(){
     +'<span style="font-size:12px;color:var(--muted)">за 30 днів</span>'
     +'<button class="ghost" id="anAbBtn" style="margin-left:auto;padding:5px 12px;font-size:12.5px" title="Прогнати один матеріал кількома моделями і порівняти тексти поруч">🧪 Порівняти моделі</button></div>'
     +capHtml
+    // 🤖 Виклики через підписку коштують чесний нуль, тобто в таблиці витрат їх не видно взагалі.
+    // Цей рядок - єдине місце, де відповідь на «а воно взагалі економить?» стає числом.
+    +((usage.saved&&Number(usage.saved.usd)>0)
+      ? '<div id="cliSaved" style="margin-bottom:10px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;font-size:12.5px">🤖 Через підписку Claude (без оплати токенів): <b>'+Number(usage.saved.calls||0)+'</b> викликів · заощаджено <b>$'+Number(usage.saved.usd).toFixed(2)+'</b> за 30 днів</div>' : '')
     +(byModel.length
       ? '<div class="grid2" style="gap:16px"><div><div style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">За моделями</div>'+byModel.map(r=>usageRow(r,totCost)).join('')+'</div>'
         +'<div><div style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">За кроками</div>'+byStep.map(r=>usageRow(r,totCost)).join('')+'</div></div>'
@@ -3188,18 +3192,32 @@ async function loadAdminSpend(){
   try{
     const r=await api('/admin/spend'); const d=r.defaults||{};
     let h='<div class="hint" style="margin-bottom:8px">Дефолт із .env: день <b>$'+Number(d.day).toFixed(2)+'</b> · місяць <b>$'+Number(d.month).toFixed(2)+'</b> · до '+d.callsPerMin+' викликів/хв. Порожнє поле = дефолт, 0 = без обмеження.</div>';
-    h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><tr style="color:var(--muted);text-align:left"><th style="padding:4px 6px">Кабінет</th><th style="padding:4px 6px">Сьогодні</th><th style="padding:4px 6px">Місяць</th><th style="padding:4px 6px">Стеля день</th><th style="padding:4px 6px">Стеля місяць</th><th></th></tr>';
+    // 🤖 Стан сайдкара підписки. Показуємо ЗАВЖДИ, бо «чому мої генерації раптом платні» без цього
+    // рядка діагностується лише в логах: фолбек на API навмисно тихий для користувача.
+    const c=r.cli||{};
+    h+='<div id="admCli" class="hint" style="margin-bottom:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px">🤖 <b>Claude через підписку (CLI)</b>: '
+      +(c.up?'<span style="color:var(--ok,#2e7d32)">сайдкар живий</span>'+(c.tokenSet?'':' <b style="color:#c62828">але токен не заданий</b>')+(c.queued?' · у черзі '+c.queued:'')
+           :'<span style="color:var(--faint)">не підключений</span> <span style="color:var(--faint)">('+esc(c.error||'сервісу немає на цьому інстансі')+')</span>')
+      +(c.cooldown?'<br>⏸ '+esc(c.cooldown):'')
+      +'<br><span style="color:var(--faint)">Дозвіл дається кабінету поштучно: токен підписки належить людині, а квота спільна. Вимкнено - кабінет працює через API, як і раніше.</span></div>';
+    h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><tr style="color:var(--muted);text-align:left"><th style="padding:4px 6px">Кабінет</th><th style="padding:4px 6px">Сьогодні</th><th style="padding:4px 6px">Місяць</th><th style="padding:4px 6px">Стеля день</th><th style="padding:4px 6px">Стеля місяць</th><th style="padding:4px 6px" title="Claude через підписку замість оплати токенів API">🤖 CLI</th><th></th></tr>';
     for(const w of (r.workspaces||[])){
       h+='<tr data-ws="'+esc(w.id)+'" style="border-top:1px solid var(--line)"><td style="padding:5px 6px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(w.id)+'">'+esc(w.emails||'(без користувача)')+'</td>'
         +'<td style="padding:5px 6px;font-variant-numeric:tabular-nums">$'+Number(w.day||0).toFixed(3)+' <span style="color:var(--faint)">('+(w.calls||0)+')</span></td>'
         +'<td style="padding:5px 6px;font-variant-numeric:tabular-nums">$'+Number(w.month||0).toFixed(2)+'</td>'
         +'<td style="padding:5px 6px"><input class="txt sDay" style="width:80px;padding:4px 6px" value="'+(w.spend_cap_day!=null?esc(String(w.spend_cap_day)):'')+'" placeholder="'+Number(d.day).toFixed(0)+'"></td>'
         +'<td style="padding:5px 6px"><input class="txt sMon" style="width:80px;padding:4px 6px" value="'+(w.spend_cap_month!=null?esc(String(w.spend_cap_month)):'')+'" placeholder="'+Number(d.month).toFixed(0)+'"></td>'
+        +'<td style="padding:5px 6px;text-align:center"><input type="checkbox" class="sCli"'+(w.cli_enabled?' checked':'')+'></td>'
         +'<td style="padding:5px 6px"><button class="ghost sSave" style="padding:4px 10px">Зберегти</button></td></tr>';
     }
     box.innerHTML=h+'</table></div>';
     box.querySelectorAll('tr[data-ws]').forEach(tr=>{ tr.querySelector('.sSave').onclick=async()=>{
-      try{ await api('/admin/spend/'+tr.getAttribute('data-ws'),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({day:tr.querySelector('.sDay').value.trim(),month:tr.querySelector('.sMon').value.trim()})}); flashSaved(); loadAdminSpend(); }
+      const ws=tr.getAttribute('data-ws');
+      try{
+        await api('/admin/spend/'+ws,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({day:tr.querySelector('.sDay').value.trim(),month:tr.querySelector('.sMon').value.trim()})});
+        await api('/admin/cli/'+ws,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:tr.querySelector('.sCli').checked})});
+        flashSaved(); loadAdminSpend();
+      }
       catch(e){ alert('⚠ '+e.message); } }; });
   }catch(e){ box.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }

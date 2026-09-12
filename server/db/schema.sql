@@ -731,3 +731,15 @@ insert into mcp_token(token, user_id, active_workspace_id)
 delete from settings_block sb
  where sb.key in ('mcp_token','mcp_last_used')
    and (sb.key = 'mcp_last_used' or exists (select 1 from mcp_token t where t.token = sb.content));
+
+-- 🤖 Claude Code CLI (підписка замість оплати токенів API) - ДОЗВІЛ на КАБІНЕТ, не глобальний.
+-- Токен підписки належить людині: обслуговувати ним чужі кабінети не можна ані за умовами
+-- підписки, ані практично (квота спільна). Колонка на `workspace`, а не в `settings_block`, з тієї
+-- самої причини, що й стеля витрат: settings_block пише сам користувач через PUT /api/settings,
+-- тобто кожен увімкнув би собі сам.
+alter table workspace add column if not exists cli_enabled boolean not null default false;
+
+-- скільки ТОЙ САМИЙ виклик коштував би через API. `cost` для CLI чесний нуль (підписка вже
+-- сплачена) і саме він годує стелю витрат; без окремої колонки питання «скільки ми заощадили»
+-- не має відповіді взагалі.
+alter table llm_usage add column if not exists alt_cost numeric not null default 0;

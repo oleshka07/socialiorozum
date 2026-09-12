@@ -15,6 +15,15 @@ export const env = {
   openai: {
     apiKey: process.env.OPENAI_API_KEY ?? "",   // прямий OpenAI для Lite (дешевше за наценку OpenRouter) + gpt-image-1
   },
+  // 🤖 Сайдкар Claude Code CLI (docker-compose profile "cli"): модель через ПІДПИСКУ, без оплати
+  // токенів. Немає сервісу - немає фічі: усе мовчки йде звичайним шляхом в API.
+  claudeCli: {
+    url: (process.env.CLAUDE_CLI_URL ?? "http://claude-cli:8090").replace(/\/$/, ""),
+    maxTurns: Number(process.env.CLAUDE_CLI_MAX_TURNS ?? 2),
+    timeoutMs: Number(process.env.CLAUDE_CLI_TIMEOUT_MS ?? 180000),
+    // На що падаємо, коли підписка недоступна (вичерпана квота, сайдкар лежить, прод без сайдкара).
+    fallbackModel: process.env.CLAUDE_CLI_FALLBACK_MODEL || "openai/gpt-4o",
+  },
   fal: {
     apiKey: process.env.FAL_KEY ?? "",           // FLUX schnell (найдешевші зображення)
   },
