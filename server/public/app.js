@@ -1644,6 +1644,18 @@ async function openImageEditor(postId, onDone){
   openPhotoTool(postId, '', (fn)=>{ if(onDone)onDone(fn); try{loadStudioPosts();}catch(e){} });
 }
 async function loadImageProvider(){ const sel=$('imgProv'); if(!sel) return; try{ const c=await api('/integrations/images'); const A=c.available||{}; const opts=[['openai','OpenAI gpt-image-1',A.openai],['fal','FLUX schnell (fal.ai)',A.fal],['gemini','Nano Banana (Gemini)',A.gemini]]; sel.innerHTML=opts.map(o=>'<option value="'+o[0]+'"'+(c.provider===o[0]?' selected':'')+(o[2]?'':' disabled')+'>'+o[1]+(o[2]?'':' - нема ключа')+'</option>').join(''); sel.onchange=async()=>{ try{ await api('/integrations/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:sel.value})}); flashSaved(); }catch(e){ flash('⚠ '+e.message); } }; }catch(e){} }
+// 🎙 Кому віддати перевагу в розшифровці голосових. «Авто» = Deepgram, якщо ключ є, інакше Whisper.
+// Провайдер без ключа лишається видимим, але заблокованим - інакше незрозуміло, чому вибору немає.
+async function loadSttProvider(){
+  const sel=$('sttProv'); if(!sel) return;
+  try{
+    const c=await api('/integrations/stt'); const A=c.available||{};
+    const best=A.deepgram?'Deepgram':(A.whisper?'Whisper':'нема ключів');
+    const opts=[['auto','Авто ('+best+' першим)',true],['deepgram','Deepgram',A.deepgram],['whisper','Whisper (OpenAI)',A.whisper]];
+    sel.innerHTML=opts.map(o=>'<option value="'+o[0]+'"'+(c.provider===o[0]?' selected':'')+(o[2]?'':' disabled')+'>'+o[1]+(o[2]?'':' - нема ключа')+'</option>').join('');
+    sel.onchange=async()=>{ try{ await api('/integrations/stt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:sel.value})}); flashSaved(); }catch(e){ flash('⚠ '+e.message); } };
+  }catch(e){}
+}
 let InboxSel=null;
 function renderInbox(){
   const list=$('inboxList'), det=$('inboxDetail'); if(!list||!det) return;
@@ -3646,7 +3658,7 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
   if(_mtq){ go('settings'); alert(_mtq==='ok'?'Facebook/Instagram підключено ✓':(_mtq==='nopage'?'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).':'Не вдалося підключити Facebook/Instagram.')); }
   if(_gdq){ go('sources'); alert(_gdq==='ok'?'Google Drive підключено ✓':'Не вдалося підключити Google Drive.'); }
   await loadPrompts();
-  loadRubrics(); loadStrategy(); loadFF(); loadMcp(); loadWorkspaces(); loadWsMembers(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadTasks(); loadStudioPosts(); loadGoalCta(); loadMagnets();
+  loadRubrics(); loadStrategy(); loadFF(); loadMcp(); loadWorkspaces(); loadWsMembers(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadSttProvider(); loadTasks(); loadStudioPosts(); loadGoalCta(); loadMagnets();
   loadMaterials(); // стрічка + лічильник
   // ⚠️ вкладку Створення тут БІЛЬШЕ НЕ смикаємо: раніше цей рядок безумовно кликав setCTab і
   // перебивав адресу (#/create/ideas відкривався й одразу з'їжджав на Чорновики). Початкову вкладку

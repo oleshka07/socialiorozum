@@ -24,6 +24,11 @@ export const env = {
     // На що падаємо, коли підписка недоступна (вичерпана квота, сайдкар лежить, прод без сайдкара).
     fallbackModel: process.env.CLAUDE_CLI_FALLBACK_MODEL || "openai/gpt-4o",
   },
+  deepgram: {                                     // 🎙 розшифровка голосу (щоденник); відкат - Whisper
+    apiKey: process.env.DEEPGRAM_API_KEY ?? "",
+    model: process.env.DEEPGRAM_MODEL || "nova-2",
+    language: process.env.DEEPGRAM_LANGUAGE || "uk",  // "auto" → Deepgram визначає мову сам
+  },
   fal: {
     apiKey: process.env.FAL_KEY ?? "",           // FLUX schnell (найдешевші зображення)
   },

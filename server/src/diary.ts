@@ -11,6 +11,7 @@ import * as tg from "./telegram.js";
 import { saveMedia } from "./media.js";
 import { cabinetMaterialLink } from "./permalink.js";
 import { chat, extractJsonArray } from "./openrouter.js";
+import { transcribeAudio } from "./stt.js";
 
 // ---- стан щоденника на воркспейс (settings_block key='diary_state') ----
 // photoFor/photoAt: щойно створений запис, до якого приклеїться НАСТУПНЕ фото чи відео.
@@ -182,23 +183,10 @@ export async function attachDiaryMedia(ws: string, chatId: string, buffer: Buffe
     `📔 ${m.kind === "video" ? "Відео" : "Фото"} в галереї з міткою «щоденник» і привʼязане до запису за ${uaDate(date)} ✓`, buttons);
 }
 
-// ---- Whisper: голосове → текст (OPENAI_API_KEY; ~$0.006/хв) ----
-export async function transcribeVoice(buffer: Buffer, filename: string): Promise<string> {
-  if (!env.openai.apiKey) throw new Error("розшифровка голосу тимчасово недоступна - напиши, будь ласка, текстом");
-  const fd = new FormData();
-  fd.append("file", new Blob([new Uint8Array(buffer)], { type: "audio/ogg" }), filename || "voice.ogg");
-  fd.append("model", "whisper-1");
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 120000);
-  let res: Response;
-  try { res = await fetch("https://api.openai.com/v1/audio/transcriptions", { method: "POST", headers: { Authorization: `Bearer ${env.openai.apiKey}` }, body: fd, signal: controller.signal }); }
-  catch (e: any) { if (e?.name === "AbortError") throw new Error("розшифровка затягнулась - спробуй коротше повідомлення"); throw e; }
-  finally { clearTimeout(timer); }
-  const j: any = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(j.error?.message ? String(j.error.message).slice(0, 200) : `Whisper HTTP ${res.status}`);
-  const text = String(j.text || "").trim();
-  if (!text) throw new Error("не розчув - спробуй ще раз або напиши текстом");
-  return text;
+// ---- голосове → текст. Сама розшифровка живе в stt.ts (Deepgram + відкат на Whisper) ----
+export async function transcribeVoice(buffer: Buffer, filename: string, ws?: string): Promise<string> {
+  const r = await transcribeAudio(buffer, filename, ws);
+  return r.text;
 }
 
 // «сьогодні нічого» - закриває день (вечірнє питання не приходить)

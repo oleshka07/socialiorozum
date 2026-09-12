@@ -354,7 +354,7 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
       if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio."); return; }
       try {
         const f = await tg.getFileBuffer(token, msg.voice.file_id);
-        const heard = await transcribeVoice(f.buffer, "voice.ogg");
+        const heard = await transcribeVoice(f.buffer, "voice.ogg", ws);
         await appendDiaryText(ws, chatId, heard, true);
       } catch (e: any) { await tg.sendMessage(token, chatId, "⚠️ " + String(e.message).slice(0, 200)); }
       return;

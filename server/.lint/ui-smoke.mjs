@@ -277,7 +277,7 @@ function handleTg(method, path, body) {
 let tgJob = null, tgPubPolls = 0;
 
 // приймач зустрічей: адреса СТАНОВА, бо перевіряється саме перевипуск (стара адреса вмирає)
-let mtToken = "tok-aaaa1111", mtPull = false;
+let mtToken = "tok-aaaa1111", mtPull = false, sttProv = "auto";
 
 function handleApi(method, path, body) {
   if (path.startsWith("/tg/")) return handleTg(method, path.slice(3), body);
@@ -290,6 +290,10 @@ function handleApi(method, path, body) {
     if (k && v) { k.set = true; k.source = "admin"; k.tail = v.slice(-4); }
     return { ok: true };
   }
+  // 🎙 Вибір розшифровки голосу. Whisper навмисно БЕЗ ключа - перевірка стежить, що недоступний
+  // провайдер лишається видимим, але заблокованим (інакше незрозуміло, чому вибору немає).
+  if (key === "GET /integrations/stt") return { provider: sttProv, available: { deepgram: true, whisper: false } };
+  if (key === "POST /integrations/stt") { sttProv = String(body?.provider || "auto"); return { ok: true }; }
   // 🤖 Дозвіл на Claude через підписку: заглушка СТАНОВА, щоб перевірка доводила «поставив →
   // збереглось», а не вміння віддати константу
   if (method === "PUT" && path.startsWith("/admin/cli/")) {
@@ -977,6 +981,31 @@ const run = async () => {
     const zeroCap = await page.$eval('#admSpend tr[data-ws="ws-2"] .sDay', (el) => el.value);
     return cap.includes("$2.55 із $3.00") && cap.includes("$7.10 із $30.00") && warnBar === "85%" &&
       rows[0].includes("smoke@rozum.one") && zeroCap === "0";
+  });
+
+  await check("sttSwitch", async () => {
+    // 🎙 Дві межі: провайдер БЕЗ ключа лишається видимим, але заблокованим (інакше людина не
+    // розуміє, чому вибору немає), і вибір реально доїжджає на сервер - заглушка станова, тож
+    // перевірка падає, якщо селект декоративний.
+    await page.evaluate(() => { selectView("settings"); setSTab("channels"); });
+    await page.waitForFunction(() => {
+      const s = document.getElementById("sttProv");
+      return s && s.options.length === 3;
+    }, undefined, { timeout: 8000 });
+    const before = await page.$eval("#sttProv", (s) => ({
+      value: s.value,
+      auto: s.options[0].textContent,
+      whisperDisabled: s.options[2].disabled,
+      whisperText: s.options[2].textContent,
+    }));
+    await page.evaluate(() => {
+      const s = document.getElementById("sttProv");
+      s.value = "deepgram"; s.dispatchEvent(new Event("change"));
+    });
+    await page.evaluate(() => loadSttProvider());          // перечитуємо з сервера, а не з DOM
+    await page.waitForFunction(() => document.getElementById("sttProv").value === "deepgram", undefined, { timeout: 8000 });
+    return before.value === "auto" && before.auto.includes("Deepgram першим") &&
+      before.whisperDisabled && before.whisperText.includes("нема ключа");
   });
 
   await check("cliAdmin", async () => {

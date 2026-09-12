@@ -57,6 +57,7 @@ import { chat } from "./openrouter.js";
 import { handleBody, wantsSse, sseEncode, resolveToken, mcpTokenFor, issueMcpToken, revokeMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
 import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember } from "./workspaces.js";
 import { CLI_MODELS, cliAllowedFor, cliHealth, forgetCliAllowed, cliCooldown } from "./claudecli.js";
+import { sttChoice, sttAvailable } from "./stt.js";
 
 // ============================================================================
 // ЗМІСТ ФАЙЛУ (182 роути; шукай за банером «===== НАЗВА =====» або шляхом роуту)
@@ -1804,6 +1805,19 @@ app.post("/api/integrations/images", async (req: any, reply) => {
     await q(`insert into settings_block(workspace_id,key,content) values($1,'image_overlay',$2)
              on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`, [ws, req.body.overlay ? "1" : "0"]);
   }
+  return { ok: true };
+});
+
+// 🎙 розшифровка голосу: кому віддати перевагу. Відкат на другого відбувається ЗАВЖДИ - голосове
+// в щоденник неможливо «надиктувати ще раз», тож збій одного сервісу не має коштувати запису.
+app.get("/api/integrations/stt", async (req: any) => {
+  return { provider: await sttChoice(req.user.workspace_id), available: sttAvailable() };
+});
+app.post("/api/integrations/stt", async (req: any, reply) => {
+  const p = String(req.body?.provider || "");
+  if (!["auto", "deepgram", "whisper"].includes(p)) return reply.code(400).send({ error: "невідомий провайдер розшифровки" });
+  await q(`insert into settings_block(workspace_id,key,content) values($1,'stt_provider',$2)
+           on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`, [req.user.workspace_id, p]);
   return { ok: true };
 });
 

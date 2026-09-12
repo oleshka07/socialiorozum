@@ -30,6 +30,7 @@ export const SECRET_DEFS: SecretDef[] = [
   { name: "FAL_KEY", label: "fal.ai (FLUX)", group: "image", hint: "Найдешевші зображення - FLUX schnell.", apply: (v) => { env.fal.apiKey = v; } },
   { name: "KIE_API_KEY", label: "kie.ai", group: "video", hint: "AI-відео для рілсів і доступ до свіжих моделей зображень. Ключ у кабінеті kie.ai.", apply: (v) => { env.kie.apiKey = v; } },
   { name: "AZURE_SPEECH_KEY", label: "Azure Speech", group: "video", hint: "Українська озвучка рілсів. Безкоштовного тарифу F0 вистачає.", apply: (v) => { env.azure.speechKey = v; } },
+  { name: "DEEPGRAM_API_KEY", label: "Deepgram", group: "video", hint: "Розшифровка голосових у щоденник. Швидший і дешевший за Whisper; якщо не спрацює - автоматично піде Whisper.", apply: (v) => { env.deepgram.apiKey = v; } },
   { name: "PEXELS_API_KEY", label: "Pexels", group: "video", hint: "Безкоштовний стоковий b-roll для рілсів.", apply: (v) => { env.pexels.apiKey = v; } },
 ];
 
