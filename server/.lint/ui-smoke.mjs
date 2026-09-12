@@ -151,7 +151,7 @@ const API = {
   "GET /sources/recent": [],
   "GET /sources/rss": { feeds: [] },
   "GET /lead-magnets": { magnets: [] },
-  "GET /integrations/telegram": { channelChatId: "-1001234567890", groupChatId: "", hasToken: true, sharedBot: true, channelTitle: "Мій канал" },
+  "GET /integrations/telegram": { channelChatId: "-1001234567890", groupChatId: "", hasToken: true, sharedBot: true, sharedDm: false, channelTitle: "Мій канал" },
   "GET /integrations/threads": { connected: true, username: "brand" },
   "GET /integrations/meta": { connected: false },
   "GET /integrations/linkedin": { connected: false, available: false },
@@ -809,6 +809,14 @@ const run = async () => {
   // саме в ній найлегше тихо зламати рядок, бо вона будується конкатенацією HTML.
   // Перемикач брендів: зʼявляється лише коли кабінетів кілька, активний позначений, а в Профілі
   // видно учасників. Саме тут легко тихо зламати мульти-воркспейс і не помітити.
+  // Бета: спільний бот не приймає DM (вебхук за продом). Кнопка підключення мусить бути ГЛУХА,
+  // а причина - написана поруч; інакше людина тисне її й отримує посилання в нікуди.
+  await check("tgSharedOff", async () => {
+    const box = await page.$eval("#tgSharedOff", (el) => el.style.display + "|" + el.innerText).catch(() => "none|");
+    const dis = await page.$eval("#tgConnectBot", (el) => el.disabled).catch(() => false);
+    return box.startsWith("block") && box.includes("не приймає повідомлень") && dis === true;
+  });
+
   await check("wsSwitcher", async () => {
     const box = await page.$eval("#wsSwitch", (el) => el.style.display).catch(() => "none");
     const list = await page.$eval("#wsList", (el) => el.innerText).catch(() => "");

@@ -56,9 +56,19 @@ export async function initTelegramBot(): Promise<void> {
   } catch (e: any) { console.error("[tgbot] init: " + e.message); }
 }
 
+// true, якщо СПІЛЬНИЙ бот на цьому інстансі реально приймає повідомлення. На беті webhook свідомо
+// лишається за продом (інакше бета вкрала б його), тож DM-фічі спільного бота тут мертві -
+// і про це треба казати, а не видавати посилання, яке нікуди не веде.
+export const sharedBotDmWorks = (): boolean => !!env.telegram.botToken && !env.beta.telegramWebhookOff;
+
 export async function createConnectLink(workspaceId: string): Promise<string> {
   const token = await wsBotToken(workspaceId);
   if (!token) throw new Error("Спільний бот не налаштований на сервері");
+  // Найкоштовніша частина цього фіксу: раніше кнопка мовчки видавала t.me-посилання, код якого
+  // живе в БАЗІ ЦЬОГО інстансу, а сам /start прилітав на ІНШИЙ інстанс (вебхук у прода) - там
+  // такого коду немає, тож бот відповідав загальним привітанням. Людина бачила «бот мене ігнорує».
+  if (token === env.telegram.botToken && !sharedBotDmWorks())
+    throw new Error("На цьому середовищі спільний бот не приймає повідомлень: його вебхук закріплений за основним сервісом (інакше бета вкрала б бота в прода). Підключи ВЛАСНОГО бота: @BotFather → /newbot → токен у «⚙️ Розширені налаштування» нижче. Тоді всі DM-фічі працюватимуть саме тут.");
   // deep-link веде на бота, який реально обслуговує цей воркспейс (власний або спільний)
   let username = BOT_USERNAME;
   if (token !== env.telegram.botToken) { try { username = (await tg.getMe(token)).username || username; } catch { /* фолбек на спільного */ } }
@@ -254,6 +264,13 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
           await registerMenu(token);
           return;
         }
+      }
+      // Код був, але не знайшовся - найчастіше він створений на ІНШОМУ інстансі (бета/прод мають
+      // окремі бази). Раніше це виглядало як «бот просто привітався» і не лишало жодного сліду.
+      if (code) {
+        await logEvent("warn", "tgbot", `/start із невідомим кодом ${code.slice(0, 8)}… (tg ${fromId}) - код створено на іншому інстансі або застарів`);
+        await tg.sendMessage(token, chatId, "Це посилання підключення не діє: код або застарів, або створений в іншому середовищі (бета й прод мають окремі бази). Відкрий socialio й натисни «Підключити наш бот» ще раз.");
+        return;
       }
       await tg.sendMessage(token, chatId, "Привіт! Щоб під'єднати мене до твого кабінету, відкрий посилання «Підключити наш бот» у socialio.");
       return;

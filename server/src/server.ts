@@ -52,7 +52,7 @@ import { contextReview, contextIssueCount, suggestFieldFix } from "./context-che
 import { generateImageForPost, imageProviders, imageCosts, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto } from "./images.js";
 import { secretStatuses, setSecret, clearSecret, refreshSecrets } from "./secrets.js";
 import { kieCatalog, kieCredits, kieReady } from "./kie.js";
-import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook } from "./tgbot.js";
+import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook, sharedBotDmWorks } from "./tgbot.js";
 import { chat } from "./openrouter.js";
 import { handleBody, wantsSse, sseEncode, resolveToken, mcpTokenFor, issueMcpToken, revokeMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
 import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember } from "./workspaces.js";
@@ -1855,6 +1855,8 @@ app.get("/api/integrations/telegram", async (req: any) => {
     channelTitle: c?.channel_title ?? "",
     groupTitle: c?.group_title ?? "",
     sharedBot: botEnabled(),
+    // чи працюють DM-фічі спільного бота на ЦЬОМУ інстансі (на беті - ні, вебхук за продом)
+    sharedDm: sharedBotDmWorks(),
   };
 });
 

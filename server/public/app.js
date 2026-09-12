@@ -2596,7 +2596,11 @@ $('newRun').onclick=()=>{
 $('logoutBtn').onclick=async()=>{ try{ await api('/auth/logout',{method:'POST'}); }catch(e){} location.href='/login'; };
 
 // ---------- Telegram / Threads / Meta ----------
-async function loadTelegram(){ try{ const c=await api('/integrations/telegram'); $('tgChannel').value=c.channelChatId||''; $('tgGroup').value=c.groupChatId||''; if(c.hasToken) $('tgToken').placeholder='•••••••• (токен збережено - лиши порожнім, щоб не міняти)'; if($('tgSharedBox')) $('tgSharedBox').style.display=c.sharedBot?'block':'none'; if($('tgConnMsg')&&c.channelTitle) $('tgConnMsg').innerHTML='✅ підключено: <b>'+esc(c.channelTitle)+'</b>'; }catch(e){} }
+async function loadTelegram(){ try{ const c=await api('/integrations/telegram'); $('tgChannel').value=c.channelChatId||''; $('tgGroup').value=c.groupChatId||''; if(c.hasToken) $('tgToken').placeholder='•••••••• (токен збережено - лиши порожнім, щоб не міняти)'; if($('tgSharedBox')) $('tgSharedBox').style.display=c.sharedBot?'block':'none';
+  // спільний бот є, але його DM мертві на цьому інстансі (бета) - кажемо це ДО кліку, а кнопку
+  // підключення глушимо: інакше вона видає посилання, яке нікуди не веде
+  const off=c.sharedBot&&c.sharedDm===false; if($('tgSharedOff')) $('tgSharedOff').style.display=off?'block':'none';
+  if($('tgConnectBot')){ $('tgConnectBot').disabled=!!off; $('tgConnectBot').title=off?'У цьому середовищі спільний бот не приймає повідомлень - підключи власного бота нижче':''; } if($('tgConnMsg')&&c.channelTitle) $('tgConnMsg').innerHTML='✅ підключено: <b>'+esc(c.channelTitle)+'</b>'; }catch(e){} }
 if($('tgConnectBot')) $('tgConnectBot').onclick=async()=>{ const m=$('tgConnMsg'); m.style.color='var(--muted)'; m.textContent='…'; try{ const r=await api('/integrations/telegram/connect-link',{method:'POST'}); const steps=$('tgBotSteps'); if(steps){ steps.style.display='block'; steps.innerHTML='1) Відкрий <a href="'+r.link+'" target="_blank"><b>@'+esc(r.bot)+'</b></a> → натисни <b>Start</b>.<br>2) Додай бота <b>адміном</b> у свій канал.<br>3) Перешли боту будь-який пост із каналу.<br>Потім онови цю сторінку - канал зʼявиться тут.'; } m.textContent=''; window.open(r.link,'_blank'); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
 async function loadThreads(){
   try{ const c=await api('/integrations/threads'); const st=$('thStatus'), conn=$('thConnect'), dis=$('thDisconnect'); if(!st) return;
