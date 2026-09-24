@@ -1740,7 +1740,7 @@ app.post("/api/runs/:id/generate-lite", async (req: any, reply) => {
     if (req.body?.images) {
       const posts = await q<{ id: string }>(`select id from post where run_id=$1 and stage='final'`, [id]);
       // онбординг шле provider:'gemini' (Nano Banana) для вау-ефекту перших зображень; без ключа - дефолтний провайдер
-      const provider = ["openai", "fal", "gemini"].includes(req.body?.provider) ? req.body.provider : undefined;
+      const provider = ["openai", "fal", "gemini", "cloudflare"].includes(req.body?.provider) ? req.body.provider : undefined;
       const res = await Promise.allSettled(posts.map((p) => generateImageForPost(ws, p.id, provider ? { provider } : undefined)));
       images = res.filter((r) => r.status === "fulfilled").length;
     }
@@ -1798,7 +1798,7 @@ app.post("/api/integrations/images", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   if (req.body?.provider !== undefined) {
     const p = String(req.body.provider);
-    if (!["openai", "fal", "gemini"].includes(p)) return reply.code(400).send({ error: "невідомий провайдер" });
+    if (!["openai", "fal", "gemini", "cloudflare"].includes(p)) return reply.code(400).send({ error: "невідомий провайдер" });
     await q(`insert into settings_block(workspace_id,key,content) values($1,'image_provider',$2)
              on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`, [ws, p]);
   }

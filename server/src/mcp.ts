@@ -26,7 +26,7 @@ import { getSettingText } from "./settings.js";
 import { listWorkspaces, isMember } from "./workspaces.js";
 import { connectedNets, parseWhen, zonedToUtc } from "./tgcompose.js";
 import { publishPostToChannels, alreadySentNetworks } from "./publisher.js";
-import { generatePostsOnePass, normFormat, GOAL_LABELS } from "./pipeline.js";
+import { generatePostsOnePass, normFormat, GOAL_LABELS, CHANNEL_LIMITS } from "./pipeline.js";
 import { logEvent } from "./log.js";
 import { generateImageForPost, imageProviders, stockPhotoOptions, attachStockPhoto } from "./images.js";
 import { getThumb } from "./media.js";
@@ -230,6 +230,29 @@ async function findPost(ws: string, raw: unknown): Promise<PostRow> {
 
 const enabledNets = (channels: any): string[] =>
   NETS.filter((k) => channels?.[k] && channels[k].on);
+
+/**
+ * Як текст піде в кожну мережу - видно ДО публікації, а не після. «Дослівно» чи «спакується моделлю
+ * кабінету» - це різниця між текстом, який людина затвердила, і переписаним; раніше її не показував
+ * жоден інструмент, і тихе переписування помічали лише в самій мережі.
+ */
+export function publishPlan(channels: any, content: string): { net: string; mode: "own" | "verbatim" | "auto"; len: number; limit: number }[] {
+  return enabledNets(channels).map((net) => {
+    const own = String(channels?.[net]?.text || "").trim();
+    const mode = own ? "own" : channels?.manual_adapt === true ? "verbatim" : "auto";
+    return { net, mode, len: (own || String(content || "")).length, limit: CHANNEL_LIMITS[net] || 0 };
+  });
+}
+// Де перевищення ліміту = відмова мережі. Telegram довгий підпис шле окремим повідомленням, а
+// 2000 для Facebook - наша рекомендація, не стіна.
+const HARD_WALL = new Set(["threads", "instagram", "linkedin"]);
+export function publishPlanLine(plan: ReturnType<typeof publishPlan>): string {
+  return plan.map(({ net, mode, len, limit }) => {
+    const how = mode === "own" ? "своя версія" : mode === "verbatim" ? "дослівно" : "спакується моделлю кабінету";
+    const over = mode !== "auto" && HARD_WALL.has(net) && limit > 0 && len > limit ? " ⚠️ довше за ліміт - мережа не прийме" : "";
+    return `${NET_LABEL[net] || net} - ${how} (${len}${limit ? `/${limit}` : " симв."})${over}`;
+  }).join(" · ");
+}
 
 // Увімкнути мережі, не затираючи вже адаптовані під них тексти (їх пише «✨ підлаштувати»).
 function mergeNets(channels: any, nets: string[]): Record<string, any> {
@@ -575,6 +598,7 @@ export const TOOLS: ToolDef[] = [
         `${short(p.id)} · створено ${fmtWhen(p.created_at, tz)} · ${p.review === "approved" ? "затверджено" : "чернетка"}${p.media ? " · є фото" : ""}`,
         `мережі: ${enabledNets(p.channels).length ? netList(enabledNets(p.channels)) : "не обрані"}${p.rubric ? ` · рубрика: ${p.rubric}` : ""}${p.format && p.format !== "post" ? ` · формат: ${p.format}` : ""}`,
         slot?.scheduled_at ? `заплановано: ${fmtWhen(slot.scheduled_at, tz)} (${slot.status})` : "",
+        enabledNets(p.channels).length ? `публікація: ${publishPlanLine(publishPlan(p.channels, p.content))}` : "",
         sent.length ? `опубліковано: ${sent.map((x) => `${NET_LABEL[x.net]}${x.link ? ` ${x.link}` : ""}`).join(", ")}` : "",
         `\n${p.content}`,
         variants.length ? `\nВерсії під мережі:\n${variants.join("\n")}` : "",
@@ -712,12 +736,12 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "generate_image",
-    title: "Згенерувати зображення (платно)",
-    description: "ПЛАТНО - витрачає AI-кредити кабінету на кожен виклик. Згенерувати зображення до поста й прикріпити його. Передай prompt англійською: конкретна сцена, обʼєкти, світло, ракурс; без людей-моделей зі стоку й без тексту (текст на зображення не накладається). Без prompt сцену візьме з першого рядка поста - зазвичай гірше. provider необовʼязковий: fal (найдешевший), gemini, openai; без нього - той, що обрано в кабінеті. У відповіді - мініатюра результату.",
+    title: "Згенерувати зображення",
+    description: "Згенерувати зображення до поста й прикріпити його. ПЛАТНО (AI-кредити кабінету), крім provider cloudflare: у нього безкоштовний денний ліміт ~100 зображень, якщо його підключено. Передай prompt англійською: конкретна сцена, обʼєкти, світло, ракурс; без людей-моделей зі стоку й без тексту (текст на зображення не накладається). Без prompt сцену візьме з першого рядка поста - зазвичай гірше. provider необовʼязковий: cloudflare (безкоштовно), fal (найдешевший платний), gemini, openai; без нього - той, що обрано в кабінеті. У відповіді - мініатюра результату.",
     properties: {
       id: S("Id поста."),
       prompt: S("Опис сцени англійською."),
-      provider: { type: "string", enum: ["openai", "fal", "gemini"], description: "Провайдер (необовʼязково)." },
+      provider: { type: "string", enum: ["cloudflare", "openai", "fal", "gemini"], description: "Провайдер (необовʼязково)." },
       aspect: ASPECT_ARG,
     },
     required: ["id"],
@@ -776,9 +800,11 @@ export const TOOLS: ToolDef[] = [
     run: async (ws, a) => {
       const p = await findPost(ws, a.id);
       const connected = await connectedNets(ws);
-      let nets = pickNets(a.channels);
-      if (nets.length) await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(authoredChannels(p.channels, nets, false))]);
-      else nets = enabledNets(p.channels);
+      const picked = pickNets(a.channels);
+      const nets = picked.length ? picked : enabledNets(p.channels);
+      // текст від Claude (origin 'mcp') під одну мережу - дослівно, як і при плануванні
+      if (nets.length && (picked.length || p.origin === "mcp"))
+        await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(authoredChannels(p.channels, nets, p.origin === "mcp"))]);
       if (!nets.length)
         throw new ToolError(`Не обрано жодної мережі. Підключені в кабінеті: ${connected.length ? netList(connected) : "жодної - спершу підключи канал у Налаштуваннях"}.`);
       const offline = nets.filter((n) => !connected.includes(n));
@@ -819,15 +845,22 @@ export const TOOLS: ToolDef[] = [
       if (!at) throw new ToolError("Не зрозумів дату. Приклади: «2026-09-14 09:00», «завтра 18:30» (час обовʼязково через двокрапку).");
       if (at.getTime() < Date.now() - 60_000) throw new ToolError(`Цей час уже минув (${fmtWhen(at, tz)}). Обери майбутній.`);
       const nets = pickNets(a.channels);
-      if (nets.length) await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(authoredChannels(p.channels, nets, false))]);
       const on = nets.length ? nets : enabledNets(p.channels);
       if (!on.length) throw new ToolError("Спершу обери мережі (channels) - інакше автопостеру нема куди публікувати.");
+      // Текст, який Claude написав сам (create_draft → origin 'mcp'), під одну мережу йде ДОСЛІВНО.
+      // Це ж доліковує чернетки, збережені до появи позначки: досить їх (пере)запланувати. Пост,
+      // зроблений у кабінеті, як і раніше не позначаємо - його майстер-текст має спакуватись.
+      let chNow = p.channels;
+      if (nets.length || p.origin === "mcp") {
+        chNow = authoredChannels(p.channels, on, p.origin === "mcp");
+        await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(chNow)]);
+      }
       // переносимо наявний слот замість другого INSERT - інакше пост вийшов би двічі
       const ex = await one<{ id: string }>(`select id from schedule_slot where post_id=$1 and status='planned' limit 1`, [p.id]);
       if (ex) await q(`update schedule_slot set scheduled_at=$2, updated_at=now() where id=$1`, [ex.id, at.toISOString()]);
       else await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [p.id, at.toISOString()]);
       await q(`update post set review='approved' where id=$1`, [p.id]);   // запланований = затверджений
-      return `🗓 ${short(p.id)} заплановано на ${fmtWhen(at, tz)} (${netList(on)}).${ex ? " Наявний слот перенесено." : ""}`;
+      return `🗓 ${short(p.id)} заплановано на ${fmtWhen(at, tz)}: ${publishPlanLine(publishPlan(chNow, p.content))}.${ex ? " Наявний слот перенесено." : ""}`;
     },
   },
   {
@@ -928,7 +961,7 @@ export const SERVER_INSTRUCTIONS = [
   "Робочий порядок: 1) brand_voice - прочитай голос бренду; 2) напиши текст САМ у цьому голосі;",
   "3) create_draft - збережи; 4) publish_post або schedule_post. Так генерація нічого не коштує власнику.",
   "generate_posts викликай лише коли тебе прямо просять «згенеруй силами socialio» - він витрачає AI-кредити кабінету.",
-  "Зображення: спершу find_stock_photos з конкретним англійським query і attach_stock_photo - це безкоштовно; generate_image платний, бери його, коли сток не підходить або коли людина просить саме генерацію.",
+  "Зображення: спершу find_stock_photos з конкретним англійським query і attach_stock_photo - це безкоштовно; generate_image платний (крім provider cloudflare - безкоштовний денний ліміт ~100 зображень, якщо його підключено), бери його, коли сток не підходить або коли людина просить саме генерацію.",
   "Якщо кабінетів кілька (list_workspaces), спершу переконайся, що активний саме той бренд: перемкни switch_workspace або передай workspace у виклику. Кожна відповідь називає кабінет у першому рядку - звіряйся з ним перед публікацією.",
   "Факти не вигадуй: бери їх з list_materials / get_material або питай автора.",
   "Перед публікацією показуй текст людині - опублікований пост відкликати не можна.",

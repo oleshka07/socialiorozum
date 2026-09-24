@@ -230,3 +230,27 @@ test("нові інструменти: сток безкоштовний і ли
   assert.match(byName.generate_image.description, /ПЛАТНО/);
   assert.deepEqual(byName.attach_stock_photo.required, ["id", "url"]);
 });
+
+// ---- план публікації: видно ДО відправки, дослівно піде текст чи його перепише модель кабінету ----
+import { publishPlan, publishPlanLine } from "../dist/mcp.js";
+
+test("publishPlan: позначка «дослівно», своя версія під мережу і авто-упаковка", () => {
+  const txt = "x".repeat(472);
+  assert.deepEqual(publishPlan({ threads: { on: true }, manual_adapt: true, native: "threads" }, txt),
+    [{ net: "threads", mode: "verbatim", len: 472, limit: 500 }]);
+  assert.equal(publishPlan({ threads: { on: true } }, txt)[0].mode, "auto");
+  const own = publishPlan({ facebook: { on: true, text: "своя" } }, txt)[0];
+  assert.equal(own.mode, "own");
+  assert.equal(own.len, 4, "довжину рахуємо з тієї версії, яка реально піде");
+  assert.deepEqual(publishPlan({ threads: { on: false } }, txt), []);
+});
+
+test("publishPlanLine: попереджає, коли дослівний текст не влізе в ліміт мережі", () => {
+  const over = publishPlanLine(publishPlan({ threads: { on: true }, manual_adapt: true, native: "threads" }, "x".repeat(612)));
+  assert.match(over, /Threads - дослівно \(612\/500\) ⚠️/);
+  // авто-упаковка сама вкладеться в ліміт - лякати нема чим
+  assert.doesNotMatch(publishPlanLine(publishPlan({ threads: { on: true } }, "x".repeat(612))), /⚠️/);
+  // для Facebook 2000 - рекомендація, а не стіна
+  assert.doesNotMatch(publishPlanLine(publishPlan({ facebook: { on: true }, manual_adapt: true, native: "facebook" }, "x".repeat(2500))), /⚠️/);
+  assert.match(publishPlanLine(publishPlan({ facebook: { on: true } }, "abc")), /спакується моделлю кабінету/);
+});

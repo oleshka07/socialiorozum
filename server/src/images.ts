@@ -1,7 +1,8 @@
-// Генерація зображень для постів. Перемикач провайдерів (per-workspace): openai | fal | gemini.
+// Генерація зображень для постів. Перемикач провайдерів (per-workspace): openai | fal | gemini | cloudflare.
 //  - openai: gpt-image-1 (quality=low) — реюзає OPENAI_API_KEY
-//  - fal:    FLUX.1 [schnell] через fal.ai — найдешевше (FAL_KEY)
+//  - fal:    FLUX.1 [schnell] через fal.ai — найдешевше з платних (FAL_KEY)
 //  - gemini: Gemini 2.5 Flash Image «Nano Banana» (GEMINI_API_KEY)
+//  - cloudflare: FLUX.2 [klein] через Workers AI — ~100 на день БЕЗКОШТОВНО (CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN)
 import sharp from "sharp";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -9,12 +10,15 @@ import { env } from "./env.js";
 import { q, one } from "./db.js";
 import { saveMedia, MEDIA_DIR, deleteMediaFile } from "./media.js";
 import { chat, extractJsonArray } from "./openrouter.js";
-import { assertSpend, noteSpend } from "./spend.js";
+import { assertSpend, assertRate, noteSpend } from "./spend.js";
+import { logEvent } from "./log.js";
 
-export type ImgProvider = "openai" | "fal" | "gemini";
+export type ImgProvider = "openai" | "fal" | "gemini" | "cloudflare";
 export type Aspect = "1:1" | "4:5" | "16:9";
 type Img = { buffer: Buffer; mime: string };
-const COSTS: Record<ImgProvider, number> = { openai: 0.011, fal: 0.003, gemini: 0.039 };
+// cloudflare = 0: у межах безкоштовного денного ліміту рахунку немає, а понад нього Free-план просто
+// відмовляє (не списує), тож у стелю витрат кабінету тут іде нуль
+const COSTS: Record<ImgProvider, number> = { openai: 0.011, fal: 0.003, gemini: 0.039, cloudflare: 0 };
 
 function normAspect(a?: string): Aspect { return a === "4:5" || a === "16:9" ? a : "1:1"; }
 // цільові пропорції картинки для sharp-оверлея (ширина×висота у пікселях базового полотна)
@@ -25,7 +29,8 @@ const OPENAI_SIZE: Record<Aspect, string> = { "1:1": "1024x1024", "4:5": "1024x1
 const FAL_SIZE: Record<Aspect, string> = { "1:1": "square_hd", "4:5": "portrait_4_3", "16:9": "landscape_16_9" };
 
 export function imageProviders(): Record<ImgProvider, boolean> {
-  return { openai: !!env.openai.apiKey, fal: !!env.fal.apiKey, gemini: !!env.gemini.apiKey };
+  return { openai: !!env.openai.apiKey, fal: !!env.fal.apiKey, gemini: !!env.gemini.apiKey,
+           cloudflare: !!(env.cloudflare.accountId && env.cloudflare.apiToken) };
 }
 
 // Скільки коштує ОДНЕ зображення в кожного з наших провайдерів - щоб рішення «міняти чи ні»
@@ -35,6 +40,7 @@ const IMG_LABELS: Record<ImgProvider, { label: string; note: string }> = {
   openai: { label: "OpenAI gpt-image-1", note: "quality=low; найкраще тримає текст і композицію" },
   fal: { label: "FLUX.1 schnell (fal.ai)", note: "найдешевше і найшвидше; деталі слабші" },
   gemini: { label: "Gemini 2.5 Flash Image (Nano Banana)", note: "сильний у фотореалізмі й правках за описом" },
+  cloudflare: { label: "Cloudflare Workers AI (FLUX.2 klein)", note: "безкоштовно ~100 зображень на день (Free-план Cloudflare); понад ліміт - до наступної доби" },
 };
 export function imageCosts(): { id: string; label: string; note: string; usd: number; available: boolean }[] {
   const avail = imageProviders();
@@ -49,6 +55,16 @@ export function imageCosts(): { id: string; label: string; note: string; usd: nu
 export function humanImageError(provider: ImgProvider, status: number, body: string): string {
   const name = IMG_LABELS[provider]?.label || provider;
   const b = String(body || "");
+  if (provider === "cloudflare") {
+    // 4006: безкоштовний денний ліміт. Це НЕ «поповни рахунок»: на Free-плані платити нема куди,
+    // ліміт просто оновиться наступної доби
+    if (/\b4006\b|daily free allocation|neurons/i.test(b))
+      return "Безкоштовний денний ліміт Cloudflare (~100 зображень) на сьогодні вичерпано. Він оновиться вночі (00:00 UTC); до того обери інший провайдер у Бренд → Візуал.";
+    if (/\b7003\b|could not route|object identifier/i.test(b))
+      return "Cloudflare не знайшов акаунт: перевір Account ID у Налаштування → Профіль → Ключі провайдерів.";
+    if (status === 401 || status === 403 || /\b10000\b|authentication error/i.test(b))
+      return "Cloudflare не прийняв токен: потрібен API Token із правами Workers AI (Read і Edit). Перевір його в Налаштування → Профіль → Ключі провайдерів.";
+  }
   // «locked» лише цілим словом: інакше «moderation_blocked» (відмова за безпекою) читався б як «нема грошей»
   if (/\blocked\b|top_?up|balance|insufficient|billing|quota|exhausted|credits?\b|depleted|payment/i.test(b))
     return `На рахунку ${name} скінчились кошти або квота: провайдер не приймає запити до поповнення. Поповни рахунок у провайдера або обери інший у Бренд → Візуал.`;
@@ -103,24 +119,126 @@ async function genGemini(prompt: string): Promise<Img> {
   return { buffer: Buffer.from(inline.data, "base64"), mime: inline.mimeType || inline.mime_type || "image/png" };
 }
 
+// ---- ☁️ Cloudflare Workers AI ----
+// Основна модель - FLUX.2 [klein] 4B: свіжа (2026), одразу малює потрібну пропорцію (4:5 без
+// обрізання), запит multipart. Запасна - FLUX.1 [schnell]: старша, лише квадрат 1024 (обрізаємо під
+// формат), запит JSON. Формати взято з офіційних схем моделей у репозиторії cloudflare-docs.
+export const CF_KLEIN = "@cf/black-forest-labs/flux-2-klein-4b";
+export const CF_SCHNELL = "@cf/black-forest-labs/flux-1-schnell";
+// Розміри для klein: кратні 16 (вимога моделі) і не більше 2×2 плиток 512×512 - так кадр коштує
+// ~$0.0012 (~104 «нейрони»), і безкоштовних 10 000 на добу вистачає приблизно на 100 зображень.
+export const CF_KLEIN_SIZE: Record<Aspect, { w: number; h: number }> = {
+  "1:1": { w: 1024, h: 1024 }, "4:5": { w: 768, h: 960 }, "16:9": { w: 1024, h: 576 },
+};
+
+export function cfUrl(model: string): string {
+  return `${env.cloudflare.apiBase}/accounts/${encodeURIComponent(env.cloudflare.accountId)}/ai/run/${model}`;
+}
+
+// Конверт Workers AI: {result:{image:<base64>}, success, errors:[{code,message}]}; помилка - у ньому ж.
+export function cfImageB64(j: any): string | null {
+  const img = j?.result?.image ?? j?.image;
+  return typeof img === "string" && img.length > 100 ? img : null;
+}
+
+// Ліміт, ключ і акаунт однакові для обох моделей - з такими відмовами на запасну йти марно.
+export function cfShouldFallback(status: number, body: string): boolean {
+  if (status === 401 || status === 403) return false;
+  return !/\b4006\b|daily free allocation|neurons|\b10000\b|authentication error|\b7003\b|could not route|object identifier/i.test(body);
+}
+
+export function sniffImageMime(buf: Buffer): string {
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e) return "image/png";
+  if (buf.subarray(0, 4).toString("latin1") === "RIFF" && buf.subarray(8, 12).toString("latin1") === "WEBP") return "image/webp";
+  return "image/jpeg";
+}
+
+type CfRes = { ok: true; b64: string; model: string } | { ok: false; status: number; text: string; model: string };
+
+async function cfGenerate(model: string, prompt: string, aspect: Aspect): Promise<CfRes> {
+  const headers: Record<string, string> = { Authorization: `Bearer ${env.cloudflare.apiToken}` };
+  let body: string | FormData;
+  if (model === CF_SCHNELL) {
+    // схема schnell: лише prompt (до 2048) і steps (до 8), зайве поле модель відхиляє. 4 кроки -
+    // ~58 «нейронів» на кадр: якість майже та сама, а безкоштовних кадрів удвічі більше, ніж на 8
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify({ prompt: prompt.slice(0, 2048), steps: 4 });
+  } else {
+    // FLUX.2 приймає multipart; boundary у заголовок ставить сам fetch
+    const d = CF_KLEIN_SIZE[aspect];
+    body = new FormData();
+    body.append("prompt", prompt.slice(0, 2048));
+    body.append("width", String(d.w));
+    body.append("height", String(d.h));
+  }
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 90_000);
+  try {
+    const r = await fetch(cfUrl(model), { method: "POST", headers, body, signal: ctl.signal });
+    const text = await r.text();
+    let j: any = null;
+    try { j = JSON.parse(text); } catch { /* не JSON - віддамо текст як є */ }
+    const b64 = r.ok ? cfImageB64(j) : null;
+    if (b64) return { ok: true, b64, model };
+    return { ok: false, status: r.ok ? 502 : r.status, text: r.ok ? `немає зображення у відповіді: ${text.slice(0, 200)}` : text.slice(0, 600), model };
+  } catch (e: any) {
+    return { ok: false, status: 504, text: e?.name === "AbortError" ? "Cloudflare не відповів за 90 секунд" : String(e?.message || e), model };
+  } finally { clearTimeout(timer); }
+}
+
+// klein відмовив НЕ через ліміт і не через ключ (модель недоступна акаунту, змінився формат, збій)
+// → той самий безкоштовний ліміт, але schnell. Памʼятаємо на 30 хв, щоб поки klein лежить, кожен
+// кадр не платив зайвим запитом і секундами очікування.
+let cfPrimaryDownUntil = 0;
+export function resetCloudflareFallback(): void { cfPrimaryDownUntil = 0; }
+
+async function genCloudflare(prompt: string, aspect: Aspect): Promise<Img> {
+  // англійська приписка: FLUX.1 читає промт англійською, а напис на картинці - найчастіший брак FLUX
+  const p = `${prompt} No text, no letters, no watermark.`;
+  const primary = env.cloudflare.imageModel || CF_KLEIN;
+  let r: CfRes;
+  if (primary !== CF_SCHNELL && Date.now() >= cfPrimaryDownUntil) {
+    r = await cfGenerate(primary, p, aspect);
+    if (!r.ok && cfShouldFallback(r.status, r.text)) {
+      cfPrimaryDownUntil = Date.now() + 30 * 60_000;
+      await logEvent("warn", "images", `Cloudflare ${primary} не спрацював (HTTP ${r.status}), беру FLUX.1 schnell: ${r.text.slice(0, 200)}`);
+      r = await cfGenerate(CF_SCHNELL, p, aspect);
+    }
+  } else r = await cfGenerate(CF_SCHNELL, p, aspect);
+  if (!r.ok) throw new Error(humanImageError("cloudflare", r.status, r.text));
+  const buffer = Buffer.from(r.b64, "base64");
+  // schnell малює лише квадрат: обрізаємо під формат, тримаючи в кадрі найцікавіше
+  if (r.model === CF_SCHNELL && aspect !== "1:1") {
+    const meta = await sharp(buffer).metadata();
+    const side = Math.min(meta.width || 1024, meta.height || 1024);
+    const [tw, th] = aspect === "4:5" ? [Math.round(side * 4 / 5), side] : [side, Math.round(side * 9 / 16)];
+    return { buffer: await sharp(buffer).resize(tw, th, { fit: "cover", position: "attention" }).jpeg({ quality: 90 }).toBuffer(), mime: "image/jpeg" };
+  }
+  return { buffer, mime: sniffImageMime(buffer) };
+}
+
 async function resolveProvider(ws: string): Promise<ImgProvider | null> {
   const row = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='image_provider'`, [ws]);
   const avail = imageProviders();
   const pref = (row?.content as ImgProvider) || "openai";
   if (avail[pref]) return pref;
-  for (const p of ["openai", "fal", "gemini"] as ImgProvider[]) if (avail[p]) return p;
+  // обраний недоступний → спершу безкоштовний, далі платні від дешевшого
+  for (const p of ["cloudflare", "fal", "openai", "gemini"] as ImgProvider[]) if (avail[p]) return p;
   return null;
 }
 
 export async function generateImage(ws: string, prompt: string, providerOverride?: ImgProvider, aspect?: Aspect): Promise<Img> {
   const avail = imageProviders();
   const p = (providerOverride && avail[providerOverride]) ? providerOverride : await resolveProvider(ws);
-  if (!p) throw new Error("Не налаштовано жодного провайдера зображень — додай ключ (OPENAI_API_KEY / FAL_KEY / GEMINI_API_KEY) у .env");
-  await assertSpend(ws);   // 💸 зображення - найдорожча одиниця ($0.04), стеля обовʼязкова
+  if (!p) throw new Error("Не налаштовано жодного провайдера зображень - адміністратор має додати ключ у Налаштування → Профіль → Ключі провайдерів.");
+  // 💸 зображення - найдорожча одиниця ($0.04), стеля обовʼязкова. Безкоштовний Cloudflare грошову
+  // стелю не зачіпає (блокувати його «вичерпаним бюджетом» було б неправдою), а частотну - так
+  if (p === "cloudflare") assertRate(ws); else await assertSpend(ws);
   const a = normAspect(aspect);
   // gemini не має параметра розміру — підказуємо пропорції в промті
   const gemPrompt = a === "1:1" ? prompt : `${prompt} Формат зображення: ${a === "4:5" ? "вертикальний 4:5" : "горизонтальний 16:9"}.`;
-  const img = p === "openai" ? await genOpenAI(prompt, a) : p === "fal" ? await genFal(prompt, a) : await genGemini(gemPrompt);
+  const img = p === "openai" ? await genOpenAI(prompt, a) : p === "fal" ? await genFal(prompt, a)
+    : p === "cloudflare" ? await genCloudflare(prompt, a) : await genGemini(gemPrompt);
   try { await q(`insert into llm_usage(workspace_id, step, model, cost) values($1,'image',$2,$3)`, [ws, p, COSTS[p] || 0]); noteSpend(ws, COSTS[p] || 0); } catch { /* облік не критичний */ }
   return img;
 }

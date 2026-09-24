@@ -1189,7 +1189,7 @@ if($('imgCostBtn')) $('imgCostBtn').onclick=async()=>{
   box.style.display=''; box.innerHTML='<div class="empty">…</div>';
   try{
     const r=await api('/pricing/media?category=image');
-    const row=(label,usd,note,ok)=>'<div class="card" style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><b>'+esc(label)+'</b><span style="color:var(--brand);font-weight:700">$'+usd.toFixed(3)+'</span></div><div class="hint">'+esc(note)+(ok===false?' · <span style="color:var(--amber)">ключ не доданий</span>':'')+'</div></div>';
+    const row=(label,usd,note,ok)=>'<div class="card" style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><b>'+esc(label)+'</b><span style="color:var(--brand);font-weight:700">'+(usd===0?'безкоштовно':'$'+usd.toFixed(3))+'</span></div><div class="hint">'+esc(note)+(ok===false?' · <span style="color:var(--amber)">ключ не доданий</span>':'')+'</div></div>';
     let h='<div style="font-weight:700;font-size:13px;margin-bottom:6px">Підключені зараз</div>';
     h+=r.ours.map(o=>row(o.label,o.usd,o.note,o.available)).join('');
     if(r.kie.length){
@@ -1643,7 +1643,7 @@ async function bulkReview(status){
 async function openImageEditor(postId, onDone){
   openPhotoTool(postId, '', (fn)=>{ if(onDone)onDone(fn); try{loadStudioPosts();}catch(e){} });
 }
-async function loadImageProvider(){ const sel=$('imgProv'); if(!sel) return; try{ const c=await api('/integrations/images'); const A=c.available||{}; const opts=[['openai','OpenAI gpt-image-1',A.openai],['fal','FLUX schnell (fal.ai)',A.fal],['gemini','Nano Banana (Gemini)',A.gemini]]; sel.innerHTML=opts.map(o=>'<option value="'+o[0]+'"'+(c.provider===o[0]?' selected':'')+(o[2]?'':' disabled')+'>'+o[1]+(o[2]?'':' - нема ключа')+'</option>').join(''); sel.onchange=async()=>{ try{ await api('/integrations/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:sel.value})}); flashSaved(); }catch(e){ flash('⚠ '+e.message); } }; }catch(e){} }
+async function loadImageProvider(){ const sel=$('imgProv'); if(!sel) return; try{ const c=await api('/integrations/images'); const A=c.available||{}; const opts=[['cloudflare','Cloudflare FLUX.2 - безкоштовно ~100/день',A.cloudflare],['openai','OpenAI gpt-image-1',A.openai],['fal','FLUX schnell (fal.ai)',A.fal],['gemini','Nano Banana (Gemini)',A.gemini]]; sel.innerHTML=opts.map(o=>'<option value="'+o[0]+'"'+(c.provider===o[0]?' selected':'')+(o[2]?'':' disabled')+'>'+o[1]+(o[2]?'':' - нема ключа')+'</option>').join(''); sel.onchange=async()=>{ try{ await api('/integrations/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:sel.value})}); flashSaved(); }catch(e){ flash('⚠ '+e.message); } }; }catch(e){} }
 // 🎙 Кому віддати перевагу в розшифровці голосових. «Авто» = Deepgram, якщо ключ є, інакше Whisper.
 // Провайдер без ключа лишається видимим, але заблокованим - інакше незрозуміло, чому вибору немає.
 async function loadSttProvider(){

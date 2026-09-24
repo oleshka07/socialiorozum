@@ -35,6 +35,15 @@ export const env = {
   gemini: {
     apiKey: process.env.GEMINI_API_KEY ?? "",    // Gemini 2.5 Flash Image (Nano Banana)
   },
+  // ☁️ Cloudflare Workers AI: ~100 зображень на день БЕЗКОШТОВНО на Free-плані (10 000 «нейронів»/добу).
+  // Потрібні обидва: Account ID (не секрет, але без нього адреса API не складається) і API Token із
+  // правами Workers AI. Модель і адресу API можна перекрити - друге лише для тестів із підробленим API.
+  cloudflare: {
+    accountId: process.env.CLOUDFLARE_ACCOUNT_ID ?? "",
+    apiToken: process.env.CLOUDFLARE_API_TOKEN ?? "",
+    imageModel: process.env.CLOUDFLARE_IMAGE_MODEL || "@cf/black-forest-labs/flux-2-klein-4b",
+    apiBase: (process.env.CLOUDFLARE_API_BASE || "https://api.cloudflare.com/client/v4").replace(/\/$/, ""),
+  },
   azure: {                                        // Azure Speech: укр. TTS для відео-рілсів (безкоштовний тариф F0)
     speechKey: process.env.AZURE_SPEECH_KEY ?? "",
     speechRegion: process.env.AZURE_SPEECH_REGION ?? "westeurope",

@@ -28,6 +28,8 @@ export const SECRET_DEFS: SecretDef[] = [
   { name: "OPENROUTER_API_KEY", label: "OpenRouter", group: "text", hint: "Запасний маршрут до всіх моделей і каталог для порівняння.", apply: (v) => { env.openrouter.apiKey = v; } },
   { name: "GEMINI_API_KEY", label: "Google Gemini", group: "text", hint: "Дешеві службові кроки + зображення Nano Banana.", apply: (v) => { env.gemini.apiKey = v; } },
   { name: "FAL_KEY", label: "fal.ai (FLUX)", group: "image", hint: "Найдешевші зображення - FLUX schnell.", apply: (v) => { env.fal.apiKey = v; } },
+  { name: "CLOUDFLARE_ACCOUNT_ID", label: "Cloudflare: Account ID", group: "image", hint: "~100 зображень на день безкоштовно (FLUX.2). dash.cloudflare.com → AI → Workers AI → «Use REST API» → Account ID. Потрібен разом із токеном нижче.", apply: (v) => { env.cloudflare.accountId = v; } },
+  { name: "CLOUDFLARE_API_TOKEN", label: "Cloudflare: API Token", group: "image", hint: "Там же: «Create a Workers AI API Token» (права Workers AI - Read і Edit).", apply: (v) => { env.cloudflare.apiToken = v; } },
   { name: "KIE_API_KEY", label: "kie.ai", group: "video", hint: "AI-відео для рілсів і доступ до свіжих моделей зображень. Ключ у кабінеті kie.ai.", apply: (v) => { env.kie.apiKey = v; } },
   { name: "AZURE_SPEECH_KEY", label: "Azure Speech", group: "video", hint: "Українська озвучка рілсів. Безкоштовного тарифу F0 вистачає.", apply: (v) => { env.azure.speechKey = v; } },
   { name: "DEEPGRAM_API_KEY", label: "Deepgram", group: "video", hint: "Розшифровка голосових у щоденник. Швидший і дешевший за Whisper; якщо не спрацює - автоматично піде Whisper.", apply: (v) => { env.deepgram.apiKey = v; } },

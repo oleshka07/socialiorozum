@@ -168,7 +168,7 @@ const API = {
   "GET /workspaces/members": { items: [{ user_id: "u1", email: "smoke@rozum.one", role: "owner" },
                                        { user_id: "u2", email: "friend@rozum.one", role: "member" }], owner: true, me: "u1" },
   "GET /integrations/mcp": { connected: true, url: "https://socialio.rozum.one/mcp/" + "a1b2c3d4".repeat(8), lastUsed: iso(-1, 10), tools: 16 },
-  "GET /integrations/images": { provider: "gemini", available: { openai: true, fal: false, gemini: true } },
+  "GET /integrations/images": { provider: "gemini", available: { openai: true, fal: false, gemini: true, cloudflare: true } },
   "GET /integrations/meta/pages": [],
   "GET /account": { email: "smoke@rozum.one", created_at: iso(-30, 8), pro: false, admin: true, media: { count: 3, bytes: 1048576 } },
   "GET /analytics/benchmarks": { networks: {}, posts: [] },
@@ -314,6 +314,7 @@ function handleApi(method, path, body) {
     const cat = /category=video/.test(path) ? "video" : "image";
     return {
       ours: cat === "image" ? [
+        { id: "cloudflare", label: "Cloudflare Workers AI (FLUX.2 klein)", note: "безкоштовно ~100 зображень на день", usd: 0, available: true },
         { id: "fal", label: "FLUX.1 schnell (fal.ai)", note: "найдешевше", usd: 0.003, available: false },
         { id: "openai", label: "OpenAI gpt-image-1", note: "тримає текст", usd: 0.011, available: true },
       ] : [],
@@ -1084,7 +1085,25 @@ const run = async () => {
     await page.click("#imgCostBtn");
     await page.waitForFunction(() => document.querySelectorAll("#imgCost .card").length >= 3, undefined, { timeout: 8000 });
     const t = await $t("#imgCost");
-    return t.includes("$0.003") && t.includes("$0.011") && t.includes("$0.020") && t.includes("kie.ai");
+    // безкоштовний провайдер - словом «безкоштовно», а не «$0.000», який читається як помилка прайсу
+    return t.includes("$0.003") && t.includes("$0.011") && t.includes("$0.020") && t.includes("kie.ai")
+      && t.includes("безкоштовно") && !t.includes("$0.000");
+  });
+
+  await check("cfProvider", async () => {
+    // ☁️ Cloudflare - перший у списку (безкоштовний) і доступний, коли обидва ключі є; вибір
+    // реально їде на сервер
+    await page.evaluate(() => { selectView("brand"); setBTab("visual"); return loadImageProvider(); });
+    await page.waitForFunction(() => { const s = document.getElementById("imgProv"); return s && s.options.length === 4; }, undefined, { timeout: 8000 });
+    const o = await page.$eval("#imgProv", (s) => ({ first: s.options[0].value, text: s.options[0].textContent, dis: s.options[0].disabled, fal: s.options[2].textContent }));
+    const sent = await page.evaluate(() => new Promise((resolve) => {
+      const was = window.fetch;
+      window.fetch = (u, init) => { if (String(u).includes("/integrations/images") && init && init.method === "POST") { window.fetch = was; resolve(init.body); } return was(u, init); };
+      const s = document.getElementById("imgProv"); s.value = "cloudflare"; s.dispatchEvent(new Event("change"));
+      setTimeout(() => { window.fetch = was; resolve(null); }, 3000);
+    }));
+    return o.first === "cloudflare" && o.text.includes("безкоштовно") && !o.dis && o.fal.includes("нема ключа")
+      && String(sent).includes('"cloudflare"');
   });
 
   await check("reelVisual", async () => {
