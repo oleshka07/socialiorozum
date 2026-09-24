@@ -234,6 +234,25 @@ function mergeNets(channels: any, nets: string[]): Record<string, any> {
   return cur;
 }
 
+/**
+ * Мережі поста, текст якого написав Claude. Одна мережа означає, що текст писали САМЕ під неї, тож
+ * публікація має взяти його дослівно. Без позначки publishPostToChannels бачить мережу «без своєї
+ * версії» і переписує текст моделлю кабінету: платно, з брифом, якого автор міг і не підтверджувати,
+ * і всупереч обіцянці create_draft «нічого не переписує». Позначка та сама, що ставить Lite при
+ * генерації під одну мережу (manual_adapt + native), тож обидва шляхи поводяться однаково.
+ *
+ * authoredNow: текст написано в цьому ж виклику. Коли Claude лише обирає, куди відправити ЧУЖИЙ пост
+ * (зроблений у кабінеті), позначку не ставимо: довгий майстер-текст там має спакуватись під ліміт,
+ * а не впасти на ньому. Кілька мереж = майстер-текст, і авто-упаковка під кожну лишається.
+ */
+export function authoredChannels(channels: any, nets: string[], authoredNow: boolean): Record<string, any> {
+  const cur = mergeNets(channels, nets);
+  const authored = authoredNow || typeof cur.native === "string";
+  if (authored && nets.length === 1) { cur.manual_adapt = true; cur.native = nets[0]; }
+  else if (nets.length !== 1 && typeof cur.native === "string") { delete cur.native; delete cur.manual_adapt; }
+  return cur;
+}
+
 async function sentMap(ids: string[]): Promise<Map<string, { net: string; link: string | null }[]>> {
   const out = new Map<string, { net: string; link: string | null }[]>();
   if (!ids.length) return out;
@@ -527,7 +546,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "create_draft",
     title: "Зберегти готовий пост",
-    description: "ГОЛОВНИЙ інструмент: зберегти в кабінет текст, який ти написав САМ. Нічого не переписує і не витрачає AI-кредитів socialio. Перед цим візьми brand_voice, щоб писати в голосі бренду. Далі пост можна опублікувати (publish_post) або запланувати (schedule_post).",
+    description: "ГОЛОВНИЙ інструмент: зберегти в кабінет текст, який ти написав САМ. Нічого не переписує і не витрачає AI-кредитів socialio. Перед цим візьми brand_voice, щоб писати в голосі бренду. Одна мережа на пост - текст опублікується дослівно, тож пиши одразу під неї й тримай її ліміт (Threads 500 символів). Кілька мереж - це майстер-текст, який при публікації спакується під кожну (платний виклик). Далі пост можна опублікувати (publish_post) або запланувати (schedule_post).",
     properties: {
       text: S("Готовий текст поста."),
       channels: NETS_ARG,
@@ -551,7 +570,7 @@ export const TOOLS: ToolDef[] = [
       const post = await one<{ id: string }>(
         `insert into post(run_id, stage, content, channels, rubric, format, intent, review)
          values($1,'final',$2,$3,$4,$5,$6,$7) returning id`,
-        [run!.id, text, JSON.stringify(Object.fromEntries(nets.map((n) => [n, { on: true }]))),
+        [run!.id, text, JSON.stringify(authoredChannels({}, nets, true)),
          str(a.rubric, 60) || null, normFormat(a.format),
          ["awareness", "nurture", "sale"].includes(String(a.intent)) ? String(a.intent) : null,
          a.approve === true ? "approved" : null]);
@@ -580,10 +599,17 @@ export const TOOLS: ToolDef[] = [
       const p = await findPost(ws, a.id);
       const done: string[] = [];
       const text = str(a.text, 20000);
-      if (text) { await q(`update post set content=$2 where id=$1`, [p.id, text]); done.push("текст оновлено"); }
+      if (text) {
+        await q(`update post set content=$2 where id=$1`, [p.id, text]);
+        done.push("текст оновлено");
+        // Текст щойно написав Claude: якщо мережа одна, він має піти дослівно (див. authoredChannels).
+        // Це ж і доліковує чернетки, збережені до появи позначки, - досить переслати їхній текст.
+        if (a.channels === undefined)
+          await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(authoredChannels(p.channels, enabledNets(p.channels), true))]);
+      }
       if (a.channels !== undefined) {
         const nets = pickNets(a.channels);
-        await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(mergeNets(p.channels, nets))]);
+        await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(authoredChannels(p.channels, nets, !!text))]);
         done.push(nets.length ? `мережі: ${netList(nets)}` : "мережі знято");
       }
       const rubric = str(a.rubric, 60);
@@ -638,7 +664,7 @@ export const TOOLS: ToolDef[] = [
       const p = await findPost(ws, a.id);
       const connected = await connectedNets(ws);
       let nets = pickNets(a.channels);
-      if (nets.length) await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(mergeNets(p.channels, nets))]);
+      if (nets.length) await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(authoredChannels(p.channels, nets, false))]);
       else nets = enabledNets(p.channels);
       if (!nets.length)
         throw new ToolError(`Не обрано жодної мережі. Підключені в кабінеті: ${connected.length ? netList(connected) : "жодної - спершу підключи канал у Налаштуваннях"}.`);
@@ -680,7 +706,7 @@ export const TOOLS: ToolDef[] = [
       if (!at) throw new ToolError("Не зрозумів дату. Приклади: «2026-09-14 09:00», «завтра 18:30» (час обовʼязково через двокрапку).");
       if (at.getTime() < Date.now() - 60_000) throw new ToolError(`Цей час уже минув (${fmtWhen(at, tz)}). Обери майбутній.`);
       const nets = pickNets(a.channels);
-      if (nets.length) await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(mergeNets(p.channels, nets))]);
+      if (nets.length) await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(authoredChannels(p.channels, nets, false))]);
       const on = nets.length ? nets : enabledNets(p.channels);
       if (!on.length) throw new ToolError("Спершу обери мережі (channels) - інакше автопостеру нема куди публікувати.");
       // переносимо наявний слот замість другого INSERT - інакше пост вийшов би двічі

@@ -154,3 +154,46 @@ test("handleBody: батч повертає масив, самі нотифік�
   assert.deepEqual(many.map((m) => m.id), [1, 2]);
   assert.equal(await handleBody(CTX, [{ jsonrpc: "2.0", method: "notifications/cancelled" }]), null);
 });
+
+// ---- authoredChannels: текст, який написав Claude, публікується дослівно ----
+// Без позначки publishPostToChannels бачить мережу «без своєї версії» і переписує текст моделлю
+// кабінету перед відправкою - платно й з брифом, якого автор міг не підтверджувати. Тихо: жодної
+// помилки, просто в Threads виходить не той текст, який людина затвердила.
+import { authoredChannels } from "../dist/mcp.js";
+
+test("authoredChannels: одна мережа від автора - дослівно (та сама позначка, що в Lite)", () => {
+  assert.deepEqual(authoredChannels({}, ["threads"], true), { threads: { on: true }, manual_adapt: true, native: "threads" });
+});
+
+test("authoredChannels: кілька мереж - майстер-текст, авто-упаковка лишається", () => {
+  const c = authoredChannels({}, ["threads", "facebook"], true);
+  assert.equal(c.manual_adapt, undefined);
+  assert.equal(c.native, undefined);
+  assert.equal(c.threads.on, true);
+  assert.equal(c.facebook.on, true);
+});
+
+test("authoredChannels: чужий пост із кабінету, лише відправлений в одну мережу, НЕ позначається", () => {
+  // інакше довгий майстер-текст не спакувався б під ліміт Threads, а впав би на ньому
+  const c = authoredChannels({ facebook: { on: true } }, ["threads"], false);
+  assert.equal(c.manual_adapt, undefined);
+  assert.equal(c.native, undefined);
+});
+
+test("authoredChannels: авторський пост, перенесений в іншу мережу, лишається авторським", () => {
+  const c = authoredChannels({ threads: { on: true }, manual_adapt: true, native: "threads" }, ["facebook"], false);
+  assert.equal(c.native, "facebook");
+  assert.equal(c.manual_adapt, true);
+  assert.equal(c.threads.on, false);
+});
+
+test("authoredChannels: авторський пост, розширений на кілька мереж, стає майстер-текстом", () => {
+  const c = authoredChannels({ threads: { on: true, text: "своя версія" }, manual_adapt: true, native: "threads" }, ["threads", "facebook"], false);
+  assert.equal(c.native, undefined);
+  assert.equal(c.manual_adapt, undefined);
+  assert.equal(c.threads.text, "своя версія");   // уже адаптовані тексти не затираються
+});
+
+test("authoredChannels: стара чернетка без позначки доліковується, коли Claude пересилає текст", () => {
+  assert.equal(authoredChannels({ threads: { on: true } }, ["threads"], true).manual_adapt, true);
+});
