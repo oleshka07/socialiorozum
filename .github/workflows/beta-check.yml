@@ -1,8 +1,7 @@
 name: beta-check
 
-# Разовий smoke-check бета-стека (запуск: push у гілку beta-check).
-# Перевіряє БЕЗ виводу секретів: наявність ключів у контейнері (лише довжини),
-# ffmpeg+шрифти в образі, живий виклик Azure TTS (укр.), Pexels і Google News RSS (резолвер джерел).
+# Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ з бази, без секретів:
+# журнал підключення Threads з обох стеків + структура кабінетів двох акаунтів (пошти замасковано).
 
 on:
   push:
@@ -13,86 +12,43 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Smoke-check BETA stack
+      - name: Threads connect log + cabinets (prod + beta, read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 9m
+          command_timeout: 3m
           script: |
-            set -e
-            cd "${{ secrets.APP_DIR }}-beta/server"
-            echo "== образ: ffmpeg + шрифти =="
-            docker compose exec -T app ffmpeg -version 2>/dev/null | head -1 || echo "FFMPEG MISSING ❌ (образ ще старий? перезапусти deploy-beta)"
-            echo "dejavu fonts: $(docker compose exec -T app fc-list 2>/dev/null | grep -ci dejavu || echo 0)"
-            echo "== ключі та живі виклики =="
-            docker compose exec -T app node - <<'NODE'
-            const k=process.env.AZURE_SPEECH_KEY, r=process.env.AZURE_SPEECH_REGION||"westeurope", p=process.env.PEXELS_API_KEY;
-            console.log("AZURE key len:", (k||"").length, "| region:", r, "| PEXELS key len:", (p||"").length);
-            console.log("LINKEDIN id len:", (process.env.LINKEDIN_CLIENT_ID||"").length, "| secret len:", (process.env.LINKEDIN_CLIENT_SECRET||"").length, (process.env.LINKEDIN_CLIENT_ID&&process.env.LINKEDIN_CLIENT_SECRET)?"OK (кнопка «Підключити» активна)":"MISSING");
-            const ssml="<speak version='1.0' xml:lang='uk-UA'><voice name='uk-UA-PolinaNeural'>Привіт! Це перевірка українського голосу.</voice></speak>";
-            (async()=>{
-              if(k){ try{
-                const res=await fetch(`https://${r}.tts.speech.microsoft.com/cognitiveservices/v1`,{method:"POST",headers:{"Ocp-Apim-Subscription-Key":k,"Content-Type":"application/ssml+xml","X-Microsoft-OutputFormat":"audio-24khz-96kbitrate-mono-mp3","User-Agent":"socialio-check"},body:ssml});
-                const b=Buffer.from(await res.arrayBuffer());
-                console.log("AZURE_TTS:", res.status, b.length+" bytes", (res.status===200&&b.length>1000)?"OK":"FAIL "+b.toString().slice(0,150));
-              }catch(e){ console.log("AZURE_TTS: ERR", e.message); } } else console.log("AZURE_TTS: KEY MISSING");
-              if(p){ try{
-                const res=await fetch("https://api.pexels.com/videos/search?query=city&orientation=portrait&per_page=1",{headers:{Authorization:p}});
-                const j=await res.json().catch(()=>({}));
-                console.log("PEXELS:", res.status, (j.videos&&j.videos.length)?"OK":"EMPTY/FAIL");
-              }catch(e){ console.log("PEXELS: ERR", e.message); } } else console.log("PEXELS: key not set (фолбек = картинка поста)");
-              // резолвер джерел: живий Google News RSS з сервера (укр. тема) через компільований rss-resolver
-              try{
-                const { resolveSource } = await import("/app/dist/rss-resolver.js").catch(()=>import("./dist/rss-resolver.js"));
-                const rr=await resolveSource("news","готельний бізнес","uk");
-                console.log("GNEWS_RESOLVE:", rr.preview.length+" items", "title:", JSON.stringify(rr.title).slice(0,80), rr.preview.length?"OK":"FAIL");
-                console.log("GNEWS first:", JSON.stringify(rr.preview[0]&&rr.preview[0].title).slice(0,100));
-                // догрузка тексту статті за лінком першого айтема (для «тонких» фідів)
-                try{
-                  const { fetchArticleText, resolveGoogleNewsUrl } = await import("/app/dist/rss.js").catch(()=>import("./dist/rss.js"));
-                  const real=await resolveGoogleNewsUrl(rr.preview[0].link);
-                  console.log("GNEWS_DECODE:", real?("OK "+real.slice(0,120)):"FAIL(consent/формат)");
-                  if(real){ const pr=await fetch(real,{headers:{"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0","Accept":"text/html"},redirect:"follow"}).catch(e=>({status:"ERR "+e.message}));
-                    const ph=pr.text?await pr.text():""; console.log("PUBLISHER_FETCH:", pr.status, (ph||"").length+" bytes", "p-tags:", ((ph||"").match(/<p[\s>]/gi)||[]).length); }
-                  const t=await fetchArticleText(rr.preview[0].link);
-                  console.log("ARTICLE_TEXT:", t.length+" chars", t.length>200?"OK":"THIN(фолбек=заголовок)", JSON.stringify(t.slice(0,90)));
-                }catch(e){ console.log("ARTICLE_TEXT: ERR", e.message); }
-                // Telegram-джерело через RSSHub у compose (публічний канал)
-                try{
-                  const tg=await resolveSource("telegram","@telegram");
-                  console.log("RSSHUB_TG:", tg.preview.length+" items", "title:", JSON.stringify(tg.title).slice(0,60), tg.preview.length?"OK":"FAIL");
-                }catch(e){ console.log("RSSHUB_TG: ERR", e.message, "(контейнер rsshub піднявся? docker compose ps)"); }
-                // Threads-профіль через RSSHub (публічний акаунт zuck)
-                try{
-                  const th=await resolveSource("threads","@zuck");
-                  console.log("RSSHUB_THREADS:", th.preview.length+" items", "title:", JSON.stringify(th.title).slice(0,60), th.preview.length?"OK":"FAIL");
-                }catch(e){ console.log("RSSHUB_THREADS: ERR", e.message); }
-              }catch(e){ console.log("GNEWS_RESOLVE: ERR", e.message); }
-            })();
-            NODE
-            echo "== rsshub контейнер =="
-            docker compose ps rsshub 2>/dev/null | tail -1 || echo "rsshub: контейнера ще нема (старий compose?)"
-            free -h | head -2
-            echo "== chromium напряму (діагностика запуску) =="
-            docker compose exec -T app sh -c '/usr/bin/chromium-browser --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --dump-dom about:blank 2>&1 | head -4; echo "chromium exit: $?"'
-            echo "== Motion-рендер (Remotion): бандл + короткий тестовий рендер у контейнері =="
-            docker compose exec -T app node - <<'RMNODE'
-            (async () => {
-              try {
-                const m = await import('./dist/remotion-render.js');
-                const t0 = Date.now();
-                await m.renderReelRemotion({ segments: [{ text: 'Тест Motion-рендера', dur: 2, label: 'ХУК' }], accent: '#F6C444' }, '/tmp/rm-test.mp4');
-                console.log('REMOTION: OK', Math.round((Date.now() - t0) / 1000) + 's');
-              } catch (e) { console.log('REMOTION: ERR', String(e.stack || e.message).slice(0, 1600)); }
-              process.exit(0);
-            })();
-            RMNODE
-            echo "== диск: скільки вільно + скільки їдять медіа =="
-            df -h / | tail -1
-            for d in /opt/socialio /opt/socialio-beta; do
-              v=$(docker volume ls -q | grep -E "$(basename $d).*media" | head -1)
-              [ -n "$v" ] && echo "$d media: $(docker run --rm -v $v:/m alpine du -sh /m 2>/dev/null | cut -f1)" || echo "$d media: том не знайдено"
+            for d in "${{ secrets.APP_DIR }}" "${{ secrets.APP_DIR }}-beta"; do
+            echo "=================== $d ==================="
+            cd "$d/server" || continue
+            docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off' <<'SQL'
+            \echo '--- threads: журнал за 21 день (новіші зверху) ---'
+            select to_char(l.created_at at time zone 'Europe/Kyiv','DD.MM HH24:MI:SS') as t, l.level,
+                   left(regexp_replace(regexp_replace(l.message,'\s+',' ','g'),'([A-Za-z0-9._%+-]{1,4})[A-Za-z0-9._%+-]*@','\1***@','g'),420) as message,
+                   left(coalesce(l.meta::text,''),260) as meta,
+                   coalesce(left(u.email,4)||'***@'||split_part(u.email,'@',2),'-') as who
+              from app_log l left join app_user u on u.id = l.user_id
+             where l.scope = 'threads' and l.created_at > now() - interval '21 days'
+             order by l.created_at desc limit 80;
+            \echo '--- кабінети двох акаунтів ---'
+            select left(u.email,4)||'***' as who, u.created_at::date as reg, (u.deleted_at is not null) as deleted,
+                   left(w.id::text,8) as ws, split_part(w.name,':',1) as kind, coalesce(w.title,'') as title, m.role,
+                   (u.workspace_id = w.id) as home,
+                   (select count(*) from workspace_member x where x.workspace_id = w.id) as members,
+                   exists(select 1 from threads_config t where t.workspace_id = w.id) as threads,
+                   w.created_at::date as ws_created
+              from app_user u join workspace_member m on m.user_id = u.id join workspace w on w.id = m.workspace_id
+             where u.email like 'konstantin%' or u.email like 'o.stepeniev%'
+             order by u.email, m.role desc;
+            \echo '--- акаунт/кабінети: події за 21 день ---'
+            select to_char(l.created_at at time zone 'Europe/Kyiv','DD.MM HH24:MI') as t, l.level, l.scope,
+                   left(regexp_replace(l.message,'([A-Za-z0-9._%+-]{1,4})[A-Za-z0-9._%+-]*@','\1***@','g'),200) as message,
+                   coalesce(left(u.email,4)||'***','-') as who
+              from app_log l left join app_user u on u.id = l.user_id
+             where l.scope in ('account','workspace') and l.created_at > now() - interval '21 days'
+               and (u.email like 'konstantin%' or u.email like 'o.stepeniev%')
+             order by l.created_at desc limit 40;
+            SQL
             done
-            docker system df | head -5
