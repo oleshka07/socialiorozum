@@ -400,11 +400,12 @@ export async function ensureIgSafeImage(ws: string, filename: string): Promise<s
 
 // ---- Стокові фото Pexels: 2-3 варіанти під тему поста (безкоштовна альтернатива AI-генерації) ----
 export type StockPhoto = { url: string; thumb: string; photographer: string; alt: string };
-export async function stockPhotoOptions(ws: string, postText: string, aspect?: string): Promise<StockPhoto[]> {
-  if (!env.pexels.apiKey) throw new Error("Стокові фото недоступні (нема PEXELS_API_KEY)");
-  // 1 дешевий виклик: тема поста → 2-3 англ. пошукові слова (конкретні візуальні обʼєкти, не абстракції)
-  let query = "modern workspace";
-  try {
+export async function stockPhotoOptions(ws: string, postText: string, aspect?: string, givenQuery?: string): Promise<StockPhoto[]> {
+  if (!env.pexels.apiKey) throw new Error("Стокові фото недоступні: немає ключа Pexels (адміністратор додає його в Налаштування → Профіль → Ключі провайдерів)");
+  // Готовий запит (його дає Claude через конектор) - без виклику моделі, тобто безкоштовно.
+  // Інакше 1 дешевий виклик: тема поста → 2-3 англ. пошукові слова (конкретні обʼєкти, не абстракції).
+  let query = (givenQuery || "").trim().slice(0, 80) || "modern workspace";
+  if (!(givenQuery || "").trim()) try {
     const raw = await chat(env.cheapModel,
       'Підбери пошуковий запит для стокового ФОТО під пост. 2-4 АНГЛІЙСЬКІ слова: конкретні візуальні обʼєкти/сцени (не абстракції на кшталт success чи growth). Поверни ЛИШЕ валідний JSON-масив з одним рядком.',
       (postText || "").slice(0, 1500), { workspaceId: ws, step: "stock_photo_query" });

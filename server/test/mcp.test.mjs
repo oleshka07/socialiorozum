@@ -197,3 +197,36 @@ test("authoredChannels: авторський пост, розширений на
 test("authoredChannels: стара чернетка без позначки доліковується, коли Claude пересилає текст", () => {
   assert.equal(authoredChannels({ threads: { on: true } }, ["threads"], true).manual_adapt, true);
 });
+
+// ---- картинки у відповіді інструмента ----
+// Мініатюри стоку й згенерованого зображення йдуть окремими блоками MCP, щоб модель обирала
+// очима. Тиха помилка тут - зламати текстовий блок (тоді всі інструменти відповідатимуть порожньо)
+// або пропустити в content блок без даних (клієнт відкине всю відповідь).
+import { toContent } from "../dist/mcp.js";
+
+test("toContent: рядок - один текстовий блок із назвою кабінету", () => {
+  assert.deepEqual(toContent("[Кабінет: А]\n", "готово"), [{ type: "text", text: "[Кабінет: А]\nготово" }]);
+});
+
+test("toContent: картинки йдуть окремими блоками ПІСЛЯ тексту", () => {
+  const c = toContent("", { text: "варіанти", images: [{ data: "QUJD", mimeType: "image/jpeg" }, { data: "REVG", mimeType: "image/png" }] });
+  assert.equal(c.length, 3);
+  assert.equal(c[0].type, "text");
+  assert.deepEqual(c[1], { type: "image", data: "QUJD", mimeType: "image/jpeg" });
+  assert.equal(c[2].mimeType, "image/png");
+});
+
+test("toContent: блок без даних не потрапляє у відповідь, порожній текст стає «Готово.»", () => {
+  const c = toContent("", { text: "", images: [{ data: "", mimeType: "image/jpeg" }] });
+  assert.deepEqual(c, [{ type: "text", text: "Готово." }]);
+});
+
+test("нові інструменти: сток безкоштовний і лише читає, генерація прямо каже, що платна", () => {
+  const byName = Object.fromEntries(TOOLS.map((t) => [t.name, t]));
+  assert.ok(byName.find_stock_photos && byName.attach_stock_photo && byName.generate_image);
+  assert.equal(byName.find_stock_photos.readOnly, true);
+  assert.match(byName.find_stock_photos.description, /БЕЗКОШТОВНО/);
+  assert.match(byName.attach_stock_photo.description, /БЕЗКОШТОВНО/);
+  assert.match(byName.generate_image.description, /ПЛАТНО/);
+  assert.deepEqual(byName.attach_stock_photo.required, ["id", "url"]);
+});

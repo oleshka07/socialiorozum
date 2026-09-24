@@ -28,6 +28,9 @@ import { connectedNets, parseWhen, zonedToUtc } from "./tgcompose.js";
 import { publishPostToChannels, alreadySentNetworks } from "./publisher.js";
 import { generatePostsOnePass, normFormat, GOAL_LABELS } from "./pipeline.js";
 import { logEvent } from "./log.js";
+import { generateImageForPost, imageProviders, stockPhotoOptions, attachStockPhoto } from "./images.js";
+import { getThumb } from "./media.js";
+import sharp from "sharp";
 
 // ============================================================================
 // 1. ПРОТОКОЛ (чисті функції - саме вони під юнітами в test/mcp.test.mjs)
@@ -278,6 +281,11 @@ async function sentMap(ids: string[]): Promise<Map<string, { net: string; link: 
 // 5. ІНСТРУМЕНТИ
 // ============================================================================
 
+// Інструмент може віддати не лише текст, а й картинки. Вони йдуть ОКРЕМИМИ блоками MCP: так модель
+// бачить, що саме пропонує сток чи що згенерувалось, і обирає очима, а не за підписом фотографа.
+export type ToolImage = { data: string; mimeType: string };
+export type ToolOut = { text: string; images?: ToolImage[] };
+
 type ToolDef = {
   name: string;
   title: string;
@@ -285,12 +293,40 @@ type ToolDef = {
   properties: Record<string, any>;
   required?: string[];
   readOnly?: boolean;
-  run: (ws: string, a: Record<string, any>, ctx: McpCtx) => Promise<string>;
+  run: (ws: string, a: Record<string, any>, ctx: McpCtx) => Promise<string | ToolOut>;
 };
+
+/** Результат інструмента → content MCP: спершу текст (з назвою кабінету), далі картинки. */
+export function toContent(head: string, out: string | ToolOut): unknown[] {
+  const o: ToolOut = typeof out === "string" ? { text: out } : out;
+  const blocks: unknown[] = [{ type: "text", text: head + (o.text || "Готово.") }];
+  for (const im of o.images || []) if (im?.data) blocks.push({ type: "image", data: im.data, mimeType: im.mimeType || "image/jpeg" });
+  return blocks;
+}
+
+// Мініатюри для відповіді: маленькі (≤320px, JPEG), бо кожна картинка йде в контекст моделі.
+async function urlThumb(url: string): Promise<ToolImage | null> {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 10000);
+    const res = await fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(t));
+    if (!res.ok) return null;
+    const small = await sharp(Buffer.from(await res.arrayBuffer())).resize(320, 320, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 70 }).toBuffer();
+    return { data: small.toString("base64"), mimeType: "image/jpeg" };
+  } catch { return null; }
+}
+async function fileThumb(filename: string): Promise<ToolImage | null> {
+  const buf = await getThumb(filename);
+  return buf ? { data: buf.toString("base64"), mimeType: "image/jpeg" } : null;
+}
+
+const ASPECTS = ["4:5", "1:1", "16:9"];
+const aspectArg = (v: unknown): string => (ASPECTS.includes(String(v)) ? String(v) : "4:5");
 
 const S = (description: string, extra: Record<string, any> = {}) => ({ type: "string", description, ...extra });
 const N = (description: string, extra: Record<string, any> = {}) => ({ type: "integer", description, ...extra });
 const NETS_ARG = { type: "array", items: { type: "string", enum: NETS }, description: "Мережі: telegram, instagram, facebook, threads, linkedin." };
+const ASPECT_ARG = { type: "string", enum: ASPECTS, description: "Формат: 4:5 (типово - найбільше місця в стрічці, підходить усім мережам), 1:1, 16:9." };
 
 // Інструменти кабінетів свідомо БЕЗ аргументу workspace (див. WS_ARG): перемикати кабінет,
 // перебуваючи в іншому кабінеті, - це зайва плутанина на рівному місці.
@@ -623,6 +659,81 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "find_stock_photos",
+    title: "Підібрати фото зі стоку",
+    description: "БЕЗКОШТОВНО: 3 стокові фото (Pexels) під пост, із мініатюрами - щоб ти бачив, що обираєш. Передай query: 2-4 англійські слова про конкретну сцену чи обʼєкти (не абстракції на кшталт success). З query підбір нічого не коштує; без нього запит складе модель кабінету. Обране фото прикріпи через attach_stock_photo.",
+    properties: {
+      id: S("Id поста."),
+      query: S("Пошуковий запит англійською, 2-4 слова: конкретна сцена чи обʼєкти."),
+      aspect: ASPECT_ARG,
+    },
+    required: ["id"],
+    readOnly: true,
+    run: async (ws, a) => {
+      const p = await findPost(ws, a.id);
+      const aspect = aspectArg(a.aspect);
+      const photos = await stockPhotoOptions(ws, p.content, aspect, str(a.query, 80) || undefined);
+      if (!photos.length) throw new ToolError("Сток нічого не знайшов - спробуй інший query: конкретніші обʼєкти сцени.");
+      const thumbs = await Promise.all(photos.map((x) => urlThumb(x.thumb || x.url)));
+      const shown = thumbs.map((t, i) => (t ? i + 1 : 0)).filter(Boolean);
+      return {
+        text: [
+          `Фото для ${short(p.id)} (формат ${aspect}):`,
+          ...photos.map((x, i) => `${i + 1}. ${x.alt || "без опису"} · фото: ${x.photographer || "?"}\n   ${x.url}`),
+          shown.length ? `Мініатюри нижче, по черзі: ${shown.join(", ")}.` : "Мініатюри не завантажились - обирай за описом.",
+          "Обране передай в attach_stock_photo (url).",
+        ].join("\n"),
+        images: thumbs.filter((t): t is ToolImage => !!t),
+      };
+    },
+  },
+  {
+    name: "attach_stock_photo",
+    title: "Прикріпити фото зі стоку",
+    description: "БЕЗКОШТОВНО: прикріпити до поста фото, знайдене через find_stock_photos. Фото обрізається під формат (типово 4:5) і стає зображенням поста в усіх мережах. У відповіді - мініатюра того, що вийшло.",
+    properties: {
+      id: S("Id поста."),
+      url: S("url фото з find_stock_photos."),
+      aspect: ASPECT_ARG,
+    },
+    required: ["id", "url"],
+    run: async (ws, a) => {
+      const p = await findPost(ws, a.id);
+      const url = str(a.url, 500);
+      // лише Pexels: інакше інструмент став би способом змусити сервер завантажити будь-яку адресу
+      if (!/^https:\/\/images\.pexels\.com\//.test(url)) throw new ToolError("Приймаю лише url із find_stock_photos (images.pexels.com).");
+      const aspect = aspectArg(a.aspect);
+      const r = await attachStockPhoto(ws, p.id, url, aspect);
+      const thumb = await fileThumb(r.filename);
+      return { text: `${short(p.id)}: фото зі стоку прикріплено (${aspect}).`, images: thumb ? [thumb] : [] };
+    },
+  },
+  {
+    name: "generate_image",
+    title: "Згенерувати зображення (платно)",
+    description: "ПЛАТНО - витрачає AI-кредити кабінету на кожен виклик. Згенерувати зображення до поста й прикріпити його. Передай prompt англійською: конкретна сцена, обʼєкти, світло, ракурс; без людей-моделей зі стоку й без тексту (текст на зображення не накладається). Без prompt сцену візьме з першого рядка поста - зазвичай гірше. provider необовʼязковий: fal (найдешевший), gemini, openai; без нього - той, що обрано в кабінеті. У відповіді - мініатюра результату.",
+    properties: {
+      id: S("Id поста."),
+      prompt: S("Опис сцени англійською."),
+      provider: { type: "string", enum: ["openai", "fal", "gemini"], description: "Провайдер (необовʼязково)." },
+      aspect: ASPECT_ARG,
+    },
+    required: ["id"],
+    run: async (ws, a) => {
+      const p = await findPost(ws, a.id);
+      const avail = imageProviders() as Record<string, boolean>;
+      const prov = a.provider ? String(a.provider) : "";
+      if (prov && !avail[prov]) {
+        const ok = Object.keys(avail).filter((k) => avail[k]);
+        throw new ToolError(`Провайдер ${prov} зараз недоступний. ${ok.length ? `Доступні: ${ok.join(", ")}.` : "Жодного - адміністратор має додати ключ у Налаштування → Профіль → Ключі провайдерів."}`);
+      }
+      const aspect = aspectArg(a.aspect);
+      const filename = await generateImageForPost(ws, p.id, { prompt: str(a.prompt, 1200) || undefined, provider: (prov || undefined) as any, aspect });
+      const thumb = await fileThumb(filename);
+      return { text: `${short(p.id)}: зображення згенеровано й прикріплено (${aspect}${prov ? `, ${prov}` : ""}).`, images: thumb ? [thumb] : [] };
+    },
+  },
+  {
     name: "generate_posts",
     title: "Згенерувати пости (AI socialio)",
     description: "Попросити ВЛАСНИЙ AI socialio написати N постів на тему. ⚠️ Витрачає AI-кредити кабінету. Якщо можеш написати текст сам - краще create_draft: результат той самий, кредити не витрачаються.",
@@ -815,6 +926,7 @@ export const SERVER_INSTRUCTIONS = [
   "Робочий порядок: 1) brand_voice - прочитай голос бренду; 2) напиши текст САМ у цьому голосі;",
   "3) create_draft - збережи; 4) publish_post або schedule_post. Так генерація нічого не коштує власнику.",
   "generate_posts викликай лише коли тебе прямо просять «згенеруй силами socialio» - він витрачає AI-кредити кабінету.",
+  "Зображення: спершу find_stock_photos з конкретним англійським query і attach_stock_photo - це безкоштовно; generate_image платний, бери його, коли сток не підходить або коли людина просить саме генерацію.",
   "Якщо кабінетів кілька (list_workspaces), спершу переконайся, що активний саме той бренд: перемкни switch_workspace або передай workspace у виклику. Кожна відповідь називає кабінет у першому рядку - звіряйся з ним перед публікацією.",
   "Факти не вигадуй: бери їх з list_materials / get_material або питай автора.",
   "Перед публікацією показуй текст людині - опублікований пост відкликати не можна.",
@@ -833,11 +945,11 @@ export async function callTool(ctx: McpCtx, name: string, args: Record<string, a
     const target = a.workspace && !WS_TOOLS.includes(name) ? await resolveWsArg(ctx.userId, a.workspace) : null;
     const wsId = target?.id || ctx.wsId;
     if (target && !(await isMember(ctx.userId, wsId))) throw new ToolError("Немає доступу до цього кабінету.");
-    const text = await tool.run(wsId, a, ctx);
+    const out = await tool.run(wsId, a, ctx);
     // Коли кабінетів кілька, КОЖНА відповідь називає бренд. Без цього людина не побачить, що
     // модель працює не в тому кабінеті, аж поки пост не вийде не там.
     const head = ctx.wsCount > 1 && !WS_TOOLS.includes(name) ? `[Кабінет: ${target?.title || ctx.wsTitle}]\n` : "";
-    return { content: [{ type: "text", text: head + (text || "Готово.") }] };
+    return { content: toContent(head, out) };
   } catch (e: any) {
     // Помилки інструмента повертаємо В РЕЗУЛЬТАТІ (isError), а не як помилку протоколу: так модель
     // бачить причину й може виправитись сама, а клієнт не рве зʼєднання.
