@@ -43,13 +43,31 @@ export function imageCosts(): { id: string; label: string; note: string; usd: nu
   })).sort((a, b) => a.usd - b.usd);
 }
 
+// Помилка провайдера зображень - людською. Спіймано живцем: fal відповів
+// 403 {"detail":"User is locked. Reason: TOP_UP."} (на рахунку скінчились гроші), і людина бачила
+// цей JSON як є - без підказки, що робити. Невідоме лишаємо сирим: вгадувати гірше, ніж показати.
+export function humanImageError(provider: ImgProvider, status: number, body: string): string {
+  const name = IMG_LABELS[provider]?.label || provider;
+  const b = String(body || "");
+  // «locked» лише цілим словом: інакше «moderation_blocked» (відмова за безпекою) читався б як «нема грошей»
+  if (/\blocked\b|top_?up|balance|insufficient|billing|quota|exhausted|credits?\b|depleted|payment/i.test(b))
+    return `На рахунку ${name} скінчились кошти або квота: провайдер не приймає запити до поповнення. Поповни рахунок у провайдера або обери інший у Бренд → Візуал.`;
+  if (status === 401 || status === 403)
+    return `${name} не прийняв ключ (HTTP ${status}). Перевір ключ у Налаштування → Профіль → Ключі провайдерів.`;
+  if (status === 429) return `${name} просить зачекати: забагато запитів. Спробуй за хвилину.`;
+  if (/safety|moderation|content[_ ]policy|blocked|prohibited/i.test(b))
+    return `${name} відхилив опис сцени за своїми правилами безпеки. Переформулюй опис.`;
+  if (status >= 500) return `${name} тимчасово недоступний (HTTP ${status}). Спробуй за хвилину або обери інший провайдер.`;
+  return `${name} ${status}: ${b.slice(0, 200)}`;
+}
+
 async function genOpenAI(prompt: string, aspect: Aspect): Promise<Img> {
   const r = await fetch("https://api.openai.com/v1/images/generations", {
     method: "POST",
     headers: { Authorization: `Bearer ${env.openai.apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({ model: "gpt-image-1", prompt, size: OPENAI_SIZE[aspect], quality: "low", n: 1 }),
   });
-  if (!r.ok) throw new Error(`OpenAI image ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  if (!r.ok) throw new Error(humanImageError("openai", r.status, await r.text()));
   const j: any = await r.json();
   const b64 = j.data?.[0]?.b64_json;
   if (!b64) throw new Error("OpenAI: порожня відповідь");
@@ -62,7 +80,7 @@ async function genFal(prompt: string, aspect: Aspect): Promise<Img> {
     headers: { Authorization: `Key ${env.fal.apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({ prompt, image_size: FAL_SIZE[aspect], num_images: 1 }),
   });
-  if (!r.ok) throw new Error(`fal ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  if (!r.ok) throw new Error(humanImageError("fal", r.status, await r.text()));
   const j: any = await r.json();
   const im = j.images?.[0];
   if (!im?.url) throw new Error("fal: порожня відповідь");
@@ -77,7 +95,7 @@ async function genGemini(prompt: string): Promise<Img> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
   });
-  if (!r.ok) throw new Error(`Gemini image ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  if (!r.ok) throw new Error(humanImageError("gemini", r.status, await r.text()));
   const j: any = await r.json();
   const parts = j.candidates?.[0]?.content?.parts || [];
   const inline = parts.map((p: any) => p.inlineData || p.inline_data).find((x: any) => x?.data);
