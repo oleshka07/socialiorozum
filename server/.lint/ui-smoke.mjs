@@ -278,6 +278,7 @@ let tgJob = null, tgPubPolls = 0;
 
 // приймач зустрічей: адреса СТАНОВА, бо перевіряється саме перевипуск (стара адреса вмирає)
 let mtToken = "tok-aaaa1111", mtPull = false, sttProv = "auto";
+const brandDeleted = [];
 
 function handleApi(method, path, body) {
   if (path.startsWith("/tg/")) return handleTg(method, path.slice(3), body);
@@ -292,6 +293,14 @@ function handleApi(method, path, body) {
   }
   // 🎙 Вибір розшифровки голосу. Whisper навмисно БЕЗ ключа - перевірка стежить, що недоступний
   // провайдер лишається видимим, але заблокованим (інакше незрозуміло, чому вибору немає).
+  if (key === "POST /workspaces/delete") {
+    const ws = API["GET /workspaces"], it = ws.items.find((w) => w.id === body?.id);
+    const norm = (v) => String(v || "").trim().replace(/\s+/g, " ").toLowerCase();
+    if (!it) return { __status: 404, error: "Такого бренду вже немає." };
+    if (norm(body?.confirm) !== norm(it.title)) return { __status: 400, error: `Щоб підтвердити, введи назву бренду точно: «${it.title}».` };
+    ws.items = ws.items.filter((w) => w.id !== it.id); ws.active = ws.home; brandDeleted.push(it.id);
+    return { ok: true };
+  }
   if (key === "GET /integrations/stt") return { provider: sttProv, available: { deepgram: true, whisper: false } };
   if (key === "POST /integrations/stt") { sttProv = String(body?.provider || "auto"); return { ok: true }; }
   // 🤖 Дозвіл на Claude через підписку: заглушка СТАНОВА, щоб перевірка доводила «поставив →
@@ -383,7 +392,10 @@ const server = createServer((req, res) => {
       let parsed = null;
       try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
       const body = handleApi(req.method, url.slice(4), parsed);
-      res.writeHead(200, { "content-type": "application/json" });
+      // відповідь-помилка: {__status: 400, error} - щоб перевіряти й гілку відмови, а не лише успіх
+      const status = body && typeof body === "object" && body.__status ? body.__status : 200;
+      if (status !== 200) delete body.__status;
+      res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify(body === undefined ? {} : body));
     });
     return;
@@ -1038,6 +1050,25 @@ const run = async () => {
       savedLine.includes("$1.47") && savedLine.includes("21");
   });
 
+  // 🧵 Причина збою підключення мережі. Спіймано на тестері: Threads відповів «your user must be in
+  // the list of Threads testers», а кабінет показав лише «Не вдалося підключити Threads» - і людина
+  // тиснула кнопку знову. Перевіряємо ПРОВОДКУ: повідомлення з поп-апа → людський текст причини.
+  await check("oauthWhy", async () => {
+    const got = await page.evaluate(async () => {
+      const out = [], was = window.alert; window.alert = (m) => out.push(String(m));
+      const send = (d) => window.postMessage(Object.assign({ oauth: true }, d), location.origin);
+      send({ threads: "error", why: "tester" });
+      send({ threads: "error", why: "other", msg: "Threads HTTP 500" });
+      send({ meta: "error", why: "session" });
+      await new Promise((r) => setTimeout(r, 400));
+      window.alert = was; return out;
+    });
+    if (got.length !== 3) console.log("   ↳ oauthWhy:", JSON.stringify(got));
+    // msg у повідомленні - спроба підсунути свій текст: він НЕ мусить потрапити у вікно
+    return got.length === 3 && got[0].includes("тестувальник") && got[0].includes("Website permissions")
+      && got[1].includes("журнал") && !got[1].includes("Threads HTTP 500") && got[2].includes("іншому браузері");
+  });
+
   await check("adminHealth", async () => {
     // зріз стану сервісу для оператора: цифри за добу і перелік помилок мусять доїхати з /admin/health
     await page.evaluate(() => { selectView("settings"); setSTab("profile"); });
@@ -1339,6 +1370,46 @@ const run = async () => {
     // матеріал → пост іде джобою і одразу відкриває редактор із написаним текстом
     await tgPage.waitForSelector(".sheet #et", { timeout: 15000 });
     return (await tgPage.$eval(".sheet #et", (el) => el.value.length > 5));
+  });
+
+  // 🗑 Видалення бренду. Раніше в «Небезпечній зоні» була лише «Видалити акаунт», і її натиснули,
+  // щоб прибрати бренд: акаунт пішов на видалення, людину вилогінило. Тепер зона знає, де ти стоїш.
+  // Стоїть ОСТАННЬОЮ: успішне видалення перезавантажує сторінку, а стан сюїти спільний.
+  await check("brandDelete", async () => {
+    const H = "11111111-1111-1111-1111-111111111111", B = "33333333-3333-3333-3333-333333333333";
+    await page.evaluate(() => { selectView("settings"); setSTab("profile"); return loadWorkspaces(); });
+    const atHome = await page.evaluate(() => ({ box: document.getElementById("wsDelBox").style.display,
+      btn: document.getElementById("accDelete").textContent }));
+    // стаємо в бренд, яким володіємо (не домашній)
+    API["GET /workspaces"] = { items: [{ id: H, title: "Бренд А", role: "owner" }, { id: B, title: "Тест бренд", role: "owner" },
+      { id: "22222222-2222-2222-2222-222222222222", title: "Бренд Б", role: "member" }], active: B, home: H };
+    await page.evaluate(() => loadWorkspaces());
+    const inBrand = await page.evaluate(() => ({ box: document.getElementById("wsDelBox").style.display,
+      name: document.getElementById("wsDelName").textContent, btn: document.getElementById("accDelete").textContent,
+      hint: document.getElementById("accDelHint").textContent }));
+    // чужа назва - відмова, бренд на місці
+    const wrong = await page.evaluate(async () => {
+      const out = []; window.alert = (m) => out.push(String(m)); window.prompt = () => "інша назва";
+      document.getElementById("wsDelBtn").click();
+      await new Promise((r) => setTimeout(r, 500)); return out;
+    });
+    const stillThere = API["GET /workspaces"].items.some((w) => w.id === B);
+    // правильна назва (регістр і пробіли не важать) - бренд стерто, сторінка вертається в домашній
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }),
+      page.evaluate(() => { window.prompt = () => "  тест   БРЕНД "; document.getElementById("wsDelBtn").click(); }),
+    ]);
+    await page.waitForFunction(() => {
+      const e = document.getElementById("userEmail"), box = document.getElementById("wsDelBox");
+      return e && e.textContent.includes("@") && box && typeof WsHome === "string" && WsHome.length > 0;
+    }, undefined, { timeout: 20000 });
+    const after = await page.evaluate(() => document.getElementById("wsDelBox").style.display);
+    const ok = atHome.box === "none" && atHome.btn === "Видалити акаунт"
+      && inBrand.box !== "none" && inBrand.name === "«Тест бренд»" && inBrand.btn === "Видалити акаунт і всі бренди"
+      && inBrand.hint.includes("«Тест бренд»") && wrong.length === 1 && wrong[0].includes("введи назву бренду")
+      && stillThere && brandDeleted.length === 1 && brandDeleted[0] === B && after === "none";
+    if (!ok) console.log("   ↳ brandDelete:", JSON.stringify({ atHome, inBrand, wrong, stillThere, brandDeleted, after }));
+    return ok;
   });
 
   await browser.close();

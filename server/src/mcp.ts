@@ -166,7 +166,9 @@ export async function resolveToken(token: unknown): Promise<McpCtx | null> {
 // Кабінет, названий у аргументі: приймаємо id, його початок або частину назви - модель пише як
 // їй зручно, а помилитись тут дорого (пост поїхав би не в той бренд).
 async function resolveWsArg(userId: string, raw: unknown): Promise<{ id: string; title: string }> {
-  const want = String(raw ?? "").trim().toLowerCase();
+  // «#2e422005» - рівно так list_workspaces показує id, тож модель його так і передає; без зрізання
+  // решітки кабінет «не знаходився», хоча був у списку двома рядками вище
+  const want = String(raw ?? "").trim().toLowerCase().replace(/^#/, "");
   const list = await listWorkspaces(userId);
   if (!want) throw new ToolError("Вкажи кабінет. Список: list_workspaces.");
   const hit = list.filter((w) => w.id === want || w.id.startsWith(want) || w.title.toLowerCase().includes(want));

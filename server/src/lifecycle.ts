@@ -9,6 +9,7 @@ import { env } from "./env.js";
 import { MEDIA_DIR, deleteMediaFile } from "./media.js";
 import { sendInactivityWarningEmail } from "./email.js";
 import { backfillDigests } from "./memory.js";
+import { purgeWorkspace, soleOwnedBrands } from "./workspaces.js";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -16,13 +17,6 @@ const GRACE_DAYS = 14;   // soft-delete -> остаточне видалення
 const WARN_DAYS = 30;    // неактивність -> лист-попередження
 const CLEAN_DAYS = 14;   // після листа -> чистка медіа/прогонів
 const ORPHAN_MS = 24 * 3600 * 1000; // файл без рядка в БД, старший за добу
-
-// Остаточне видалення: спершу файли з диска, потім рядок workspace (каскад стирає user, сесії, усі дані).
-async function hardPurgeWorkspace(ws: string): Promise<void> {
-  const media = await q<{ filename: string }>(`select filename from media_asset where workspace_id=$1`, [ws]);
-  for (const m of media) await deleteMediaFile(m.filename);
-  await q(`delete from workspace where id=$1`, [ws]);
-}
 
 // Чистка важких даних за неактивність: медіа (файли+рядки) + джерела (каскад прогонів/постів). Акаунт лишається.
 async function purgeWorkspaceContent(ws: string): Promise<void> {
@@ -59,11 +53,18 @@ async function sweepOrphanMedia(): Promise<void> {
 
 async function tick(): Promise<void> {
   // 1) остаточне видалення soft-deleted після grace
-  const toPurge = await q<{ workspace_id: string; email: string }>(
-    `select workspace_id, email from app_user where deleted_at is not null and deleted_at < now() - ($1 || ' days')::interval`,
+  const toPurge = await q<{ id: string; workspace_id: string; email: string }>(
+    `select id, workspace_id, email from app_user where deleted_at is not null and deleted_at < now() - ($1 || ' days')::interval`,
     [String(GRACE_DAYS)]);
   for (const u of toPurge) {
-    try { await hardPurgeWorkspace(u.workspace_id); await logEvent("info", "lifecycle", `акаунт остаточно видалено: ${u.email}`); }
+    try {
+      // бренди, де людина ЄДИНИЙ власник, ідуть разом з акаунтом - інакше лишились би сиротами
+      // без господаря; домашній останнім (каскадом забирає й сам рядок app_user)
+      const brands = await soleOwnedBrands(u.id);
+      for (const b of brands) await purgeWorkspace(b);
+      await purgeWorkspace(u.workspace_id);
+      await logEvent("info", "lifecycle", `акаунт остаточно видалено: ${u.email}` + (brands.length ? ` (+ брендів: ${brands.length})` : ""));
+    }
     catch (e: any) { await logEvent("error", "lifecycle", `hard purge ${u.email}: ${e.message}`); }
   }
   // 2) попередження про неактивність (>30 днів, ще не попереджали)

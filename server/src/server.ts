@@ -55,9 +55,10 @@ import { kieCatalog, kieCredits, kieReady } from "./kie.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook, sharedBotDmWorks } from "./tgbot.js";
 import { chat } from "./openrouter.js";
 import { handleBody, wantsSse, sseEncode, resolveToken, mcpTokenFor, issueMcpToken, revokeMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
-import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember } from "./workspaces.js";
+import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember, deleteBrand } from "./workspaces.js";
 import { CLI_MODELS, cliAllowedFor, cliHealth, forgetCliAllowed, cliCooldown } from "./claudecli.js";
 import { sttChoice, sttAvailable } from "./stt.js";
+import { oauthWhy, oauthFailQuery } from "./oauthwhy.js";
 
 // ============================================================================
 // ЗМІСТ ФАЙЛУ (182 роути; шукай за банером «===== НАЗВА =====» або шляхом роуту)
@@ -366,7 +367,7 @@ app.post("/api/account/delete", async (req: any, reply) => {
   try { await sendDeletionScheduledEmail(req.user.email, `${env.appBaseUrl}/login`, 14); } catch { /* лист не критичний */ }
   await logEvent("info", "account", `акаунт заплановано до видалення: ${req.user.email}`, null, req.user.id);
   reply.clearCookie(COOKIE, { path: "/" });
-  return { ok: true, message: "Акаунт заплановано до видалення через 14 днів. Дані зникли з кабінету. Увійдіть протягом 14 днів, щоб скасувати." };
+  return { ok: true, message: "Акаунт заплановано до видалення через 14 днів. Передумаєш - просто увійди протягом цього часу, і все лишиться як було." };
 });
 
 // почати з чистого листа: стерти весь контент воркспейсу + повернути онбординг (підключення каналів лишаються)
@@ -1962,7 +1963,10 @@ app.post("/api/integrations/telegram/test", async (req: any, reply) => {
 // ===================== THREADS (Meta) =====================
 const THREADS_REDIRECT = `${env.appBaseUrl}/api/integrations/threads/callback`;
 // threads_manage_replies: читання коментарів під власними постами + відповіді на них (реплай-коуч);
-// пермішен апрувнуто в App Review - у токен потрапляє після (пере)підключення акаунта
+// у токен потрапляє після (пере)підключення акаунта.
+// ⚠️ App Review застосунку Threads ще НЕ пройдено (24.09 тестер отримав дослівно «requires the
+// threads_basic permission... your user must be in the list of Threads testers»): поки підключитись
+// може лише людина зі списку Threads Testers, а причину кабінет тепер пояснює сам (oauthwhy.ts).
 const THREADS_SCOPES = ["threads_basic", "threads_content_publish", "threads_manage_insights", "threads_manage_replies"];
 
 async function thConfig(ws: string) {
@@ -2002,9 +2006,10 @@ app.get("/api/integrations/threads/connect", async (req: any, reply) => {
 app.get("/api/integrations/threads/callback", async (req: any, reply) => {
   const code = String(req.query?.code ?? ""); const state = String(req.query?.state ?? "");
   const oerr = String(req.query?.error_description ?? req.query?.error ?? "");
-  if (oerr) { await logEvent("error", "threads", `Threads відмовив: ${oerr}`, { error: req.query?.error }, req.user.id); return reply.redirect("/app?threads=error"); }
-  if (!code) { await logEvent("error", "threads", "callback без code", { keys: Object.keys(req.query || {}) }, req.user.id); return reply.redirect("/app?threads=error"); }
-  if (!state || state !== req.cookies?.threads_state) { await logEvent("error", "threads", `state mismatch - cookie ${req.cookies?.threads_state ? "є але != state" : "ВІДСУТНІЙ"}`, null, req.user.id); return reply.redirect("/app?threads=error"); }
+  // причина їде в кабінет кодом (?why=), інакше людина бачить «не вдалося» без жодного пояснення
+  if (oerr) { await logEvent("error", "threads", `Threads відмовив: ${oerr}`, { error: req.query?.error }, req.user.id); return reply.redirect("/app?threads=error" + oauthFailQuery(oauthWhy(oerr, "provider"))); }
+  if (!code) { await logEvent("error", "threads", "callback без code", { keys: Object.keys(req.query || {}) }, req.user.id); return reply.redirect("/app?threads=error" + oauthFailQuery(oauthWhy("", "provider"))); }
+  if (!state || state !== req.cookies?.threads_state) { await logEvent("error", "threads", `state mismatch - cookie ${req.cookies?.threads_state ? "є але != state" : "ВІДСУТНІЙ"}`, null, req.user.id); return reply.redirect("/app?threads=error&why=session"); }
   reply.clearCookie("threads_state", { path: "/" });
   try {
     const short = await threads.exchangeCode(env.threads.appId, env.threads.appSecret, THREADS_REDIRECT, code);
@@ -2020,7 +2025,7 @@ app.get("/api/integrations/threads/callback", async (req: any, reply) => {
     return reply.redirect("/app?threads=ok");
   } catch (e: any) {
     await logEvent("error", "threads", "OAuth callback: " + e.message, null, req.user.id);
-    return reply.redirect("/app?threads=error");
+    return reply.redirect("/app?threads=error" + oauthFailQuery(oauthWhy(e.message)));
   }
 });
 
@@ -2204,9 +2209,9 @@ app.get("/api/integrations/meta/connect", async (req: any, reply) => {
 app.get("/api/integrations/meta/callback", async (req: any, reply) => {
   const code = String(req.query?.code ?? ""); const state = String(req.query?.state ?? "");
   const oerr = String(req.query?.error_description ?? req.query?.error ?? "");
-  if (oerr) { await logEvent("error", "meta", `Meta відмовив: ${oerr}`, { error: req.query?.error }, req.user.id); return reply.redirect("/app?meta=error"); }
-  if (!code) { await logEvent("error", "meta", "callback без code", { keys: Object.keys(req.query || {}) }, req.user.id); return reply.redirect("/app?meta=error"); }
-  if (!state || state !== req.cookies?.meta_state) { await logEvent("error", "meta", `state mismatch - cookie ${req.cookies?.meta_state ? "є але != state" : "ВІДСУТНІЙ"}`, null, req.user.id); return reply.redirect("/app?meta=error"); }
+  if (oerr) { await logEvent("error", "meta", `Meta відмовив: ${oerr}`, { error: req.query?.error }, req.user.id); return reply.redirect("/app?meta=error" + oauthFailQuery(oauthWhy(oerr, "provider"))); }
+  if (!code) { await logEvent("error", "meta", "callback без code", { keys: Object.keys(req.query || {}) }, req.user.id); return reply.redirect("/app?meta=error" + oauthFailQuery(oauthWhy("", "provider"))); }
+  if (!state || state !== req.cookies?.meta_state) { await logEvent("error", "meta", `state mismatch - cookie ${req.cookies?.meta_state ? "є але != state" : "ВІДСУТНІЙ"}`, null, req.user.id); return reply.redirect("/app?meta=error&why=session"); }
   reply.clearCookie("meta_state", { path: "/" });
   try {
     const short = await meta.exchangeCode(env.meta.appId, env.meta.appSecret, META_REDIRECT, code);
@@ -2226,7 +2231,7 @@ app.get("/api/integrations/meta/callback", async (req: any, reply) => {
     return reply.redirect("/app?meta=ok");
   } catch (e: any) {
     await logEvent("error", "meta", "OAuth callback: " + e.message, null, req.user.id);
-    return reply.redirect("/app?meta=error");
+    return reply.redirect("/app?meta=error" + oauthFailQuery(oauthWhy(e.message)));
   }
 });
 
@@ -3342,6 +3347,18 @@ app.post("/api/workspaces/switch", async (req: any, reply) => {
   if (!isUuid(id)) return reply.code(400).send({ error: "невірний кабінет" });   // гард ДО запиту: чужий формат валить uuid-колонку
   if (!(await isMember(req.user.id, id))) return reply.code(403).send({ error: "Немає доступу до цього кабінету" });
   await q(`update user_session set active_workspace_id=$2 where token=$1`, [req.cookies?.[COOKIE], id]);
+  return { ok: true };
+});
+
+// Видалити бренд (не акаунт). Раніше такої дії не було взагалі, і єдина червона кнопка в
+// «Небезпечній зоні» - «Видалити акаунт» - спрацювала саме там, де людина хотіла прибрати бренд.
+app.post("/api/workspaces/delete", async (req: any, reply) => {
+  const id = String(req.body?.id ?? "");
+  if (!isUuid(id)) return reply.code(400).send({ error: "невірний кабінет" });   // гард ДО запиту
+  const r = await deleteBrand(req.user.id, id, req.body?.confirm);
+  if (!r.ok) return reply.code(r.status).send({ error: r.error });
+  forgetCliAllowed(id);
+  await logEvent("info", "workspace", `видалено бренд: ${r.title}`, null, req.user.id);
   return { ok: true };
 });
 

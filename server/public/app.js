@@ -2934,11 +2934,33 @@ $('mediaUpload').onclick=async()=>{
 // ---------- 🏢 кабінети (бренди): перемикач у меню аватара + доступи в Профілі ----------
 // Активний кабінет живе в СЕСІЇ на сервері, тож після перемикання просто перезавантажуємо сторінку:
 // так гарантовано оновляться всі 20+ списків, а не половина, яку ми згадали б оновити руками.
-let Wss=[], WsActive='';
+let Wss=[], WsActive='', WsHome='';
 async function loadWorkspaces(){
-  try{ const r=await api('/workspaces'); Wss=r.items||[]; WsActive=r.active||''; renderWsSwitch(WsActive);
+  try{ const r=await api('/workspaces'); Wss=r.items||[]; WsActive=r.active||''; WsHome=r.home||''; renderWsSwitch(WsActive); renderDangerZone();
     const t=$('wsTitle'), cur=Wss.find(w=>w.id===WsActive); if(t&&cur&&!t.value) t.value=cur.title||''; }catch(e){}
 }
+// Небезпечна зона знає, ДЕ ти стоїш. Раніше в ній була лише «Видалити акаунт», і людина, яка хотіла
+// прибрати бренд, натиснула саме її: акаунт пішов на видалення, а її вилогінило. Тепер у бренді
+// першою стоїть «Видалити бренд», а кнопка акаунта чесно каже, що забирає з собою ВСІ бренди.
+function brandsGoingWithAccount(){ return Wss.filter(w=>w.role==='owner'); }
+function renderDangerZone(){
+  const box=$('wsDelBox'), cur=Wss.find(w=>w.id===WsActive);
+  const inBrand=!!(cur&&WsHome&&cur.id!==WsHome&&cur.role==='owner');
+  if(box){ box.style.display=inBrand?'':'none'; if(inBrand&&$('wsDelName')) $('wsDelName').textContent='«'+cur.title+'»'; }
+  const own=brandsGoingWithAccount(), hint=$('accDelHint'), btn=$('accDelete');
+  if(hint) hint.textContent='Видалення акаунта: вихід на всіх пристроях, а через 14 днів акаунт зітреться остаточно'
+    +(own.length>1?(' разом з усіма брендами, де ти власник ('+own.map(w=>'«'+w.title+'»').join(', ')+')'):'')
+    +'. Передумаєш - просто увійди протягом цього часу.';
+  if(btn) btn.textContent=own.length>1?'Видалити акаунт і всі бренди':'Видалити акаунт';
+}
+if($('wsDelBtn')) $('wsDelBtn').onclick=async()=>{
+  const cur=Wss.find(w=>w.id===WsActive); if(!cur) return;
+  const typed=prompt('Видалити бренд «'+cur.title+'» назавжди?\n\nЗітруться його матеріали, пости, календар, медіа й підключення мереж. Скасувати це не можна. Акаунт і інші бренди лишаться.\n\nЩоб підтвердити, введи назву бренду:','');
+  if(typed==null) return;
+  try{ await api('/workspaces/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:cur.id,confirm:typed})});
+    alert('Бренд «'+cur.title+'» видалено. Повертаю тебе в основний кабінет.'); location.reload(); }
+  catch(e){ alert('⚠ '+e.message); }
+};
 function renderWsSwitch(active){
   const box=$('wsSwitch'), list=$('wsList'); if(!box||!list) return;
   if(Wss.length<2){ box.style.display='none'; return; }   // один кабінет - жодного зайвого вибору
@@ -3282,7 +3304,11 @@ async function loadAdminKeys(){
 $('accPwSave').onclick=async()=>{ const m=$('accPwMsg'); m.style.color='var(--muted)'; m.textContent='…'; try{ await api('/account/password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({currentPassword:$('accCurPw').value,newPassword:$('accNewPw').value})}); $('accCurPw').value=''; $('accNewPw').value=''; m.style.color='var(--brand)'; m.textContent='пароль змінено ✓'; }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
 $('accEmailSave').onclick=async()=>{ const m=$('accEmailMsg'); m.style.color='var(--muted)'; m.textContent='…'; try{ const r=await api('/account/email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('accNewEmail').value,password:$('accEmailPw').value})}); $('accEmailPw').value=''; $('accNewEmail').value=''; m.style.color='var(--brand)'; m.textContent='email змінено ✓'; if($('userEmail'))$('userEmail').textContent=r.email; loadAccount(); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
 $('accExport').onclick=()=>{ window.location.href='/api/account/export'; };
-$('accDelete').onclick=async()=>{ const email=prompt('Видалення акаунта.\nДані одразу зникнуть з кабінету, остаточно зітруться через 14 днів (увійди, щоб скасувати).\n\nВведи свій email для підтвердження:'); if(!email) return; try{ const r=await api('/account/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmEmail:email})}); alert(r.message||'Акаунт заплановано до видалення.'); location.href='/login'; }catch(e){ alert('⚠ '+e.message); } };
+$('accDelete').onclick=async()=>{ const own=brandsGoingWithAccount(), cur=Wss.find(w=>w.id===WsActive);
+  const inBrand=!!(cur&&WsHome&&cur.id!==WsHome&&cur.role==='owner');
+  const email=prompt('Видалення АКАУНТА'+(own.length>1?' разом з усіма брендами: '+own.map(w=>'«'+w.title+'»').join(', '):'')+'.\n\n'
+    +(inBrand?'Хочеш прибрати лише бренд «'+cur.title+'»? Скасуй і натисни «🗑 Видалити бренд».\n\n':'')
+    +'Тебе вилогінить на всіх пристроях, а через 14 днів усе зітреться остаточно (увійди, щоб скасувати).\n\nВведи свій email для підтвердження:'); if(!email) return; try{ const r=await api('/account/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmEmail:email})}); alert(r.message||'Акаунт заплановано до видалення.'); location.href='/login'; }catch(e){ alert('⚠ '+e.message); } };
 $('accReset').onclick=async()=>{ const c=prompt('Це СОТРЕ весь контент: бренд, стратегію, рубрики, джерела, пости, календар, медіа - і поверне онбординг. Канали лишаться підключені.\n\nВведи RESET для підтвердження:'); if(!c) return; try{ const r=await api('/account/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:c})}); alert(r.message||'Готово.'); location.href='/app'; }catch(e){ alert('⚠ '+e.message); } };
 
 // ---------- Стратегія ----------
@@ -3425,10 +3451,28 @@ async function runOnbProgress(rid){
 }
 
 // ---------- OAuth у поп-апі (кабінет не закривається) ----------
+// Чому не підключилось - людською. Сервер шле лише код причини (src/oauthwhy.ts): до цього
+// людина бачила «Не вдалося підключити Threads» без пояснення, хоча Threads назвав причину дослівно
+// (тестер не був у списку Threads Testers) - і тиснула «Підключити» знову, бо зробити нічого не могла.
+// Тексти ФІКСОВАНІ: з адреси беремо лише код, тож чужим посиланням сюди нічого не підсунеш.
+function oauthFailText(net, why){
+  const name=net==='threads'?'Threads':'Instagram/Facebook';
+  if(why==='tester') return name+' не пустив цей акаунт: застосунок socialio ще проходить перевірку Meta, і поки підключатись можуть лише запрошені тестувальники.\n\n'
+    +'Що зробити: попроси адміністратора socialio додати тебе в тестувальники, прийми запрошення '
+    +(net==='threads'?'в Threads (Налаштування → Акаунт → Дозволи вебсайтів → Запрошення; англ. Settings → Account → Website permissions → Invites)':'(прийде сповіщення у Facebook або на developers.facebook.com)')
+    +' і підключи ще раз.';
+  if(why==='denied') return 'Підключення скасовано у вікні '+name+'. Спробуй ще раз і натисни «Дозволити».';
+  if(why==='session') return 'Підключення загубилось дорогою: вікно '+name+' відкрилось в іншому браузері чи вкладці, і повернення не впізнало твій кабінет. Спробуй ще раз у цьому ж браузері.';
+  if(why==='retry') return 'Код підключення протух, поки вікно було відкрите. Просто спробуй ще раз.';
+  return 'Не вдалося підключити '+name+'.\n\nСпробуй ще раз. Якщо повториться - напиши адміністратору socialio: причину записано в журнал сервісу.';
+}
 function connectPopup(url){ try{ const w=Math.min(620,screen.width||620), h=Math.min(740,screen.height||740); const x=Math.max(0,((screen.width||w)-w)/2), y=Math.max(0,((screen.height||h)-h)/2); const p=window.open(url,'oauth_connect','width='+w+',height='+h+',left='+x+',top='+y); if(!p) location.href=url; }catch(e){ location.href=url; } return false; }
 window.addEventListener('message',(ev)=>{ if(ev.origin!==location.origin) return; const d=ev.data||{}; if(!d.oauth) return;
-  if(d.meta!=null){ try{loadMeta();}catch(e){} try{loadChanStatus();}catch(e){} const cs=(typeof OB_STEPS!=='undefined')&&OB_STEPS[obIdx]; if($('onboarding')&&$('onboarding').style.display!=='none'&&cs&&cs.type==='connect'){ obVoiceImported=false; renderOb(); } else flash(d.meta==='ok'?'Instagram/Facebook підключено ✓':'Не вдалося підключити Instagram/Facebook.'); }
-  if(d.threads!=null){ try{loadThreads();}catch(e){} try{loadChanStatus();}catch(e){} flash(d.threads==='ok'?'Threads підключено ✓':'Не вдалося підключити Threads.'); }
+  if(d.meta!=null){ try{loadMeta();}catch(e){} try{loadChanStatus();}catch(e){} const cs=(typeof OB_STEPS!=='undefined')&&OB_STEPS[obIdx];
+    // збій пояснюємо ЗАВЖДИ, і в онбордингу теж: раніше там крок просто перемальовувався мовчки
+    if(d.meta==='error') alert(oauthFailText('meta',d.why));
+    if($('onboarding')&&$('onboarding').style.display!=='none'&&cs&&cs.type==='connect'){ obVoiceImported=false; renderOb(); } else if(d.meta!=='error') flash(d.meta==='ok'?'Instagram/Facebook підключено ✓':'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).'); }
+  if(d.threads!=null){ try{loadThreads();}catch(e){} try{loadChanStatus();}catch(e){} if(d.threads==='ok') flash('Threads підключено ✓'); else alert(oauthFailText('threads',d.why)); }
   if(d.linkedin!=null){ try{loadLinkedin();}catch(e){} try{loadChanStatus();}catch(e){} flash(d.linkedin==='ok'?'LinkedIn підключено ✓':'Не вдалося підключити LinkedIn.'); }
   if(d.youtube!=null){ try{loadYoutube();}catch(e){} try{loadChanStatus();}catch(e){} flash(d.youtube==='ok'?'YouTube підключено ✓':'Не вдалося підключити YouTube.'); }
   if(d.tiktok!=null){ try{loadTiktok();}catch(e){} try{loadChanStatus();}catch(e){} flash(d.tiktok==='ok'?'TikTok підключено ✓':'Не вдалося підключити TikTok.'); }
@@ -3630,7 +3674,7 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
 
 // ---------- init ----------
 (async()=>{
-  try{ const _q=new URLSearchParams(location.search); if(window.opener && window.opener!==window && (_q.has('meta')||_q.has('threads')||_q.has('gdrive')||_q.has('linkedin')||_q.has('youtube')||_q.has('tiktok'))){ window.opener.postMessage({oauth:true, meta:_q.get('meta'), threads:_q.get('threads'), gdrive:_q.get('gdrive'), linkedin:_q.get('linkedin'), youtube:_q.get('youtube'), tiktok:_q.get('tiktok')}, location.origin); document.body.innerHTML='<div style="padding:40px;text-align:center;font-family:sans-serif;color:#333">Готово ✓ Можна закрити це вікно.</div>'; try{window.close();}catch(e){} return; } }catch(e){}
+  try{ const _q=new URLSearchParams(location.search); if(window.opener && window.opener!==window && (_q.has('meta')||_q.has('threads')||_q.has('gdrive')||_q.has('linkedin')||_q.has('youtube')||_q.has('tiktok'))){ window.opener.postMessage({oauth:true, meta:_q.get('meta'), threads:_q.get('threads'), gdrive:_q.get('gdrive'), linkedin:_q.get('linkedin'), youtube:_q.get('youtube'), tiktok:_q.get('tiktok'), why:_q.get('why')}, location.origin); document.body.innerHTML='<div style="padding:40px;text-align:center;font-family:sans-serif;color:#333">Готово ✓ Можна закрити це вікно.</div>'; try{window.close();}catch(e){} return; } }catch(e){}
   setTheme(localStorage.getItem('kg_theme')||'light');
   // маркер БЕТИ: щоб завжди було видно, в якому середовищі ти (прод не зачіпає)
   if(location.hostname.startsWith('beta.')){ document.title='[BETA] '+document.title;
@@ -3654,8 +3698,8 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
   await loadTelegram(); loadThreads(); loadMeta(); loadLinkedin(); loadYoutube(); loadTiktok();
   const _sp=new URLSearchParams(location.search); const _thq=_sp.get('threads'), _mtq=_sp.get('meta'), _gdq=_sp.get('gdrive');
   if(_thq||_mtq||_gdq) history.replaceState(null,'',location.pathname);
-  if(_thq){ go('settings'); alert(_thq==='ok'?'Threads підключено ✓':'Не вдалося підключити Threads. Перевірте дозволи й Redirect URI у Meta.'); }
-  if(_mtq){ go('settings'); alert(_mtq==='ok'?'Facebook/Instagram підключено ✓':(_mtq==='nopage'?'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).':'Не вдалося підключити Facebook/Instagram.')); }
+  if(_thq){ go('settings'); alert(_thq==='ok'?'Threads підключено ✓':oauthFailText('threads',_sp.get('why'))); }
+  if(_mtq){ go('settings'); alert(_mtq==='ok'?'Facebook/Instagram підключено ✓':(_mtq==='nopage'?'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).':oauthFailText('meta',_sp.get('why')))); }
   if(_gdq){ go('sources'); alert(_gdq==='ok'?'Google Drive підключено ✓':'Не вдалося підключити Google Drive.'); }
   await loadPrompts();
   loadRubrics(); loadStrategy(); loadFF(); loadMcp(); loadWorkspaces(); loadWsMembers(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadSttProvider(); loadTasks(); loadStudioPosts(); loadGoalCta(); loadMagnets();

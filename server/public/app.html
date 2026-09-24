@@ -928,7 +928,7 @@
           </div>
           <div class="btnrow" style="margin-top:14px"><button id="accExport">📤 Експорт моїх даних (JSON)</button></div>
         </div>
-        <div class="panel" style="border-color:var(--danger)">
+        <div class="panel">
           <div class="ph">🏢 Кабінет і доступи</div>
           <div class="hint">Кабінет = окремий бренд зі своїм контентом, каналами й голосом. Даси доступ іншому акаунту - людина перемикатиметься між брендами в меню аватара, а її конектор Claude побачить обидва.</div>
           <div class="fld" style="margin-top:10px"><label class="fl">Назва цього кабінету (видно лише тобі й тим, кому дав доступ)</label><div style="display:flex;gap:8px"><input class="txt" id="wsTitle" placeholder="напр. Бренд А"><button class="ghost" type="button" id="wsTitleSave">Зберегти</button></div></div>
@@ -939,7 +939,11 @@
         </div>
         <div class="panel">
           <div class="ph" style="color:var(--danger)">⚠ Небезпечна зона</div>
-          <div class="hint">Видалення акаунта: дані одразу зникнуть з кабінету, остаточно зітруться через 14 днів. Передумаєш - просто увійди протягом цього часу.</div>
+          <div id="wsDelBox" style="display:none;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--line)">
+            <div class="hint">Ти зараз у бренді <b id="wsDelName"></b>. «Видалити бренд» зітре лише його: матеріали, пости, календар, медіа й підключені мережі. Акаунт і решта брендів лишаться.</div>
+            <div class="btnrow"><button class="danger" type="button" id="wsDelBtn">🗑 Видалити бренд</button></div>
+          </div>
+          <div class="hint" id="accDelHint">Видалення акаунта: вихід на всіх пристроях, а через 14 днів акаунт зітреться остаточно. Передумаєш - просто увійди протягом цього часу.</div>
           <div class="hint" style="margin-top:10px">«Почати з чистого листа» - стерти весь контент (бренд, стратегію, пости, календар, медіа) і пройти онбординг заново. Підключені канали лишаються.</div>
           <div class="btnrow"><button class="ghost" id="accReset">🔄 Почати з чистого листа</button><button class="danger" id="accDelete">Видалити акаунт</button></div>
         </div>
