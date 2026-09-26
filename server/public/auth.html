@@ -52,6 +52,8 @@ button:disabled{opacity:.5}
 .gbtn:hover{border-color:var(--brand)}
 .ordiv{text-align:center;margin:16px 0;color:var(--faint);font-size:12px}
 @media(max-width:820px){ .wrap{grid-template-columns:1fr} .left{display:none} .right{background:var(--bg)} }
+#reviewBar{position:fixed;top:0;left:0;right:0;z-index:9999;display:flex;gap:10px;align-items:flex-start;padding:8px 14px 9px;background:#15201a;color:#fff;font:500 13.5px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+#reviewBar .rv-en{flex:none;font-size:11px;font-weight:800;letter-spacing:.06em;background:#f2a007;color:#15201a;border-radius:6px;padding:2px 6px;margin-top:1px}
 </style></head>
 <body>
 <div class="wrap">
@@ -155,5 +157,17 @@ $('form').onsubmit=async(e)=>{
   }catch(err){ show('err', err.message); }
   finally{ btn.disabled=false; btn.textContent=old; }
 };
+</script>
+<script>
+// 🎬 англійський підпис для скрінкастів App Review Meta (той самий прапорець, що й у кабінеті: /app?review=en
+// або /login?review=en). Вхід у socialio - поштою й паролем; Facebook Login - пізніше, у Налаштуваннях.
+(function(){ try{
+  const q=new URLSearchParams(location.search).get('review');
+  if(q==='en') localStorage.setItem('kg_review_en','1'); if(q==='off') localStorage.removeItem('kg_review_en');
+  if(localStorage.getItem('kg_review_en')!=='1') return;
+  const b=document.createElement('div'); b.id='reviewBar'; b.lang='en';
+  b.innerHTML='<span class="rv-en">EN</span><span>socialio sign-in page: the user logs in to socialio with email and password (“Увійти” = Log in). Facebook Login is used later, only to connect the user\'s own Facebook Page and Instagram account in Settings → Channels.</span>';
+  document.body.appendChild(b); document.body.style.paddingTop=(b.offsetHeight+8)+'px';
+}catch(e){} })();
 </script>
 </body></html>

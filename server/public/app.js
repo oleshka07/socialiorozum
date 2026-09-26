@@ -4403,3 +4403,49 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
   if(runId){ try{ await refresh(); }catch(e){ runId=null; localStorage.removeItem('kg_run'); updRunLabel(); } }
   loadPublish();
 })();
+
+// ===== 🎬 English captions for Meta App Review =====
+// Meta вимагає в скрінкасті англійський інтерфейс або англійські субтитри, а кабінет - український.
+// Режим /app?review=en показує вгорі смугу англійською: що на екрані й який дозвіл тут працює. Тож
+// монтувати субтитри не треба - вони вже в кадрі, а рецензент Meta, відкривши кабінет за тим самим
+// посиланням, бачить ті самі пояснення. Вимкнути - ✕ або /app?review=off.
+const REVIEW_KEY='kg_review_en';
+const REVIEW_TXT={
+  default:'socialio: a content studio for small businesses. The user writes posts in their own brand voice and publishes them to their own Facebook Page and Instagram account.',
+  today:'Home. socialio helps a small business write posts in its own voice and publish them to its own Facebook Page and Instagram account.',
+  create:'Drafts: posts prepared for the user\'s own channels. “Редагувати” (Edit) opens the post editor, where the user reviews the text and publishes it.',
+  publish:'Calendar: approved posts are scheduled here and published at the chosen time to the user\'s own Facebook Page and Instagram account (pages_manage_posts, instagram_content_publish).',
+  brand:'Brand voice: learned from the captions of the user\'s own recent Instagram posts (instagram_basic), so new posts sound like the user.',
+  analytics:'Analytics of the user\'s own published posts: views, reach, likes, comments, shares, saves and new followers per post, plus follower counts (instagram_manage_insights, read_insights, pages_read_engagement).',
+  settings:'Settings of the user\'s workspace.',
+  tools:'Tools of the user\'s workspace.',
+  channelsOff:'Settings → Channels. “Підключити” (Connect) in the Facebook + Instagram card opens Facebook Login; the user picks which of their Pages and linked Instagram account the app may use (pages_show_list, instagram_basic).',
+  channelsOn:'Connected: the user\'s Facebook Page and linked Instagram account; the Page list shows all Pages the user manages (pages_show_list). “Дозволити коментарі” (Allow comments) requests instagram_manage_comments + pages_manage_engagement; “Дозволити статистику” (Allow statistics) requests read_insights.',
+  composer:'Post editor. Left: post text, networks (Instagram, Facebook…) and an optional first comment. Right: preview per network. “Опублікувати зараз” (Publish now) posts to the user\'s own Page (pages_manage_posts) and Instagram (instagram_content_publish), then adds the first comment (pages_manage_engagement, instagram_manage_comments).',
+  composerSent:'Published. “↗ Відкрити пост” (Open post) opens the live post; under each network the editor shows whether the first comment was posted (✓).',
+};
+function reviewWanted(){
+  const q=new URLSearchParams(location.search).get('review');
+  try{ if(q==='en') localStorage.setItem(REVIEW_KEY,'1'); if(q==='off') localStorage.removeItem(REVIEW_KEY); return localStorage.getItem(REVIEW_KEY)==='1'; }
+  catch(e){ return q==='en'; }
+}
+function reviewKey(){
+  const cmp=document.querySelector('.cmp-ov');
+  if(cmp) return /Відкрити пост/.test((cmp.querySelector('#cmpPrev')||{}).textContent||'')?'composerSent':'composer';
+  if(curView==='settings'&&sTab==='channels'){ const st=$('mtStatus'); return st&&/Підключено/.test(st.textContent)?'channelsOn':'channelsOff'; }
+  return REVIEW_TXT[curView]?curView:'default';
+}
+function startReviewCaptions(){
+  if(!reviewWanted()||$('reviewBar')) return;
+  document.documentElement.classList.add('review-on');
+  const bar=document.createElement('div'); bar.id='reviewBar'; bar.lang='en'; bar.setAttribute('role','note');
+  bar.innerHTML='<span class="rv-en">EN</span><span id="reviewTxt"></span><button id="reviewOff" title="Hide English captions" aria-label="Hide English captions">✕</button>';
+  document.body.appendChild(bar);
+  const fit=()=>document.documentElement.style.setProperty('--rvh',bar.offsetHeight+'px');
+  try{ new ResizeObserver(fit).observe(bar); }catch(e){ window.addEventListener('resize',fit); }
+  // екран міняється і кліком, і з коду (композер, вкладки, підключення) - дешевше раз на 0,6 с звірити
+  let last=''; const tick=()=>{ const k=reviewKey(); if(k!==last){ last=k; $('reviewTxt').textContent=REVIEW_TXT[k]||REVIEW_TXT.default; fit(); } };
+  tick(); const timer=setInterval(tick,600);
+  $('reviewOff').onclick=()=>{ try{ localStorage.removeItem(REVIEW_KEY); }catch(e){} clearInterval(timer); bar.remove(); document.documentElement.classList.remove('review-on'); };
+}
+startReviewCaptions();

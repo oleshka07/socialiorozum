@@ -598,6 +598,17 @@
   .owl-mini:hover{ color:var(--brand); }
   @media (max-width:700px){ #owl{ left:12px; bottom:74px } .owl-bubble{ width:210px } }
   @media (prefers-reduced-motion:reduce){ #owl,.owl-body,.owl-wl,.owl-wr,.owl-bubble{ animation:none!important; transition:none!important } }
+/* 🎬 англійські підписи для скрінкастів App Review Meta (/app?review=en): смуга вгорі відсуває
+   інтерфейс униз, а не перекриває кнопки - і в кабінеті, і в композері, і в модалках */
+#reviewBar{position:fixed;top:0;left:0;right:0;z-index:9999;display:flex;align-items:flex-start;gap:10px;padding:8px 44px 9px 14px;
+  background:#15201a;color:#fff;font:500 13.5px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;box-shadow:0 2px 10px rgba(0,0,0,.25)}
+#reviewBar .rv-en{flex:none;font-size:11px;font-weight:800;letter-spacing:.06em;background:#f2a007;color:#15201a;border-radius:6px;padding:2px 6px;margin-top:1px}
+#reviewBar #reviewOff{position:absolute;right:8px;top:6px;background:transparent;border:0;color:#fff;opacity:.7;font-size:15px;cursor:pointer;padding:2px 6px}
+html.review-on body{padding-top:var(--rvh,48px)}
+html.review-on .topnav,html.review-on .topbar,html.review-on .pagehead{top:var(--rvh,48px)}
+html.review-on .cmp-ov,html.review-on .modal{top:var(--rvh,48px)}
+/* сова говорить українською і сидить поверх кнопок - у скрінкасті для Meta вона лише заважає */
+html.review-on #owl{display:none!important}
 </style>
 <script src="https://apis.google.com/js/api.js"></script>
 </head>

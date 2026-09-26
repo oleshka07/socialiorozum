@@ -2135,6 +2135,41 @@ const run = async () => {
     return good;
   });
 
+  await check("reviewCaptions", async () => {
+    // 🎬 /app?review=en: англійська смуга вгорі міняє текст за екраном, відсуває композер (а не
+    // перекриває його кнопки) і вимикається ✕
+    await closeComposers();
+    const st = await page.evaluate(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      localStorage.setItem("kg_review_en", "1"); startReviewCaptions();
+      selectView("analytics"); await wait(800);
+      const an = document.getElementById("reviewTxt").textContent;
+      selectView("settings"); setSTab("channels"); await wait(800);
+      const ch = document.getElementById("reviewTxt").textContent;
+      const barH = document.getElementById("reviewBar").offsetHeight;
+      window.scrollTo(0, 0);
+      const owl = document.getElementById("owl");
+      return { an, ch, barH, cls: document.documentElement.classList.contains("review-on"), lang: document.getElementById("reviewBar").lang,
+        owlHidden: !owl || getComputedStyle(owl).display === "none" };
+    });
+    if (process.env.SMOKE_SHOTS) await page.screenshot({ path: join(HERE, "review-channels.png") });
+    await page.evaluate((id) => openComposer(id), P8);
+    await page.waitForSelector(".cmp-ov #cmpFc", { timeout: 6000 });
+    await page.waitForTimeout(800);
+    if (process.env.SMOKE_SHOTS) await page.screenshot({ path: join(HERE, "review-composer.png") });
+    const cmp = await page.evaluate(() => ({ txt: document.getElementById("reviewTxt").textContent,
+      top: document.querySelector(".cmp-ov").getBoundingClientRect().top, barH: document.getElementById("reviewBar").offsetHeight,
+      backVisible: (() => { const b = document.querySelector("#cmpBack").getBoundingClientRect(); const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!e && !!e.closest("#cmpBack"); })() }));
+    await closeComposers();
+    const off = await page.evaluate(() => { document.getElementById("reviewOff").click();
+      return { gone: !document.getElementById("reviewBar"), cls: document.documentElement.classList.contains("review-on"), ls: localStorage.getItem("kg_review_en") }; });
+    const good = /instagram_manage_insights/.test(st.an) && /pages_show_list/.test(st.ch) && st.cls && st.lang === "en" && st.barH > 20 && st.owlHidden
+      && /^Post editor/.test(cmp.txt) && Math.abs(cmp.top - cmp.barH) <= 1 && cmp.backVisible
+      && off.gone && !off.cls && off.ls === null;
+    if (!good) console.log("   ↳ reviewCaptions:", JSON.stringify({ st, cmp, off }));
+    return good;
+  });
+
   // 🗑 Видалення бренду. Раніше в «Небезпечній зоні» була лише «Видалити акаунт», і її натиснули,
   // щоб прибрати бренд: акаунт пішов на видалення, людину вилогінило. Тепер зона знає, де ти стоїш.
   // Стоїть ОСТАННЬОЮ: успішне видалення перезавантажує сторінку, а стан сюїти спільний.
