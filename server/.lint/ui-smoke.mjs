@@ -57,6 +57,7 @@ const P9POST = { id: P9, content: "Осінь у горах", review: "approved"
 CAR.set(P9, [{ id: "c9", filename: "p9.jpg", kind: "image" }]);
 const FC9 = { comments: [{ network: "instagram", status: "sent" }, { network: "linkedin", status: "failed", error: "LinkedIn не дав застосунку дозволу коментувати від імені профілю." }] };
 const fcSends = [];   // POST /posts/:id/first-comment/send
+const altPuts = [];   // PUT /media/:id/alt - опис фото
 const postPuts = [];  // PUT /posts/:id - що композер зберіг (текст, перший коментар)
 // заливка частинами: сервер-заглушка тримає «скільки вже прийшло» на кожен uid, як справжній
 const CHUNKS = new Map();
@@ -481,6 +482,8 @@ function handleApi(method, path, body) {
   if (method === "POST" && m) return { ok: true, channels: { telegram: { on: true, text: "TG-версія" }, threads: { on: true, text: "TH-версія" } } };
   m = /^\/posts\/([0-9a-f-]+)\/channels$/.exec(path);
   if (method === "POST" && m) { chanSaves.push({ id: m[1], channels: body && body.channels }); return { ok: true }; }
+  m = /^\/media\/([\w-]+)\/alt$/.exec(path);
+  if (method === "PUT" && m) { altPuts.push({ id: m[1], alt: body && body.alt_text }); const a = String((body && body.alt_text) || "").replace(/\s+/g, " ").trim(); return { ok: true, alt_text: a || null }; }
   m = /^\/posts\/([0-9a-f-]+)\/first-comment\/send$/.exec(path);
   if (method === "POST" && m) {
     fcSends.push(m[1]);
@@ -2087,6 +2090,42 @@ const run = async () => {
     if (!good) console.log("   ↳ fcComposer:", JSON.stringify({ st, off, back, long, put }));
     await closeComposers();
     await page.evaluate(() => { Object.assign(ChanStatus, window.__cs2); });
+    return good;
+  });
+
+  await check("igExtras", async () => {
+    // 📸 Instagram: співавтори (до 3, нормалізація, сміття названо) і шапка прев'ю «ваш_профіль і …»;
+    // ALT на фото - опис зберігається й кадр показує «ALT ✓»
+    await page.evaluate(() => { window.__cs4 = { ...ChanStatus }; ChanStatus.instagram = true; ChanStatus.linkedin = true; });
+    await closeComposers();
+    await page.evaluate((id) => openComposer(id), P8);
+    await page.waitForSelector(".cmp-ov #cmpCollab", { timeout: 6000 });
+    await page.evaluate(() => { const i = document.querySelector("#cmpCollab"); i.value = "@Partner.Glamp, friend_1 нік! a"; i.dispatchEvent(new Event("input")); });
+    const st = await page.evaluate(() => {
+      const lbl = [...document.querySelectorAll("#cmpPrev .pv-label")].find((x) => x.textContent === "Instagram");
+      let ph = lbl && lbl.nextElementSibling; while (ph && !ph.classList.contains("phone")) ph = ph.nextElementSibling;
+      return { shown: document.querySelector("#cmpIgBox").style.display !== "none", hint: document.querySelector("#cmpCollabHint").textContent,
+        head: ph ? ph.querySelector(".phone-h .phone-user").textContent.replace(/\s+/g, " ").trim() : null,
+        altBtn: (document.querySelector('#cmpMediaWrap [data-alt="c8"]') || {}).textContent || null };
+    });
+    await page.evaluate(() => { window.prompt = () => "  Три речі для походу  на столі "; document.querySelector('#cmpMediaWrap [data-alt="c8"]').click(); });
+    await page.waitForFunction(() => /ALT ✓/.test((document.querySelector('#cmpMediaWrap [data-alt="c8"]') || {}).textContent || ""), undefined, { timeout: 5000 }).catch(() => {});
+    const alt = await page.evaluate(() => { const b = document.querySelector('#cmpMediaWrap [data-alt="c8"]'); return { t: b && b.textContent, on: !!b && b.classList.contains("on"), title: b && b.title }; });
+    chanSaves.length = 0;
+    await page.evaluate(() => document.querySelector("#cmpSave").click());
+    await page.waitForFunction(() => /збережено/.test((document.querySelector(".cmp-ov #cmpMsg") || {}).textContent || ""), undefined, { timeout: 6000 }).catch(() => {});
+    const saved = chanSaves.find((x) => x.id === P8);
+    // сторіс: блоку Instagram нема (співавторів і опису сторіс не мають)
+    await page.evaluate(() => { const f = document.querySelector("#cmpFormat"); f.value = "story"; f.dispatchEvent(new Event("change")); });
+    const inStory = await page.evaluate(() => ({ box: document.querySelector("#cmpIgBox").style.display, alt: !!document.querySelector("#cmpMediaWrap [data-alt]") }));
+    const good = st.shown && /@partner\.glamp, @friend_1, @a/.test(st.hint) && /не схоже на нік: нік!/.test(st.hint) && st.head === "ваш_профіль і partner.glamp та ще 2"
+      && st.altBtn === "ALT" && alt.t === "ALT ✓" && alt.on && /Три речі для походу на столі/.test(alt.title)
+      && altPuts.length === 1 && altPuts[0].id === "c8"
+      && !!saved && JSON.stringify(saved.channels.instagram.collaborators) === JSON.stringify(["partner.glamp", "friend_1", "a"])
+      && inStory.box === "none" && !inStory.alt;
+    if (!good) console.log("   ↳ igExtras:", JSON.stringify({ st, alt, altPuts, saved: saved && saved.channels.instagram, inStory }));
+    await closeComposers();
+    await page.evaluate(() => { Object.assign(ChanStatus, window.__cs4); });
     return good;
   });
 

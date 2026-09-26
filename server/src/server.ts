@@ -50,6 +50,7 @@ import { briefMismatch, brandTextOf } from "./textkind.js";
 import { startDiary } from "./diary.js";
 import { startThreadsAuto } from "./threads-auto.js";
 import { startComments, commentStates, queueMissingComments, processDue as processDueComments } from "./comments.js";
+import { cleanAlt } from "./igextras.js";
 import { getSettingText } from "./settings.js";
 import { runAbTest, modelCatalog, abSpend } from "./abtest.js";
 import { contextReview, contextIssueCount, suggestFieldFix } from "./context-check.js";
@@ -60,7 +61,7 @@ import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUserna
 import { chat } from "./openrouter.js";
 import { handleBody, wantsSse, sseEncode, resolveToken, mcpTokenFor, issueMcpToken, revokeMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
 import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember, deleteBrand, workspaceTitle } from "./workspaces.js";
-import { postMediaList, mediaCounts, setPostMediaOrder, setPostVideo, appendPostMedia, removePostMedia, promoteIfCoverless, healCoverless, SlideError, MAX_SLIDES } from "./slides.js";
+import { postMediaList, mediaCounts, setPostMediaOrder, setPostVideo, appendPostMedia, removePostMedia, promoteIfCoverless, healCoverless, SlideError, MAX_SLIDES, altToOriginal } from "./slides.js";
 import { renderCarousel, CAROUSEL_THEMES } from "./carousel.js";
 import { uploadLinkState, takeUploadSlot, markUploaded, refundUploadSlot, uploadPageHtml, uploadResultText, uploadScript, uploadUrl, UPLOAD_FILE_MAX, UPLOAD_TEXT, type UploadResult } from "./uploadlink.js";
 import { CLI_MODELS, cliAllowedFor, cliHealth, forgetCliAllowed, cliCooldown } from "./claudecli.js";
@@ -856,6 +857,17 @@ app.get("/api/media", async (req: any) =>
   q(`select id, kind, mime, original_name, filename, size, source, created_at, duration, width, height from media_asset
      where workspace_id=$1 and source not in ('ig-safe','ai-base','slide') order by created_at desc limit 200`, [req.user.workspace_id]));
 
+// 📸 alt-текст фото (опис для незрячих і пошуку): іде в Instagram (фото й кадри каруселі) і LinkedIn.
+// Порожній рядок прибирає опис.
+app.put("/api/media/:id/alt", async (req: any, reply) => {
+  const alt = cleanAlt(req.body?.alt_text);
+  const r = await one<{ id: string; kind: string }>(
+    `update media_asset set alt_text=nullif($3,'') where id=$1 and workspace_id=$2 returning id, kind`, [req.params.id, req.user.workspace_id, alt]);
+  if (!r) return reply.code(404).send({ error: "медіа не знайдено" });
+  if (alt) await altToOriginal(r.id, alt);   // те саме фото наступного разу прийде вже з описом
+  return { ok: true, alt_text: alt || null, ...(r.kind === "video" ? { note: "у відео alt-тексту мережі не приймають" } : {}) };
+});
+
 app.delete("/api/media/:id", async (req: any, reply) => {
   const m = await one<{ filename: string }>(`select filename from media_asset where id=$1 and workspace_id=$2`, [req.params.id, req.user.workspace_id]);
   if (!m) return reply.code(404).send({ error: "медіа не знайдено" });
@@ -940,8 +952,10 @@ app.get("/api/posts/:postId/full", async (req: any, reply) => {
 });
 
 // ---- 🖼 КАРУСЕЛЬ: кадри поста ----
-const mediaOut = (m: { id: string; filename: string; kind: string; duration?: number | null; width?: number | null; height?: number | null; size?: number | null }) =>
-  ({ id: m.id, filename: m.filename, kind: m.kind, duration: m.duration ?? null, width: m.width ?? null, height: m.height ?? null, size: m.size ?? null });
+// alt_text - опис фото (композер показує «ALT ✓» на кадрі; без нього після повторного відкриття
+// кадр виглядав би неописаним, хоч опис збережено)
+const mediaOut = (m: { id: string; filename: string; kind: string; duration?: number | null; width?: number | null; height?: number | null; size?: number | null; alt_text?: string | null }) =>
+  ({ id: m.id, filename: m.filename, kind: m.kind, duration: m.duration ?? null, width: m.width ?? null, height: m.height ?? null, size: m.size ?? null, alt_text: m.alt_text ?? null });
 const slidesOut = async (postId: string) => ({ ok: true, media: (await postMediaList(postId)).map(mediaOut) });
 const slideFail = (reply: any, e: any) => reply.code(e instanceof SlideError ? 400 : 500).send({ error: e?.message || "не вдалося" });
 // додати кадр(и) з медіатеки в кінець (кроп-копія під пропорцію каруселі, оригінал лишається)

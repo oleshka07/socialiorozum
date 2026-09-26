@@ -123,7 +123,8 @@ export async function uploadVideo(token: string, authorUrn: string, filePath: st
 
 // публікація поста (текст до 3000 симв, опційно зображення або відео). Кілька зображень = multiImage
 // (LinkedIn приймає 2-20), одне - звичайне media; відео - media з urn:li:video.
-export async function publish(token: string, authorUrn: string, text: string, images?: Buffer | Buffer[], video?: { path: string; size: number }): Promise<{ postId: string }> {
+// altTexts - опис кожного фото (alt-текст) у тому ж порядку, що й images; LinkedIn приймає до 4086 знаків
+export async function publish(token: string, authorUrn: string, text: string, images?: Buffer | Buffer[], video?: { path: string; size: number }, altTexts?: string[]): Promise<{ postId: string }> {
   const body: any = {
     author: authorUrn,
     commentary: escapeCommentary(text.slice(0, 3000)),
@@ -138,10 +139,10 @@ export async function publish(token: string, authorUrn: string, text: string, im
   } else if (bufs.length >= 2) {
     const urns: string[] = [];
     for (const b of bufs) urns.push(await uploadImage(token, authorUrn, b));
-    body.content = { multiImage: { images: urns.map((id) => ({ id })) } };
+    body.content = { multiImage: { images: urns.map((id, i) => ({ id, ...(altTexts?.[i] ? { altText: altTexts[i] } : {}) })) } };
   } else if (bufs.length === 1) {
     const imageUrn = await uploadImage(token, authorUrn, bufs[0]);
-    body.content = { media: { id: imageUrn } };
+    body.content = { media: { id: imageUrn, ...(altTexts?.[0] ? { altText: altTexts[0] } : {}) } };
   }
   const j: any = await liFetch(`${API}/rest/posts`, { method: "POST", headers: REST_HEADERS(token), body: JSON.stringify(body) });
   const id = j.__headers?.get?.("x-restli-id") || j.id || "";

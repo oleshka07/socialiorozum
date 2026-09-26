@@ -332,6 +332,9 @@ create index if not exists idx_media_ws on media_asset(workspace_id, created_at 
 alter table media_asset add column if not exists duration real;
 alter table media_asset add column if not exists width int;
 alter table media_asset add column if not exists height int;
+-- 📸 опис фото для незрячих і пошуку (alt-текст): Instagram (фото й кадри каруселі) і LinkedIn.
+-- Живе на файлі: те саме фото в іншому пості описується так само.
+alter table media_asset add column if not exists alt_text text;
 alter table post add column if not exists media_id uuid references media_asset(id) on delete set null;
 alter table post add column if not exists channels jsonb;   -- {telegram:{on,text}, instagram:{...}, ...} для композера
 alter table post add column if not exists rubric text;      -- тег-рубрика (штампується при генерації; фільтри Студії/календаря)

@@ -1,5 +1,6 @@
 // Meta Graph API (Facebook Login) — постинг у FB-Сторінку + FB/IG аналітика.
 // Окремий від Threads: хост graph.facebook.com, окремий App ID/Secret (META_APP_*).
+import { igExtrasRejected } from "./igextras.js";
 const GV = "v23.0"; // версія Graph API (за потреби синхронізувати з Holos)
 const GRAPH = `https://graph.facebook.com/${GV}`;
 const DIALOG = `https://www.facebook.com/${GV}/dialog/oauth`;
@@ -250,14 +251,13 @@ export async function businessDiscovery(igUserId: string, pageToken: string, tar
 // Instagram Reels: контейнер media_type=REELS з video_url → чекаємо обробки відео → media_publish.
 // IG приймає MP4/MOV (H.264 або HEVC, AAC), 3 с - 15 хв; найкраще 9:16. share_to_feed - щоб рілс
 // показувався і в стрічці профілю, а не лише у вкладці Reels.
-export async function publishReelToInstagram(igUserId: string, pageToken: string, videoUrl: string, caption: string, opts?: { shareToFeed?: boolean }) {
-  const cbody = new URLSearchParams({ media_type: "REELS", video_url: videoUrl, caption, share_to_feed: opts?.shareToFeed === false ? "false" : "true", access_token: pageToken });
-  const c = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media`, {
-    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: cbody,
-  });
+export async function publishReelToInstagram(igUserId: string, pageToken: string, videoUrl: string, caption: string, opts?: { shareToFeed?: boolean; collaborators?: string[] }) {
+  // alt-тексту Reels не приймають - лише співавтори
+  const c = await igCreate(igUserId, pageToken, { media_type: "REELS", video_url: videoUrl, caption, share_to_feed: opts?.shareToFeed === false ? "false" : "true" },
+    opts?.collaborators?.length ? { collaborators: opts.collaborators } : undefined);
   // відео обробляється асинхронно: публікувати можна лише після status_code=FINISHED (до ~5 хв)
   await igWaitFinished(c.id, pageToken, { tries: 60, everyMs: 5000, what: "відео" });
-  return igPublishContainer(igUserId, pageToken, c.id);
+  return { ...(await igPublishContainer(igUserId, pageToken, c.id)), dropped: c.dropped };
 }
 
 // 📱 Сторіс Instagram: контейнер STORIES з image_url або video_url - без підпису (у сторіс його нема,
@@ -363,37 +363,66 @@ async function igPublishContainer(igUserId: string, pageToken: string, creationI
   }
   throw lastErr || new Error("Instagram: не вдалося опублікувати");
 }
-export async function publishToInstagram(igUserId: string, pageToken: string, imageUrl: string, caption: string) {
-  const cbody = new URLSearchParams({ image_url: imageUrl, caption, access_token: pageToken });
-  const c = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media`, {
-    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: cbody,
+// 📸 Доповнення Instagram: співавтори (до 3) і alt-текст фото. Створюємо контейнер із ними; якщо
+// Instagram відбив саме їх (невідомий нік, акаунт не приймає співавторів, задовгий опис) - повтор без
+// них, а що відкинуто й чому - у dropped: пост має вийти й без доповнень, а людина - знати, чого бракує.
+export type IgExtras = { collaborators?: string[]; altText?: string };
+async function igCreate(igUserId: string, pageToken: string, base: Record<string, string>, extras?: IgExtras): Promise<{ id: string; dropped?: string }> {
+  const send = (p: Record<string, string>) => fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ ...p, access_token: pageToken }),
   });
+  const add: Record<string, string> = {};
+  if (extras?.collaborators?.length) add.collaborators = JSON.stringify(extras.collaborators.slice(0, 3));
+  if (extras?.altText) add.alt_text = extras.altText;
+  if (!Object.keys(add).length) return send(base);
+  // щаблі: усе → без співавторів (опис фото лишається) → без доповнень. Співавтори - найчастіша
+  // причина відмови (нік не існує, акаунт не приймає запрошень), і опис через них губитись не має.
+  const steps: { p: Record<string, string>; dropped: string[] }[] = [{ p: { ...base, ...add }, dropped: [] }];
+  if (add.collaborators && add.alt_text) steps.push({ p: { ...base, alt_text: add.alt_text }, dropped: ["співавторів"] });
+  steps.push({ p: base, dropped: [add.collaborators ? "співавторів" : "", add.alt_text ? "alt-тексту" : ""].filter(Boolean) });
+  let first = "", last: any = null;
+  for (const st of steps) {
+    try {
+      const c = await send(st.p);
+      return st.dropped.length ? { id: c.id, dropped: `${st.dropped.join(" і ")} - Instagram не прийняв: ${first.slice(0, 160)}` } : c;
+    } catch (e: any) {
+      const m = String(e?.message || e);
+      if (!igExtrasRejected(m)) throw e;   // ліміт, токен, фото - доповнення тут ні до чого
+      first = first || m; last = e;
+    }
+  }
+  throw last;
+}
+
+export async function publishToInstagram(igUserId: string, pageToken: string, imageUrl: string, caption: string, extras?: IgExtras) {
+  const c = await igCreate(igUserId, pageToken, { image_url: imageUrl, caption }, extras);
   await igWaitFinished(c.id, pageToken);
-  return igPublishContainer(igUserId, pageToken, c.id);
+  return { ...(await igPublishContainer(igUserId, pageToken, c.id)), dropped: c.dropped };
 }
 
 // 🖼 Instagram-карусель (2-10 кадрів): контейнер на кожен кадр (is_carousel_item, без підпису) →
 // контейнер CAROUSEL з children і підписом → media_publish. Кожен контейнер обробляється асинхронно,
 // тож чекаємо FINISHED і в кадрів, і в самої каруселі - інакше IG відповідає «Media ID is not available».
 // Усі кадри IG обрізає під пропорцію ПЕРШОГО, тому ми ріжемо їх однаково ще до публікації.
-export async function publishCarouselToInstagram(igUserId: string, pageToken: string, imageUrls: string[], caption: string) {
+// alt-текст - на кожному кадрі, співавтори - на самому контейнері CAROUSEL (на кадрах їх не буває)
+export async function publishCarouselToInstagram(igUserId: string, pageToken: string, imageUrls: string[], caption: string, extras?: { collaborators?: string[]; altTexts?: string[] }) {
   const urls = imageUrls.slice(0, 10);
   if (urls.length < 2) throw new Error("Для каруселі Instagram потрібно щонайменше 2 фото");
   const children: string[] = [];
-  for (const url of urls) {
-    const body = new URLSearchParams({ image_url: url, is_carousel_item: "true", access_token: pageToken });
-    const c = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media`, {
-      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body,
-    });
+  const dropped: string[] = [];
+  let altOff = false;   // відбив опис одного кадру - решті не шлемо (інакше подвійні запити на кожен кадр)
+  for (const [i, url] of urls.entries()) {
+    const alt = altOff ? "" : String(extras?.altTexts?.[i] || "");
+    const c = await igCreate(igUserId, pageToken, { image_url: url, is_carousel_item: "true" }, alt ? { altText: alt } : undefined);
+    if (c.dropped) { altOff = true; dropped.push(c.dropped); }
     children.push(c.id);
   }
   for (const id of children) await igWaitFinished(id, pageToken);
-  const cbody = new URLSearchParams({ media_type: "CAROUSEL", children: children.join(","), caption, access_token: pageToken });
-  const car = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media`, {
-    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: cbody,
-  });
+  const car = await igCreate(igUserId, pageToken, { media_type: "CAROUSEL", children: children.join(","), caption },
+    extras?.collaborators?.length ? { collaborators: extras.collaborators } : undefined);
+  if (car.dropped) dropped.push(car.dropped);
   await igWaitFinished(car.id, pageToken);
-  return igPublishContainer(igUserId, pageToken, car.id);
+  return { ...(await igPublishContainer(igUserId, pageToken, car.id)), dropped: dropped.join("; ") || undefined };
 }
 
 // 🖼 Кілька фото в одному пості Сторінки: кожне фото вантажимо НЕопублікованим (published=false) і

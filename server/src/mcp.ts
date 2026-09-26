@@ -39,10 +39,11 @@ import { join } from "node:path";
 import { generatePostsOnePass, normFormat, GOAL_LABELS, CHANNEL_LIMITS } from "./pipeline.js";
 import { logEvent } from "./log.js";
 import { generateImageForPost, imageProviders, stockPhotoOptions, attachStockPhoto, attachCroppedImage, appendCroppedSlide, cropCopy } from "./images.js";
-import { postMediaList, setPostMediaOrder, setPostVideo, MAX_SLIDES, SlideError } from "./slides.js";
+import { postMediaList, setPostMediaOrder, setPostVideo, MAX_SLIDES, SlideError, altToOriginal } from "./slides.js";
 import { renderCarousel, CAROUSEL_THEMES } from "./carousel.js";
 import { briefMismatch, brandTextOf } from "./textkind.js";
 import { COMMENT_NETS, COMMENT_MAX, COMMENT_PERM, commentFor, commentStates, queueMissingComments, processDue as processDueComments, type CommentState } from "./comments.js";
+import { normCollaborators, cleanAlt, IG_MAX_COLLABORATORS } from "./igextras.js";
 import { getThumb } from "./media.js";
 import sharp from "sharp";
 
@@ -327,6 +328,41 @@ export async function applyFirstComment(postId: string, channels: any, fc: unkno
   return { channels: ch, note: notes.length ? notes.join(", ") : null };
 }
 
+/** Співавтори Instagram у channels.instagram.collaborators. Вертає рядок для відповіді. */
+async function applyCollaborators(ws: string, postId: string, channels: any, v: unknown): Promise<{ channels: any; note: string }> {
+  const own = (await one<{ ig_username: string | null }>(`select ig_username from meta_config where workspace_id=$1`, [ws]))?.ig_username;
+  const r = normCollaborators(v, own);
+  const ch = { ...(channels || {}) };
+  ch.instagram = { ...(ch.instagram && typeof ch.instagram === "object" ? ch.instagram : { on: false }) };
+  if (r.ok.length) ch.instagram.collaborators = r.ok; else delete ch.instagram.collaborators;
+  await q(`update post set channels=$2 where id=$1`, [postId, JSON.stringify(ch)]);
+  const warn = [r.bad.length ? `не схоже на нік Instagram: ${r.bad.join(", ")}` : "", r.extra.length ? `Instagram приймає до ${IG_MAX_COLLABORATORS} - зайві @${r.extra.join(", @")} не додано` : ""].filter(Boolean);
+  const note = (r.ok.length ? `співавтори Instagram: ${r.ok.map((u) => "@" + u).join(", ")}` : "співавторів Instagram прибрано")
+    + (warn.length ? ` (⚠️ ${warn.join("; ")})` : "") + (r.ok.length && !ch.instagram.on ? " - але Instagram на пості не обрано" : "");
+  return { channels: ch, note };
+}
+/**
+ * Опис фото по кадрах поста (у порядку кадрів). emptyClears: "" прибирає опис (update_post) чи лишає
+ * наявний (attach_media - там порожній рядок модель ставить як «без опису», а кадр міг успадкувати
+ * опис оригіналу). Вертає, скільки фото тепер з описом.
+ */
+async function applyAltTexts(postId: string, alts: unknown, opts: { onlyLast?: number; emptyClears: boolean }): Promise<{ set: number; photos: number; skippedVideo: boolean }> {
+  const list = (Array.isArray(alts) ? alts : [alts]).map((x) => (typeof x === "string" ? cleanAlt(x) : null));
+  const frames = await postMediaList(postId);
+  const target = opts.onlyLast ? frames.slice(-opts.onlyLast) : frames;
+  let skippedVideo = false;
+  for (const [i, m] of target.entries()) {
+    const alt = i < list.length ? list[i] : null;
+    if (alt === null || (alt === "" && !opts.emptyClears)) continue;
+    if (m.kind === "video") { skippedVideo = true; continue; }
+    await q(`update media_asset set alt_text=nullif($2,'') where id=$1`, [m.id, alt]);
+    if (alt) await altToOriginal(m.id, alt);
+  }
+  const after = await postMediaList(postId);
+  const photos = after.filter((m) => m.kind !== "video");
+  return { set: photos.filter((m) => m.alt_text).length, photos: photos.length, skippedVideo };
+}
+
 /** Як перший коментар піде в кожну обрану мережу: текст, стан, що заважає. Порожньо - коментаря нема. */
 export function commentPlanLines(post: { first_comment?: string | null; channels?: any; format?: string | null },
                                  nets: string[], states: CommentState[], sentNets: string[], granted: string | null): string[] {
@@ -353,6 +389,16 @@ export function commentPlanLines(post: { first_comment?: string | null; channels
     else out.push(`— ${label}: піде одразу після публікації${tag}${over}${perm}`);
   }
   return out;
+}
+
+/** 📸 Співавтори й опис фото - рядок для get_post (лише коли Instagram обрано). */
+async function igExtrasLine(p: PostRow): Promise<string> {
+  if (!p.channels?.instagram?.on || p.format === "story") return "";
+  const collab = Array.isArray(p.channels.instagram.collaborators) ? p.channels.instagram.collaborators : [];
+  const photos = (await postMediaList(p.id)).filter((m) => m.kind !== "video");
+  const alt = photos.filter((m) => m.alt_text).length;
+  return `📸 Instagram: ${collab.length ? `співавтори ${collab.map((u: string) => "@" + u).join(", ")}` : "без співавторів"}` +
+    (photos.length ? ` · опис фото (alt): ${alt} з ${photos.length}` : "");
 }
 
 const COMMENT_UA: Record<string, string> = { sent: "✓", failed: "⚠️ не вийшов", pending: "⏳ повторимо", sending: "⏳ надсилається" };
@@ -524,6 +570,8 @@ const FC_BY_NET_ARG = {
   properties: Object.fromEntries(COMMENT_NETS.map((n) => [n, { type: "string" }])),
   additionalProperties: false,
 };
+const COLLAB_ARG = { type: "array", items: { type: "string" }, description: `Instagram: співавтори (collab) - до ${IG_MAX_COLLABORATORS} ніків (@partner). Кожен отримає запрошення, і після згоди пост зʼявиться і в його профілі. Фото, карусель і Reels; сторіс - ні. У update_post порожній масив прибирає співавторів.` };
+const ALT_ARG = { type: "array", items: { type: "string" }, description: "Опис фото (alt-текст) для незрячих і пошуку, по одному на кадр у тому ж порядку (1-2 речення, що на фото); порожній рядок прибирає опис кадру. Іде в Instagram (фото й кадри каруселі) і LinkedIn; у відео й сторіс мережі його не приймають." };
 const FC_ARG = S("Перший коментар під постом від імені автора: посилання (у LinkedIn і Facebook воно в тексті ріже охоплення, у коментарі - ні), хештеги для Instagram, заклик. Іде одразу після публікації в Instagram, Facebook, LinkedIn і Threads (там - відповіддю автора). У Telegram і в сторіс коментаря немає. У update_post порожній рядок прибирає коментар.");
 
 const ASPECT_ARG = { type: "string", enum: ASPECTS, description: "Формат: 4:5 (типово - найбільше місця в стрічці, підходить усім мережам), 1:1, 16:9, 9:16 (сторіс; для поста формату story - типово)." };
@@ -791,6 +839,7 @@ export const TOOLS: ToolDef[] = [
         enabledNets(p.channels).length ? `публікація: ${publishPlanLine(publishPlan(p.channels, p.content))}` : "",
         sent.length ? `опубліковано: ${sent.map((x) => `${NET_LABEL[x.net]} ${fmtWhen(x.at, tz)}${x.link ? ` ${x.link}` : ""}`).join(", ")}` : "",
         ...commentPlanLines(p, [...new Set([...enabledNets(p.channels), ...sent.map((x) => x.net)])], await commentStates(p.id), sent.map((x) => x.net), await metaGranted(ws)),
+        await igExtrasLine(p),
         `\n${p.content}`,
         variants.length ? `\nВерсії під мережі:\n${variants.join("\n")}` : "",
       ].filter(Boolean).join("\n");
@@ -808,6 +857,7 @@ export const TOOLS: ToolDef[] = [
       intent: S("Намір: awareness (знайомство), nurture (прогрів), sale (продаж).", { enum: ["awareness", "nurture", "sale"] }),
       first_comment: FC_ARG,
       first_comment_by_network: FC_BY_NET_ARG,
+      instagram_collaborators: COLLAB_ARG,
       approve: { type: "boolean", description: "true - одразу позначити затвердженим (готовий до календаря)." },
     },
     required: ["text"],
@@ -832,6 +882,8 @@ export const TOOLS: ToolDef[] = [
       await logEvent("info", "mcp", `чернетку створено з Claude (${text.length} симв.)`, null);
       const fc = (a.first_comment !== undefined || a.first_comment_by_network !== undefined)
         ? await applyFirstComment(post!.id, authoredChannels({}, nets, true), a.first_comment, a.first_comment_by_network) : null;
+      const collab = a.instagram_collaborators !== undefined
+        ? await applyCollaborators(ws, post!.id, fc ? fc.channels : authoredChannels({}, nets, true), a.instagram_collaborators) : null;
       const fcPlan = fc ? commentPlanLines({ first_comment: typeof a.first_comment === "string" ? a.first_comment : null, channels: fc.channels, format: normFormat(a.format) },
         nets, [], [], await metaGranted(ws)) : [];
       const twin = (await scheduleConflicts(ws, post!.id, null, NETS)).filter((c) => c.kind === "text");
@@ -844,7 +896,7 @@ export const TOOLS: ToolDef[] = [
         notConnected.length ? `⚠️ Не підключені в кабінеті: ${netList(notConnected)} - туди публікація не піде.` : "",
         twin.length ? `⚠️ Такий самий текст уже є: ${twin.map((c) => `${short(c.postId)} (${c.state === "sent" ? "опубліковано" : "заплановано"})`).join(", ")} - можливо, це дубль (delete_post, якщо так).` : "",
         "Далі: publish_post (опублікувати зараз) або schedule_post (на дату й час).",
-      ].filter(Boolean).join(" ") + (fcPlan.length ? "\n" + fcPlan.join("\n") : "");
+      ].filter(Boolean).join(" ") + (fcPlan.length ? "\n" + fcPlan.join("\n") : "") + (collab ? `\n👥 ${collab.note}.` : "");
     },
   },
   {
@@ -859,6 +911,8 @@ export const TOOLS: ToolDef[] = [
       format: S("Формат (необовʼязково): post, carousel, reel, story.", { enum: ["post", "carousel", "reel", "story"] }),
       first_comment: FC_ARG,
       first_comment_by_network: FC_BY_NET_ARG,
+      instagram_collaborators: COLLAB_ARG,
+      alt_texts: ALT_ARG,
       approve: { type: "boolean", description: "true - затвердити, false - зняти затвердження." },
     },
     required: ["id"],
@@ -901,13 +955,21 @@ export const TOOLS: ToolDef[] = [
         if (late.length) done.push(`пост уже вийшов у ${netList(late)} - коментар туди не піде сам: send_first_comment`);
         if (already.length) done.push(`у ${netList(already)} перший коментар уже стоїть - новий текст туди не піде (змінити його можна лише в самій мережі)`);
       }
+      if (a.instagram_collaborators !== undefined) {
+        const chNow = (await one<{ channels: any }>(`select channels from post where id=$1`, [p.id]))?.channels;
+        done.push((await applyCollaborators(ws, p.id, chNow, a.instagram_collaborators)).note);
+      }
+      if (a.alt_texts !== undefined) {
+        const r = await applyAltTexts(p.id, a.alt_texts, { emptyClears: true });
+        done.push(r.photos ? `опис фото: ${r.set} з ${r.photos}` + (r.skippedVideo ? " (у відео alt-тексту мережі не приймають)" : "") : "у поста нема фото - описувати нічого");
+      }
       if (typeof a.approve === "boolean") {
         await q(`update post set review=$2 where id=$1`, [p.id, a.approve ? "approved" : null]);
         done.push(a.approve ? "затверджено" : "затвердження знято");
         // незатверджений текст не має лишатись у календарі: автопостер відправив би його в мережу
         if (!a.approve) { const n = await unschedulePost(p.id); if (n) done.push(`знято з розкладу (${n})`); }
       }
-      if (!done.length) throw new ToolError("Нічого не змінено - передай text, channels, rubric, format, first_comment або approve.");
+      if (!done.length) throw new ToolError("Нічого не змінено - передай text, channels, rubric, format, first_comment, instagram_collaborators, alt_texts або approve.");
       return `${short(p.id)}: ${done.join(", ")}.`;
     },
   },
@@ -981,6 +1043,7 @@ export const TOOLS: ToolDef[] = [
       media: { type: "array", items: { type: "string" }, description: "Id фото з list_media (#a1b2c3d4) по порядку: одне фото - масив з одного id, кілька - карусель." },
       aspect: ASPECT_ARG,
       append: { type: "boolean", description: "true - додати в кінець наявних кадрів, а не замінити їх." },
+      alt_text: { ...ALT_ARG, description: "Опис кожного фото (alt-текст) у тому ж порядку, що й media: 1-2 речення, що на фото - ти бачиш мініатюри в list_media. Для незрячих і пошуку; іде в Instagram і LinkedIn. Порожній рядок чи без аргументу - опис, збережений на фото в медіатеці (якщо є); новий опис зберігається і на фото в медіатеці, якщо там його ще нема." },
     },
     required: ["id", "media"],
     run: async (ws, a) => {
@@ -1047,7 +1110,9 @@ export const TOOLS: ToolDef[] = [
           for (const id of ids) await appendCroppedSlide(ws, p.id, id, before.length ? undefined : aspect);
         }
       } catch (e: any) { if (e instanceof SlideError) throw new ToolError(e.message); throw e; }
+      if (a.alt_text !== undefined) await applyAltTexts(p.id, a.alt_text, { onlyLast: ids.length, emptyClears: false });
       const after = await postMediaList(p.id);
+      const altN = after.filter((m) => m.kind !== "video" && m.alt_text).length;
       const others = new Set<string>();
       for (const id of ids) {
         const used = (await one<{ u: string | null }>(`select ${USED_IN} as u from media_asset a where a.id=$1`, [id]))?.u;
@@ -1063,7 +1128,8 @@ export const TOOLS: ToolDef[] = [
       const repeat = others.size
         ? (ids.length === 1 ? ` Це фото вже стоїть у ${[...others].join(", ")}` : ` Ці фото вже стоять і в ${[...others].join(", ")}`) + " - якщо повтор небажаний, обери інше (list_media з unused_only)."
         : "";
-      return { text: `${short(p.id)}: ${what}.${repeat}${after.length > 1 ? " Мініатюри нижче - по порядку кадрів." : ""}`, images: thumbs };
+      const altLine = altN ? ` Опис фото (alt): ${altN} з ${after.length}.` : " Опису фото (alt-текст) ще нема - передай alt_text, це допомагає незрячим і пошуку Instagram.";
+      return { text: `${short(p.id)}: ${what}.${repeat}${altLine}${after.length > 1 ? " Мініатюри нижче - по порядку кадрів." : ""}`, images: thumbs };
     },
   },
   {
@@ -1322,6 +1388,8 @@ export const TOOLS: ToolDef[] = [
       const cms = res.filter((r) => r.status === "sent" && r.comment)
         .map((r) => `${NET_LABEL[r.channel] || r.channel} ${COMMENT_UA[r.comment!.status] || r.comment!.status}${r.comment!.error ? `: ${r.comment!.error}` : ""}`);
       const ok = res.filter((r) => r.status === "sent").map((r) => NET_LABEL[r.channel] || r.channel);
+      // пост вийшов, але частина доповнень ні (співавтори/опис фото не прийняті, довгий текст Telegram)
+      const notes = res.filter((r) => r.status === "sent" && r.note).map((r) => `${NET_LABEL[r.channel] || r.channel}: ${r.note}`);
       const skip = res.filter((r) => r.status === "skipped").map((r) => NET_LABEL[r.channel] || r.channel);
       const err = res.filter((r) => r.status === "error");
       const links = (await sentMap([p.id])).get(p.id) || [];
@@ -1334,6 +1402,7 @@ export const TOOLS: ToolDef[] = [
         err.length ? `⚠️ Не вийшло: ${err.map((e) => `${NET_LABEL[e.channel] || e.channel} - ${e.error}`).join("; ")}` : "",
         offline.length ? `⚠️ Не підключені: ${netList(offline)}` : "",
         cms.length ? `💬 Перший коментар: ${cms.join("; ")}` : "",
+        notes.length ? `⚠️ ${notes.join("; ")}` : "",
         links.filter((x) => x.link).map((x) => `${NET_LABEL[x.net]}: ${x.link}`).join("\n"),
       ].filter(Boolean).join("\n") || "Нічого не відправлено.";
     },
@@ -1635,6 +1704,7 @@ export const SERVER_INSTRUCTIONS = [
   "Файл з інтернету (пряме посилання) чи невеликий файл у base64 - upload_media; папка з компʼютера - media_upload_link.",
   "Календар: schedule_post відмовить, якщо в ту саму мережу майже в той самий час уже стоїть пост або такий текст уже є (свідомо - force: true); прибрати з календаря - unschedule_post, чернетку назавжди - delete_post (опубліковане не видаляється). publish_post, що відповів «триває у фоні», не повторюй - результат у get_post.",
   "Перший коментар (посилання, хештеги, заклик окремо від тексту): first_comment у create_draft / update_post, свій для мережі - first_comment_by_network; іде сам одразу після публікації в Instagram, Facebook, LinkedIn і Threads (у Telegram і сторіс - ні). Посилання в тексті LinkedIn і Facebook ріже охоплення - краще в перший коментар. Дописали коментар після публікації - send_first_comment.",
+  "Instagram: опис фото для незрячих і пошуку (alt-текст) - alt_text в attach_media або alt_texts в update_post (ти бачиш мініатюри - опиши, що на фото, 1-2 речення; іде і в LinkedIn); співавтори (collab, до 3 ніків) - instagram_collaborators у create_draft / update_post.",
   "Статистика постів (перегляди, лайки, відповіді, репости, підписники, що працює) - analytics.",
   "Факти не вигадуй: бери їх з list_materials / get_material або питай автора.",
   "Перед публікацією показуй текст людині - опублікований пост відкликати не можна.",

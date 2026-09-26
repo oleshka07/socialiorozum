@@ -2310,6 +2310,9 @@ async function openComposer(postId, opts){
           +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px"><button class="dashbtn" id="cmpFcHash" title="5-8 хештегів у коментар, а не в текст поста"># Хештеги в коментар</button><span id="cmpFcCnt" style="font-size:11px;color:var(--faint)"></span></div>'
           +'<div id="cmpFcNets" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"></div>'
           +'<div id="cmpFcState" style="font-size:12px;margin-top:6px"></div></div>'
+        +'<div id="cmpIgBox" style="display:none"><div style="font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint);margin-top:14px">📸 INSTAGRAM <span class="qh" title="Співавтори (collab): кожен отримає запрошення в Instagram, і після згоди пост зʼявиться і в його профілі, і в стрічці його підписників. До 3 акаунтів. Опис фото для незрячих (alt-текст) - кнопка ALT на кожному фото нижче.">?</span></div>'
+          +'<input id="cmpCollab" class="txt" style="margin-top:6px;font-size:13px" placeholder="👥 Співавтори: @партнер, @друг (до 3, необовʼязково)">'
+          +'<div id="cmpCollabHint" style="font-size:11.5px;color:var(--muted);margin-top:4px"></div></div>'
         +'<div style="font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint);margin-top:14px">🖼 МЕДІА</div>'
         +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="dashbtn" id="cmpPhoto" title="Обкладинка: з галереї, з компʼютера, зі стоку чи AI-генерація, текст на фото">🎨 Обкладинка</button><button class="dashbtn" id="cmpAddSlides" title="Кілька фото в одному пості: Instagram і Threads - карусель, Facebook - галерея, Telegram - альбом">＋ Кадри каруселі</button><button class="dashbtn" id="cmpVideo" title="Власне відео: Instagram - Reels, Facebook - відео Сторінки, Threads, Telegram, LinkedIn">🎬 Відео</button></div>'
         +'<div id="cmpMediaWrap" style="margin-top:10px"></div>'
@@ -2436,6 +2439,7 @@ async function openComposer(postId, opts){
       renderCarBlock(); return; }
     const st=isStory();
     box.innerHTML='<div class="slides-strip">'+media.map((m,i)=>'<div class="slide-th'+(st?' story':'')+'"><img src="/thumb/'+esc(m.filename)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(m.filename)+'\'"><span class="sn">'+(m.kind==='video'?'▶ '+(fmtDur(m.duration)||''):(st?(i+1):(i===0?'обкл.':(i+1))))+'</span><button class="sx" data-rm="'+m.id+'" title="Прибрати кадр">✕</button>'
+        +((m.kind!=='video'&&!st)?'<button class="sa'+(m.alt_text?' on':'')+'" data-alt="'+m.id+'" title="'+(m.alt_text?'Опис фото: '+esc(m.alt_text):'Додати опис фото (alt-текст) для незрячих і пошуку - іде в Instagram і LinkedIn')+'">ALT'+(m.alt_text?' ✓':'')+'</button>':'')
         +(n>1?'<div class="sm"><button data-mv="'+i+'" data-d="-1"'+(i===0?' disabled':'')+' title="Раніше">‹</button><button data-mv="'+i+'" data-d="1"'+(i===n-1?' disabled':'')+' title="Пізніше">›</button></div>':'')+'</div>').join('')
       +(n<10?'<button class="slide-add" id="cmpAddMore" title="Додати кадри">＋<br>кадр</button>':'')+'</div>'
       +(st?'<div style="font-size:11.5px;color:var(--muted);margin-top:6px">⚡ Сторіс: '+n+' '+(n===1?'кадр':'кадрів')+' (до 10) - кожен піде окремою сторіс в Instagram і Facebook. Фото ріжуться 9:16, відео можна ставити поруч (в Instagram - до 60 с).</div>'
@@ -2443,7 +2447,12 @@ async function openComposer(postId, opts){
     box.querySelectorAll('[data-rm]').forEach(b=>b.onclick=async()=>{ b.disabled=true; try{ const r=await api('/posts/'+postId+'/slides/'+b.dataset.rm,{method:'DELETE'}); setMedia(r.media); renderMedia(); renderPrev(); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); b.disabled=false; } });
     box.querySelectorAll('[data-mv]').forEach(b=>b.onclick=()=>{ const i=+b.dataset.mv, j=i+(+b.dataset.d); const ids=media.map(m=>m.id); [ids[i],ids[j]]=[ids[j],ids[i]]; reorderMedia(ids); });
     const more=box.querySelector('#cmpAddMore'); if(more) more.onclick=addSlides;
-    renderCarBlock(); }
+    // 📸 alt-текст: живе на самому фото (те саме фото в іншому пості описане так само)
+    box.querySelectorAll('[data-alt]').forEach(b=>b.onclick=async()=>{ const m=media.find(x=>x.id===b.dataset.alt); if(!m) return;
+      const v=prompt('Опис фото (alt-текст): що на ньому, 1-2 речення. Його читають екранні читалки незрячих людей і пошук Instagram. Іде в Instagram і LinkedIn. Порожньо - прибрати.', m.alt_text||''); if(v===null) return;
+      try{ const r=await api('/media/'+m.id+'/alt',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({alt_text:v})}); m.alt_text=r.alt_text; renderMedia(); renderIg(); setMsg(r.alt_text?'опис фото збережено ✓':'опис фото прибрано','var(--brand)'); }
+      catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } });
+    renderCarBlock(); renderIg(); }
   // ＋ кадри: з медіатеки (кілька, у порядку кліків) або одразу з компʼютера пачкою
   async function addSlides(){ if(isVideo()){ setMsg('⚠ Відео публікується окремим постом. Щоб зробити карусель, спершу прибери відео (✕).','var(--danger)'); return; }
     const room=10-media.length; if(room<=0){ setMsg('у каруселі вже 10 кадрів - більше Instagram і Telegram не приймають','var(--danger)'); return; }
@@ -2500,7 +2509,7 @@ async function openComposer(postId, opts){
       const head='<div class="phone-h"><span class="phone-av">'+esc(av)+'</span><span class="phone-user">ваш_профіль</span>'+cnt+'</div>';
       const empty='<span style="color:var(--muted)">порожньо</span>';
       let body;
-      if(k==='instagram') body=head+img+'<div class="ig-acts">♡ 💬 ↗<span class="sp"></span>🔖</div><div class="phone-b"><span class="phone-user">ваш_профіль</span> <span class="phone-txt" style="display:inline">'+(t?pvCap(k,t):empty)+'</span></div>';
+      if(k==='instagram') body=(collabList().length?head.replace('ваш_профіль</span>','ваш_профіль <span style="font-weight:500;color:var(--muted)">і</span> '+esc(collabList()[0])+(collabList().length>1?' <span style="font-weight:500;color:var(--muted)">та ще '+(collabList().length-1)+'</span>':'')+'</span>'):head)+img+'<div class="ig-acts">♡ 💬 ↗<span class="sp"></span>🔖</div><div class="phone-b"><span class="phone-user">ваш_профіль</span> <span class="phone-txt" style="display:inline">'+(t?pvCap(k,t):empty)+'</span></div>';
       else if(k==='telegram') body=head+img+'<div class="phone-b"><div class="phone-txt">'+(t?esc(t):empty)+'</div></div>'+((over&&mediaFilename)?'<div class="pv-note">довгий підпис Telegram надішле окремим повідомленням під '+(isVideo()?'відео':media.length>1?'альбомом':'фото')+'</div>':'');
       else if(k==='threads'&&C.threads&&C.threads.thread){
         // 🧵 прев'ю гілки як у Threads: аватар + вертикальна лінія + частини-відповіді
@@ -2527,8 +2536,21 @@ async function openComposer(postId, opts){
     box.querySelectorAll('[data-fcedit]').forEach(a=>a.onclick=()=>{ const k=a.dataset.fcedit; const v=prompt('Перший коментар для '+netName(k)+' (порожньо = без коментаря в цій мережі):', fcOf(k)||fcMaster.trim()); if(v===null) return; C[k]=C[k]||{text:''}; C[k].first_comment=v.trim(); renderPrev(); });
     box.querySelectorAll('[data-fcoff]').forEach(a=>a.onclick=()=>{ const k=a.dataset.fcoff; C[k]=C[k]||{text:''}; C[k].first_comment=''; renderPrev(); });
     box.querySelectorAll('[data-fcreset]').forEach(a=>a.onclick=()=>{ const k=a.dataset.fcreset; if(C[k]) delete C[k].first_comment; renderPrev(); });
-    renderFc();
+    renderFc(); renderIg();
     box.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{ pvIdx.instagram=Math.max(0,Math.min(media.length-1,(pvIdx.instagram||0)+(+b.dataset.nav))); renderPrev(); }); }
+  // ----- 📸 Instagram: співавтори -----
+  function collabList(){ const v=C.instagram&&C.instagram.collaborators; return Array.isArray(v)?v:[]; }
+  function parseCollab(str){ const ok=[],bad=[];
+    String(str||'').split(/[\s,;]+/).forEach(x=>{ const u=x.trim().replace(/^https?:\/\/(www\.)?instagram\.com\//i,'').replace(/[/?#].*$/,'').replace(/^@/,'').toLowerCase(); if(!u) return;
+      if(!/^[a-z0-9._]{1,30}$/.test(u)){ bad.push(x.trim()); return; } if(!ok.includes(u)) ok.push(u); });
+    return {ok:ok.slice(0,3),bad,extra:ok.slice(3)}; }
+  function renderIg(){ const box=ov.querySelector('#cmpIgBox'); if(!box) return;
+    const on=!!(C.instagram&&C.instagram.on)&&!isStory(); box.style.display=on?'':'none'; if(!on) return;
+    const r=parseCollab(ov.querySelector('#cmpCollab').value), noAlt=media.filter(m=>m.kind!=='video'&&!m.alt_text).length;
+    ov.querySelector('#cmpCollabHint').innerHTML=(r.ok.length?'Запрошення отримають: '+r.ok.map(u=>'@'+esc(u)).join(', ')+' - після згоди пост зʼявиться і в їхніх профілях.':'Співавтори - необовʼязково.')
+      +(r.bad.length?' <span style="color:var(--danger)">⚠ не схоже на нік: '+esc(r.bad.join(', '))+'</span>':'')
+      +(r.extra.length?' <span style="color:var(--danger)">⚠ Instagram приймає до 3 - зайві: @'+esc(r.extra.join(', @'))+'</span>':'')
+      +(noAlt&&!isVideo()?' · Опис фото для незрячих - кнопка ALT на фото в «Медіа».':''); }
   // ----- 💬 перший коментар -----
   // свій текст мережі (рядок, порожній = без коментаря тут) або спільний; у сторіс і Telegram - нема
   function fcOwn(k){ return !!(C[k]&&typeof C[k].first_comment==='string'); }
@@ -2591,6 +2613,9 @@ async function openComposer(postId, opts){
       const bad=cmStates.filter(x=>r.queued.includes(x.network)&&x.status!=='sent');
       setMsg(bad.length?'⚠ '+bad.map(x=>netName(x.network)+': '+(x.error||'ще надсилається')).join('; '):'💬 коментар під постом ✓', bad.length?'var(--danger)':'var(--brand)');
     }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ renderPrev(); } }
+  const collabIn=ov.querySelector('#cmpCollab'); collabIn.value=collabList().map(u=>'@'+u).join(', ');
+  collabIn.addEventListener('input',()=>{ const r=parseCollab(collabIn.value); C.instagram=C.instagram||{on:false};
+    if(r.ok.length) C.instagram.collaborators=r.ok; else delete C.instagram.collaborators; renderPrev(); });
   const fcTa=ov.querySelector('#cmpFc'); fcTa.value=fcMaster; fcTa.addEventListener('input',()=>{ fcMaster=fcTa.value; renderPrev(); });
   ov.querySelector('#cmpFcHash').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('# добираю хештеги в коментар…'); aiBusy('# Добираю хештеги…');
     try{ const r=await api('/posts/'+postId+'/hashtags',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:master})}); const tags=(r.hashtags||[]).join(' ');
@@ -2701,7 +2726,8 @@ async function openComposer(postId, opts){
       // 💬 перший коментар: окремий рядок - пост уже в мережі, навіть якщо коментар ні
       const cm=res.filter(x=>x.comment); const cmBad=cm.filter(x=>x.comment.status!=='sent');
       const cmTxt=cm.length?(' · 💬 '+cm.map(x=>x.channel+(x.comment.status==='sent'?' ✓':x.comment.status==='pending'?' ⏳':' ⚠')).join(', ')):'';
-      setMsg((ok.length?'✓ '+ok.join(', '):'')+cmTxt+(err.length?' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; '):'')+(cmBad.length?' · коментар: '+cmBad.map(x=>x.channel+': '+(x.comment.error||'надсилається')).join('; '):''), (err.length||cmBad.some(x=>x.comment.status==='failed'))?'var(--danger)':'var(--brand)');
+      const notes=res.filter(x=>x.status==='sent'&&x.note).map(x=>x.channel+': '+x.note);
+      setMsg((ok.length?'✓ '+ok.join(', '):'')+cmTxt+(err.length?' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; '):'')+(cmBad.length?' · коментар: '+cmBad.map(x=>x.channel+': '+(x.comment.error||'надсилається')).join('; '):'')+(notes.length?' · ⚠ '+notes.join('; '):''), (err.length||notes.length||cmBad.some(x=>x.comment.status==='failed'))?'var(--danger)':'var(--brand)');
       if(cmStates.some(x=>x.status==='sending'||(x.status==='pending'&&!x.error))) pollComments(); if(ok.length&&!err.length) flash('Опубліковано ✓ Якщо пост залетить - 🔥 на картці дасть 5 кутів продовження'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)');
       // навіть при збої частина мереж могла пройти - перечитуємо ФАКТИЧНИЙ стан, щоб інтерфейс
       // не показував «не опубліковано» на пості, який уже вийшов

@@ -19,6 +19,7 @@ import { startJob } from "./jobs.js";
 import { ensurePostDigest } from "./memory.js";
 import { postMediaList } from "./slides.js";
 import { commentAfterPublish, commentFor } from "./comments.js";
+import { normCollaborators, cleanAlt } from "./igextras.js";
 
 export async function thValidToken(ws: string): Promise<{ token: string; userId: string } | null> {
   const c = await one<{ threads_user_id: string | null; access_token: string | null; token_expires_at: string | null }>(
@@ -232,13 +233,16 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
   const [tgc, thTok, mt, li] = await Promise.all([
     one<{ bot_token: string | null; channel_chat_id: string | null; group_chat_id: string | null; channel_username: string | null }>(`select bot_token, channel_chat_id, group_chat_id, channel_username from telegram_config where workspace_id=$1`, [ws]),
     thValidToken(ws),
-    one<{ page_id: string | null; page_token: string | null; ig_user_id: string | null; token_expires_at: string | null }>(`select page_id, page_token, ig_user_id, token_expires_at from meta_config where workspace_id=$1`, [ws]),
+    one<{ page_id: string | null; page_token: string | null; ig_user_id: string | null; ig_username: string | null; token_expires_at: string | null }>(`select page_id, page_token, ig_user_id, ig_username, token_expires_at from meta_config where workspace_id=$1`, [ws]),
     one<{ member_urn: string; access_token: string; token_expires_at: string | null }>(`select member_urn, access_token, token_expires_at from linkedin_config where workspace_id=$1`, [ws]),
   ]);
+  // 📸 alt-текст фото (у тому ж порядку, що images): Instagram і LinkedIn
+  const alts = video ? [] : mediaList.filter((m) => m.kind === "image").map((m) => cleanAlt(m.alt_text));
   for (const k of enabled) {
     if (sentSet.has(k)) { results.push({ channel: k, status: "skipped" }); continue; } // уже опубліковано в цю мережу
     // id щойно опублікованого поста в мережі - під ним піде перший коментар (Telegram коментарів не має)
     let target = "";
+    let note = "";   // пост вийшов, але щось із доповнень ні (співавтори, alt-текст) - людина має знати
     try {
       if (k === "telegram") {
         if (!tgc?.bot_token) throw new Error("Telegram не підключено");
@@ -418,13 +422,16 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
           const safe: string[] = [];
           for (const f of images) safe.push(await ensureIgSafeImage(ws, f));
           const safeUrls = safe.map((f) => `${env.appBaseUrl}/media/${f}`);
+          // 👥 співавтори (до 3) - на фото, карусель і Reels; власний нік співавтором бути не може
+          const collab = normCollaborators(ch.instagram?.collaborators, mt.ig_username).ok;
           const r = video
-            ? await meta.publishReelToInstagram(mt.ig_user_id, mt.page_token, videoUrl, textOf(k))
+            ? await meta.publishReelToInstagram(mt.ig_user_id, mt.page_token, videoUrl, textOf(k), { collaborators: collab })
             : carousel
-            ? await meta.publishCarouselToInstagram(mt.ig_user_id, mt.page_token, safeUrls, textOf(k))
-            : await meta.publishToInstagram(mt.ig_user_id, mt.page_token, safeUrls[0], textOf(k));
+            ? await meta.publishCarouselToInstagram(mt.ig_user_id, mt.page_token, safeUrls, textOf(k), { collaborators: collab, altTexts: alts })
+            : await meta.publishToInstagram(mt.ig_user_id, mt.page_token, safeUrls[0], textOf(k), { collaborators: collab, altText: alts[0] });
           await q(`update meta_publish set external_id=$2, status='sent' where id=$1`, [reserved.id, r.mediaId]);
           target = r.mediaId;
+          if (r.dropped) note = `пост вийшов без ${r.dropped}`;
           // permalink IG - лише окремим запитом; збій не критичний (доберемо лениво в /publish-state)
           try {
             const pl = await meta.mediaPermalink(r.mediaId, mt.page_token);
@@ -442,9 +449,11 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
         const reserved = rv;
         try {
           // зображення LinkedIn приймає лише через власний upload (не за URL) - читаємо локальні файли
-          const bufs: Buffer[] = [];
-          for (const f of images) { try { bufs.push(await readFile(join(MEDIA_DIR, f))); } catch { /* файл зник - без нього */ } }
-          const r = await linkedin.publish(li.access_token, li.member_urn, textOf(k), bufs, video ? { path: videoPath, size: videoSize } : undefined);
+          const bufs: Buffer[] = [], liAlts: string[] = [];
+          for (const [i, f] of images.entries()) {
+            try { bufs.push(await readFile(join(MEDIA_DIR, f))); liAlts.push(alts[i] || ""); } catch { /* файл зник - без нього */ }
+          }
+          const r = await linkedin.publish(li.access_token, li.member_urn, textOf(k), bufs, video ? { path: videoPath, size: videoSize } : undefined, liAlts);
           // URN поста → лінк збирається детерміновано, без додаткового запиту
           await q(`update linkedin_publish set external_id=$2, status='sent', permalink=nullif($3,'') where id=$1`,
             [reserved.id, r.postId || null, liLink(r.postId || null)]);
@@ -462,7 +471,7 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
           await logEvent("warn", "comment", `перший коментар не поставлено в чергу: ${e.message}`, { ws, postId });
         }
       }
-      results.push({ channel: k, status: "sent", ...(cm ? { comment: cm } : {}) });
+      results.push({ channel: k, status: "sent", ...(cm ? { comment: cm } : {}), ...(note ? { note } : {}) });
     } catch (e: any) { results.push({ channel: k, status: "error", error: e.message }); }
   }
   // 🧠 памʼять контенту: щойно опублікований пост дистилюється в структурований артефакт (гачок,

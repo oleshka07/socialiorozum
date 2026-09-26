@@ -12,12 +12,22 @@ import { deleteMediaFile } from "./media.js";
 // в усі мережі одразу, тож межа - найвужча)
 export const MAX_SLIDES = 10;
 
-export type PostMedia = { id: string; filename: string; kind: string; source: string; size?: number | null; duration?: number | null; width?: number | null; height?: number | null };
+export type PostMedia = { id: string; filename: string; kind: string; source: string; size?: number | null; duration?: number | null; width?: number | null; height?: number | null; alt_text?: string | null };
+
+/**
+ * Опис, даний кадру (кроп-копії), зберігаємо й на оригіналі в медіатеці, якщо там опису ще нема: те
+ * саме фото наступного разу прикріпиться вже з описом (кроп успадковує опис оригіналу).
+ */
+export async function altToOriginal(mediaId: string, alt: string): Promise<void> {
+  if (!alt) return;
+  await q(`update media_asset o set alt_text=$2 from media_asset c
+            where c.id=$1 and c.source='crop' and o.id::text=c.external_id and o.workspace_id=c.workspace_id and o.alt_text is null`, [mediaId, alt]);
+}
 
 /** Кадри поста по порядку: обкладинка першою, далі post_slide. */
 export async function postMediaList(postId: string): Promise<PostMedia[]> {
   return q<PostMedia>(
-    `select m.id, m.filename, m.kind, m.source, m.size, m.duration, m.width, m.height from (
+    `select m.id, m.filename, m.kind, m.source, m.size, m.duration, m.width, m.height, m.alt_text from (
         select media_id, 0 as pos from post where id=$1 and media_id is not null
         union all select media_id, pos from post_slide where post_id=$1
      ) x join media_asset m on m.id = x.media_id

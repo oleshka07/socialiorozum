@@ -502,7 +502,10 @@ export async function cropCopy(ws: string, mediaId: string, aspect?: Aspect | st
   const out = await img.resize(w, h, crop ? { fit: "fill" } : { fit: "cover", position: "attention" }).jpeg({ quality: 90 }).toBuffer();
   // кроп-копія памʼятає свій оригінал (external_id): з цього медіатека конектора знає, в яких
   // постах фото вже стоїть, і не підсуне те саме фото вдруге
-  return saveMedia(ws, { buffer: out, mime: "image/jpeg", name: "crop.jpg", source: "crop", externalId: mediaId });
+  const copy = await saveMedia(ws, { buffer: out, mime: "image/jpeg", name: "crop.jpg", source: "crop", externalId: mediaId });
+  // опис фото (alt-текст) іде разом із кадром: на кропі - те саме, що й на оригіналі
+  await q(`update media_asset set alt_text=(select alt_text from media_asset where id=$2) where id=$1 and alt_text is null`, [copy.id, mediaId]);
+  return copy;
 }
 
 // прикріпити фото з галереї/завантаження ОБКЛАДИНКОЮ, обітнувши під обраний формат.
