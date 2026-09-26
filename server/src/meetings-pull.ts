@@ -6,6 +6,7 @@
 // тобто саме та схема, яку рекомендує специфікація.
 //
 // ⚠️ Токен зберігає ОПЕРАТОР через кабінет. Ми його ніде не показуємо назад і не пишемо в журнал.
+import { publicFetch } from "./netguard.js";
 import { q, one } from "./db.js";
 import { logEvent } from "./log.js";
 import { normalizeMeeting, saveMeeting, nextCursor, cloudRecordToBody } from "./meetings.js";
@@ -40,7 +41,7 @@ export function checkAuth(cfg: { url: string; token: string }): void {
 async function api(cfg: { url: string; token: string }, path: string, timeoutMs = 30000): Promise<any> {
   checkAuth(cfg);
   const base = cfg.url.replace(/\/+$/, "");
-  const res = await fetch(base + path, {
+  const res = await publicFetch(base + path, {
     headers: { Authorization: `Bearer ${cfg.token.trim()}` },
     signal: AbortSignal.timeout(timeoutMs),
   });

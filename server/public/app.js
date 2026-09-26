@@ -3,7 +3,9 @@
 // Наступний крок модульності: різати на composer.js / studio.js / calendar.js / settings.js.
 
 const $ = id => document.getElementById(id);
-const esc = s => String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+// лапки теж: esc() стоїть і всередині атрибутів ="…" (title, value, data-*) - без цього назва стрічки,
+// пошта при вході чи рубрика з « " » виходили з атрибута й могли виконати код у кабінеті
+const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 // ===== ГЛОБАЛЬНИЙ СТАН (оголошення вгорі - ESLint no-use-before-define ловить TDZ-баги) =====
 let curLayout='studio';        // активна розкладка Створення (studio|pipeline)
 let PRO=false;                 // тариф-флаг (перемикач в аватар-меню)
@@ -43,7 +45,12 @@ const SAMPLE = `Клієнт: я постійно відкладаю важли�
 let runId = localStorage.getItem('kg_run') || null;
 let S = {plan:[], schedule:{}};
 let busy = false;
-let curView = 'create';
+// до першого selectView розділ не обрано: змінна раніше казала 'create', хоча сторінка стартує з
+// «Сьогодні» - і F5 на #/create/* пропускав перемикання, лишаючи мертвий екран «Завантажую твій день…»
+let curView = '';
+// старт кабінету: композер і матеріал за посиланням відкриваються ПІСЛЯ того, як підтягнуто
+// підключені мережі, рубрики й стрічку (інакше всі мережі в композері «не підключено»)
+let _bootDone; const bootReady=new Promise(r=>{ _bootDone=r; });
 // вкладки розділів: стан угорі, бо його читає маршрутизатор ROUTE_TABS (визначений вище за setXTab)
 let cTab='posts', pTab='cal', bTab='voice', sTab='profile';
 let _cmpOpenId=null;      // id поста, відкритого в композері (для deep-лінка #/post/<id>)
@@ -181,13 +188,14 @@ function applyRoute(){
     // розділ під композером перемикаємо МОВЧКИ: адресу тримає сам композер, інакше selectView
     // перезаписав би її на #/create/posts і лінк на пост загубився б
     _routeSilent=true; try{ selectView('create','posts'); } finally { _routeSilent=false; }
-    if(typeof openComposer==='function') openComposer(parts[1]);
+    const pid=parts[1];
+    bootReady.then(()=>{ if(_cmpOpenId!==pid&&typeof openComposer==='function') openComposer(pid); });
     return true;
   }
   // 🔗 deep-link на КОНКРЕТНИЙ матеріал: `#/material/<id>` веде з бота прямо в той запис щоденника.
   // Фільтри стрічки скидаємо НАВМИСНО: якщо активний фільтр за типом чи стрічкою, потрібний матеріал
   // просто не потрапив би в список, і лінк привів би у порожній екран.
-  if(v==='material'&&parts[1]){ openMaterialDeep(parts[1]); return true; }
+  if(v==='material'&&parts[1]){ const mid=parts[1]; bootReady.then(()=>openMaterialDeep(mid)); return true; }
   if(!ROUTE_VIEWS.includes(v)) return false;
   if(v!==curView) selectView(v,tab||undefined);
   else if(tab){ const r=ROUTE_TABS[v]; if(r&&r.keys.includes(tab)&&r.get()!==tab) r.set(tab); }
@@ -342,9 +350,9 @@ document.querySelectorAll('#pubTabs .tab').forEach(x=>x.onclick=()=>setPTab(x.da
 // переселення панелі плану в хаб Публікації (обробники лишаються живими - вузол той самий)
 (function(){ const host=$('pubPlanHost'), lp=$('layPlan'); if(host&&lp) host.appendChild(lp); })();
 document.querySelectorAll('#cTabs .tab').forEach(x=>x.onclick=()=>setCTab(x.dataset.ctab));
-function setLayout(l){
+function setLayout(l,keepTab){
   curLayout=l;
-  if(cTab!=='posts') setCTab('posts');
+  if(!keepTab&&cTab!=='posts') setCTab('posts');
   const map={studio:'layStudio',pipeline:'layPipeline',inbox:'layInbox'};
   for(const k in map){ const el=$(map[k]); if(el) el.style.display = (k===l&&cTab==='posts')?'':'none'; }
   document.querySelectorAll('#layoutTabs .tab').forEach(t=>t.classList.toggle('on',t.dataset.lay===l));
@@ -371,6 +379,13 @@ $('toStudio').onclick=()=>setLayout('studio');
 
 // ---------- МАТЕРІАЛИ: стрічка сировини ----------
 let Mats=[], MatFilter='Усі', MatFeedFilter=null, MatOpen=null, Ideas=[];
+// повний текст розгорнутого матеріалу - в кеші, а не лише в DOM: паралельний loadMaterials (старт,
+// перехід вкладкою) перемальовував стрічку, і текст назавжди ставав спінером
+const MatFull={};
+function fillMatFull(){ const id=MatOpen; const el=$('matFull'); if(!id||!el) return;
+  if(MatFull[id]!=null){ el.textContent=MatFull[id]; return; }
+  api('/materials/'+id).then(f=>{ MatFull[id]=f.transcript||''; const e2=$('matFull'); if(e2&&MatOpen===id) e2.textContent=MatFull[id]; })
+    .catch(()=>{ const e2=$('matFull'); if(e2&&MatOpen===id) e2.textContent='Не вдалося завантажити текст - спробуй ще раз.'; }); }
 const MAT_TYPE={mcp:'🔌 З Claude',bot:'🤖 З бота',manual:'✍️ Нотатка',rss:'📡 RSS',fireflies:'🎙 Транскрипт',grain:'🎙 Транскрипт',meetgeek:'🎙 Транскрипт',gdrive:'📁 Drive',brand:'✨ Бренд',plan:'📅 План',idea:'💡 Ідея',diary:'📔 Щоденник',meeting:'🎤 Зустріч'};
 async function loadMaterials(){ try{ const r=await api('/materials'); Mats=r.materials||[]; }catch(e){ Mats=[]; } try{ const ib=await api('/ideas'); Ideas=ib.ideas||[]; }catch(e){ Ideas=[]; } renderMaterials(); updateCounts(); }
 function matType(m){ return MAT_TYPE[m.origin]||m.origin; }
@@ -404,14 +419,14 @@ function renderMaterials(){
   }).join('');
   feed.querySelectorAll('[data-mat]').forEach(row=>{
     const id=row.dataset.mat;
-    row.querySelector('.matHead').onclick=async()=>{ MatOpen=MatOpen===id?null:id; renderMaterials(); if(MatOpen===id){ try{ const f=await api('/materials/'+id); const el=$('matFull'); if(el) el.textContent=f.transcript||''; }catch(e){} } };
+    row.querySelector('.matHead').onclick=()=>{ MatOpen=MatOpen===id?null:id; renderMaterials(); };
     row.querySelectorAll('[data-ma]').forEach(b=>b.onclick=async(ev)=>{ ev.stopPropagation(); const a=b.dataset.ma;
       if(a==='del'){ if(!confirm('Прибрати матеріал зі стрічки?')) return; try{ await api('/materials/'+id+'/archive',{method:'POST'}); await loadMaterials(); }catch(e){ flash('⚠ '+e.message); } return; }
       if(a==='post'){ aiBusy('✨ Створюю пост з матеріалу…'); setCTab('posts'); setLayout('studio');
         try{ await api('/materials/'+id+'/posts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}); await loadStudioPosts(); flash('Готово - пост у стрічці ✓'); }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } return; }
       if(a==='series'){ if(!confirm('Нарізати матеріал на серію з ~6 постів? Кожен - окремий тейк зі своїм кутом і гачком.')) return;
         aiBusy('⚡ Нарізаю матеріал на серію постів…'); setCTab('posts'); setLayout('studio');
-        try{ const r=await api('/materials/'+id+'/series',{method:'POST'}); await loadStudioPosts(); flash('Серія готова - '+(r.count||0)+' постів у Чорновиках ✓'); }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } return; }
+        try{ const r=await runAiJob('/materials/'+id+'/series',{}); await loadStudioPosts(); flash('Серія готова - '+(r.count||0)+' постів у Чорновиках ✓'); }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } return; }
       if(a==='reels'){ const sec=await askReelLen('🎬 Сценарій Reels'); if(!sec) return;
         aiBusy('🎬 Пишу сценарій Reels з матеріалу…'); setCTab('posts'); setLayout('studio');
         try{ await api('/materials/'+id+'/reels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({targetSec:sec})}); await loadStudioPosts(); flash('Сценарій Reels у Чорновиках ✓'); }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } return; }
@@ -421,6 +436,7 @@ function renderMaterials(){
       if(a==='ideas'){ openMaterialIdeas(id); }
     });
   });
+  fillMatFull();
 }
 // Відкрити конкретний матеріал за адресою `#/material/<id>` (лінк «🌐 Перейти» з бота).
 // Стрічка може бути ще не завантажена (перехід із зовнішнього посилання одразу після старту),
@@ -434,7 +450,6 @@ async function openMaterialDeep(id){
   if(!row){ flash('Матеріал не знайдено - можливо, його прибрали зі стрічки'); return; }
   row.scrollIntoView({behavior:'smooth',block:'center'});
   row.classList.add('thl'); setTimeout(()=>row.classList.remove('thl'),2200);
-  try{ const f=await api('/materials/'+id); const el=$('matFull'); if(el) el.textContent=f.transcript||''; }catch(e){}
 }
 // вкладка «💡 Ідеї» (Створення): банк ідей окремою адресою - з бота, AI-продовжень і власних
 async function loadIdeasTab(){
@@ -516,7 +531,7 @@ async function openMaterialIdeas(matId){
       +'<div style="font-size:12.5px;font-weight:600;color:var(--ink2);margin-bottom:8px">Скільки ідей</div>'
       +'<div style="display:flex;gap:6px" id="miCountChips">'+[3,6,9,12].map(n=>'<div class="cchip'+(n===miCount?' on':'')+'" data-n="'+n+'">'+n+'</div>').join('')+'</div>'
       +((Rubrics&&Rubrics.length)?('<div style="font-size:12.5px;font-weight:600;color:var(--ink2);margin:16px 0 8px">Рубрики в міксі</div>'
-        +'<div style="display:flex;flex-wrap:wrap;gap:6px" id="miRubChips">'+Rubrics.map(r=>'<label class="rchip on"><input type="checkbox" class="miRub" value="'+esc(r.name)+'" checked> '+(r.emoji||'')+' '+esc(r.name)+'</label>').join('')+'</div>'):'')
+        +'<div style="display:flex;flex-wrap:wrap;gap:6px" id="miRubChips">'+Rubrics.map(r=>'<label class="rchip on"><input type="checkbox" class="miRub" value="'+esc(r.name)+'" checked> '+esc(r.emoji||'')+' '+esc(r.name)+'</label>').join('')+'</div>'):'')
       +'<div class="btnrow" style="margin-top:18px"><button class="primary" id="miNext" style="width:100%">💡 Витягнути ідеї →</button></div>';
     card.querySelector('#miX').onclick=close;
     card.querySelectorAll('#miCountChips [data-n]').forEach(c=>c.onclick=()=>{ miCount=+c.dataset.n; renderSettings(); });
@@ -613,7 +628,7 @@ function renderPlanMix(){
   const COLORS=['var(--brand)','var(--tg)','var(--amber)','var(--th, #999)','#8e6bbf','#5a9e6f'];
   wrap.style.display='';
   bar.innerHTML=rubs.map((r,i)=>{ const pct=Math.round(((+r.share||25)/total)*100); return '<div style="width:'+pct+'%;background:'+COLORS[i%COLORS.length]+';opacity:.8" title="'+esc(r.name)+' '+pct+'%"></div>'; }).join('');
-  leg.innerHTML=rubs.map((r,i)=>{ const pct=Math.round(((+r.share||25)/total)*100); return '<span><span style="display:inline-block;width:8px;height:8px;border-radius:3px;background:'+COLORS[i%COLORS.length]+';margin-right:3px"></span>'+(r.emoji||'')+esc(r.name)+' '+pct+'%</span>'; }).join('');
+  leg.innerHTML=rubs.map((r,i)=>{ const pct=Math.round(((+r.share||25)/total)*100); return '<span><span style="display:inline-block;width:8px;height:8px;border-radius:3px;background:'+COLORS[i%COLORS.length]+';margin-right:3px"></span>'+esc(r.emoji||'')+esc(r.name)+' '+pct+'%</span>'; }).join('');
 }
 async function loadPlan(){
   try{ const r=await api('/plan'); PlanAll=r.slots||[]; PlanChans=[...new Set(PlanAll.map(s=>s.channel).filter(Boolean))]; renderFmtFact(r.realizedMix||{}); }
@@ -728,8 +743,9 @@ function renderPlan(){
   list.querySelectorAll('[data-slot]').forEach(row=>{
     const id=row.dataset.slot; const slot=PlanSlots.find(x=>x.id===id);
     row.querySelectorAll('[data-pa]').forEach(b=>b.onclick=async()=>{ const a=b.dataset.pa;
-      if(a==='topost'){ setCTab('posts'); setLayout('studio'); return; }
-      if(a==='tocal'){ go('publish'); return; }
+      // план тепер живе в «Публікації»: setCTab розділ не перемикав, а go('publish') лишав вкладку «План»
+      if(a==='topost'){ if(slot&&slot.post_id) openComposer(slot.post_id); else { selectView('create','posts'); setLayout('studio'); } return; }
+      if(a==='tocal'){ selectView('publish','cal'); return; }
       const from=a==='material'?'material':'theme';
       aiBusy('✨ Генерую пост: «'+((slot&&slot.theme)?slot.theme.slice(0,60):'')+'»…');
       try{ await api('/plan/slots/'+id+'/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from})}); await loadPlan(); setCTab('posts'); setLayout('studio'); await loadStudioPosts(); flash('Пост створено і привʼязано до слота ✓'); }
@@ -1016,7 +1032,7 @@ async function loadAnalytics(){
 
 // 🔍 «Що спрацювало»: AI-розбір топ-постів (за ×N) → повторювані патерни → правило голосу в 1 клік
 async function topPatterns(){ aiBusy('🔍 Розбираю топ-пости: шукаю, що повторюється в усіх хітах…');
-  let r; try{ r=await api('/analytics/top-patterns',{method:'POST'}); }catch(e){ aiDone(); flash('⚠ '+e.message); return; } finally{ aiDone(); }
+  let r; try{ r=await api('/analytics/top-patterns',{method:'POST'}); }catch(e){ flash('⚠ '+e.message); return; } finally{ aiDone(); }
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='80';
   ov.innerHTML='<div class="modal-card" style="max-width:560px;padding:20px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">🔍 Що спрацювало (розбір '+(r.sample||0)+' топ-постів)</b><button class="icon" id="tpX" style="margin-left:auto">✕</button></div>'
     +'<div class="hint" style="margin-bottom:10px">Патерни, що повторюються у ВСІХ твоїх найкращих постах. Те, що було лише в одному хіті - шум, його тут нема.</div>'
@@ -1150,10 +1166,14 @@ if($('ctxRun')) $('ctxRun').onclick=async()=>{
   finally{ b.disabled=false; aiDone(); }
 };
 function renderBrief(text){ const o=$('briefView'); if(!o) return; o.innerHTML = text ? '<pre style="white-space:pre-wrap;font:inherit;margin:0;color:var(--ink2);line-height:1.65">'+esc(text)+'</pre>' : '<div class="empty">Натисни «Згенерувати» вгорі - бриф зʼявиться тут.</div>'; }
-let saveT;
 function flashSaved(){ const s=$('saved'); if(!s) return; s.style.opacity='1'; clearTimeout(flashSaved._t); flashSaved._t=setTimeout(()=>s.style.opacity='0',1500); }
-async function saveSetting(key,val){ try{ await api('/settings/'+key,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:val})}); flashSaved(); }catch(e){} }
-for(const tid of Object.keys(SET)){ const el=$(tid); if(el) el.addEventListener('input', ()=>{ clearTimeout(saveT); saveT=setTimeout(()=>saveSetting(SET[tid],el.value),700); }); }
+async function saveSetting(key,val){ try{ await api('/settings/'+key,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:val})}); flashSaved(); }catch(e){ flash('⚠ Не збережено: '+e.message); } }
+// таймер - СВІЙ на кожне поле: один спільний скасовував збереження поля А, щойно людина за 0,7 с
+// переходила друкувати в поле Б (правка А губилась мовчки). Відхід із поля зберігає одразу.
+const saveTs={};
+for(const tid of Object.keys(SET)){ const el=$(tid); if(el){
+  el.addEventListener('input', ()=>{ clearTimeout(saveTs[tid]); saveTs[tid]=setTimeout(()=>{ delete saveTs[tid]; saveSetting(SET[tid],el.value); },700); });
+  el.addEventListener('blur', ()=>{ if(saveTs[tid]){ clearTimeout(saveTs[tid]); delete saveTs[tid]; saveSetting(SET[tid],el.value); } }); } }
 $('langSel').onchange=()=>saveSetting('output_language',$('langSel').value);
 if($('vAddr')) $('vAddr').onchange=()=>saveSetting('voice_address',$('vAddr').value);
 if($('reelRend')) $('reelRend').onchange=()=>saveSetting('reel_renderer',$('reelRend').value);
@@ -1446,7 +1466,7 @@ async function developPost(id){ aiBusy('🔥 Шукаю кути розвитк�
 // 🎯 вердикт Директора на чернетці: веде до цілі / частково / ні + правка в 1 клік
 // 🧲 «Магніт під ТЕМУ»: магніти саме під цей пост + вплетення CTA в текст
 async function postMagnet(id){ aiBusy('🧲 Складаю лід-магніти під тему поста…');
-  let mags=[]; try{ const r=await api('/posts/'+id+'/lead-magnet',{method:'POST'}); mags=r.magnets||[]; }catch(e){ flash('⚠ '+e.message); aiDone(); return; } finally{ aiDone(); }
+  let mags=[]; try{ const r=await api('/posts/'+id+'/lead-magnet',{method:'POST'}); mags=r.magnets||[]; }catch(e){ flash('⚠ '+e.message); return; } finally{ aiDone(); }
   if(!mags.length){ flash('Не вдалося скласти магніти'); return; }
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
   ov.innerHTML='<div class="modal-card" style="max-width:560px;padding:20px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">🧲 Магніти під цю тему</b><button class="icon" id="pmX" style="margin-left:auto">✕</button></div>'
@@ -1465,25 +1485,28 @@ async function postMagnet(id){ aiBusy('🧲 Складаю лід-магніти
     catch(e){ flash('⚠ '+e.message); b.disabled=false; } finally{ aiDone(); } });
 }
 async function directorCheck(id){ aiBusy('🎯 Директор перевіряє пост на відповідність цілі…');
+  // aiBusy/aiDone - лічильник: гасимо рівно стільки, скільки запалили (відмова в confirm гасила двічі,
+  // і банер ховався, поки інша робота - напр. публікація - ще йшла)
+  let busy=true;
   try{ const r=await api('/posts/'+id+'/director',{method:'POST'});
     const E={yes:'✅ ВЕДЕ ДО ЦІЛІ',partial:'⚠ ЧАСТКОВО ВЕДЕ',no:'✖ НЕ ВЕДЕ ДО ЦІЛІ'};
     const trustLine=r.trust?('\n'+(r.trust==='builds'?'🤝 Будує довіру':'💸 Витрачає довіру (просить, не давши цінності)')+(r.trustWhy?': '+r.trustWhy:'')):'';
     const msg=(E[r.verdict]||r.verdict)+trustLine+'\n\n'+(r.reason||'');
-    if(r.verdict!=='yes'&&(r.fix||r.sharper)){ aiDone();
+    if(r.verdict!=='yes'&&(r.fix||r.sharper)){ aiDone(); busy=false;
       // спершу пропонуємо ГОСТРІШУ версію (готовий переписаний початок), потім - правку-інструкцію
       if(r.sharper&&confirm(msg+'\n\n⚡ ВЕРСІЯ ГОСТРІША (новий початок поста):\n«'+r.sharper+'»\n\nЗамінити перший абзац цією версією?')){
         const full=await api('/posts/'+id+'/full'); const parts=(full.content||'').split('\n\n'); parts[0]=r.sharper;
         await api('/posts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:parts.join('\n\n')})});
         await loadStudioPosts(); flash('Початок загострено під ціль ✓'); }
       else if(r.fix&&confirm('Правка Директора: '+r.fix+'\n\nЗастосувати (перепише пост)?')){
-        aiBusy('⚡ Загострюю пост під ціль…');
+        aiBusy('⚡ Загострюю пост під ціль…'); busy=true;
         await api('/posts/'+id+'/regenerate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instruction:r.fix})});
         await loadStudioPosts(); flash('Пост загострено під ціль ✓'); } }
     else alert(msg);
-  }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } }
+  }catch(e){ flash('⚠ '+e.message); } finally{ if(busy) aiDone(); } }
 // 📖 Сторителлінг-редактор: оцінка поста як історії (12 прийомів) + до 5 правок «Було→Пропоную→Чому»
 async function storytellingCheck(id){ aiBusy('📖 Оцінюю пост як історію…');
-  let r; try{ r=await api('/posts/'+id+'/storytelling',{method:'POST'}); }catch(e){ flash('⚠ '+e.message); aiDone(); return; } finally{ aiDone(); }
+  let r; try{ r=await api('/posts/'+id+'/storytelling',{method:'POST'}); }catch(e){ flash('⚠ '+e.message); return; } finally{ aiDone(); }
   const fixes=r.fixes||[], checklist=r.checklist||[];
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
   ov.innerHTML='<div class="modal-card" style="max-width:600px;max-height:80vh;overflow:auto;padding:20px">'
@@ -1599,7 +1622,9 @@ function renderStudio(){
       +'</div></div>';
   }).join('');
   grid.querySelectorAll('.pcard').forEach(card=>{ const id=card.dataset.post; const cont=card.querySelector('.pcontent');
-    cont.addEventListener('blur',()=>saveContent(id,cont.textContent));
+    // innerText, а не textContent: Enter у редагованому тексті Chrome робить <div>/<br>, і textContent
+    // зливав рядки («Перший рядок⏎НОВИЙ» зберігалось як «Перший рядокНОВИЙ»)
+    cont.addEventListener('blur',()=>saveContent(id,cont.innerText));
     const cb=card.querySelector('.psel'); if(cb) cb.onchange=()=>{ cb.checked?SelPosts.add(id):SelPosts.delete(id); card.classList.toggle('selc',cb.checked); renderBulkBar(); };
     card.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(id); return; } if(a==='image'){ openImageEditor(id); return; } if(a==='atomize'){ openAtomize(id); return; } if(a==='director'){ directorCheck(id); return; } if(a==='develop'){ developPost(id); return; } if(a==='magnet'){ postMagnet(id); return; } if(a==='reelvideo'){ reelVideoRun(id); return; } if(a==='reelplay'){ openVideoModal(b.dataset.rv); return; } if(a==='reelpub'){ openReelPublish(id); return; }
       if(a==='menu'){ const p=Finals.find(x=>x.id===id); if(p) openCardMenu(p,b,card); return; }
@@ -1673,7 +1698,7 @@ function renderInbox(){
   det.innerHTML='<div class="indet-h">'+chanDots(p.channels)+'<span class="statuspill '+sp[1]+'" style="margin-left:auto">'+sp[0]+'</span></div>'
     +'<div class="indet-text pcontent" contenteditable="true">'+esc(p.content)+'</div>'
     +'<div class="indet-f"><span class="chars">'+(p.content||'').replace(/\n/g,'').length+' символів</span><button data-a="regen">↻ Переробити</button><button class="primary" data-a="composer">📣 Опублікувати</button><button class="approve'+(ap?' on':'')+'" data-a="approve">✓ '+(ap?'Затверджено':'Затвердити')+'</button></div>';
-  const cont=det.querySelector('.pcontent'); cont.addEventListener('blur',()=>saveContent(p.id,cont.textContent));
+  const cont=det.querySelector('.pcontent'); cont.addEventListener('blur',()=>saveContent(p.id,cont.innerText));
   det.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(p.id); return; } postAction(det,p.id,a); });
 }
 const STEPNAMES={1:'Витяг ідей',3:'Чорнові пости',4:'Tone of Voice',5:'Формат під канали',6:'Де-AI',7:'Контент-план'};
@@ -1956,7 +1981,7 @@ async function openComposer(postId, opts){
   const initDate=opts.scheduledAt?locDate(opts.scheduledAt):''; const initTime=opts.scheduledAt?locHM(opts.scheduledAt):'11:00';
   const textOf=(k)=> (C[k]&&typeof C[k].text==='string'&&C[k].text) ? C[k].text : master;
   const ov=document.createElement('div'); ov.className='cmp-ov';
-  const rubOpts='<option value="">без рубрики</option>'+(Rubrics||[]).map(r=>'<option value="'+esc(r.name)+'"'+(r.name===rubric?' selected':'')+'>'+(r.emoji||'')+' '+esc(r.name)+'</option>').join('');
+  const rubOpts='<option value="">без рубрики</option>'+(Rubrics||[]).map(r=>'<option value="'+esc(r.name)+'"'+(r.name===rubric?' selected':'')+'>'+esc(r.emoji||'')+' '+esc(r.name)+'</option>').join('');
   ov.innerHTML=
     '<div class="cmp-top"><button class="ghost" id="cmpBack" style="padding:6px 12px;font-size:13px">← Назад</button><b style="font-size:16px;margin-left:4px">✍ Композер</b><span id="cmpSub" style="font-size:12px;color:var(--muted)"></span><span style="flex:1"></span><button class="icon" id="cmpX" title="Закрити">✕</button></div>'
     +'<div class="cmp-body">'
@@ -1998,14 +2023,20 @@ async function openComposer(postId, opts){
       +'<button class="ok" id="cmpSched">🗓 Запланувати</button><button class="primary" id="cmpNow">📣 Опублікувати зараз</button></div>';
   document.body.appendChild(ov);
   _cmpOpenId=postId; writeRoute('post',postId); // 🔗 тепер на цей пост можна дати пряме посилання
-  const escH=(e)=>{ if(e.key==='Escape') close(); };
+  let savedMaster=master; // що вже лежить на сервері: закриття з незбереженим текстом перепитує
+  const leaveOk=()=>master===savedMaster||confirm('Закрити композер? Незбережені зміни в тексті загубляться.');
+  const escH=(e)=>{ if(e.key!=='Escape') return;
+    // Escape у діалозі ПОВЕРХ композера (фото, вибір кадрів) - не привід закривати сам композер
+    const layers=[...document.querySelectorAll('.cmp-ov,.modal')];
+    if(layers[layers.length-1]!==ov) return;
+    if(leaveOk()) close(); };
   function close(){ ov.remove(); document.removeEventListener('keydown',escH); _cmpOpenId=null;
     if(/^#\/post\//.test(location.hash)) location.hash=_routeBack; } // function-декларація: хойститься, безпечна для колбеків вище
   document.addEventListener('keydown',escH);
   const msg=ov.querySelector('#cmpMsg'); const txt=ov.querySelector('#cmpText'); txt.value=master;
   const setMsg=(t,c)=>{ msg.textContent=t; msg.style.color=c||'var(--muted)'; };
-  ov.querySelector('#cmpX').onclick=close;
-  const backBtn=ov.querySelector('#cmpBack'); if(backBtn) backBtn.onclick=close;
+  ov.querySelector('#cmpX').onclick=()=>{ if(leaveOk()) close(); };
+  const backBtn=ov.querySelector('#cmpBack'); if(backBtn) backBtn.onclick=()=>{ if(leaveOk()) close(); };
   // 🗑 видалення доступне лише НЕопублікованим (опубліковані - історія й аналітика)
   const delBtn=ov.querySelector('#cmpDel');
   if(delBtn){ delBtn.style.display=sentSet.size?'none':''; delBtn.onclick=()=>deletePost(postId, close); }
@@ -2205,16 +2236,17 @@ async function openComposer(postId, opts){
       setMsg('');
     }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpAudit').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('🔍 шукаю AI-сліди…'); aiBusy('🔍 Шукаю сліди AI у тексті…');
+    let busy=true; // лічильник банера: гасимо рівно те, що запалили (відмова в confirm гасила двічі)
     try{ const r=await api('/posts/'+postId+'/ai-audit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:master})}); const f=r.findings||[];
       if(!f.length){ setMsg('чисто - слідів AI не знайдено ✓','var(--brand)'); return; }
-      aiDone();
+      aiDone(); busy=false;
       const doFix=confirm('🔍 Знайдено AI-слідів: '+f.length+'\n\n'+f.map(x=>'• '+x.pattern+': «'+x.quote+'»').join('\n')+'\n\n🧹 Виправити точково? (замінюються ЛИШЕ знайдені фрагменти, решта тексту не рухається)');
       if(!doFix){ setMsg('знайдено слідів: '+f.length+' (не виправлено)','var(--danger)'); return; }
-      setMsg('🧹 точкова правка (до 2 проходів)…'); aiBusy('🧹 Точково прибираю AI-сліди…');
+      setMsg('🧹 точкова правка (до 2 проходів)…'); aiBusy('🧹 Точково прибираю AI-сліди…'); busy=true;
       const rr=await api('/posts/'+postId+'/deai-fix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:master})});
       master=rr.content||master; txt.value=master; renderPrev();
       setMsg((rr.remaining&&rr.remaining.length)?('прибрано; лишилось слідів: '+rr.remaining.length+' (запусти ще раз)'):'сліди прибрано, текст чистий ✓','var(--brand)');
-    }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
+    }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; if(busy) aiDone(); } };
   // обкладинку міняє фото-редактор: перечитуємо список кадрів (кадри каруселі лишаються на місці)
   ov.querySelector('#cmpPhoto').onclick=()=>{ if(isVideo()&&!confirm('У пості відео. Замінити його фото?')) return;
     openPhotoTool(postId, full.image_prompt||'', async()=>{ try{ const f2=await api('/posts/'+postId+'/full'); setMedia(f2.media); }catch(_){ } renderMedia(); renderPrev(); }); };
@@ -2253,6 +2285,7 @@ async function openComposer(postId, opts){
   // ----- зберегти / адаптувати / публікувати / планувати -----
   async function saveDraft(){ const iv=ov.querySelector('#cmpIntent'), fv=ov.querySelector('#cmpFormat');
     await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master,rubric,intent:iv?iv.value:'',slides_text:slidesText,...(fv?{format:fv.value}:{})})});
+    savedMaster=master;
     await api('/posts/'+postId+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:C})}); }
   ov.querySelector('#cmpSave').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('💾 зберігаю…'); try{ await saveDraft(); setMsg('чернетку збережено ✓','var(--brand)'); try{await loadStudioPosts();}catch(_){} }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; } };
   // формат «Карусель», а кадрів ще нема: інакше сценарій «Слайд 1…Слайд 10» піде підписом під одним фото
@@ -2264,14 +2297,18 @@ async function openComposer(postId, opts){
       // людина. Щойно юзер підлаштував (чи вернув ↺) хоч одну мережу вручну, прев'ю = істина:
       // мережі, які він лишив зі своїм текстом, їдуть саме зі своїм текстом.
       // у сторіс підпису немає - пакувати текст під мережі нема чого (і платити за це теж)
-      const missing=(C.manual_adapt||isStory())?[]:todo.filter(k=>!hasOwn(k));
+      // гілка Threads пакується з майстер-тексту на сервері (threadsSplit) - під 500 символів її не ріжемо
+      const missing=(C.manual_adapt||isStory())?[]:todo.filter(k=>!hasOwn(k)&&!(k==='threads'&&C.threads&&C.threads.thread));
       if(missing.length){ setMsg('✨ пакую під канали…'); aiBusy('✨ Пакую пост під кожну мережу…');
         // ⚠️ aiBusy/aiDone - ЛІЧИЛЬНИК: без парного aiDone саме тут банер «Публікую в канали…»
         // лишався висіти назавжди, бо _aiN ніколи не падав до нуля (finally нижче гасить лише СВІЙ виклик)
         try{
           await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master})});
           const ra=await api('/posts/'+postId+'/adapt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:missing})});
-          Object.keys(ra.channels||{}).forEach(k=>{ if(!sentSet.has(k)) C[k]=ra.channels[k]; }); renderPrev();
+          // беремо ЛИШЕ новий текст для мереж, які пакували; вибір мереж і прапорці (гілка, нумерація)
+          // лишаються локальні. Раніше тут копіювались УСІ збережені мережі - і пост ішов у мережу,
+          // яку людина щойно вимкнула, а режим гілки губився
+          missing.forEach(k=>{ const v=ra.channels&&ra.channels[k]; if(v&&v.text) C[k]={...(C[k]||{}),on:true,text:v.text}; }); renderPrev();
         } finally { aiDone(); } }
     }catch(_){ /* адаптація не критична - публікуємо майстер-текстом */ }
     setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const res=await runPublish(postId,setMsg); const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); ok.forEach(k=>sentSet.add(k)); await refreshSentState(postId,sentSet,(l)=>{ sentLinks=l; renderChips(); renderPrev(); }); renderChips(); renderPrev(); setMsg((ok.length?'✓ '+ok.join(', '):'')+(err.length?' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; '):''), err.length?'var(--danger)':'var(--brand)'); if(ok.length&&!err.length) flash('Опубліковано ✓ Якщо пост залетить - 🔥 на картці дасть 5 кутів продовження'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)');
@@ -2474,7 +2511,7 @@ async function ensureRun(){
 }
 function setBusy(b){ busy=b; document.querySelectorAll('#pipe button, #runAll, #genPostsBtn, #studioMore').forEach(x=>x.disabled=b); const sb=$('stopBtn'); if(sb){ sb.style.display=b?'block':'none'; if(!b) sb.textContent='⛔ Зупинити'; } }
 function ideaOpts(){ return { count: Math.max(1,Math.min(12,(+($('ideaCount')&&$('ideaCount').value))||6)), rubrics: [...document.querySelectorAll('.ideaRub:checked')].map(c=>c.value) }; }
-function renderIdeaRubrics(){ const o=$('ideaRubrics'); if(!o) return; o.innerHTML = Rubrics.length ? Rubrics.map(r=>'<label class="rchip"><input type="checkbox" class="ideaRub" value="'+esc(r.name)+'" checked> '+(r.emoji||'')+' '+esc(r.name)+'</label>').join('') : '<div class="empty">нема рубрик</div>'; o.querySelectorAll('.rchip').forEach(l=>{ const cb=l.querySelector('input'); const upd=()=>l.classList.toggle('on',cb.checked); upd(); cb.addEventListener('change',upd); }); }
+function renderIdeaRubrics(){ const o=$('ideaRubrics'); if(!o) return; o.innerHTML = Rubrics.length ? Rubrics.map(r=>'<label class="rchip"><input type="checkbox" class="ideaRub" value="'+esc(r.name)+'" checked> '+esc(r.emoji||'')+' '+esc(r.name)+'</label>').join('') : '<div class="empty">нема рубрик</div>'; o.querySelectorAll('.rchip').forEach(l=>{ const cb=l.querySelector('input'); const upd=()=>l.classList.toggle('on',cb.checked); upd(); cb.addEventListener('change',upd); }); }
 async function run(n){
   if(busy) return; setBusy(true); aiBusy('⚙️ Виконую крок конвеєра…');
   try{ await ensureRun(); badge(n,'run','<span class="spin"></span> генерую'); stepEl(n).classList.remove('stale');
@@ -2497,7 +2534,7 @@ async function genPosts(){
   setBusy(true); setLayout('studio');
   const cnt=Number(($('ideaCount')||{}).value)||6;
   aiBusy('✨ Генерую '+cnt+' чорновиків у твоєму голосі…');
-  try{ const r=await api('/runs/'+rid+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:cnt})}); await refresh(); flash('Готово - '+(r.count||0)+' чорновиків на перегляд. Відкрий чорновик, підлаштуй під канали й заплануй.'); loadTasks(); }
+  try{ const r=await runAiJob('/runs/'+rid+'/generate-lite',{count:cnt}); await refresh(); flash('Готово - '+(r.count||0)+' чорновиків на перегляд. Відкрий чорновик, підлаштуй під канали й заплануй.'); loadTasks(); }
   catch(e){ flash('⚠ '+e.message); try{await refresh();}catch(_){} }
   finally{ setBusy(false); aiDone(); }
 }
@@ -2530,7 +2567,7 @@ if($('ideasToPosts')) $('ideasToPosts').onclick=async()=>{
   const picked=Array.from(document.querySelectorAll('#ideaList .ideaCb:checked')).map(c=>c.dataset.idea).filter(Boolean);
   if(!picked.length){ flash('Обери хоча б одну ідею'); return; }
   if(busy||!runId) return; setBusy(true); setLayout('studio'); aiBusy('✨ Створюю пости з обраних ідей…');
-  try{ const r=await api('/runs/'+runId+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ideas:picked})}); await refresh(); flash('Готово - '+(r.count||0)+' постів на перегляд.'); loadTasks(); }
+  try{ const r=await runAiJob('/runs/'+runId+'/generate-lite',{ideas:picked}); await refresh(); flash('Готово - '+(r.count||0)+' постів на перегляд.'); loadTasks(); }
   catch(e){ flash('⚠ '+e.message); }
   finally{ setBusy(false); aiDone(); }
 };
@@ -2926,13 +2963,18 @@ function abModelOptions(sel){
       +byVendor[v].map(m=>'<option value="'+esc(m.id)+'"'+(m.id===sel?' selected':'')+'>'+esc(m.id)+esc(abPriceLabel(m))+'</option>').join('')
       +'</optgroup>').join('');
 }
-async function loadAbTest(){
-  if(_abReady) return; _abReady=true;
-  const box=$('abModels'), src=$('abSource'); if(!box||!src) return;
+function fillAbSources(){ const src=$('abSource'); if(!src) return;
   // матеріали: беремо вже завантажену стрічку, щоб не робити зайвий запит
-  const mats=(Mats||[]).slice(0,40);
+  const mats=(Mats||[]).slice(0,40), cur=src.value;
   src.innerHTML=(mats.length?mats.map(m=>'<option value="'+esc(m.id)+'">'+esc((matType(m)||'')+' · '+String(m.title||'без назви').slice(0,70))+'</option>').join('')
     :'<option value="">- нема матеріалів: додай хоч один у «Створення → Матеріали»</option>');
+  if(cur&&mats.some(m=>m.id===cur)) src.value=cur; }
+async function loadAbTest(){
+  // список матеріалів оновлюємо щоразу: відкриття #/tools одразу після старту бачило ще порожню
+  // стрічку, а прапорець нижче більше не пускав сюди - і лишалось «нема матеріалів» назавжди
+  fillAbSources();
+  if(_abReady) return; _abReady=true;
+  const box=$('abModels'), src=$('abSource'); if(!box||!src) return;
   let cat={models:[],live:false,current:'',spend:{calls:0,cost:0}};
   try{ cat=await api('/models/catalog'); }catch(e){}
   _abCat=cat.models||[];
@@ -3555,7 +3597,7 @@ function renderStrategy(){
   $('stratStatus').textContent = st==='applied'?'застосовано':(st==='draft'?'чернетка':'нема');
   const o=$('stratView'); if(!o) return;
   if(!d || !Object.keys(d).length){ o.innerHTML='<div class="empty">Натисни «Згенерувати».</div>'; return; }
-  const rubs=(d.rubrics||[]).map(r=>(r.emoji||'')+' '+esc(r.name||'')+' '+(r.share||0)+'%').join(' · ');
+  const rubs=(d.rubrics||[]).map(r=>esc(r.emoji||'')+' '+esc(r.name||'')+' '+esc(Number(r.share)||0)+'%').join(' · ');
   const themes=(d.monthly_themes||[]).map(t=>esc(typeof t==='string'?t:((t&&t.themes)||[]).join(', '))).filter(Boolean).join(' · ');
   const sel=new Set((d.best_days||[]).map(x=>String(x).toLowerCase().slice(0,3)));
   const times=(Array.isArray(d.times)&&d.times.length?d.times:['11:00']).join(', ');
@@ -3565,7 +3607,7 @@ function renderStrategy(){
       +'<label style="font-size:12px;color:var(--muted)">Час (HH:MM, через кому = кілька на день): <input id="stTimes" class="txt" value="'+esc(times)+'" style="width:170px;display:inline-block;padding:7px 9px"></label>'
       +'<div class="btnrow"><button class="primary" id="saveSched">Зберегти розклад</button><span id="schedMsg" style="font-size:12px;color:var(--muted)"></span></div>'
       +(d.schedule_rationale?'<div class="hint" style="margin-top:8px">💡 '+esc(d.schedule_rationale)+'</div>':'')+'</div>'
-    +'<div class="card"><b>Частота:</b> '+((d.frequency&&d.frequency.posts_per_week)||'?')+' пост/тиж · <b>Канали:</b> '+esc((d.channels||[]).join(', ')||'-')+'</div>'
+    +'<div class="card"><b>Частота:</b> '+esc((d.frequency&&d.frequency.posts_per_week)||'?')+' пост/тиж · <b>Канали:</b> '+esc((d.channels||[]).join(', ')||'-')+'</div>'
     +(themes?'<div class="card"><b>Теми:</b> '+themes+'</div>':'');
   o.querySelectorAll('.stDay').forEach(cb=>{ const l=cb.closest('.rchip'); l.classList.toggle('on',cb.checked); cb.addEventListener('change',()=>l.classList.toggle('on',cb.checked)); });
   const sb=$('saveSched'); if(sb) sb.onclick=saveSchedule;
@@ -3683,7 +3725,7 @@ async function runOnbProgress(rid){
     +'<div>📥 У <b>Джерелах</b> додаси інші джерела контенту (транскрипти, RSS, фото з Google Drive)</div>'
     +'</div><div style="text-align:center;margin-top:20px"><span class="spin"></span> <span style="color:var(--muted);font-size:13px">зачекай ~30-60 секунд…</span></div></div>';
   const minWait=new Promise(z=>setTimeout(z,3500)); // щоб встиг прочитати тези
-  try{ await Promise.all([ api('/runs/'+rid+'/generate-lite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:cnt,images:true,provider:'gemini'})}), minWait ]); }catch(e){ await minWait; }
+  try{ await Promise.all([ runAiJob('/runs/'+rid+'/generate-lite',{count:cnt,images:true,provider:'gemini'}), minWait ]); }catch(e){ await minWait; }
 }
 
 // ---------- OAuth у поп-апі (кабінет не закривається) ----------
@@ -3917,6 +3959,8 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
     const bb=document.createElement('div'); bb.textContent='BETA';
     bb.style.cssText='position:fixed;bottom:76px;right:12px;z-index:95;background:#e67e22;color:#fff;font-weight:800;font-size:11px;padding:4px 10px;border-radius:20px;letter-spacing:.06em;box-shadow:0 2px 8px rgba(0,0,0,.25);pointer-events:none';
     document.body.appendChild(bb); }
+  // після входу повертаємо адресу, з якою людина прийшла (див. catch нижче: #/post/<id> з бота)
+  try{ const nx=sessionStorage.getItem('kg_next'); if(nx){ sessionStorage.removeItem('kg_next'); if(!location.hash&&/^#\/[\w\/-]{1,160}$/.test(nx)) history.replaceState(null,'','/app'+nx); } }catch(_){ }
   // Пріоритет: АДРЕСА (#/publish/plan) → останній розділ із localStorage → «Сьогодні».
   // Саме адреса головна: оновлення сторінки, «назад», закладка й надісланий комусь лінк повертають
   // РІВНО той екран, а не дефолтну вкладку розділу.
@@ -3926,10 +3970,11 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
     const _lastTab=localStorage.getItem('kg_ctab');
     selectView(_views.includes(_lastView)?_lastView:'today', _lastView==='create'?_lastTab:undefined);
   }
-  setLayout('studio'); renderCountChips();
+  setLayout('studio',true); renderCountChips(); // вкладку з адреси (#/create/ideas) не перебиваємо
   renderStudio(); renderInbox(); renderStudioSteps({}); renderSourceCard(null);
   try{ const me=await api('/auth/me'); $('userEmail').textContent=me.email; if(me.email) $('avatar').textContent=(me.email[0]||'О').toUpperCase(); }
-  catch(e){ location.href='/login'; return; }
+  // посилання з бота, відкрите без входу (вбудований браузер Telegram): адресу памʼятаємо до входу
+  catch(e){ try{ if(location.hash) sessionStorage.setItem('kg_next',location.hash); }catch(_){ } location.href='/login'; return; }
   await loadSettings();
   await loadTelegram(); loadThreads(); loadMeta(); loadLinkedin(); loadYoutube(); loadTiktok();
   const _sp=new URLSearchParams(location.search); const _thq=_sp.get('threads'), _mtq=_sp.get('meta'), _gdq=_sp.get('gdrive');
@@ -3938,13 +3983,15 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
   if(_mtq){ go('settings'); alert(_mtq==='ok'?'Facebook/Instagram підключено ✓':(_mtq==='nopage'?'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).':oauthFailText('meta',_sp.get('why')))); }
   if(_gdq){ go('sources'); alert(_gdq==='ok'?'Google Drive підключено ✓':'Не вдалося підключити Google Drive.'); }
   await loadPrompts();
-  loadRubrics(); loadStrategy(); loadFF(); loadMcp(); loadWorkspaces(); loadWsMembers(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadSttProvider(); loadTasks(); loadStudioPosts(); loadGoalCta(); loadMagnets();
-  loadMaterials(); // стрічка + лічильник
+  const _rubP=loadRubrics(); loadStrategy(); loadFF(); loadMcp(); loadWorkspaces(); loadWsMembers(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadSttProvider(); loadTasks(); loadStudioPosts(); loadGoalCta(); loadMagnets();
+  const _matsP=loadMaterials().then(()=>{ try{ fillAbSources(); }catch(_){ } }); // стрічка + лічильник
   // ⚠️ вкладку Створення тут БІЛЬШЕ НЕ смикаємо: раніше цей рядок безумовно кликав setCTab і
   // перебивав адресу (#/create/ideas відкривався й одразу з'їжджав на Чорновики). Початкову вкладку
   // тепер ставить applyRoute/фолбек вище; сюди лишився лише сам завантажувач плану.
   loadPlan();
   await loadChanStatus();
+  try{ await Promise.all([_matsP,_rubP]); }catch(_){ }
+  _bootDone();
   let _onb=true; try{ const st=await api('/settings'); if(!st.some(r=>r.key==='onboarded')){ _onb=false; showOnboarding(); } }catch(e){}
   // 🦉 сова-провідник (лише після онбордингу; не заважає першому налаштуванню)
   if(_onb){ try{ owlInit(); setTimeout(loadGuide,1500); }catch(e){} }

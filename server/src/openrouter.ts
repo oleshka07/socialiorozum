@@ -194,6 +194,10 @@ export async function chat(model: string, system: string, user: string, ctx?: Ch
 
   if (!res.ok) {
     const t = await res.text();
+    // гроші на рахунку провайдера скінчились - це не «спробуй за хвилину»: без поповнення чи іншої
+    // моделі кожна наступна спроба впаде так само (так тейки на беті падали 840 разів за два тижні)
+    if (res.status === 402 || /insufficient_quota|requires more credits|credit balance|Insufficient credits/i.test(t))
+      throw new Error(`На рахунку провайдера моделі (${provider}) закінчились кошти - обери іншу модель в Інструментах («Головна модель») або поповни рахунок.`);
     // 5xx і 429 у провайдера - не наша помилка і не назавжди: кажемо людині саме це, а деталь
     // лишаємо після крапки для оператора (вона потрапляє в журнал разом із повідомленням)
     if (res.status >= 500 || res.status === 429)

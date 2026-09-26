@@ -779,3 +779,14 @@ create index if not exists idx_post_slide_media on post_slide(media_id);
 -- Сценарій каруселі («Слайд 1: …», «Слайд 2: …»): з нього зібрано кадри. Коли кадри готові, текст
 -- поста стає ПІДПИСОМ під каруселлю, а сценарій живе тут - щоб слайди можна було перезібрати.
 alter table post add column if not exists slides_text text;
+-- Сміттєвий ключ «all» (канал слота майстер-плану) потрапляв у post.channels двома шляхами, і публікатор
+-- звітував «опубліковано: all», не відправивши нікуди. Писати його перестали; наявні пости чистимо тут.
+update post set channels = channels - 'all' where channels ? 'all';
+-- Автопостер повторює ТИМЧАСОВІ збої (ліміт мережі, таймаут, 5xx, перезапуск) до 3 разів через 10 хв.
+-- Час публікації в календарі не рухаємо: повтор живе окремо в retry_at.
+alter table schedule_slot add column if not exists attempts int not null default 0;
+alter table schedule_slot add column if not exists retry_at timestamptz;
+-- Хто видав посилання підключення бота і хто за ним підключився: відкликання доступу до кабінету
+-- тепер забирає й доступ через бота/Mini App (раніше звʼязок Telegram↔кабінет лишався назавжди).
+alter table tg_connect add column if not exists created_by uuid references app_user(id) on delete cascade;
+alter table tg_owner add column if not exists user_id uuid references app_user(id) on delete set null;

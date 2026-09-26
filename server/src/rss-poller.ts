@@ -28,7 +28,15 @@ async function fetchInstagramItems(feed: Feed): Promise<RssItem[]> {
 }
 
 // створює source+run для нових статей; повертає id нових прогонів
-async function ingest(feed: Feed): Promise<string[]> {
+// одна стрічка - один прохід за раз: ручне «↓ Підтягнути», що збіглося з воркером, раніше двічі
+// проходило перевірку «такий айтем уже є?» і клало дублікати (з платною авто-генерацією на кожен)
+const ingesting = new Set<string>();
+async function ingest(f: Feed): Promise<string[]> {
+  if (ingesting.has(f.id)) return [];
+  ingesting.add(f.id);
+  try { return await ingestNow(f); } finally { ingesting.delete(f.id); }
+}
+async function ingestNow(feed: Feed): Promise<string[]> {
   let items;
   try { items = feed.kind === "instagram" ? await fetchInstagramItems(feed) : await fetchFeed(feed.url); }
   catch (e: any) {
@@ -96,7 +104,15 @@ async function runPipelines(runIds: string[]): Promise<void> {
 }
 
 async function tick(): Promise<void> {
-  const feeds = await q<Feed>(`select id, workspace_id, url, kind, auto_run, error_count, last_pulled_at from content_source where active=true and kind in ('rss','instagram') limit 50`);
+  // Лише стрічки, яким настав час (бекоф битих - у самому запиті), найдавніші першими. Раніше тут
+  // стояло «перші 50 без сортування»: стрічки понад 50-ту не опитувались ніколи, а биті в бекофі
+  // займали місця в цих 50.
+  const feeds = await q<Feed>(
+    `select id, workspace_id, url, kind, auto_run, error_count, last_pulled_at from content_source
+      where active=true and kind in ('rss','instagram')
+        and (coalesce(error_count,0) = 0 or last_pulled_at is null
+             or last_pulled_at < now() - make_interval(secs => least(21600, 900 * power(2, greatest(coalesce(error_count,0) - 1, 0)))))
+      order by last_pulled_at nulls first limit 200`);
   for (const f of feeds) {
     // експоненційний бекоф для битих фідів: 15хв → 30хв → 1г → … → стеля 6г (щоб не довбати мертве джерело)
     const errs = f.error_count || 0;
@@ -142,12 +158,13 @@ async function notifyTopMaterials(ws: string, ids: string[]): Promise<void> {
   const tops = await q<{ id: string; title: string; ai_score: number; ai_score_why: string | null }>(
     `select id, coalesce(title,'') as title, ai_score, ai_score_why from source
       where id = any($1) and ai_score >= 9 and archived=false order by ai_score desc limit 2`, [ids]);
+  if (!tops.length) return;
   const { liveSend } = await import("./tgbot.js");
-  for (const t of tops) {
-    await liveSend(ws, owner.chat_id, "topmat",
-      `🔥 Топ-матеріал ⭐${t.ai_score}/10:\n«${t.title.slice(0, 150)}»${t.ai_score_why ? `\n\n${String(t.ai_score_why).slice(0, 200)}` : ""}`,
-      [[{ text: "✨ Зробити чорновик", data: `mat_post:${t.id}` }]]);
-  }
+  // ОДНЕ повідомлення на всі топ-матеріали: «живе» повідомлення категорії гасить попереднє, тож
+  // два окремі надсилання лишали лише друге - і саме з нижчою оцінкою
+  const text = tops.map((t) => `🔥 Топ-матеріал ⭐${t.ai_score}/10:\n«${t.title.slice(0, 150)}»${t.ai_score_why ? `\n${String(t.ai_score_why).slice(0, 200)}` : ""}`).join("\n\n");
+  await liveSend(ws, owner.chat_id, "topmat", text,
+    tops.map((t, i) => [{ text: tops.length > 1 ? `✨ Чорновик із ${i + 1}-го` : "✨ Зробити чорновик", data: `mat_post:${t.id}` }]));
 }
 
 // 🌙 нічна ретенція новин: раз на добу архівуємо вчорашні новини з низькою оцінкою цінності

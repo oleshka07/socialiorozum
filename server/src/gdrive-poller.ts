@@ -1,4 +1,5 @@
 // Фоновий поллер папок Google Drive: тягне нові зображення -> медіа-бібліотека.
+import { getSetting, setSetting } from "./settings.js";
 import { q, one } from "./db.js";
 import { logEvent } from "./log.js";
 import { env } from "./env.js";
@@ -34,23 +35,34 @@ async function pullFolder(folder: Folder): Promise<number> {
   try { files = await gdrive.listImages(token, folder.folder_id); }
   catch (e: any) { await q(`update gdrive_folder set last_error=$2, last_pulled_at=now() where id=$1`, [folder.id, String(e.message).slice(0, 300)]); throw e; }
   let created = 0;
+  // файли, які медіатека вже відхилила (TIFF, PSD, RAW проходять фільтр image/, але не наш формат):
+  // раніше кожен такий файл завантажувався знову кожні 15 хв - з попередженням у журналі щоразу
+  const skip = new Set<string>(await getSetting<string[]>(folder.workspace_id, "gdrive_skip", []));
+  let skipChanged = false;
   for (const f of files) {
     if (created >= MAX_PER_TICK) break;
+    if (skip.has(f.id)) continue;
     const dup = await one(`select id from media_asset where workspace_id=$1 and external_id=$2`, [folder.workspace_id, f.id]);
     if (dup) continue;
+    let buf: Buffer;
+    try { buf = await gdrive.downloadFile(token, f.id); }
+    catch (e: any) { await logEvent("warn", "gdrive", `файл ${f.name}: ${e.message}`); continue; } // мережа - спробуємо наступного разу
     try {
-      const buf = await gdrive.downloadFile(token, f.id);
       await saveMedia(folder.workspace_id, { buffer: buf, mime: f.mimeType, name: f.name, source: "gdrive", externalId: f.id });
       created++;
-    } catch (e: any) { await logEvent("warn", "gdrive", `файл ${f.name}: ${e.message}`); }
+    } catch (e: any) {
+      skip.add(f.id); skipChanged = true;
+      await logEvent("warn", "gdrive", `файл ${f.name} пропущено назавжди: ${e.message}`);
+    }
   }
+  if (skipChanged) await setSetting(folder.workspace_id, "gdrive_skip", [...skip].slice(-500));
   await q(`update gdrive_folder set last_error=null, last_pulled_at=now() where id=$1`, [folder.id]);
   if (created) await logEvent("info", "gdrive", `${folder.name || folder.folder_id}: +${created} фото`);
   return created;
 }
 
 async function tick(): Promise<void> {
-  const folders = await q<Folder>(`select id, workspace_id, folder_id, name from gdrive_folder where active=true limit 50`);
+  const folders = await q<Folder>(`select id, workspace_id, folder_id, name from gdrive_folder where active=true order by last_pulled_at nulls first limit 200`);
   for (const f of folders) {
     try { await pullFolder(f); }
     catch (e: any) { await logEvent("warn", "gdrive", `${f.folder_id}: ${e.message}`); }

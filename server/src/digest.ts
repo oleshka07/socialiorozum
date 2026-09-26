@@ -3,6 +3,7 @@
 import { q, one } from "./db.js";
 import { env } from "./env.js";
 import { logEvent } from "./log.js";
+import { canTry, failedTry, succeededTry } from "./dailytry.js";
 import { nextInsight } from "./pipeline.js";
 import { liveSend } from "./tgbot.js";
 import { networkBenchmarks } from "./metrics.js";
@@ -154,10 +155,17 @@ async function tick(): Promise<void> {
       if (hour !== DIGEST_HOUR) continue;
       const last = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='digest_last'`, [o.workspace_id]);
       if (last?.content === date) continue; // вже слали сьогодні
-      await sendDigest(o.workspace_id, o.chat_id, date);
+      const key = o.workspace_id + ":digest";
+      if (!canTry(key, date)) continue; // після збою - до 3 спроб із паузою, а не кожні 5 хв до кінця години
+      try { await sendDigest(o.workspace_id, o.chat_id, date); succeededTry(key); }
+      catch (e: any) {
+        const gaveUp = failedTry(key, date, e);
+        await logEvent("error", "digest", e.message + (gaveUp ? " (на сьогодні спроби вичерпано)" : " (повтор за 20 хв)"), { ws: o.workspace_id });
+        continue;
+      }
       await q(`insert into settings_block(workspace_id, key, content) values($1,'digest_last',$2)
                on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`, [o.workspace_id, date]);
-    } catch (e: any) { await logEvent("error", "digest", e.message); }
+    } catch (e: any) { await logEvent("error", "digest", e.message, { ws: o.workspace_id }); }
   }
 }
 

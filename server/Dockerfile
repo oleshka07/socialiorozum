@@ -27,4 +27,6 @@ COPY db ./db
 COPY public ./public
 COPY remotion ./remotion
 EXPOSE 8080
-CMD ["npm", "run", "start"]
+# міграція, потім exec: Node стає PID 1 і сам отримує SIGTERM від docker (через npm і sh сигнал не
+# доходив, і публікацію в дорозі деплой просто вбивав). Плавну зупинку робить server.ts.
+CMD ["sh", "-c", "node dist/migrate.js && exec node dist/server.js"]

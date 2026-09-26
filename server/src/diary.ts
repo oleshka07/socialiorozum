@@ -3,6 +3,7 @@
 // (source origin='diary', один запис на день, усе дописується в нього).
 // Питання не копляться: liveSend категорії 'diary' видаляє попереднє. Ігнор 3 дні поспіль → лишається
 // тільки вечірнє питання. Голос розшифровує Whisper (OPENAI_API_KEY). Медіа → галерея source='diary'.
+import { canTry, failedTry, succeededTry } from "./dailytry.js";
 import { q, one } from "./db.js";
 import { env } from "./env.js";
 import { logEvent } from "./log.js";
@@ -103,13 +104,20 @@ async function diaryButtons(ws: string, srcId: string): Promise<tg.TgButton[][]>
 export async function appendDiaryText(ws: string, chatId: string, text: string, voice = false): Promise<void> {
   const { date, time } = localParts(await wsTz(ws));
   const title = `📔 Щоденник, ${uaDate(date)} · ${time}${voice ? " 🎙" : ""}`;
+  // межа запису - 40 тис. символів (~45 хв голосу); раніше 8 тис. (~10 хв) різали мовчки, хоча
+  // підтвердження обіцяло «збережено ЦІЛИМ»
+  const DIARY_MAX = 40000;
+  const clean = text.trim();
+  const cut = clean.length > DIARY_MAX;
   const d = await one<{ id: string }>(
     `insert into source(workspace_id, origin, title, transcript) values($1,'diary',$2,$3) returning id`,
-    [ws, title, text.trim().slice(0, 8000)]);
+    [ws, title, clean.slice(0, DIARY_MAX)]);
   // фото приклеїться САМЕ до цього запису, якщо надійде наступним (вікно PHOTO_WINDOW_MS)
   await setState(ws, { answered: date, pending: false, misses: 0, photoFor: d!.id, photoAt: Date.now() });
   await liveSend(ws, chatId, "diary_ok",
-    `📔 Записав у щоденник (${uaDate(date)}, ${time}):\n«${text.trim().slice(0, 160)}»\n\nЗапис збережено ЦІЛИМ - історія не ріжеться на шматки, тож пост вийде звʼязним.` +
+    `📔 Записав у щоденник (${uaDate(date)}, ${time}):\n«${clean.slice(0, 160)}»\n\n` +
+    (cut ? `⚠️ Запис довгий: збережено перші ${DIARY_MAX.toLocaleString("uk")} символів із ${clean.length.toLocaleString("uk")}. Решту надішли окремим повідомленням.`
+      : "Запис збережено ЦІЛИМ - історія не ріжеться на шматки, тож пост вийде звʼязним.") +
     `\n\n🖼 Можеш надіслати фото чи відео наступним повідомленням - приклею до цього ж запису. Необовʼязково: не надішлеш - запис і так повний.`,
     await diaryButtons(ws, d!.id));
 }
@@ -160,7 +168,7 @@ export async function attachMediaToEntry(ws: string, chatId: string, srcId: stri
   if (!src) { await attachDiaryMedia(ws, chatId, buffer, mime, name, caption); return; }  // запис зник - не втрачаємо медіа
   const m = await saveMedia(ws, { buffer, mime, name, source: "diary", externalId: srcId });
   const note = `\n📎 ${m.kind === "video" ? "відео" : "фото"} до запису${caption ? `: ${caption.trim().slice(0, 300)}` : ""}`;
-  await q(`update source set transcript = left(coalesce(transcript,'') || $2, 8000) where id=$1`, [srcId, note]);
+  await q(`update source set transcript = left(coalesce(transcript,'') || $2, 40500) where id=$1`, [srcId, note]);
   await setState(ws, { photoFor: undefined, photoAt: undefined });   // одне фото на запрошення
   const buttons = await diaryButtons(ws, srcId);
   if (m.kind === "video") buttons.push([{ text: "🎥 У вставки для рілсів (b-roll)", data: `dbroll:${m.id}` }]);
@@ -223,9 +231,14 @@ async function tick(): Promise<void> {
   if (!env.telegram.botToken) return;
   const owners = await q<{ workspace_id: string; chat_id: string }>(`select workspace_id, chat_id from tg_owner where chat_id is not null`);
   for (const o of owners) {
+    let key = "";
+    let day = "";
     try {
       const ws = o.workspace_id;
       const { hour, date } = localParts(await wsTz(ws));
+      day = date;
+      key = `${ws}:diary:${hour}`;
+      if (!canTry(key, date)) continue; // після збою - до 3 спроб із паузою, а не кожні 5 хв до кінця години
       const st = await getState(ws);
       if (st.skip === date) continue;
       if (hour === LUNCH_HOUR && st.lunch !== date && st.answered !== date) {
@@ -233,7 +246,8 @@ async function tick(): Promise<void> {
         let misses = st.misses || 0;
         const yest = new Date(date + "T12:00:00Z"); yest.setUTCDate(yest.getUTCDate() - 1);
         const yesterday = yest.toISOString().slice(0, 10);
-        if (st.evening === yesterday && st.answered !== yesterday) misses++;
+        // «🙅 Сьогодні нічого» - теж відповідь, а не мовчання: пропуском не рахуємо
+        if (st.evening === yesterday && st.answered !== yesterday && st.skip !== yesterday) misses++;
         if (misses >= 3) { await setState(ws, { lunch: date, misses }); continue; }
         await liveSend(ws, o.chat_id, "diary", await buildQuestion(ws, "lunch", date, false), [[{ text: "🙅 Сьогодні нічого", data: "dnone" }]]);
         await setState(ws, { lunch: date, pending: true, misses });
@@ -243,7 +257,11 @@ async function tick(): Promise<void> {
           answered ? undefined : [[{ text: "🙅 Сьогодні нічого", data: "dnone" }]]);
         await setState(ws, { evening: date, pending: true });
       }
-    } catch (e: any) { await logEvent("error", "diary", e.message); }
+      succeededTry(key);
+    } catch (e: any) {
+      const gaveUp = key ? failedTry(key, day, e) : false;
+      await logEvent("error", "diary", e.message + (gaveUp ? " (на сьогодні спроби вичерпано)" : ""), { ws: o.workspace_id });
+    }
   }
 }
 

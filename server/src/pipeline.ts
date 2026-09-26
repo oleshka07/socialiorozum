@@ -834,7 +834,9 @@ export async function generatePostsOnePass(runId: string, count: number, ideas?:
   const out = await chat(model, system, `Вхідний матеріал:\n---\n${transcript}`, { workspaceId: workspace_id, step: "lite", maxTokens: liteMaxTokens(n) });
   const posts = parseLitePosts(out);
   if (!posts.length) throw new Error("Не вдалося згенерувати пости (порожня відповідь моделі)");
-  await q(`delete from post where run_id=$1 and stage='final'`, [runId]);
+  // Нові пости ДОДАЮТЬСЯ до прогону. Раніше тут стояло «видалити всі фінальні пости прогону»: кабінет
+  // генерує в активному прогоні повторно, і каскад забирав уже затверджені, заплановані й ОПУБЛІКОВАНІ
+  // пости разом з історією публікацій і метриками. Студія давно - загальний пул, заміна не потрібна.
   const ids: string[] = [];
   for (let i = 0; i < posts.length; i++) {
     const p = posts[i];

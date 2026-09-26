@@ -29,7 +29,8 @@ export function tgLink(chatId: string, messageId: number | string | null, userna
 // Facebook: id поста вже містить id сторінки («<pageId>_<postId>»), тож окремий запит не потрібен.
 export function fbLink(externalId: string | null): string {
   const id = String(externalId || "").trim();
-  if (!id) return "";
+  // лише справжній id допису («<сторінка>_<пост>» або число); список кадрів сторіс «id1,id2» - не адреса
+  if (!/^\d+(_\d+)?$/.test(id)) return "";
   return `https://www.facebook.com/${id}`;
 }
 

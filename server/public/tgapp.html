@@ -403,11 +403,23 @@ async function uploadMore(e) {
   if (!files.length) return;
   $('em').textContent = '🖼 Додаю ' + files.length + ' фото…';
   try {
-    const fd = new FormData(); files.forEach((f) => fd.append('file', f, f.name || 'photo.jpg'));
-    const r = await api('/post/' + cur.id + '/media?append=1', { method: 'POST', body: fd });
-    cur.media = r.media || cur.media; cur.filename = cur.media[0] || cur.filename; haptic('success'); drawEditor();
+    // порціями до 18 МБ: сервер (nginx) приймає до 20 МБ за запит, а 5+ фото з телефона - більше,
+    // і тоді не додавалось жодного («HTTP 413»). Кабінет ділить так само.
+    const batches = [[]]; let sz = 0;
+    for (const f of files) {
+      if (batches[batches.length - 1].length && sz + f.size > 18 * 1024 * 1024) { batches.push([]); sz = 0; }
+      batches[batches.length - 1].push(f); sz += f.size;
+    }
+    let done = 0;
+    for (const b of batches) {
+      const fd = new FormData(); b.forEach((f) => fd.append('file', f, f.name || 'photo.jpg'));
+      const r = await api('/post/' + cur.id + '/media?append=1', { method: 'POST', body: fd });
+      cur.media = r.media || cur.media; cur.filename = cur.media[0] || cur.filename;
+      done += b.length; $('em').textContent = '🖼 Додаю… ' + done + ' з ' + files.length;
+    }
+    haptic('success'); drawEditor();
     $('em').textContent = cur.media.length > 1 ? '🖼 Карусель: ' + cur.media.length + ' кадрів' : '';
-  } catch (err) { $('em').textContent = '⚠️ ' + err.message; }
+  } catch (err) { drawEditor(); $('em').textContent = '⚠️ ' + err.message; }
 }
 
 // 🎬 відео з телефона: частинами по 8 МБ (відео - сотні МБ, а сервер за раз приймає до 20),
@@ -460,8 +472,9 @@ async function genImage() {
   await saveText();
   $('aAi').disabled = true; $('em').textContent = '🎨 Малюю…';
   try {
-    const r = await runJob('/post/' + cur.id + '/image', { aspect: '4:5' }, (s) => { $('em').textContent = '🎨 Малюю… ' + s + 'с'; });
-    cur.filename = r.filename; haptic('success'); drawEditor();
+    await runJob('/post/' + cur.id + '/image', { aspect: '4:5' }, (s) => { $('em').textContent = '🎨 Малюю… ' + s + 'с'; });
+    // перечитуємо пост цілком: нове фото замінює і відео, і кадри каруселі - старий список лишав би їх на екрані
+    cur = await api('/post/' + cur.id); haptic('success'); drawEditor();
   } catch (e) { $('em').textContent = '⚠️ ' + e.message; if ($('aAi')) $('aAi').disabled = false; }
 }
 
@@ -529,6 +542,8 @@ async function doPublish() {
       let j = null; try { j = await api('/post/' + cur.id + '/publish-job'); } catch (e) { /* мережа моргнула */ }
       if (j && j.status === 'done') { haptic('success'); break; }
       if (j && j.status === 'error') throw new Error(j.error || 'публікація не вдалась');
+      // 'idle' = сервер перезапустився посеред роботи: не крутимо 5 хв, а перечитуємо фактичний стан
+      if (j && j.status === 'idle' && Date.now() - t0 > 4000) throw new Error('сервер перезапустився під час публікації - перевір, у які мережі пост уже вийшов');
       if (Date.now() - t0 > 5 * 60 * 1000) throw new Error('публікація триває надто довго - перевір канал');
       $('em').textContent = '🚀 Публікую… ' + Math.round((Date.now() - t0) / 1000) + 'с';
     }

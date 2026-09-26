@@ -85,7 +85,10 @@ export async function setPostMediaOrder(ws: string, postId: string, ids: string[
     if (!m) throw new SlideError("Файл не знайдено в медіатеці цього кабінету.");
     if (m.kind !== "image" && m.kind !== "video") throw new SlideError("Підтримуються лише фото й відео.");
   }
-  const prev = await one<{ media_id: string | null; image_base: string | null; format: string | null }>(`select media_id, image_base, format from post where id=$1`, [postId]);
+  // пост - лише цього кабінету (раніше перевірялись тільки файли, а сам пост міг бути чужим)
+  const prev = await one<{ media_id: string | null; image_base: string | null; format: string | null }>(
+    `select p.media_id, p.image_base, p.format from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
   if (!prev) throw new SlideError("пост не знайдено");
   // 🎬 відео - окремий пост (Reels, відео у Facebook, Threads, Telegram, LinkedIn): поруч із ним фото
   // не буває - Facebook-галерея й LinkedIn відео не беруть, а мережі з мішаною каруселлю - не всі.

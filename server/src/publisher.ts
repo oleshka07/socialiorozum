@@ -35,7 +35,50 @@ export async function thValidToken(ws: string): Promise<{ token: string; userId:
   return { token: c.access_token, userId: c.threads_user_id };
 }
 
-export type PubResult = { channel: string; status: "sent" | "error" | "skipped"; error?: string };
+export type PubResult = { channel: string; status: "sent" | "error" | "skipped"; error?: string; note?: string };
+
+// Мережі, у які сервіс реально публікує. У `post.channels` бувають службові ключі (manual_adapt,
+// reel_caption) і сміття на кшталт «all» із майстер-плану: без цього фільтра такий ключ пролітав
+// повз усі гілки й звітував «опубліковано», хоча не пішло нікуди.
+export const PUB_NETS = ["telegram", "threads", "facebook", "instagram", "linkedin"];
+export const enabledNets = (ch: any): string[] => PUB_NETS.filter((k) => ch && ch[k] && ch[k].on === true);
+
+// Резервація «раз на мережу» ПЕРЕД викликом мережі. Повертає рядок, "sent" (уже надіслано) або "busy"
+// (саме зараз публікує інший процес). Рядок 'sending', старший за 20 хв, - слід публікації, яку обірвав
+// перезапуск сервера (деплой, OOM): жоден живий процес її вже не веде, тож його переймаємо. Раніше він
+// блокував мережу для поста назавжди, а автопостер ще й звітував «↩ вже», хоча пост міг не вийти.
+const STALE_SENDING = "20 minutes";
+type PubTable = "telegram_publish" | "threads_publish" | "meta_publish" | "linkedin_publish";
+async function reservePub(table: PubTable, key: Record<string, string>, extra: Record<string, string> = {}): Promise<{ id: string } | "sent" | "busy"> {
+  const kc = Object.keys(key), kv = Object.values(key);
+  const cond = kc.map((c, i) => `${c}=$${i + 1}`).join(" and ");
+  const stale = await q<{ id: string }>(
+    `delete from ${table} where ${cond} and status='sending' and created_at < now() - interval '${STALE_SENDING}' returning id`, kv);
+  if (stale.length) await logEvent("warn", "publish", `${table}: перейнято завислу резервацію (попередню публікацію обірвав перезапуск)`, { postId: key.post_id });
+  const cols = [...kc, ...Object.keys(extra)], vals = [...kv, ...Object.values(extra)];
+  const r = await one<{ id: string }>(
+    `insert into ${table}(${cols.join(",")},status) values(${vals.map((_, i) => `$${i + 1}`).join(",")},'sending')
+     on conflict (${kc.join(",")}) do nothing returning id`, vals);
+  if (r) return r;
+  const cur = await one<{ status: string }>(`select status from ${table} where ${cond}`, kv);
+  return cur?.status === "sent" ? "sent" : "busy";
+}
+const BUSY = "у цю мережу пост саме зараз публікується (інша вкладка, бот чи автопостер) - дочекайся результату";
+
+/**
+ * Після ручної публікації (кабінет, бот, Mini App, Claude): гасимо заплановані слоти поста, лише
+ * коли ВСІ обрані мережі вже надіслані. Інакше слот мусить добити решту пізніше, а збій «зараз»
+ * не має тихо скасовувати завтрашню публікацію.
+ */
+export async function closeSlotsIfDone(postId: string, reason: string): Promise<boolean> {
+  const post = await one<{ channels: any }>(`select channels from post where id=$1`, [postId]);
+  const enabled = enabledNets(post?.channels);
+  const sent = new Set(await alreadySentNetworks(postId));
+  if (!enabled.length || enabled.some((k) => !sent.has(k))) return false;
+  await q(`update schedule_slot set status='posted', result=$2, updated_at=now() where post_id=$1 and status='planned'`, [postId, reason]);
+  await q(`update plan_slot set status='published' where post_id=$1 and status in ('drafted','approved','scheduled')`, [postId]);
+  return true;
+}
 
 // Текст CTA-гілки Threads з cta_config (детерміновано, без LLM). null = CTA не налаштований.
 async function threadsCtaText(ws: string): Promise<string | null> {
@@ -69,7 +112,23 @@ export async function alreadySentNetworks(postId: string): Promise<string[]> {
 // лише перетин увімкнених із нею. Мережі, куди вже публікували (status='sent'), ПРОПУСКАЮТЬСЯ
 // (публікація один раз на мережу) — і при ручній публікації, і в автопостері.
 // Якщо жодної мережі не обрано — нічого не публікує (порожній результат), без тихого fallback.
-export async function publishPostToChannels(ws: string, postId: string, onlyNets?: string[]): Promise<PubResult[]> {
+// 🛑 Плавна зупинка. Деплой шле SIGTERM; публікація, що вже йде (Instagram і Threads обробляють відео
+// хвилинами), мусить дійти до кінця, інакше пост міг вийти в мережу, а ми про це не дізнались.
+// server.ts на SIGTERM ставить `stopping` і чекає, поки лічильник не впаде до нуля.
+let inFlight = 0, stopping = false;
+export const publishesInFlight = () => inFlight;
+export const isStopping = () => stopping;
+export function beginShutdown(): void { stopping = true; }
+async function tracked<T>(work: () => Promise<T>): Promise<T> {
+  if (stopping) throw new Error("сервер саме перезапускається - спробуй за хвилину");
+  inFlight++;
+  try { return await work(); } finally { inFlight--; }
+}
+
+export function publishPostToChannels(ws: string, postId: string, onlyNets?: string[]): Promise<PubResult[]> {
+  return tracked(() => publishPostToChannelsNow(ws, postId, onlyNets));
+}
+async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: string[]): Promise<PubResult[]> {
   const post = await one<{ content: string; channels: any; format: string | null }>(
     `select p.content, p.channels, p.intent, p.format from post p
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
@@ -109,8 +168,7 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
     return null;
   };
   const ch = post.channels || {};
-  const enabled = Object.keys(ch).filter((k) => ch[k] && ch[k].on)
-    .filter((k) => !onlyNets || onlyNets.includes(k));
+  const enabled = enabledNets(ch).filter((k) => !onlyNets || onlyNets.includes(k));
   const sentSet = new Set(await alreadySentNetworks(postId));
   // «Створи один раз - сервіс сам перепакує»: мережі без власної версії тексту адаптуються
   // автоматично перед відправкою (один LLM-виклик на всі відсутні; при збої - майстер-текст як раніше).
@@ -147,7 +205,7 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
     try {
       if (k === "telegram") {
         if (!tgc?.bot_token) throw new Error("Telegram не підключено");
-        let any = false;
+        let any = false, already = false, tailErr = "";
         const cap = textOf(k);
         const sentChats = new Set<string>(); // один фізичний чат не отримує пост двічі (channel==group → дубль)
         for (const [t, chat] of [["channel", tgc.channel_chat_id], ["group", tgc.group_chat_id]] as const) {
@@ -156,27 +214,33 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
           sentChats.add(chat);
           // атомарна резервація ПЕРЕД викликом Telegram - захист від гонки (подвійний клік, збіг
           // ручної публікації з автопостом). Хтось інший уже зарезервував/надіслав цю ціль → пропускаємо.
-          const reserved = await one<{ id: string }>(
-            `insert into telegram_publish(post_id,target,chat_id,status) values($1,$2,$3,'sending')
-             on conflict (post_id,target) do nothing returning id`, [postId, t, chat]);
-          if (!reserved) continue;
+          const rv = await reservePub("telegram_publish", { post_id: postId, target: t }, { chat_id: chat });
+          if (rv === "sent") { already = true; continue; }
+          if (rv === "busy") throw new Error(BUSY);
+          const reserved = rv;
           try {
             let r: { message_id: number };
+            // текст довший за підпис (1024) іде окремим повідомленням ПІСЛЯ медіа. Якщо впаде саме він -
+            // медіа вже в каналі: резервацію НЕ звільняємо (інакше повтор задублював би альбом), а кажемо прямо
+            const tail = async () => {
+              if (cap.length <= 1024) return;
+              try { await tg.sendMessage(tgc.bot_token!, chat, cap); } catch (e: any) { tailErr = e.message; }
+            };
             const vErr = videoLimit("telegram");
             if (vErr) throw new Error(vErr);
             if (video) {
               // за адресою Telegram тягне лише до 20 МБ; більше (до 50) - надсилаємо файл самі
               const src = videoSize <= tg.TG_VIDEO_URL_MAX ? { url: videoUrl } : { file: await readFile(videoPath), name: video.filename };
               r = await tg.sendVideo(tgc.bot_token, chat, src, cap.length <= 1024 ? cap : "", video);
-              if (cap.length > 1024) await tg.sendMessage(tgc.bot_token, chat, cap);
+              await tail();
             } else if (carousel) {
               // альбом: підпис на першому кадрі; довший за 1024 - окремим повідомленням під альбомом
               const msgs = await tg.sendMediaGroup(tgc.bot_token, chat, imageUrls, cap.length <= 1024 ? cap : "");
               r = msgs[0];
-              if (cap.length > 1024) await tg.sendMessage(tgc.bot_token, chat, cap);
+              await tail();
             } else if (imageUrl) {
               r = await tg.sendPhoto(tgc.bot_token, chat, imageUrl, cap.length <= 1024 ? cap : "");
-              if (cap.length > 1024) await tg.sendMessage(tgc.bot_token, chat, cap); // підпис > ліміту Telegram → текст окремо
+              await tail(); // підпис > ліміту Telegram → текст окремо
             } else {
               r = await tg.sendMessage(tgc.bot_token, chat, cap);
             }
@@ -197,7 +261,15 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
             throw e;
           }
         }
-        if (!any) throw new Error("Не вказано канал/групу");
+        if (!any) {
+          if (already) { results.push({ channel: k, status: "skipped" }); continue; }
+          throw new Error("Не вказано канал/групу");
+        }
+        if (tailErr) {
+          await logEvent("warn", "publish", `Telegram: медіа вийшло, а текст окремим повідомленням - ні: ${tailErr}`, { ws, postId });
+          results.push({ channel: k, status: "sent", note: `медіа вийшло, а довгий текст окремим повідомленням - ні (${tailErr}); допиши його в канал вручну` });
+          continue;
+        }
       } else if (k === "threads") {
         if (!thTok) throw new Error("Threads не підключено");
         const thErr = videoLimit("threads"); if (thErr) throw new Error(thErr);
@@ -207,9 +279,10 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
         // гілка: явний прапорець на пості АБО авто-режим для майстер-текстів понад ліміт (500)
         const wantThread = perPost.thread === true || (strat.thread === "auto" && perPost.thread !== false && post.content.length > 500);
         // резервація ОДИН раз для всього поста (root) - гілка/ветки нижче лише розвивають цей root
-        const reserved = await one<{ id: string }>(
-          `insert into threads_publish(post_id,status) values($1,'sending') on conflict (post_id) do nothing returning id`, [postId]);
-        if (!reserved) { results.push({ channel: k, status: "skipped" }); continue; }
+        const rv = await reservePub("threads_publish", { post_id: postId });
+        if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
+        if (rv === "busy") throw new Error(BUSY);
+        const reserved = rv;
         let rootId: string;
         try {
           if (wantThread) {
@@ -269,11 +342,13 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
         }
       } else if (k === "facebook") {
         if (!mt?.page_id || !mt.page_token) throw new Error("Facebook не підключено");
-        if (mt.token_expires_at && new Date(mt.token_expires_at).getTime() < Date.now())
-          throw new Error("Токен Meta (Facebook/Instagram) протух - перепідключи у Налаштування → Канали");
-        const reserved = await one<{ id: string }>(
-          `insert into meta_publish(post_id,channel,status) values($1,'facebook','sending') on conflict (post_id,channel) do nothing returning id`, [postId]);
-        if (!reserved) { results.push({ channel: k, status: "skipped" }); continue; }
+        // строк у meta_config - це строк токена КОРИСТУВАЧА (~60 днів); токен Сторінки, отриманий із
+        // нього, не протухає. Тож заздалегідь не відмовляємо: якщо доступ справді втрачено, Meta
+        // відповість помилкою 190, і людина побачить «перепідключи» (fbFetch).
+        const rv = await reservePub("meta_publish", { post_id: postId, channel: "facebook" });
+        if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
+        if (rv === "busy") throw new Error(BUSY);
+        const reserved = rv;
         try {
           if (video) {
             // відео Сторінки: Meta сама тягне файл за адресою; вертає id відео (без id сторінки)
@@ -292,11 +367,10 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
         if (!mt?.ig_user_id || !mt.page_token) throw new Error("Instagram не підключено");
         if (!images.length && !video) throw new Error("Instagram потребує фото або відео");
         const igErr = videoLimit("instagram"); if (igErr) throw new Error(igErr);
-        if (mt.token_expires_at && new Date(mt.token_expires_at).getTime() < Date.now())
-          throw new Error("Токен Meta (Facebook/Instagram) протух - перепідключи у Налаштування → Канали");
-        const reserved = await one<{ id: string }>(
-          `insert into meta_publish(post_id,channel,status) values($1,'instagram','sending') on conflict (post_id,channel) do nothing returning id`, [postId]);
-        if (!reserved) { results.push({ channel: k, status: "skipped" }); continue; }
+        const rv = await reservePub("meta_publish", { post_id: postId, channel: "instagram" });
+        if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
+        if (rv === "busy") throw new Error(BUSY);
+        const reserved = rv;
         try {
           // IG приймає лише JPEG з пропорціями 0.8-1.91 → за потреби готуємо сумісну копію (PNG з AI-генерації падав).
           // Для каруселі - кожен кадр.
@@ -320,9 +394,10 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
         const liErr = videoLimit("linkedin"); if (liErr) throw new Error(liErr);
         if (li.token_expires_at && new Date(li.token_expires_at).getTime() < Date.now())
           throw new Error("Токен LinkedIn протух (живе 60 днів) - перепідключи у Налаштування → Канали");
-        const reserved = await one<{ id: string }>(
-          `insert into linkedin_publish(post_id,status) values($1,'sending') on conflict (post_id) do nothing returning id`, [postId]);
-        if (!reserved) { results.push({ channel: k, status: "skipped" }); continue; }
+        const rv = await reservePub("linkedin_publish", { post_id: postId });
+        if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
+        if (rv === "busy") throw new Error(BUSY);
+        const reserved = rv;
         try {
           // зображення LinkedIn приймає лише через власний upload (не за URL) - читаємо локальні файли
           const bufs: Buffer[] = [];
@@ -354,7 +429,7 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
 export const STORY_NETS = ["instagram", "facebook"];
 const NET_UA: Record<string, string> = { telegram: "Telegram", threads: "Threads", linkedin: "LinkedIn", instagram: "Instagram", facebook: "Facebook" };
 async function publishStoryToChannels(ws: string, postId: string, ch: any, onlyNets?: string[]): Promise<PubResult[]> {
-  const enabled = Object.keys(ch).filter((k) => ch[k] && ch[k].on && k in NET_UA).filter((k) => !onlyNets || onlyNets.includes(k));
+  const enabled = enabledNets(ch).filter((k) => !onlyNets || onlyNets.includes(k));
   const sentSet = new Set(await alreadySentNetworks(postId));
   const frames = await postMediaList(postId);
   const mt = await one<{ page_id: string | null; page_token: string | null; ig_user_id: string | null; token_expires_at: string | null }>(
@@ -368,14 +443,13 @@ async function publishStoryToChannels(ws: string, postId: string, ch: any, onlyN
       if (!frames.length) throw new Error("у сторіс немає жодного кадру - додай фото чи відео");
       if (k === "instagram" && (!mt?.ig_user_id || !mt.page_token)) throw new Error("Instagram не підключено");
       if (k === "facebook" && (!mt?.page_id || !mt.page_token)) throw new Error("Facebook не підключено");
-      if (mt!.token_expires_at && new Date(mt!.token_expires_at).getTime() < Date.now())
-        throw new Error("Токен Meta (Facebook/Instagram) протух - перепідключи у Налаштування → Канали");
       // межі - ДО виклику: відео в сторіс Instagram - до 60 с (а мережа сказала б це через хвилину обробки)
       const longVid = frames.find((m) => m.kind === "video" && Number(m.duration) > 60);
       if (k === "instagram" && longVid) throw new Error(`відео в сторіс Instagram - до 60 с, а тут ${Math.round(Number(longVid.duration))} с - вріж його`);
-      const reserved = await one<{ id: string }>(
-        `insert into meta_publish(post_id,channel,status) values($1,$2,'sending') on conflict (post_id,channel) do nothing returning id`, [postId, k]);
-      if (!reserved) { results.push({ channel: k, status: "skipped" }); continue; }
+      const rv = await reservePub("meta_publish", { post_id: postId, channel: k });
+      if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
+      if (rv === "busy") throw new Error(BUSY);
+      const reserved = rv;
       const ids: string[] = [];
       try {
         for (const m of frames) {
@@ -441,7 +515,10 @@ async function freshToken(
   return r.access_token;
 }
 
-export async function publishReelToChannels(ws: string, postId: string, nets: string[]): Promise<PubResult[]> {
+export function publishReelToChannels(ws: string, postId: string, nets: string[]): Promise<PubResult[]> {
+  return tracked(() => publishReelToChannelsNow(ws, postId, nets));
+}
+async function publishReelToChannelsNow(ws: string, postId: string, nets: string[]): Promise<PubResult[]> {
   const post = await one<{ content: string; channels: any; reel_video: string | null; own_video: string | null }>(
     `select p.content, p.channels, p.reel_video, (select m.filename from media_asset m where m.id=p.media_id and m.kind='video') as own_video
        from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
@@ -473,13 +550,23 @@ export async function publishReelToChannels(ws: string, postId: string, nets: st
       if (k === "instagram") {
         const mt = await one<{ page_token: string | null; ig_user_id: string | null }>(`select page_token, ig_user_id from meta_config where workspace_id=$1`, [ws]);
         if (!mt?.ig_user_id || !mt.page_token) throw new Error("Instagram не підключено");
-        const r = await meta.publishReelToInstagram(mt.ig_user_id, mt.page_token, videoUrl, caption);
-        await q(`insert into meta_publish(post_id,channel,external_id,status) values($1,'instagram',$2,'sent')`, [postId, r.mediaId]);
+        const rv = await reservePub("meta_publish", { post_id: postId, channel: "instagram" });
+        if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
+        if (rv === "busy") throw new Error(BUSY);
+        try {
+          const r = await meta.publishReelToInstagram(mt.ig_user_id, mt.page_token, videoUrl, caption);
+          await q(`update meta_publish set external_id=$2, status='sent' where id=$1`, [rv.id, r.mediaId]);
+        } catch (e: any) { await q(`delete from meta_publish where id=$1`, [rv.id]); throw e; }
       } else if (k === "facebook") {
         const mt = await one<{ page_id: string | null; page_token: string | null }>(`select page_id, page_token from meta_config where workspace_id=$1`, [ws]);
         if (!mt?.page_id || !mt.page_token) throw new Error("Facebook не підключено");
-        const r = await meta.publishVideoToPage(mt.page_id, mt.page_token, caption, videoUrl);
-        await q(`insert into meta_publish(post_id,channel,external_id,status) values($1,'facebook',$2,'sent')`, [postId, r.id]);
+        const rv = await reservePub("meta_publish", { post_id: postId, channel: "facebook" });
+        if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
+        if (rv === "busy") throw new Error(BUSY);
+        try {
+          const r = await meta.publishVideoToPage(mt.page_id, mt.page_token, caption, videoUrl);
+          await q(`update meta_publish set external_id=$2, status='sent', permalink=nullif($3,'') where id=$1`, [rv.id, r.id, fbVideoLink(r.id)]);
+        } catch (e: any) { await q(`delete from meta_publish where id=$1`, [rv.id]); throw e; }
       } else if (k === "youtube") {
         const yc = await one<{ access_token: string; refresh_token: string | null; token_expires_at: string | null }>(
           `select access_token, refresh_token, token_expires_at from youtube_config where workspace_id=$1`, [ws]);

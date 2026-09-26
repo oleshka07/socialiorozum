@@ -17,6 +17,15 @@ test("zonedToUtc: зимовий Київ = UTC+2 (DST враховано, а н
   const at = zonedToUtc(2026, 1, 15, 9, 0, KYIV);
   assert.equal(at.toISOString(), "2026-01-15T07:00:00.000Z");
 });
+test("zonedToUtc: у сам день переходу на літній час година не зсувається", () => {
+  // Лос-Анджелес, 8 березня 2026 (перехід о 02:00): 09:00 PDT = 16:00 UTC, а не 17:00
+  assert.equal(zonedToUtc(2026, 3, 8, 9, 0, "America/Los_Angeles").toISOString(), "2026-03-08T16:00:00.000Z");
+  // Київ, 29 березня 2026 (перехід о 03:00): 09:00 EEST = 06:00 UTC
+  assert.equal(zonedToUtc(2026, 3, 29, 9, 0, KYIV).toISOString(), "2026-03-29T06:00:00.000Z");
+  // осінній перехід, Київ 25 жовтня 2026: 09:00 EET = 07:00 UTC
+  assert.equal(zonedToUtc(2026, 10, 25, 9, 0, KYIV).toISOString(), "2026-10-25T07:00:00.000Z");
+});
+
 
 test("zonedToUtc: UTC сам у себе не зсувається", () => {
   assert.equal(zonedToUtc(2026, 7, 28, 9, 0, "UTC").toISOString(), "2026-07-28T09:00:00.000Z");

@@ -1,4 +1,6 @@
 // Власний RSS 2.0 / Atom парсер на регексах — без зовнішніх залежностей.
+import { publicFetch } from "./netguard.js";
+
 export type RssItem = { externalId: string; title: string; content: string; link: string };
 
 export function cleanText(s: string): string { return decode(s); }
@@ -44,15 +46,35 @@ export function parseFeedTitle(xml: string): string {
   return decode(tag(head, "title")).slice(0, 200);
 }
 
+// Тіло читаємо з межею часу й розміру. Раніше таймер вимикався, щойно приходили заголовки: фід, що
+// цідить по байту (або віддає гігабайтний файл), тримав воркер вічно - і стрічки не оновлювались
+// ні в кого до перезапуску.
+export async function readLimited(res: Response, maxBytes: number): Promise<string> {
+  const reader = res.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) { await reader.cancel().catch(() => {}); throw new Error(`відповідь більша за ${Math.round(maxBytes / 1024 / 1024)} МБ`); }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 export async function fetchFeedRaw(url: string): Promise<string> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15000);
-  let res: Response;
-  try { res = await fetch(url, { headers: { "User-Agent": "socialio/1.0 RSS Fetcher" }, signal: controller.signal }); }
-  catch (e: any) { if (e && e.name === "AbortError") throw new Error("RSS timeout 15s"); throw e; }
-  finally { clearTimeout(timer); }
-  if (!res.ok) throw new Error(`RSS HTTP ${res.status}`);
-  return res.text();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const res = await publicFetch(url, { headers: { "User-Agent": "socialio/1.0 RSS Fetcher" }, signal: controller.signal });
+    if (!res.ok) throw new Error(`RSS HTTP ${res.status}`);
+    return await readLimited(res, 5 * 1024 * 1024);
+  } catch (e: any) {
+    if (e && e.name === "AbortError") throw new Error("RSS timeout 20s");
+    throw e;
+  } finally { clearTimeout(timer); }
 }
 
 export async function fetchFeed(url: string): Promise<RssItem[]> {
@@ -92,10 +114,14 @@ export function extractParagraphs(html: string): string {
   return [og, body].filter(Boolean).join("\n\n").trim();
 }
 
-async function fetchWithTimeout(url: string, init?: RequestInit, ms = 15000): Promise<Response | null> {
+// Сторінка (стаття, Google News): текст із межею часу (разом із тілом) і розміру. null - не вийшло.
+async function fetchPageText(url: string, init?: RequestInit, ms = 15000, maxBytes = 3 * 1024 * 1024): Promise<{ ok: boolean; text: string } | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
-  try { return await fetch(url, { ...init, signal: controller.signal }); }
+  try {
+    const res = await publicFetch(url, { ...init, signal: controller.signal });
+    return { ok: res.ok, text: res.ok ? await readLimited(res, maxBytes) : "" };
+  }
   catch { return null; }
   finally { clearTimeout(timer); }
 }
@@ -116,21 +142,21 @@ export async function resolveGoogleNewsUrl(link: string): Promise<string> {
   try { // новий формат (AU_yq…)
     // SOCS/CONSENT-кукі: без них європейські IP (Hetzner) отримують GDPR-сторінку згоди без підпису статті
     const gCookie = "SOCS=CAISHAgBEhJnd3NfMjAyNDAxMDktMF9SQzIaAnVrIAEaBgiA_LyaBg; CONSENT=YES+";
-    const pageRes = await fetchWithTimeout(`https://news.google.com/articles/${id}`, { headers: { "User-Agent": BROWSER_UA, Accept: "text/html", Cookie: gCookie } });
+    const pageRes = await fetchPageText(`https://news.google.com/articles/${id}`, { headers: { "User-Agent": BROWSER_UA, Accept: "text/html", Cookie: gCookie } });
     if (!pageRes?.ok) return "";
-    const page = await pageRes.text();
+    const page = pageRes.text;
     const sg = page.match(/data-n-a-sg="([^"]+)"/)?.[1];
     const ts = page.match(/data-n-a-ts="([^"]+)"/)?.[1];
     if (!sg || !ts) return "";
     const inner = `["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],"${id}",${ts},"${sg}"]`;
     const req = JSON.stringify([[["Fbv4je", inner, null, "generic"]]]);
-    const res = await fetchWithTimeout("https://news.google.com/_/DotsSplashUi/data/batchexecute", {
+    const res = await fetchPageText("https://news.google.com/_/DotsSplashUi/data/batchexecute", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "User-Agent": BROWSER_UA, Cookie: gCookie },
       body: "f.req=" + encodeURIComponent(req),
     });
     if (!res?.ok) return "";
-    const txt = await res.text();
+    const txt = res.text;
     const um = txt.match(/https?:\\?\/\\?\/(?!news\.google)[^"\\]+/);
     if (um) return um[0].replace(/\\\//g, "/").replace(/\\u003d/gi, "=").replace(/\\u0026/gi, "&");
   } catch { /* формат змінився - фолбек нижче */ }
@@ -145,7 +171,7 @@ export async function fetchArticleText(link: string): Promise<string> {
     const real = await resolveGoogleNewsUrl(link);
     return real ? fetchArticleText(real) : "";
   }
-  const res = await fetchWithTimeout(link, { headers: { "User-Agent": BROWSER_UA, Accept: "text/html" }, redirect: "follow" });
+  const res = await fetchPageText(link, { headers: { "User-Agent": BROWSER_UA, Accept: "text/html" } });
   if (!res?.ok) return "";
-  try { return extractParagraphs((await res.text()).slice(0, 800_000)); } catch { return ""; }
+  try { return extractParagraphs(res.text.slice(0, 800_000)); } catch { return ""; }
 }

@@ -56,6 +56,12 @@ async function sweepOrphanMedia(): Promise<void> {
   }
 }
 
+// Кабінет людини «живий», якщо автопостер ще публікує з нього або там стоять заплановані пости:
+// людина могла розписати контент на місяць уперед і не заходити - це робота, а не покинутий акаунт.
+const WS_BUSY = `exists (
+  select 1 from schedule_slot ss join post p on p.id = ss.post_id join pipeline_run r on r.id = p.run_id join source s on s.id = r.source_id
+   where s.workspace_id = app_user.workspace_id
+     and ((ss.status = 'planned' and ss.scheduled_at > now()) or (ss.status = 'posted' and ss.updated_at > now() - interval '30 days')))`;
 async function tick(): Promise<void> {
   // 1) остаточне видалення soft-deleted після grace
   const toPurge = await q<{ id: string; workspace_id: string; email: string }>(
@@ -75,7 +81,8 @@ async function tick(): Promise<void> {
   // 2) попередження про неактивність (>30 днів, ще не попереджали)
   const toWarn = await q<{ id: string; email: string }>(
     `select id, email from app_user where deleted_at is null and inactivity_warned_at is null
-       and last_active_at is not null and last_active_at < now() - ($1 || ' days')::interval`,
+       and last_active_at is not null and last_active_at < now() - ($1 || ' days')::interval
+       and not ${WS_BUSY}`,
     [String(WARN_DAYS)]);
   for (const u of toWarn) {
     try { await sendInactivityWarningEmail(u.email, `${env.appBaseUrl}/login`, CLEAN_DAYS); await q(`update app_user set inactivity_warned_at=now() where id=$1`, [u.id]); await logEvent("info", "lifecycle", `лист про неактивність: ${u.email}`); }
@@ -85,7 +92,8 @@ async function tick(): Promise<void> {
   const toClean = await q<{ workspace_id: string; email: string; id: string }>(
     `select id, workspace_id, email from app_user where deleted_at is null and data_purged_at is null
        and inactivity_warned_at is not null and inactivity_warned_at < now() - ($1 || ' days')::interval
-       and last_active_at < now() - ($2 || ' days')::interval`,
+       and last_active_at < now() - ($2 || ' days')::interval
+       and not ${WS_BUSY}`,
     [String(CLEAN_DAYS), String(WARN_DAYS)]);
   for (const u of toClean) {
     try { await purgeWorkspaceContent(u.workspace_id); await q(`update app_user set data_purged_at=now() where id=$1`, [u.id]); await logEvent("info", "lifecycle", `чистка медіа/прогонів за неактивність: ${u.email}`); }

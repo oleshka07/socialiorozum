@@ -17,8 +17,21 @@ async function fbFetch<T = any>(url: string, init?: RequestInit): Promise<T> {
     clearTimeout(timer);
   }
   const j: any = await res.json().catch(() => ({}));
-  if (!res.ok || j.error) throw new Error(j.error?.message ? String(j.error.message) : `Meta HTTP ${res.status}`);
+  if (!res.ok || j.error) throw new Error(humanMetaError(res.status, j.error));
   return j as T;
+}
+
+// Найчастіші відмови Graph API - людською; решта лишається текстом самої Meta (він зазвичай конкретний).
+export function humanMetaError(status: number, err?: { message?: string; code?: number; error_subcode?: number }): string {
+  const m = String(err?.message || "");
+  const code = Number(err?.code || 0);
+  if (code === 190 || /Error validating access token|session has been invalidated|has expired/i.test(m))
+    return "Доступ до Facebook/Instagram втрачено (Meta більше не приймає токен) - перепідключи у Налаштування → Канали.";
+  if ([4, 17, 32, 613].includes(code) || /request limit|too many calls/i.test(m))
+    return "Meta просить зачекати (забагато запитів) - спробуй за кілька хвилин.";
+  if (code === 10 || code === 200 || /permission/i.test(m))
+    return `Meta не дає на це дозволу (${m.slice(0, 120) || "код " + code}) - можливо, під час підключення не всі галочки було увімкнено: перепідключи у Налаштування → Канали.`;
+  return m || `Meta HTTP ${status}`;
 }
 
 export function authUrl(appId: string, redirectUri: string, state: string, scopes: string[]): string {

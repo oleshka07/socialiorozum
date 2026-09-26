@@ -60,7 +60,24 @@ export const ffprobeAvailable = (): Promise<boolean> =>
 const BROKEN_VIDEO = "файл схожий на відео, але не читається (пошкоджений чи обрізаний) - перезбережи або експортуй його ще раз";
 
 // кадр відео для мініатюри: 1-ша секунда (перший кадр часто чорний), коротке відео - нульова
-async function videoFrame(file: string): Promise<Buffer | null> {
+// Кадр для мініатюри відео - не більше 2 ffmpeg одночасно: /thumb відкритий без входу (його тягнуть
+// прев'ю Mini App і мережі), тож сотня запитів на різні відео не має запускати сотню процесів.
+// Слот передається наступному в черзі напряму; задовга черга - одразу без кадру (плитка з заглушкою).
+let framesBusy = 0;
+const frameQueue: Array<() => void> = [];
+async function withFrameSlot<T>(fn: () => Promise<T>): Promise<T | null> {
+  if (framesBusy >= 2) {
+    if (frameQueue.length >= 50) return null;
+    await new Promise<void>((r) => frameQueue.push(r));
+  } else framesBusy++;
+  try { return await fn(); }
+  finally { const next = frameQueue.shift(); if (next) next(); else framesBusy--; }
+}
+
+function videoFrame(file: string): Promise<Buffer | null> {
+  return withFrameSlot(() => videoFrameNow(file)).then((b) => b ?? null);
+}
+async function videoFrameNow(file: string): Promise<Buffer | null> {
   for (const ss of ["1", "0"]) {
     try {
       const buf = await runTool("ffmpeg", ["-v", "error", "-ss", ss, "-i", file, "-frames:v", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"], 30000);
@@ -176,6 +193,7 @@ async function sha256File(path: string): Promise<string> {
  * заливку поклали б процес. Відбиток для дедупу рахується потоком і збігається з тим, що дав би
  * saveMedia на тих самих байтах, тож повтор тієї самої папки копій не робить незалежно від шляху.
  */
+export const IMAGE_MAX_BYTES = 60 * 1024 * 1024;
 export async function saveMediaFile(ws: string, path: string, opts: { name?: string; source?: string; dedupe?: boolean }):
   Promise<{ id: string; filename: string; kind: string; existed?: boolean }> {
   const head = Buffer.alloc(64);
@@ -184,7 +202,12 @@ export async function saveMediaFile(ws: string, path: string, opts: { name?: str
   const sniffed = sniffKind(head);
   if (!sniffed) { await unlink(path).catch(() => {}); throw new Error("Це не зображення і не відео - приймаємо JPG, PNG, WebP, GIF, HEIC, MP4, MOV, WebM"); }
   if (sniffed.kind === "image") {
-    try { return await saveMedia(ws, { buffer: await readFile(path), mime: sniffed.mime, name: opts.name, source: opts.source, dedupe: opts.dedupe }); }
+    try {
+      // фото обробляється в памʼяті (sharp, HEIC → JPEG), тож межа тут своя, а не 500 МБ від відео:
+      // інакше «фото» на сотні МБ, зібране частинами, виїло б памʼять сервера
+      if ((await stat(path)).size > IMAGE_MAX_BYTES) throw new Error(`Фото більше за ${IMAGE_MAX_BYTES / 1024 / 1024} МБ - стисни його або збережи як JPEG`);
+      return await saveMedia(ws, { buffer: await readFile(path), mime: sniffed.mime, name: opts.name, source: opts.source, dedupe: opts.dedupe });
+    }
     finally { await unlink(path).catch(() => {}); }
   }
   const source = opts.source || "upload";

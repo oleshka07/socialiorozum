@@ -34,7 +34,9 @@ export function humanTgError(status: number, description?: string): string {
   if (/not enough rights|have no rights|CHAT_WRITE_FORBIDDEN|can't post/i.test(d)) return "Бот у каналі є, але без права публікувати - дай йому право «Публікувати повідомлення».";
   if (/chat not found|chat_id is empty|channel not found/i.test(d)) return "Канал не знайдено - перевір підключення каналу в Налаштування → Канали.";
   if (status === 401 || /Unauthorized/i.test(d)) return "Токен бота недійсний - перевипусти його в BotFather і встав у Налаштування → Канали.";
-  if (status === 429 || /Too Many Requests|retry after/i.test(d)) return "Telegram просить зачекати (забагато повідомлень) - автопостер повторить сам.";
+  // 404 «Not Found» Bot API віддає, коли сам токен битий (не той формат, обрізаний під час копіювання)
+  if (status === 404) return "Telegram не впізнав бота (404): токен бота недійсний - встав його заново в Налаштування → Канали.";
+  if (status === 429 || /Too Many Requests|retry after/i.test(d)) return "Telegram просить зачекати (забагато повідомлень) - спробуй за хвилину; запланований пост автопостер повторить сам.";
   if (/message is too long|caption is too long/i.test(d)) return "Текст задовгий для Telegram - скороти або дай сервісу підлаштувати під канал.";
   if (/wrong file identifier|failed to get HTTP URL content|WEBPAGE_MEDIA_EMPTY|IMAGE_PROCESS_FAILED/i.test(d)) return "Telegram не зміг завантажити зображення - спробуй інше фото або прибери його.";
   if (status === 403) return "Telegram відмовив у доступі (403): бот не адмін каналу або його видалили - перевір у Налаштування → Канали.";
@@ -174,6 +176,7 @@ export async function getFileBuffer(token: string, fileId: string): Promise<{ bu
     return { buffer: Buffer.from(await res.arrayBuffer()), path: f.file_path };
   } finally { clearTimeout(timer); }
 }
+export const getWebhookInfo = (token: string) => tg<{ url?: string; pending_update_count?: number; last_error_message?: string }>(token, "getWebhookInfo");
 export const setWebhook = (token: string, url: string, secretToken?: string) =>
   tg(token, "setWebhook", { url, allowed_updates: ["message", "channel_post", "my_chat_member", "callback_query"], ...(secretToken ? { secret_token: secretToken } : {}) });
 

@@ -456,7 +456,10 @@ export async function overlayForPost(ws: string, postId: string, headline: strin
     `select p.image_base from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
   if (!post?.image_base) throw new Error("Спершу додай або згенеруй зображення");
-  const baseBuf = await readFile(join(MEDIA_DIR, post.image_base));
+  // базове фото могли стерти з медіатеки - тоді кажемо, що робити, а не «ENOENT: no such file»
+  const baseBuf = await readFile(join(MEDIA_DIR, post.image_base)).catch(() => {
+    throw new Error("Фото, на яке накладався текст, прибрано з медіатеки - обери фото заново (← Інше фото)");
+  });
   const hl = (headline || "").trim();
   let buf: Buffer, mime = "image/jpeg";
   if (overlayOn && hl) { const r = await overlayHeadline(baseBuf, hl, style); buf = r.buffer; mime = r.mime; }
@@ -611,8 +614,10 @@ export async function attachStockPhoto(ws: string, postId: string, url: string, 
   const timer = setTimeout(() => controller.abort(), 30000);
   let buf: Buffer;
   try {
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) throw new Error(`Pexels download ${res.status}`);
+    const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": "Mozilla/5.0 (compatible; socialio/1.0)", Accept: "image/*" } });
+    if (!res.ok) throw new Error(res.status === 404
+      ? "Pexels не знайшов фото за цією адресою - візьми url саме з результатів пошуку стоку (find_stock_photos)"
+      : `Pexels не віддав фото (HTTP ${res.status}) - спробуй інше фото або ще раз за хвилину`);
     buf = Buffer.from(await res.arrayBuffer());
   } finally { clearTimeout(timer); }
   const saved = await saveMedia(ws, { buffer: buf, mime: "image/jpeg", name: "pexels.jpg", source: "pexels" });

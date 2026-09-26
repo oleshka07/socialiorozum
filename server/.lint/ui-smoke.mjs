@@ -48,6 +48,7 @@ CAR.set(P7, [{ id: "s1", filename: "s1.jpg", kind: "image" }, { id: "s2", filena
 const CHUNKS = new Map();
 const chunkPuts = [];
 const videoCalls = [];
+const chanSaves = [];   // що композер зберіг як мережі поста (POST /posts/:id/channels)
 
 const POSTS = [
   {
@@ -398,6 +399,12 @@ function handleApi(method, path, body) {
     const p = POSTS.find((x) => x.id === m[1]) || POSTS[0];
     return { sent: p.sent || [], links: p.links || {} };
   }
+  // адаптація повертає ЗБЕРЕЖЕНИЙ стан мереж (як справжній сервер) - тут із Threads, який людина
+  // щойно вимкнула в композері: клієнт мусить узяти лише текст, а не воскресити мережу
+  m = /^\/posts\/([0-9a-f-]+)\/adapt$/.exec(path);
+  if (method === "POST" && m) return { ok: true, channels: { telegram: { on: true, text: "TG-версія" }, threads: { on: true, text: "TH-версія" } } };
+  m = /^\/posts\/([0-9a-f-]+)\/channels$/.exec(path);
+  if (method === "POST" && m) { chanSaves.push({ id: m[1], channels: body && body.channels }); return { ok: true }; }
   if (method === "POST" && path === "/ab/generate") return AB_RESULT;
   if (method === "POST" && path === "/brand/context-fix") {
     aiJobPolls = 0;
@@ -695,6 +702,32 @@ const run = async () => {
     await page.waitForTimeout(250);
     return st.msg.includes("✓ telegram") && st.msg.includes("threads") && st.tgLocked
       && st.links.includes(TG_LINK) && busyCleared;
+  });
+
+  await check("escQuotes", async () => {
+    // esc() стоїть і всередині атрибутів ="…": лапки мусять екрануватись, інакше назва стрічки чи
+    // пошта при вході виходили з атрибута (onmouseover=…) і виконували код у кабінеті
+    const out = await page.evaluate(() => esc(`x" onmouseover="alert(1)' <b>`));
+    const probe = await page.evaluate(() => { const d = document.createElement("div"); d.innerHTML = '<span title="' + esc('a" onclick="x') + '">t</span>'; return d.firstChild.getAttributeNames().join(","); });
+    return out.includes("&quot;") && out.includes("&#39;") && out.includes("&lt;b&gt;") && probe === "title";
+  });
+
+  await check("publishKeepsChoice", async () => {
+    // «Опублікувати зараз» пакує мережі без своєї версії й бере від сервера ЛИШЕ текст: вимкнена
+    // людиною мережа не повертається (раніше збережений стан перезаписував локальний вибір)
+    const p1 = POSTS[0], keep = { sent: p1.sent, links: p1.links };
+    p1.sent = []; p1.links = {}; chanSaves.length = 0;
+    await page.evaluate((id) => openComposer(id), P1);
+    await page.waitForSelector('.cmp-ov #cmpChips .netchip[data-net="threads"]', { timeout: 6000 });
+    await page.click('#cmpChips .netchip[data-net="threads"]');
+    await page.click("#cmpNow");
+    await page.waitForFunction(() => /✓ telegram/.test(document.querySelector("#cmpMsg").textContent), undefined, { timeout: 15000 });
+    await page.evaluate(() => { const b = document.querySelector("#cmpBack"); if (b) b.click(); });
+    await page.waitForTimeout(250);
+    Object.assign(p1, keep);
+    const last = chanSaves[chanSaves.length - 1];
+    const ch = (last && last.channels) || {};
+    return !!(ch.telegram && ch.telegram.on && ch.telegram.text === "TG-версія") && !(ch.threads && ch.threads.on);
   });
 
   await check("perChanAdapt", async () => {

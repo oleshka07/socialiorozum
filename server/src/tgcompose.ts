@@ -13,16 +13,23 @@ import { getSetting, setSetting } from "./settings.js";
 import { saveMedia } from "./media.js";
 import { postMediaList, setPostMediaOrder, setPostVideo, MAX_SLIDES } from "./slides.js";
 import { appendCroppedSlide } from "./images.js";
-import { publishPostToChannels } from "./publisher.js";
+import { publishPostToChannels, enabledNets, closeSlotsIfDone, alreadySentNetworks, PUB_NETS } from "./publisher.js";
 import { rewritePost } from "./pipeline.js";
 import { logEvent } from "./log.js";
 
 const KEY = "tg_compose";
 type Await = null | "text" | "photo" | "when" | "rewrite";
-type ComposeState = { postId: string | null; await: Await; chat: string | null };
+type ComposeState = { postId: string | null; await: Await; chat: string | null; at?: number };
 const EMPTY: ComposeState = { postId: null, await: null, chat: null };
+// Очікування відповіді живе 30 хв. Без строку бот «застрягав»: відповідь щоденника через день
+// переписувала текст поста, запускала платне переписування або тонула в «Не зрозумів дату».
+const AWAIT_TTL_MS = 30 * 60_000;
 
-export const getCompose = (ws: string) => getSetting<ComposeState>(ws, KEY, EMPTY);
+export async function getCompose(ws: string): Promise<ComposeState> {
+  const st = await getSetting<ComposeState>(ws, KEY, EMPTY);
+  if (st.await && (!st.at || Date.now() - st.at > AWAIT_TTL_MS)) return { ...st, await: null };
+  return st;
+}
 const setCompose = (ws: string, st: ComposeState) => setSetting(ws, KEY, st);
 export const clearCompose = (ws: string) => setSetting(ws, KEY, EMPTY);
 
@@ -59,10 +66,16 @@ async function wsTz(ws: string): Promise<string> {
 export function zonedToUtc(y: number, mo: number, d: number, hh: number, mi: number, tz: string): Date {
   const guess = Date.UTC(y, mo - 1, d, hh, mi, 0);
   const f = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
-  const p: Record<string, string> = {};
-  for (const part of f.formatToParts(new Date(guess))) if (part.type !== "literal") p[part.type] = part.value;
-  const asLocal = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour) % 24, Number(p.minute));
-  return new Date(guess - (asLocal - guess));
+  // зсув пояса В ЦЮ МИТЬ (місцевий час мінус UTC)
+  const offsetAt = (ms: number): number => {
+    const p: Record<string, string> = {};
+    for (const part of f.formatToParts(new Date(ms))) if (part.type !== "literal") p[part.type] = part.value;
+    return Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour) % 24, Number(p.minute)) - ms;
+  };
+  // два проходи: зсув, узятий у мить «guess», у день переходу на літній/зимовий час хибить на годину -
+  // тож перевіряємо його вже в знайденій миті й за потреби уточнюємо («завтра 09:00» не стає 10:00)
+  const first = guess - offsetAt(guess);
+  return new Date(guess - offsetAt(first));
 }
 
 // «зараз» у поясі воркспейсу, розкладене на частини (для кнопок «сьогодні/завтра»)
@@ -93,7 +106,7 @@ export async function createBotDraft(ws: string, text: string): Promise<string> 
 }
 
 type PostRow = { id: string; content: string; channels: any; filename: string | null; review: string | null };
-async function loadPost(ws: string, postId: string): Promise<PostRow | null> {
+export async function loadPost(ws: string, postId: string): Promise<PostRow | null> {
   return one<PostRow>(
     `select p.id, p.content, p.channels, p.review, ma.filename from post p
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
@@ -116,7 +129,9 @@ export async function composeCard(ws: string, postId: string): Promise<{ text: s
   const body = p.content.length > 600 ? p.content.slice(0, 600) + "…" : p.content;
   const list = await postMediaList(postId);
   const frames = list.length, isVideo = list[0]?.kind === "video";
-  const text = `📝 <b>${p.review === "approved" ? "Затверджено" : "Чернетка"}</b>\n\n${esc(body)}\n\n`
+  // розмітка **…** (sendMessage сам перекладає її в HTML і екранує текст): власні <b> і &amp; тут
+  // екранувались удруге, і людина бачила буквальні «<b>Чернетка</b>» та «R&amp;D»
+  const text = `📝 **${p.review === "approved" ? "Затверджено" : "Чернетка"}**\n\n${body}\n\n`
     + (isVideo ? `🎬 Відео${list[0].duration ? ` ${Math.floor(Number(list[0].duration) / 60)}:${String(Math.round(Number(list[0].duration)) % 60).padStart(2, "0")}` : ""}\n`
       : `🖼 Фото: ${frames > 1 ? `карусель, ${frames} кадрів` : p.filename ? "є" : "нема"}\n`)
     + `📢 Канали: ${chosen.length ? chosen.map(niceNet).join(", ") : "не обрано"}`
@@ -148,7 +163,6 @@ export async function toggleApprove(ws: string, postId: string): Promise<string>
 }
 
 const niceNet = (k: string) => (NETS.find((n) => n[0] === k) || [k, k])[1];
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 // ---- дії ----
 export async function toggleNet(ws: string, postId: string, net: string): Promise<void> {
@@ -163,9 +177,28 @@ export async function setText(ws: string, postId: string, text: string): Promise
   await q(`update post set content=$2 where id=$1 and id in (
              select p.id from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
              where p.id=$1 and s.workspace_id=$3)`, [postId, text.trim(), ws]);
+  await masterChanged(ws, postId, text.trim());
+}
+
+// Майстер-текст змінили в боті: версії під мережі, зроблені зі СТАРОГО тексту, більше не правда - інакше
+// після правки в мережу, де вже була своя версія, пішов би текст до правки. Для ще не надісланих мереж
+// скидаємо їх (публікація спакує заново); текст, написаний під одну мережу (native), оновлюємо дослівно.
+export async function masterChanged(ws: string, postId: string, text: string): Promise<void> {
+  const p = await loadPost(ws, postId); if (!p) return;
+  const ch = p.channels || {};
+  const sent = new Set(await alreadySentNetworks(postId));
+  let changed = false;
+  for (const k of PUB_NETS) {
+    if (!ch[k] || sent.has(k)) continue;
+    if (ch.manual_adapt && ch.native === k) { ch[k] = { ...ch[k], text }; changed = true; }
+    else if (ch[k].text) { delete ch[k].text; changed = true; }
+  }
+  if (ch.manual_adapt && !ch.native) { delete ch.manual_adapt; changed = true; }
+  if (changed) await q(`update post set channels=$2 where id=$1`, [postId, JSON.stringify(ch)]);
 }
 
 export async function attachPhoto(ws: string, postId: string, buffer: Buffer, mime: string, name: string): Promise<void> {
+  if (!(await loadPost(ws, postId))) throw new Error("пост не знайдено");
   const m = await saveMedia(ws, { buffer, mime, name, source: "bot" });
   await q(`update post set media_id=$2 where id=$1`, [postId, m.id]);
 }
@@ -196,6 +229,7 @@ export async function aiRewrite(ws: string, postId: string, instruction?: string
   const p = await loadPost(ws, postId); if (!p) throw new Error("пост не знайдено");
   const fresh = await rewritePost(ws, p.content, instruction);
   await q(`update post set content=$2 where id=$1`, [postId, fresh]);
+  await masterChanged(ws, postId, fresh);
   return fresh;
 }
 
@@ -203,28 +237,31 @@ export async function aiRewrite(ws: string, postId: string, instruction?: string
 // авто-паковка під мережі й запис permalink працюють однаково.
 export async function publishNow(ws: string, postId: string): Promise<string> {
   const p = await loadPost(ws, postId); if (!p) throw new Error("пост не знайдено");
-  const nets = Object.keys(p.channels || {}).filter((k) => p.channels[k] && p.channels[k].on);
+  const nets = enabledNets(p.channels);
   if (!nets.length) return "⚠️ Спершу обери хоч один канал.";
   const res = await publishPostToChannels(ws, postId);
   const ok = res.filter((r) => r.status === "sent").map((r) => niceNet(r.channel));
   const skip = res.filter((r) => r.status === "skipped").map((r) => niceNet(r.channel));
   const err = res.filter((r) => r.status === "error");
-  // погасити запланований слот, якщо публікуємо руками раніше часу
-  await q(`update schedule_slot set status='posted', result='опубліковано з бота' where post_id=$1 and status='planned'`, [postId]);
+  const notes = res.filter((r) => r.note).map((r) => `${niceNet(r.channel)}: ${r.note}`);
+  // погасити запланований слот, якщо публікуємо руками раніше часу - але лише коли вийшло в УСІ
+  // обрані мережі: збій «зараз» не має тихо скасовувати завтрашню публікацію
+  await closeSlotsIfDone(postId, "опубліковано з бота");
   let out = ok.length ? `✅ Опубліковано: ${ok.join(", ")}` : "";
   if (skip.length) out += `${out ? "\n" : ""}↩️ Пропущено (вже публікувалось): ${skip.join(", ")}`;
   if (err.length) out += `${out ? "\n" : ""}⚠️ Не вийшло: ${err.map((e) => `${niceNet(e.channel)} - ${e.error}`).join("; ")}`;
+  if (notes.length) out += `${out ? "\n" : ""}ℹ️ ${notes.join("; ")}`;
   return out || "Нічого не відправлено.";
 }
 
 export async function schedule(ws: string, postId: string, at: Date): Promise<string> {
   if (at.getTime() < Date.now() - 60000) return "⚠️ Цей час уже минув - обери майбутній.";
   const p = await loadPost(ws, postId); if (!p) throw new Error("пост не знайдено");
-  const nets = Object.keys(p.channels || {}).filter((k) => p.channels[k] && p.channels[k].on);
+  const nets = enabledNets(p.channels);
   if (!nets.length) return "⚠️ Спершу обери хоч один канал.";
   // переносимо наявний слот замість другого INSERT - інакше пост вийшов би двічі
   const ex = await one<{ id: string }>(`select id from schedule_slot where post_id=$1 and status='planned' limit 1`, [postId]);
-  if (ex) await q(`update schedule_slot set scheduled_at=$2, updated_at=now() where id=$1`, [ex.id, at.toISOString()]);
+  if (ex) await q(`update schedule_slot set scheduled_at=$2, retry_at=null, attempts=0, updated_at=now() where id=$1`, [ex.id, at.toISOString()]);
   // ⚠️ у schedule_slot НЕМА workspace_id (воркспейс визначається через post → run → source) -
   // insert із ним падав би в рантаймі, а tsc такого не бачить. Той самий набір колонок, що в /api/schedule.
   else await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [postId, at.toISOString()]);
@@ -285,7 +322,7 @@ export function parseWhenAt(raw: string, n: { y: number; mo: number; d: number; 
 
 // ---- стан очікування наступного повідомлення ----
 export async function expect(ws: string, postId: string, what: Await, chat: string): Promise<void> {
-  await setCompose(ws, { postId, await: what, chat });
+  await setCompose(ws, { postId, await: what, chat, at: Date.now() });
 }
 export async function stopExpecting(ws: string): Promise<void> {
   const st = await getCompose(ws);

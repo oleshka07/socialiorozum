@@ -19,6 +19,7 @@
 // власнику, перевипуск одним кліком (стара адреса одразу мертва), а ФОРМАТ перевіряємо ДО запиту
 // в БД - інакше порожнє чи сміттєве значення зматчилось би з іншим ключем settings_block
 // (ця пастка вже траплялась на токені діалогів).
+import { touchActive } from "./auth.js";
 import { randomBytes } from "node:crypto";
 import { q, one } from "./db.js";
 import { env } from "./env.js";
@@ -26,7 +27,7 @@ import { getSettingText } from "./settings.js";
 import { listWorkspaces, isMember, workspaceTitle } from "./workspaces.js";
 import { issueUploadLink, uploadCommands, uploadUrl, clampMinutes, UPLOAD_MAX_FILES } from "./uploadlink.js";
 import { connectedNets, parseWhen, zonedToUtc } from "./tgcompose.js";
-import { publishPostToChannels, alreadySentNetworks } from "./publisher.js";
+import { publishPostToChannels, alreadySentNetworks, closeSlotsIfDone } from "./publisher.js";
 import { generatePostsOnePass, normFormat, GOAL_LABELS, CHANNEL_LIMITS } from "./pipeline.js";
 import { logEvent } from "./log.js";
 import { generateImageForPost, imageProviders, stockPhotoOptions, attachStockPhoto, attachCroppedImage, appendCroppedSlide, cropCopy } from "./images.js";
@@ -183,11 +184,14 @@ async function resolveWsArg(userId: string, raw: unknown): Promise<{ id: string;
 // «Остання активність конектора» - щоб у кабінеті було видно, що підключення живе. Пишемо не
 // частіше разу на 5 хв: інакше кожен tools/call давав би зайвий UPDATE.
 const usedAt = new Map<string, number>();
-function touchUsed(token: string): void {
+function touchUsed(token: string, userId: string): void {
   const now = Date.now();
   if (now - (usedAt.get(token) || 0) < 5 * 60_000) return;
   usedAt.set(token, now);
   q(`update mcp_token set last_used_at=now() where token=$1`, [token]).catch(() => {});
+  // робота через Claude - теж активність: інакше нічний прибиральник вважав би людину, яка місяць
+  // працює лише з конектора, неактивною і через 44 дні стер би її контент
+  touchActive(userId).catch(() => {});
 }
 
 // ============================================================================
@@ -1141,8 +1145,9 @@ export const TOOLS: ToolDef[] = [
         throw new ToolError(`Не обрано жодної мережі. Підключені в кабінеті: ${connected.length ? netList(connected) : "жодної - спершу підключи канал у Налаштуваннях"}.`);
       const offline = nets.filter((n) => !connected.includes(n));
       const res = await publishPostToChannels(ws, p.id);
-      // погасити запланований слот: інакше автопостер відправив би той самий пост удруге
-      await q(`update schedule_slot set status='posted', result='опубліковано з Claude (MCP)' where post_id=$1 and status='planned'`, [p.id]);
+      // погасити запланований слот (інакше автопостер відправив би той самий пост удруге) - лише коли
+      // вийшло в усі обрані мережі: збій «зараз» не має тихо скасовувати заплановану публікацію
+      await closeSlotsIfDone(p.id, "опубліковано з Claude (MCP)");
       const ok = res.filter((r) => r.status === "sent").map((r) => NET_LABEL[r.channel] || r.channel);
       const skip = res.filter((r) => r.status === "skipped").map((r) => NET_LABEL[r.channel] || r.channel);
       const err = res.filter((r) => r.status === "error");
@@ -1189,7 +1194,7 @@ export const TOOLS: ToolDef[] = [
       }
       // переносимо наявний слот замість другого INSERT - інакше пост вийшов би двічі
       const ex = await one<{ id: string }>(`select id from schedule_slot where post_id=$1 and status='planned' limit 1`, [p.id]);
-      if (ex) await q(`update schedule_slot set scheduled_at=$2, updated_at=now() where id=$1`, [ex.id, at.toISOString()]);
+      if (ex) await q(`update schedule_slot set scheduled_at=$2, retry_at=null, attempts=0, updated_at=now() where id=$1`, [ex.id, at.toISOString()]);
       else await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [p.id, at.toISOString()]);
       await q(`update post set review='approved' where id=$1`, [p.id]);   // запланований = затверджений
       return `🗓 ${short(p.id)} заплановано на ${fmtWhen(at, tz)}: ${publishPlanLine(publishPlan(chNow, p.content))}.${ex ? " Наявний слот перенесено." : ""}`;
@@ -1350,7 +1355,7 @@ export async function handleRpc(ctx: McpCtx, msg: any): Promise<any | null> {
       return rpcResult(id, { tools: toolSpecs() });
     case "tools/call": {
       const name = String(msg.params?.name || "");
-      touchUsed(ctx.token);
+      touchUsed(ctx.token, ctx.userId);
       return rpcResult(id, await callTool(ctx, name, msg.params?.arguments || {}));
     }
     // Ресурсів і промтів ми не оголошуємо, але деякі клієнти все одно їх питають - порожній

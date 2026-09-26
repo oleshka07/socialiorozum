@@ -119,6 +119,17 @@ export const deleteSession = (token: string) => q(`delete from user_session wher
 export const touchActive = (userId: string) =>
   q(`update app_user set last_active_at=now(), inactivity_warned_at=null
      where id=$1 and (last_active_at is null or last_active_at < now() - interval '1 hour')`, [userId]);
+// Бот і Mini App діють від імені КАБІНЕТУ (людина там - Telegram id, не акаунт), тож активністю
+// вважаємо всіх, хто має доступ до цього кабінету. Не частіше разу на годину на кабінет.
+const wsTouched = new Map<string, number>();
+export function touchWorkspaceActive(workspaceId: string): void {
+  const now = Date.now();
+  if (now - (wsTouched.get(workspaceId) || 0) < 3600_000) return;
+  wsTouched.set(workspaceId, now);
+  q(`update app_user u set last_active_at=now(), inactivity_warned_at=null
+       from workspace_member m where m.workspace_id=$1 and m.user_id=u.id
+        and (u.last_active_at is null or u.last_active_at < now() - interval '1 hour')`, [workspaceId]).catch(() => {});
+}
 export async function softDeleteAccount(userId: string): Promise<void> {
   await q(`update app_user set deleted_at=now() where id=$1`, [userId]);
   await q(`delete from user_session where user_id=$1`, [userId]); // вилогінити з усіх пристроїв

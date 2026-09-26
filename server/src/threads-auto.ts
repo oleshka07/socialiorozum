@@ -4,6 +4,7 @@
 // що залетить за бенчмарками - масштабуємо в гілку/рілс).
 import { q, one } from "./db.js";
 import { logEvent } from "./log.js";
+import { canTry, failedTry, succeededTry } from "./dailytry.js";
 import * as threads from "./threads.js";
 import { thValidToken } from "./publisher.js";
 import { generateThreadsTakes } from "./pipeline.js";
@@ -24,6 +25,10 @@ async function processReplyJobs(): Promise<void> {
     `select id, workspace_id, root_media_id, reply_text from threads_reply_job
      where status='pending' and due_at <= now() order by due_at limit 10`);
   for (const j of jobs) {
+    // забираємо джобу ДО публікації: перезапуск між публікацією й записом статусу інакше дав би
+    // другу відповідь під той самий пост
+    const claimed = await one(`update threads_reply_job set status='sending' where id=$1 and status='pending' returning id`, [j.id]);
+    if (!claimed) continue;
     try {
       const tok = await thValidToken(j.workspace_id);
       if (!tok) throw new Error("Threads не підключено");
@@ -51,7 +56,16 @@ async function processDailyTakes(): Promise<void> {
       if (hour !== TAKES_HOUR) continue;
       const last = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='takes_last'`, [r.workspace_id]);
       if (last?.content === date) continue; // сьогодні вже генерували
-      await generateThreadsTakes(r.workspace_id, n);
+      const key = r.workspace_id + ":takes";
+      if (!canTry(key, date)) continue; // після збою - не щохвилини, а до 3 спроб на день
+      try {
+        await generateThreadsTakes(r.workspace_id, n);
+        succeededTry(key);
+      } catch (e: any) {
+        const gaveUp = failedTry(key, date, e);
+        await logEvent("error", "threads-auto", "тейки: " + e.message + (gaveUp ? " (на сьогодні спроби вичерпано)" : " (повтор за 20 хв)"), { ws: r.workspace_id });
+        continue;
+      }
       await setSetting(r.workspace_id, "takes_last", date);
     } catch (e: any) { await logEvent("error", "threads-auto", "тейки: " + e.message, { ws: r.workspace_id }); }
   }

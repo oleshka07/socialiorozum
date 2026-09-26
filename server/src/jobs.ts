@@ -20,7 +20,19 @@ export type JobRow = { id: string; workspace_id: string | null; kind: string; ke
 const LOST = "сервер перезапустився під час виконання - перевір фактичний стан";
 
 /** Запустити роботу. Якщо джоба з тим самим (kind,key) уже біжить - повертаємо її (дедуп). */
-export async function startJob(kind: string, key: string | null, ws: string | null, work: () => Promise<any>): Promise<JobRow> {
+// подвійний клік: два запити одночасно проходили перевірку «вже біжить?» і запускали ДВІ роботи
+// (дві публікації одного поста). Джоби виконуються в цьому ж процесі, тож замок у памʼяті достатній.
+const starting = new Map<string, Promise<JobRow>>();
+export function startJob(kind: string, key: string | null, ws: string | null, work: () => Promise<any>): Promise<JobRow> {
+  if (!key) return startJobNow(kind, key, ws, work);
+  const k = kind + ":" + key;
+  const pending = starting.get(k);
+  if (pending) return pending;
+  const p = startJobNow(kind, key, ws, work).finally(() => starting.delete(k));
+  starting.set(k, p);
+  return p;
+}
+async function startJobNow(kind: string, key: string | null, ws: string | null, work: () => Promise<any>): Promise<JobRow> {
   if (key) {
     const cur = await one<JobRow>(`select * from job where kind=$1 and key=$2 and status='running' order by created_at desc limit 1`, [kind, key]);
     if (cur) return cur;

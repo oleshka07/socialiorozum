@@ -58,6 +58,9 @@ export async function revokeAccess(wsId: string, userId: string): Promise<{ ok: 
   if (!row) return { ok: false, error: "Доступу й так немає." };
   if (row.role === "owner") return { ok: false, error: "Власника кабінету прибрати не можна." };
   await q(`delete from workspace_member where workspace_id=$1 and user_id=$2`, [wsId, userId]);
+  // разом із доступом - і Telegram: бот і Mini App цієї людини більше не відкривають кабінет
+  await q(`delete from tg_owner where workspace_id=$1 and user_id=$2`, [wsId, userId]);
+  await q(`delete from tg_connect where workspace_id=$1 and created_by=$2`, [wsId, userId]);
   // сесії, що сиділи в цьому кабінеті, самі впадуть у домашній: resolve у userBySession робить
   // join по членству, тож окремо чистити нічого не треба
   return { ok: true };

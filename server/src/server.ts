@@ -41,7 +41,7 @@ import { readdir, stat } from "node:fs/promises";
 import { startMeetingPull, testPull, pullOnce } from "./meetings-pull.js";
 import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
 import * as gdrive from "./gdrive.js";
-import { publishPostToChannels, alreadySentNetworks, startReelPublishJob, reelSentNetworks } from "./publisher.js";
+import { publishPostToChannels, alreadySentNetworks, startReelPublishJob, reelSentNetworks, closeSlotsIfDone, enabledNets, beginShutdown, publishesInFlight } from "./publisher.js";
 import { startLifecycleWorker } from "./lifecycle.js";
 import { startDigest } from "./digest.js";
 import { startMetrics, networkBenchmarks } from "./metrics.js";
@@ -53,7 +53,7 @@ import { contextReview, contextIssueCount, suggestFieldFix } from "./context-che
 import { generateImageForPost, imageProviders, imageCosts, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto, appendCroppedSlide } from "./images.js";
 import { secretStatuses, setSecret, clearSecret, refreshSecrets } from "./secrets.js";
 import { kieCatalog, kieCredits, kieReady } from "./kie.js";
-import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook, sharedBotDmWorks } from "./tgbot.js";
+import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook, sharedBotDmWorks, hookSecret, sameSecret, ownBotToken, refreshOwnBotWebhooks, initHookBase } from "./tgbot.js";
 import { chat } from "./openrouter.js";
 import { handleBody, wantsSse, sseEncode, resolveToken, mcpTokenFor, issueMcpToken, revokeMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
 import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember, deleteBrand, workspaceTitle } from "./workspaces.js";
@@ -121,8 +121,11 @@ app.addHook("onSend", async (req: any, reply, payload) => {
 });
 
 // базові security-заголовки
-app.addHook("onRequest", async (_req, reply) => {
-  reply.header("X-Frame-Options", "DENY");
+app.addHook("onRequest", async (req: any, reply) => {
+  // Mini App у веб-версії Telegram (web.telegram.org) відкривається у фреймі: для неї замість
+  // «нікому» - «лише Telegram», інакше там був би порожній екран
+  if ((req.raw.url || "").split("?")[0] === "/tgapp") reply.header("Content-Security-Policy", "frame-ancestors https://web.telegram.org https://*.telegram.org");
+  else reply.header("X-Frame-Options", "DENY");
   reply.header("X-Content-Type-Options", "nosniff");
   reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
   reply.header("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
@@ -166,7 +169,9 @@ document.getElementById('p').addEventListener('keydown',e=>{if(e.key==='Enter')g
   });
   app.post("/beta-pin", async (req: any, reply) => {
     if (rateLimited("betapin:" + req.ip, 10)) return reply.code(429).send({ error: "Забагато спроб - зачекай хвилину" });
-    if (String((req.body as any)?.pin ?? "").trim() !== env.beta.pin) return reply.code(401).send({ error: "невірний PIN" });
+    // порівняння за сталий час (хеші однакової довжини), щоб PIN не вгадувався по часу відповіді
+    const got = createHash("sha256").update(String((req.body as any)?.pin ?? "").trim()).digest();
+    if (!timingSafeEqual(got, createHash("sha256").update(env.beta.pin).digest())) return reply.code(401).send({ error: "невірний PIN" });
     reply.setCookie(PIN_COOKIE, pinToken, { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 30 });
     return { ok: true };
   });
@@ -248,7 +253,9 @@ app.post("/api/auth/login", async (req: any, reply) => {
   const password = String(req.body?.password ?? "");
   const u = await auth.userByEmail(email);
   if (!u || !auth.verifyPassword(password, u.password_hash)) {
-    await logEvent("warn", "auth", `невдалий вхід: ${email}`);
+    // у журнал - лише схоже на пошту й коротке: сюди пише будь-хто без входу, а журнал читає адмінка
+    const shown = /^[^\s@"'<>]{1,64}@[^\s@"'<>]{1,190}$/.test(email) ? email : `(не пошта, ${Math.min(email.length, 9999)} симв.)`;
+    await logEvent("warn", "auth", `невдалий вхід: ${shown}`);
     return reply.code(401).send({ error: "Невірний email або пароль" });
   }
   if (!u.email_verified) return reply.code(403).send({ error: "Підтвердіть пошту (перевірте лист)" });
@@ -610,10 +617,11 @@ app.delete("/api/prompts/:step", async (req: any, reply) => {
 });
 
 // ===================== SOURCES + RUNS =====================
-app.post("/api/sources", async (req: any) => {
+app.post("/api/sources", async (req: any, reply) => {
   const { transcript, title, origin } = req.body ?? {};
-  if (!transcript) return { error: "transcript обовʼязковий" };
-  if (String(transcript).length > 100000) return { error: "Транскрипт задовгий (макс 100k символів)" };
+  // відмова - кодом 400: відповідь 200 з {error} кабінет читав як успіх («Матеріал додано ✓», а не збережено нічого)
+  if (!String(transcript ?? "").trim()) return reply.code(400).send({ error: "Додай текст матеріалу" });
+  if (String(transcript).length > 100000) return reply.code(400).send({ error: `Текст задовгий: ${String(transcript).length.toLocaleString("uk")} символів, а приймаємо до 100 000 - розбий його на кілька матеріалів` });
   const src = await one<{ id: string }>(
     `insert into source(workspace_id, origin, title, transcript) values($1,$2,$3,$4) returning id`,
     [req.user.workspace_id, origin ?? "manual", title ?? null, transcript]
@@ -1008,7 +1016,8 @@ app.post("/api/posts/:postId/adapt", async (req: any, reply) => {
   try {
     const variants = await adaptForChannels(ws, post.content, channels, post.intent || undefined);
     const cur = post.channels || {};
-    for (const ch of channels) cur[ch] = { on: true, text: variants[ch] || (cur[ch] && cur[ch].text) || post.content };
+    // лише текст: решта налаштувань мережі (гілка Threads, нумерація) лишаються як були
+    for (const ch of channels) cur[ch] = { ...(cur[ch] || {}), on: true, text: variants[ch] || (cur[ch] && cur[ch].text) || post.content };
     await q(`update post set channels=$2 where id=$1`, [req.params.postId, JSON.stringify(cur)]);
     return { ok: true, channels: cur };
   } catch (e: any) { await logEvent("error", "adapt", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
@@ -1042,13 +1051,7 @@ app.post("/api/posts/:postId/publish-all", async (req: any, reply) => {
       // «Розвідник», режим «Питання»: 3 питання-продовження від аудиторії → Банк ідей
       one<{ content: string }>(`select content from post where id=$1`, [postId])
         .then((p) => p && publishQuestions(ws, p.content)).catch(() => {});
-      const post = await one<{ channels: any }>(`select channels from post where id=$1`, [postId]);
-      const enabled = Object.keys(post?.channels || {}).filter((k) => post!.channels[k] && post!.channels[k].on);
-      const sent = new Set(await alreadySentNetworks(postId));
-      if (!enabled.filter((k) => !sent.has(k)).length) {
-        await q(`update schedule_slot set status='posted', result='опубліковано вручну (слот погашено)' where post_id=$1 and status='planned'`, [postId]);
-        await q(`update plan_slot set status='published' where post_id=$1 and status in ('drafted','approved','scheduled')`, [postId]);
-      }
+      await closeSlotsIfDone(postId, "опубліковано вручну (слот погашено)");
     }
     return { results };
   });
@@ -1353,9 +1356,11 @@ app.post("/api/materials/:id/series", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   const m = await one<{ id: string; transcript: string; origin: string }>(`select id, transcript, origin from source where id=$1 and workspace_id=$2`, [req.params.id, ws]);
   if (!m) return reply.code(404).send({ error: "матеріал не знайдено" });
-  try {
+  // два виклики моделі поспіль - за 60 с nginx не вкладаються: джоба, як і в решти довгих AI-дій
+  // (раніше людина бачила «504: <html>…», робота тривала, а повтор давав другу серію)
+  return { jobId: await startAiJob(ws, async () => {
     const takes = await extractIdeasFromText(ws, m.transcript, 6, undefined, ideaMode(m.origin));
-    if (!takes.length) return reply.code(500).send({ error: "не вдалося витягнути тейки з матеріалу" });
+    if (!takes.length) throw new Error("не вдалося витягнути тейки з матеріалу");
     const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [m.id]);
     // серія з АРКОМ: частини пов'язані і ведуть до пейофу, а не розсип постів на тему
     const n = takes.length;
@@ -1363,7 +1368,7 @@ app.post("/api/materials/:id/series", async (req: any, reply) => {
       takes.map((t, i) => t.idea + (t.angle ? ` Кут: ${t.angle}.` : "") + (t.hook ? ` Гачок: ${t.hook}` : "") +
         ` [Це частина ${i + 1} з ${n} звʼязаної серії: кожен пост самостійний, але наприкінці - місток-інтрига до наступної частини${i === n - 1 ? "; ЦЕ ФІНАЛ серії - пейофф: сильний висновок усього арка + головний CTA" : ""}.]`));
     return { ok: true, count };
-  } catch (e: any) { return reply.code(500).send({ error: e.message }); }
+  }) };
 });
 
 // «Магніт»: лід-магніти (генерація + збережений список)
@@ -1855,18 +1860,25 @@ app.post("/api/runs/:id/autopilot", async (req: any, reply) => {
 app.post("/api/runs/:id/generate-lite", async (req: any, reply) => {
   const id = req.params.id; const ws = req.user.workspace_id;
   if (!(await runOwned(id, ws))) return reply.code(404).send({ error: "run не знайдено" });
-  try {
-    const count = await generatePostsOnePass(id, Number(req.body?.count) || 6, Array.isArray(req.body?.ideas) ? req.body.ideas : undefined);
-    let images = 0;
-    if (req.body?.images) {
-      const posts = await q<{ id: string }>(`select id from post where run_id=$1 and stage='final'`, [id]);
-      // онбординг шле provider:'gemini' (Nano Banana) для вау-ефекту перших зображень; без ключа - дефолтний провайдер
-      const provider = ["openai", "fal", "gemini", "cloudflare"].includes(req.body?.provider) ? req.body.provider : undefined;
-      const res = await Promise.allSettled(posts.map((p) => generateImageForPost(ws, p.id, provider ? { provider } : undefined)));
-      images = res.filter((r) => r.status === "fulfilled").length;
-    }
-    return { ok: true, count, images };
-  } catch (e: any) { await logEvent("error", "lite", e.message, { runId: id }, req.user.id); return reply.code(500).send({ error: e.message }); }
+  const body = req.body || {}, userId = req.user.id;
+  // Джоба: пости + зображення (онбординг) у 60 с nginx не вкладаються - раніше на 504 онбординг
+  // показував порожню Студію з «Готово - ось твої перші пости».
+  return { jobId: await startAiJob(ws, async () => {
+    try {
+      const t0 = (await one<{ t: string }>(`select now()::text as t`))!.t;
+      const count = await generatePostsOnePass(id, Number(body.count) || 6, Array.isArray(body.ideas) ? body.ideas : undefined);
+      let images = 0;
+      if (body.images) {
+        // лише щойно створені пости: прогін міг уже мати пости (генерація тепер додає, а не замінює)
+        const posts = await q<{ id: string }>(`select id from post where run_id=$1 and stage='final' and created_at >= $2::timestamptz`, [id, t0]);
+        // онбординг шле provider:'gemini' (Nano Banana) для вау-ефекту перших зображень; без ключа - дефолтний провайдер
+        const provider = ["openai", "fal", "gemini", "cloudflare"].includes(body.provider) ? body.provider : undefined;
+        const res = await Promise.allSettled(posts.map((p) => generateImageForPost(ws, p.id, provider ? { provider } : undefined)));
+        images = res.filter((r) => r.status === "fulfilled").length;
+      }
+      return { ok: true, count, images };
+    } catch (e: any) { await logEvent("error", "lite", e.message, { runId: id }, userId); throw e; }
+  }) };
 });
 
 // згенерувати ідеї (дешево) для блоку «💡 Ідеї → пости» у Студії
@@ -2014,13 +2026,21 @@ app.get("/api/integrations/telegram", async (req: any) => {
 // спільний бот: видати deep-link для підключення каналу
 app.post("/api/integrations/telegram/connect-link", async (req: any, reply) => {
   if (!botEnabled()) return reply.code(400).send({ error: "Спільний бот не налаштований на сервері" });
-  try { return { link: await createConnectLink(req.user.workspace_id), bot: botUsername() }; }
+  try { return { link: await createConnectLink(req.user.workspace_id, req.user.id), bot: botUsername() }; }
   catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
 
-app.put("/api/integrations/telegram", async (req: any) => {
+app.put("/api/integrations/telegram", async (req: any, reply) => {
   const ws = req.user.workspace_id;
-  const token = String(req.body?.botToken ?? "").trim();
+  const token = String(req.body?.botToken ?? "").trim().replace(/^bot(?=\d)/i, "");
+  // Токен власного бота перевіряємо ДО збереження: раніше в базу лягав будь-який рядок, і з ним
+  // кабінет потім тихо падав щодня («Telegram: Not Found»), а сам рядок ставав ключем для підпису.
+  if (token && token !== env.telegram.botToken) {
+    if (!/^\d{5,15}:[A-Za-z0-9_-]{30,}$/.test(token))
+      return reply.code(400).send({ error: "Це не схоже на токен бота. Він виглядає так: 123456789:AAH… - скопіюй його з @BotFather цілком." });
+    try { await tg.getMe(token); }
+    catch (e: any) { return reply.code(400).send({ error: "Telegram не прийняв цей токен: " + String(e.message).slice(0, 160) }); }
+  }
   const channel = String(req.body?.channelChatId ?? "").trim() || null;
   const group = String(req.body?.groupChatId ?? "").trim() || null;
   await q(
@@ -2028,6 +2048,8 @@ app.put("/api/integrations/telegram", async (req: any) => {
      values($1, nullif($2,''), $3, $4, now())
      on conflict (workspace_id) do update set
        bot_token = case when $2 <> '' then $2 else telegram_config.bot_token end,
+       -- інший канал - інший @username: закешоване імʼя давало б посилання t.me/<старий канал>/<id>
+       channel_username = case when telegram_config.channel_chat_id is distinct from excluded.channel_chat_id then null else telegram_config.channel_username end,
        channel_chat_id = excluded.channel_chat_id,
        group_chat_id = excluded.group_chat_id,
        updated_at = now()`,
@@ -2629,7 +2651,7 @@ app.get("/api/plan", async (req: any) => {
   const ws = req.user.workspace_id;
   const channel = req.query?.channel ? String(req.query.channel) : null;
   const slots = await q(
-    `select ps.id, ps.slot_date, ps.channel, ps.rubric, ps.theme, ps.hook, ps.status, ps.match_note, ps.post_id, ps.format, s.title as match_title
+    `select ps.id, ps.slot_date, ps.channel, ps.rubric, ps.theme, ps.hook, ps.status, ps.match_note, ps.post_id, ps.format, ps.match_source_id, s.title as match_title
      from plan_slot ps left join source s on s.id = ps.match_source_id
      where ps.workspace_id=$1 ${channel ? "and ps.channel=$2" : ""} order by ps.slot_date`,
     channel ? [ws, channel] : [ws]);
@@ -2799,7 +2821,7 @@ app.post("/api/materials/:id/posts", async (req: any, reply) => {
       const post = await one<{ id: string }>(`select id from post where run_id=$1 and stage='final' order by created_at limit 1`, [run!.id]);
       if (post) {
         await q(`update post set rubric=coalesce($2, rubric), channels=coalesce(channels,'{}'::jsonb) || $3::jsonb where id=$1`,
-          [post.id, slot.rubric, JSON.stringify({ [slot.channel]: { on: true } })]);
+          [post.id, slot.rubric, PLAN_NETS.includes(slot.channel) ? JSON.stringify({ [slot.channel]: { on: true } }) : "{}"]);
         await q(`update plan_slot set status='drafted', post_id=$2 where id=$1`, [slot.id, post.id]);
       }
     }
@@ -3016,7 +3038,7 @@ app.post("/api/schedule", async (req: any, reply) => {
   // якщо у поста ВЖЕ є незапощений слот - переносимо його, а не додаємо другий (інакше подвійна публікація)
   const existing = await one<{ id: string }>(`select id from schedule_slot where post_id=$1 and status='planned' limit 1`, [postId]);
   if (existing) {
-    await q(`update schedule_slot set scheduled_at=$2 where id=$1`, [existing.id, req.body?.scheduledAt ?? null]);
+    await q(`update schedule_slot set scheduled_at=$2, retry_at=null, attempts=0, updated_at=now() where id=$1`, [existing.id, req.body?.scheduledAt ?? null]);
     await q(`update plan_slot set status='scheduled' where post_id=$1 and status in ('drafted','approved')`, [postId]);
     return { ok: true, id: existing.id, moved: true };
   }
@@ -3030,7 +3052,7 @@ app.put("/api/schedule/:id", async (req: any, reply) => {
   if (!(await slotOwned(req.params.id, req.user.workspace_id))) return reply.code(404).send({ error: "слот не знайдено" });
   // переносити можна лише те, що ще не пішло: posted/posting не «воскрешаємо» - це друга публікація
   const r = await one<{ id: string }>(
-    `update schedule_slot set scheduled_at=$2, status='planned' where id=$1 and status in ('planned','failed') returning id`,
+    `update schedule_slot set scheduled_at=$2, status='planned', retry_at=null, attempts=0, updated_at=now() where id=$1 and status in ('planned','failed') returning id`,
     [req.params.id, req.body?.scheduledAt ?? null]);
   if (!r) return reply.code(409).send({ error: "Слот уже опубліковано - перенести не можна. Заплануй пост заново зі Студії." });
   return { ok: true };
@@ -3067,11 +3089,27 @@ app.post("/api/schedule/auto", async (req: any) => {
          join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
        where s.workspace_id=$1)`, [ws]);
   // 2) затверджені фінальні пости, які ще не запощені й не в процесі
-  const units = await q<{ id: string; channels: any; rubric: string | null }>(
+  const approved = await q<{ id: string; channels: any; rubric: string | null }>(
     `select p.id, p.channels, p.rubric from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where s.workspace_id=$1 and p.stage='final' and p.review='approved'
        and not exists(select 1 from schedule_slot ss where ss.post_id=p.id and ss.status in ('posting','posted'))
      order by p.created_at`, [ws]);
+  // ...і ще не опубліковані в УСІ свої мережі. Публікація «зараз» (кабінет, бот, Mini App, Claude)
+  // слота не має, тож фільтр лише за слотами пропускав такі пости: вони займали перші дні розкладу,
+  // а свіжі затверджені їхали в кінець. Частково опублікований пост лишається - автопостер добʼє решту.
+  const sentRows = approved.length ? await q<{ post_id: string; net: string }>(
+    `select post_id, 'telegram' as net from telegram_publish where status='sent' and post_id = any($1)
+     union select post_id, 'threads' from threads_publish where status='sent' and post_id = any($1)
+     union select post_id, channel from meta_publish where status='sent' and post_id = any($1)
+     union select post_id, 'linkedin' from linkedin_publish where status='sent' and post_id = any($1)`, [approved.map((u) => u.id)]) : [];
+  const sentBy = new Map<string, Set<string>>();
+  for (const r of sentRows) { if (!sentBy.has(r.post_id)) sentBy.set(r.post_id, new Set()); sentBy.get(r.post_id)!.add(r.net); }
+  const units = approved.filter((u) => {
+    const sent = sentBy.get(u.id);
+    if (!sent || !sent.size) return true;
+    const nets = enabledNets(u.channels);
+    return nets.length > 0 && nets.some((k) => !sent.has(k));
+  });
   // типово Telegram для постів без обраних мереж (явно - щоб autopost мав куди публікувати, не тихо)
   if (units.length) await q(`update post set channels=$2 where id = any($1) and (channels is null or channels = '{}'::jsonb)`,
     [units.map((u) => u.id), JSON.stringify({ telegram: { on: true } })]);
@@ -3201,15 +3239,17 @@ app.put("/api/integrations/transcription", async (req: any) => {
   if (req.body?.clearSecret === true) { await q(`update transcription_config set webhook_secret=null, updated_at=now() where workspace_id=$1`, [ws]); return { ok: true }; }
   const key = String(req.body?.apiKey ?? "").trim();
   const secret = String(req.body?.webhookSecret ?? "").trim();
-  const autoRun = req.body?.autoRun === true || req.body?.autoRun === "true";
-  const provider = ["fireflies", "grain", "meetgeek"].includes(String(req.body?.provider)) ? String(req.body.provider) : "fireflies";
+  // Поля, яких немає в запиті, лишаються як були: дві форми кабінету шлють різні набори полів, і
+  // раніше збереження однієї скидало провайдера на Fireflies, а другої - вимикало авто-генерацію
+  const autoRun = req.body?.autoRun == null ? null : (req.body.autoRun === true || req.body.autoRun === "true");
+  const provider = ["fireflies", "grain", "meetgeek"].includes(String(req.body?.provider)) ? String(req.body.provider) : null;
   await q(`insert into transcription_config(workspace_id, provider, api_key, webhook_secret, auto_run, webhook_token, updated_at)
-           values($1,$6, nullif($2,''), nullif($3,''), $4, $5, now())
+           values($1, coalesce($6,'fireflies'), nullif($2,''), nullif($3,''), coalesce($4,false), $5, now())
            on conflict (workspace_id) do update set
-             provider = $6,
+             provider = coalesce($6, transcription_config.provider),
              api_key = case when $2 <> '' then $2 else transcription_config.api_key end,
              webhook_secret = case when $3 <> '' then $3 else transcription_config.webhook_secret end,
-             auto_run = $4,
+             auto_run = coalesce($4, transcription_config.auto_run),
              webhook_token = coalesce(transcription_config.webhook_token, $5),
              updated_at=now()`,
     [ws, key, secret, autoRun, auth.newToken(), provider]);
@@ -3237,21 +3277,23 @@ app.post("/api/transcription/import", async (req: any, reply) => {
 
 // вебхук Fireflies: «зустріч готова» -> автоімпорт джерела (+ опційно автопілот).
 // Поза auth: маршрутизація через per-workspace токен у URL, автентичність - HMAC-підпис.
-// вебхук Telegram-ботів (auth-exempt; секрет у шляху + у заголовку).
-// Без ?bot= - спільний бот. З ?bot=<id> - ВЛАСНИЙ бот воркспейсу (токен шукаємо за префіксом id:
-// токени Telegram мають формат "<botId>:<hash>") - усі DM-фічі працюють через нього.
+// вебхуки Telegram-ботів (auth-exempt). Спільний бот: виведений секрет і в шляху, і в заголовку.
+// ВЛАСНИЙ бот: у шляху лише id бота, секрет (свій для кожного бота) - тільки в заголовку, бо адресу
+// вебхука власник бота бачить (getWebhookInfo), а заголовок ні. Раніше всі боти ділили один секрет
+// у шляху, тож власник будь-якого бота міг підробляти апдейти від імені інших людей.
+app.post("/api/webhooks/telegram/bot/:botId", async (req: any, reply) => {
+  const botId = String(req.params.botId || "");
+  if (!/^\d{3,20}$/.test(botId)) return reply.code(404).send({ error: "not found" });
+  if (!sameSecret(req.headers["x-telegram-bot-api-secret-token"], hookSecret(`bot:${botId}`))) return reply.code(403).send({ error: "bad secret" });
+  const token = await ownBotToken(botId);
+  if (!token) return { ok: true, ignored: true }; // бот відвʼязаний - апдейт нікому обробляти
+  handleUpdate(req.body, token).catch(() => {});
+  return { ok: true };
+});
 app.post("/api/webhooks/telegram/:secret", async (req: any, reply) => {
-  if (req.params.secret !== env.telegram.webhookSecret) return reply.code(404).send({ error: "not found" });
-  const hdr = req.headers["x-telegram-bot-api-secret-token"];
-  if (hdr && hdr !== env.telegram.webhookSecret) return reply.code(403).send({ error: "bad secret" });
-  const botId = String(req.query?.bot || "").replace(/\D/g, "");
-  if (botId) {
-    const own = await one<{ bot_token: string }>(
-      `select bot_token from telegram_config where bot_token like $1 limit 1`, [`${botId}:%`]);
-    if (!own) return { ok: true, ignored: true }; // бот відв'язаний - апдейт нікому обробляти
-    handleUpdate(req.body, own.bot_token).catch(() => {});
-    return { ok: true };
-  }
+  const want = hookSecret("shared");
+  if (!sameSecret(req.params.secret, want)) return reply.code(404).send({ error: "not found" });
+  if (!sameSecret(req.headers["x-telegram-bot-api-secret-token"], want)) return reply.code(403).send({ error: "bad secret" });
   handleUpdate(req.body).catch(() => {});
   return { ok: true };
 });
@@ -3621,7 +3663,12 @@ app.post("/mcp/upload/:token", async (req: any, reply) => {
         // відео до 20 МБ проходить і так; більші скрипт шле частинами на /chunk
         const m = await saveMedia(st.ws, { buffer: buf, mime: part.mimetype || "application/octet-stream", name, source: "upload", dedupe: true });
         // той самий файл удруге місця не зʼїдає: у медіатеці нічого не додалось
-        if (m.existed) await refundUploadSlot(token); else await markUploaded(token);
+        if (m.existed) await refundUploadSlot(token);
+        else {
+          await markUploaded(token);
+          // фото одним запитом теж рахується в байтовий бюджет посилання (раніше - лише частини)
+          await q(`update upload_link set bytes_left = greatest(bytes_left - $2, 0) where token=$1`, [token, buf.length]);
+        }
         r.saved.push({ id: "#" + m.id.slice(0, 8), name, dup: !!m.existed });
       } catch (e: any) {
         await refundUploadSlot(token);
@@ -3721,21 +3768,31 @@ app.post("/api/integrations/mcp/revoke", async (req: any) => {
 async function tgUser(req: any): Promise<{ ws: string; tgId: number } | null> {
   const initData = String(req.headers["x-tg-init-data"] || req.body?.initData || "");
   if (!initData) return null;
-  // спільний бот або власний бот воркспейсу: перевіряємо обома токенами, які реально можуть підписати
-  const tokens = [env.telegram.botToken, ...(await q<{ bot_token: string }>(`select distinct bot_token from telegram_config where bot_token is not null`)).map((r) => r.bot_token)];
-  for (const t of tokens) {
-    if (!t) continue;
-    const u = verifyInitData(initData, t);
+  // Спільний бот: підпис зробив сам Telegram (токен знає лише сервіс) - id користувача справжній.
+  if (env.telegram.botToken) {
+    const u = verifyInitData(initData, env.telegram.botToken);
+    if (u) {
+      const own = await one<{ workspace_id: string }>(`select workspace_id from tg_owner where tg_user_id=$1`, [u.id]);
+      return own ? { ws: own.workspace_id, tgId: u.id } : null;
+    }
+  }
+  // Власний бот: його токен знає власник кабінету, тож таким підписом можна «назватись» будь-ким.
+  // Тому підпис власним ботом відкриває ЛИШЕ кабінети, де стоїть саме цей токен (раніше звідси
+  // відкривався кабінет будь-кого, чий Telegram id вписано в підпис).
+  const own = await q<{ bot_token: string }>(`select distinct bot_token from telegram_config where bot_token is not null and bot_token <> $1`, [env.telegram.botToken || ""]);
+  for (const r of own) {
+    const u = verifyInitData(initData, r.bot_token);
     if (!u) continue;
-    const own = await one<{ workspace_id: string }>(`select workspace_id from tg_owner where tg_user_id=$1`, [u.id]);
-    if (own) return { ws: own.workspace_id, tgId: u.id };
-    return null; // підпис валідний, але кабінет не привʼязаний
+    const row = await one<{ workspace_id: string }>(
+      `select o.workspace_id from tg_owner o join telegram_config c on c.workspace_id=o.workspace_id and c.bot_token=$2 where o.tg_user_id=$1`, [u.id, r.bot_token]);
+    return row ? { ws: row.workspace_id, tgId: u.id } : null;
   }
   return null;
 }
 const tgGuard = async (req: any, reply: any) => {
   const u = await tgUser(req);
   if (!u) { reply.code(401).send({ error: "Відкрий застосунок кнопкою в боті (підпис Telegram недійсний або кабінет не підключено)" }); return null; }
+  auth.touchWorkspaceActive(u.ws); // Mini App - теж робота в кабінеті (інакше прибиральник вважав би людину неактивною)
   return u;
 };
 
@@ -4004,12 +4061,15 @@ app.put("/api/tg/post/:postId", async (req: any, reply) => {
 // теж джобою. Клієнт полить `/api/tg/post/:id/publish-job`.
 app.post("/api/tg/post/:postId/publish", async (req: any, reply) => {
   const u = await tgGuard(req, reply); if (!u) return;
+  if (!(await tgOwnPost(u.ws, req.params.postId))) return reply.code(404).send({ error: "пост не знайдено" });
   const job = await startPublishJob(u.ws, req.params.postId, async () => ({ message: await publishNow(u.ws, req.params.postId) }));
   return { started: true, status: job.status };
 });
 
 app.get("/api/tg/post/:postId/publish-job", async (req: any, reply) => {
   const u = await tgGuard(req, reply); if (!u) return;
+  // як і в кабінеті: стан публікації видно лише власнику поста (джоба шукається за id поста без кабінету)
+  if (!(await tgOwnPost(u.ws, req.params.postId))) return reply.code(404).send({ error: "пост не знайдено" });
   return jobView(await getJobByKey("publish", req.params.postId));
 });
 
@@ -4038,11 +4098,32 @@ app.get("/privacy", (_req, reply) => reply.sendFile("privacy.html"));
 app.get("/terms", (_req, reply) => reply.sendFile("terms.html"));
 app.get("/data-deletion", (_req, reply) => reply.sendFile("data-deletion.html"));
 
+// 🛑 SIGTERM (деплой, рестарт): перестаємо брати нові запити й слоти, даємо публікаціям у дорозі
+// дійти до кінця (compose чекає до 60 с - stop_grace_period), потім виходимо.
+let shuttingDown = false;
+async function shutdown(sig: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  beginShutdown();
+  console.log(`[shutdown] ${sig}: чекаю на публікації в дорозі (${publishesInFlight()})`);
+  try { await app.close(); } catch { /* уже закрито */ }
+  const until = Date.now() + 50_000;
+  while (publishesInFlight() > 0 && Date.now() < until) await new Promise((r) => setTimeout(r, 500));
+  if (publishesInFlight() > 0) console.log(`[shutdown] не дочекались ${publishesInFlight()} публікацій - їх перейме наступний процес`);
+  process.exit(0);
+}
+process.on("SIGTERM", () => { void shutdown("SIGTERM"); });
+process.on("SIGINT", () => { void shutdown("SIGINT"); });
+
+await initHookBase(); // секрети вебхуків Telegram - до першого апдейту
+// усе, що «бігло» до рестарту, робота вже не виконує - позначаємо ДО прийому запитів, інакше щойно
+// запущена джоба могла б потрапити під цю позначку
+await markLostJobs().catch(() => {});
 app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
   app.log.info(`socialio на ${addr}`);
   // ключі з адмінки накладаються поверх .env ПЕРШИМ ділом - до того, як воркери підуть у мережу
   refreshSecrets();
-  markLostJobs().catch(() => {});   // усе, що «бігло» до рестарту, робота вже не виконує
+
   startAutopost();
   startRssPoller();
   startGdrivePoller();
@@ -4053,6 +4134,7 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
   startThreadsAuto();
   startMeetingPull();   // погодинна звірка з хмарою власного транскрибатора
   initTelegramBot();
+  refreshOwnBotWebhooks().catch(() => {});
   // одноразово полагодити залишкові iPhone HEIF -> JPEG (у фоні; ідемпотентно)
   convertAllHeif().then((n) => { if (n) app.log.info(`HEIF→JPEG конвертовано: ${n}`); }).catch((e: any) => app.log.error("convertAllHeif: " + e.message));
   // відео: «.quick» → «.mov» і тривалість/розмір кадру для завантажених раніше (у фоні; ідемпотентно)

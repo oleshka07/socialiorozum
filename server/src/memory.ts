@@ -31,6 +31,9 @@ const clean = (v: unknown, max: number) => String(v ?? "").replace(/\s+/g, " ").
 // ---------------------------------------------------------------- дистиляція одного поста
 // Ідемпотентна: пост, опублікований у 4 мережі, дистилюється ОДИН раз (перевірка існування ДО
 // виклику моделі, потім ON CONFLICT DO NOTHING на гонку паралельних публікацій).
+// пост, який не дистилювався (стеля витрат, модель віддала не JSON), бекфіл пробує знову не раніше
+// ніж за добу: інакше такі пости стояли на початку черги щоразу й не пускали решту архіву
+const digestFailedAt = new Map<string, number>();
 export async function ensurePostDigest(workspaceId: string, postId: string): Promise<boolean> {
   const exists = await one<{ post_id: string }>(`select post_id from post_digest where post_id=$1`, [postId]);
   if (exists) return false;
@@ -50,6 +53,7 @@ export async function ensurePostDigest(workspaceId: string, postId: string): Pro
     d = extractJsonObject<any>(raw);
   } catch (e: any) {
     // не критично: памʼять просто не поповнилась цим постом (публікація вже відбулась)
+    digestFailedAt.set(postId, Date.now());
     await logEvent("warn", "post_digest", `не вдалось дистилювати пост: ${e.message}`, { ws: workspaceId, postId });
     return false;
   }
@@ -132,8 +136,10 @@ export async function backfillDigests(limit = 40): Promise<number> {
           left join post_digest d on d.post_id=u.pid
          where d.post_id is null
          order by u.pid, u.at desc
-       ) x order by x.at desc limit $1`, [limit]);
-    for (const r of rows) if (await ensurePostDigest(r.workspace_id, r.post_id)) done++;
+       ) x order by x.at desc limit $1`, [limit * 5]);
+    const now = Date.now();
+    const due = rows.filter((r) => now - (digestFailedAt.get(r.post_id) || 0) > 24 * 3600_000).slice(0, limit);
+    for (const r of due) if (await ensurePostDigest(r.workspace_id, r.post_id)) done++;
   } catch (e: any) {
     await logEvent("warn", "post_digest", `бекфіл не завершився: ${e.message}`);
   }

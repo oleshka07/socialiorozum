@@ -54,6 +54,9 @@ services:
   app:
     build: .
     restart: unless-stopped
+    # деплой шле SIGTERM; публікація, що вже йде, отримує до 60 с дійти до кінця (див. server.ts)
+    stop_grace_period: 60s
+    init: true                  # tini збирає зомбі-процеси ffmpeg/ffprobe і передає сигнали
     env_file: .env
     depends_on:
       db:
