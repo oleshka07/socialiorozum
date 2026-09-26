@@ -772,17 +772,27 @@ app.get("/api/sources/recent", async (req: any) =>
 // ===================== МЕДІА-БІБЛІОТЕКА =====================
 app.post("/api/media", async (req: any, reply) => {
   const saved: any[] = [];
+  const failed: { name: string; error: string }[] = [];
   // ?source=broll - персональна відео-бібліотека для рілсів (вставки з автором у кадрі)
   const source = String(req.query?.source || "") === "broll" ? "broll" : "upload";
+  // Кожен файл - окремо: раніше перший битий файл у пачці обривав весь запит, і хороші файли після
+  // нього губились, а про вже збережені людина дізнавалась лише з помилки.
   try {
     for await (const part of req.files()) {
-      const buf = await part.toBuffer();
-      const m = await saveMedia(req.user.workspace_id, { buffer: buf, mime: part.mimetype || "application/octet-stream", name: part.filename, source });
-      if (source === "broll" && m.kind !== "video") { await q(`delete from media_asset where id=$1`, [m.id]); await deleteMediaFile(m.filename); throw new Error("для b-roll потрібне відео (mp4/mov)"); }
-      saved.push({ id: m.id, kind: m.kind, url: `/media/${m.filename}` });
+      try {
+        const buf = await part.toBuffer();
+        const m = await saveMedia(req.user.workspace_id, { buffer: buf, mime: part.mimetype || "application/octet-stream", name: part.filename, source });
+        if (source === "broll" && m.kind !== "video") { await q(`delete from media_asset where id=$1`, [m.id]); await deleteMediaFile(m.filename); throw new Error("для b-roll потрібне відео (mp4/mov)"); }
+        saved.push({ id: m.id, kind: m.kind, url: `/media/${m.filename}` });
+      } catch (e: any) { failed.push({ name: String(part.filename || ""), error: e.message }); }
     }
-  } catch (e: any) { return reply.code(400).send({ error: e.message }); }
-  return { ok: true, saved };
+  } catch (e: any) {
+    // ліміт файлів на запит (кабінет шле порціями по 10, тож це лише для сторонніх клієнтів) чи обірване
+    // завантаження: те, що встигло, уже збережене
+    failed.push({ name: "", error: /files limit/i.test(String(e.message)) ? "за один раз - до 10 файлів, решту надішли наступною порцією" : e.message });
+  }
+  if (!saved.length && failed.length) return reply.code(400).send({ error: failed.map((f) => (f.name ? `${f.name}: ` : "") + f.error).join("; "), failed });
+  return { ok: true, saved, failed };
 });
 
 // технічні копії (ig-safe: JPEG-версія для Instagram API) в бібліотеці не показуємо -

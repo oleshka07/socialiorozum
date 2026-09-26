@@ -254,3 +254,27 @@ test("publishPlanLine: попереджає, коли дослівний тек�
   assert.doesNotMatch(publishPlanLine(publishPlan({ facebook: { on: true }, manual_adapt: true, native: "facebook" }, "x".repeat(2500))), /⚠️/);
   assert.match(publishPlanLine(publishPlan({ facebook: { on: true } }, "abc")), /спакується моделлю кабінету/);
 });
+
+// ---- медіатека в конекторі: власні фото автора, безкоштовно, з позначкою «вже в пості» ----
+import { usedList, OWN_MEDIA, GEN_MEDIA } from "../dist/mcp.js";
+
+test("медіатека: інструменти безкоштовні, список лише читає, прикріплення вимагає пост і фото", () => {
+  const byName = Object.fromEntries(TOOLS.map((t) => [t.name, t]));
+  assert.ok(byName.list_media && byName.attach_media);
+  assert.equal(byName.list_media.readOnly, true);
+  assert.match(byName.list_media.description, /БЕЗКОШТОВНО/);
+  assert.match(byName.attach_media.description, /БЕЗКОШТОВНО/);
+  assert.deepEqual(byName.attach_media.required, ["id", "media"]);
+  // медіатека стоїть у списку ПЕРЕД стоком - модель читає інструменти згори
+  const names = TOOLS.map((t) => t.name);
+  assert.ok(names.indexOf("list_media") < names.indexOf("find_stock_photos"));
+});
+
+test("медіатека: власні фото окремо від згенерованого, кроп-копії не показуються ніде", () => {
+  assert.ok(OWN_MEDIA.includes("upload") && OWN_MEDIA.includes("gdrive"));
+  for (const hidden of ["crop", "ai-base", "ig-safe"]) {
+    assert.ok(!OWN_MEDIA.includes(hidden) && !GEN_MEDIA.includes(hidden), `${hidden} у медіатеці конектора - це копія, а не фото`);
+  }
+  assert.equal(usedList("ab12cd34,ef56ab78"), "#ab12cd34, #ef56ab78");
+  assert.equal(usedList(null), "");
+});

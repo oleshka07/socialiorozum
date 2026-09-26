@@ -492,7 +492,9 @@ export async function attachCroppedImage(ws: string, postId: string, mediaId: st
     }
   }
   const out = await img.resize(w, h, crop ? { fit: "fill" } : { fit: "cover", position: "attention" }).jpeg({ quality: 90 }).toBuffer();
-  const saved = await saveMedia(ws, { buffer: out, mime: "image/jpeg", name: "crop.jpg", source: "crop" });
+  // кроп-копія памʼятає свій оригінал (external_id): з цього медіатека конектора знає, в яких
+  // постах фото вже стоїть, і не підсуне те саме фото вдруге
+  const saved = await saveMedia(ws, { buffer: out, mime: "image/jpeg", name: "crop.jpg", source: "crop", externalId: mediaId });
   const prevC = await prevMedia(postId);
   await q(`update post set media_id=$2, image_base=$3, headline=null where id=$1`, [postId, saved.id, saved.filename]);
   cleanupDerivedMedia(ws, postId, prevC).catch(() => { /* зачистка не критична */ });

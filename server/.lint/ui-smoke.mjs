@@ -279,6 +279,7 @@ let tgJob = null, tgPubPolls = 0;
 // приймач зустрічей: адреса СТАНОВА, бо перевіряється саме перевипуск (стара адреса вмирає)
 let mtToken = "tok-aaaa1111", mtPull = false, sttProv = "auto";
 const brandDeleted = [];
+const mediaPosts = [];   // скільки файлів прийшло в КОЖНОМУ запиті завантаження в медіатеку
 
 function handleApi(method, path, body) {
   if (path.startsWith("/tg/")) return handleTg(method, path.slice(3), body);
@@ -390,6 +391,14 @@ const server = createServer((req, res) => {
     let raw = "";
     req.on("data", (c) => { raw += c; });
     req.on("end", () => {
+      // завантаження в медіатеку: рахуємо файли в запиті - так перевірка бачить, чи кабінет ділить пачку
+      if (req.method === "POST" && url.startsWith("/api/media")) {
+        const n = (raw.match(/filename="/g) || []).length;
+        mediaPosts.push(n);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, saved: Array.from({ length: n }, (_, i) => ({ id: "up" + i, kind: "image", url: "/media/x.png" })), failed: [] }));
+        return;
+      }
       let parsed = null;
       try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
       const body = handleApi(req.method, url.slice(4), parsed);
@@ -1088,6 +1097,24 @@ const run = async () => {
     // безкоштовний провайдер - словом «безкоштовно», а не «$0.000», який читається як помилка прайсу
     return t.includes("$0.003") && t.includes("$0.011") && t.includes("$0.020") && t.includes("kie.ai")
       && t.includes("безкоштовно") && !t.includes("$0.000");
+  });
+
+  await check("mediaBatch", async () => {
+    // пачка фото в медіатеку йде ПОРЦІЯМИ по 10: одним запитом сервер зберіг би 10, а решта впала б
+    // з «reach files limit» - і людина не дізналась би навіть про збережені
+    mediaPosts.length = 0;
+    const msg = await page.evaluate(async () => {
+      selectView("settings"); setSTab("sources");
+      const dt = new DataTransfer();
+      for (let i = 0; i < 23; i++) dt.items.add(new File([new Uint8Array(64)], "p" + i + ".jpg", { type: "image/jpeg" }));
+      document.getElementById("mediaFile").files = dt.files;
+      document.getElementById("mediaUpload").click();
+      const el = document.getElementById("mediaMsg");
+      for (let i = 0; i < 80 && !/завантажено/.test(el.textContent); i++) await new Promise((r) => setTimeout(r, 100));
+      return el.textContent;
+    });
+    if (mediaPosts.join(",") !== "10,10,3" || msg !== "завантажено: 23") console.log("   ↳ mediaBatch:", JSON.stringify({ mediaPosts, msg }));
+    return mediaPosts.join(",") === "10,10,3" && msg === "завантажено: 23";
   });
 
   await check("cfProvider", async () => {

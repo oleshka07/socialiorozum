@@ -2678,10 +2678,8 @@ async function loadBroll(){
 }
 if($('brollUpload')) $('brollUpload').onclick=async()=>{ const inp=$('brollFile'), msg=$('brollMsg'); const files=inp&&inp.files; if(!files||!files.length){ msg.textContent='обери відео-файли'; return; }
   msg.textContent='завантаження…';
-  try{ const fd=new FormData(); for(const f of files) fd.append('file',f);
-    const r=await fetch('/api/media?source=broll',{method:'POST',body:fd,credentials:'same-origin'}); const j=await r.json(); if(!r.ok||j.error) throw new Error(j.error||('HTTP '+r.status));
-    msg.textContent='✓ додано '+(j.saved||[]).length; inp.value=''; loadBroll();
-  }catch(e){ msg.textContent='⚠ '+e.message; } };
+  const r=await uploadInBatches(files,'/api/media?source=broll',(done,total)=>{ msg.textContent='завантаження… '+done+' з '+total; });
+  msg.textContent=r.failed.length?uploadReport(r):'✓ додано '+r.saved.length; inp.value=''; loadBroll(); };
 async function loadMeta(){
   try{ const c=await api('/integrations/meta'); const st=$('mtStatus'), conn=$('mtConnect'), dis=$('mtDisconnect'), stats=$('mtStats'); if(!st) return;
     if(!c.configured){ st.textContent='🕓 Підключення Facebook/Instagram тимчасово недоступне.'; [conn,dis,stats].forEach(b=>b&&(b.style.display='none')); return; }
@@ -2923,10 +2921,33 @@ async function loadMedia(){
     }
   }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }
+// Завантаження пачкою: сервер приймає до 10 файлів за запит, а nginx - обмежений обсяг тіла, тож
+// ділимо на порції (до 10 файлів і до 40 МБ). Раніше 30 фото йшли одним запитом: зберігались перші
+// 10, решта падала з «reach files limit», і про вже збережені людина навіть не дізнавалась.
+async function uploadInBatches(files, url, onProgress){
+  const list=[...files], batches=[]; let cur=[], bytes=0;
+  for(const f of list){ if(cur.length&&(cur.length>=10||bytes+f.size>40*1024*1024)){ batches.push(cur); cur=[]; bytes=0; } cur.push(f); bytes+=f.size; }
+  if(cur.length) batches.push(cur);
+  const saved=[], failed=[];
+  for(const b of batches){
+    if(onProgress) onProgress(saved.length+failed.length, list.length);
+    const fd=new FormData(); b.forEach(f=>fd.append('file',f));
+    try{ const r=await fetch(url,{method:'POST',body:fd,credentials:'same-origin'}); const j=await r.json().catch(()=>({}));
+      if(!r.ok) throw new Error(j.error||('HTTP '+r.status));
+      saved.push(...(j.saved||[])); failed.push(...(j.failed||[]));
+    }catch(e){ b.forEach(f=>failed.push({name:f.name,error:e.message})); }   // порція впала цілком - позначаємо кожен її файл
+  }
+  return {saved, failed, total:list.length};
+}
+function uploadReport(r){ return r.failed.length
+  ? '⚠ завантажено '+r.saved.length+' з '+r.total+'. Не вдалось: '+r.failed.slice(0,3).map(x=>(x.name?x.name+' - ':'')+x.error).join('; ')+(r.failed.length>3?' …':'')
+  : 'завантажено: '+r.saved.length; }
 $('mediaUpload').onclick=async()=>{
   const f=$('mediaFile').files; const m=$('mediaMsg'); if(!f||!f.length){ m.style.color='var(--danger)'; m.textContent='Обери файл(и)'; return; }
-  const fd=new FormData(); for(const file of f) fd.append('file',file); m.style.color='var(--muted)'; m.textContent='завантаження…';
-  try{ const r=await fetch('/api/media',{method:'POST',body:fd,credentials:'same-origin'}); const j=await r.json(); if(!r.ok||j.error) throw new Error(j.error||('HTTP '+r.status)); $('mediaFile').value=''; m.style.color='var(--brand)'; m.textContent='завантажено: '+((j.saved||[]).length); await loadMedia(); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; }
+  m.style.color='var(--muted)'; m.textContent='завантаження…';
+  const r=await uploadInBatches(f,'/api/media',(done,total)=>{ m.textContent='завантаження… '+done+' з '+total; });
+  $('mediaFile').value=''; m.style.color=r.failed.length?'var(--danger)':'var(--brand)'; m.textContent=uploadReport(r);
+  await loadMedia();
 };
 
 // ---------- Google Drive ----------

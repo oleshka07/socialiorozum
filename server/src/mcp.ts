@@ -28,7 +28,7 @@ import { connectedNets, parseWhen, zonedToUtc } from "./tgcompose.js";
 import { publishPostToChannels, alreadySentNetworks } from "./publisher.js";
 import { generatePostsOnePass, normFormat, GOAL_LABELS, CHANNEL_LIMITS } from "./pipeline.js";
 import { logEvent } from "./log.js";
-import { generateImageForPost, imageProviders, stockPhotoOptions, attachStockPhoto } from "./images.js";
+import { generateImageForPost, imageProviders, stockPhotoOptions, attachStockPhoto, attachCroppedImage } from "./images.js";
 import { getThumb } from "./media.js";
 import sharp from "sharp";
 
@@ -344,6 +344,34 @@ async function fileThumb(filename: string): Promise<ToolImage | null> {
   const buf = await getThumb(filename);
   return buf ? { data: buf.toString("base64"), mimeType: "image/jpeg" } : null;
 }
+
+// Мініатюри для СПИСКУ дрібніші за звичайні: 12 штук у одній відповіді мають лишатись легкими,
+// а щоб обрати фото під пост, 256 пікселів вистачає
+async function smallThumb(filename: string): Promise<ToolImage | null> {
+  const buf = await getThumb(filename);
+  if (!buf) return null;
+  try {
+    const small = await sharp(buf).resize(256, 256, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 65 }).toBuffer();
+    return { data: small.toString("base64"), mimeType: "image/jpeg" };
+  } catch { return null; }
+}
+
+// ---- медіатека кабінету ----
+// Власні фото автора: завантажені в кабінет, із Google Drive, надіслані боту чи в щоденник.
+// Похідне (кропи під пости, AI, сток, технічні копії) за замовчуванням не показуємо: це копії
+// того, що вже стоїть у постах, і вони лише розмивали б вибір.
+export const OWN_MEDIA = ["upload", "gdrive", "diary", "bot"];
+export const GEN_MEDIA = ["ai", "pexels"];
+const MEDIA_PAGE = 12;
+const MEDIA_SRC: Record<string, string> = { upload: "завантажено", gdrive: "Google Drive", diary: "щоденник", bot: "з бота", ai: "AI", pexels: "сток" };
+// Де фото вже стоїть: напряму (post.media_id) або через кроп-копію під формат поста, яку
+// attachCroppedImage позначає external_id = id оригіналу. Кропи, зроблені до цієї позначки,
+// відстежити нема як - такі фото просто виглядають вільними.
+const USED_IN = `(select string_agg(left(p.id::text, 8), ',' order by p.created_at desc)
+                    from post p left join media_asset c on c.id = p.media_id
+                   where p.media_id = a.id or (c.source = 'crop' and c.external_id = a.id::text))`;
+export const usedList = (usedIn: string | null | undefined): string =>
+  String(usedIn || "").split(",").filter(Boolean).map((x) => "#" + x).join(", ");
 
 const ASPECTS = ["4:5", "1:1", "16:9"];
 const aspectArg = (v: unknown): string => (ASPECTS.includes(String(v)) ? String(v) : "4:5");
@@ -685,6 +713,85 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "list_media",
+    title: "Медіатека кабінету",
+    description: "БЕЗКОШТОВНО: власні фото автора з медіатеки кабінету (завантажені в кабінет, із Google Drive, надіслані боту) - з мініатюрами, щоб ти обирав очима. Позначено, в яких постах фото вже стоїть. Обране прикріпи через attach_media. Власне фото автора майже завжди краще за сток і генерацію - дивись сюди першим. По 12 на сторінку, новіші перші.",
+    properties: {
+      unused_only: { type: "boolean", description: "true - лише фото, яких ще немає в жодному пості (щоб не повторюватись)." },
+      include_generated: { type: "boolean", description: "true - показати й згенеровані AI та стокові зображення, не лише власні фото автора." },
+      page: N("Сторінка (типово 1).", { minimum: 1 }),
+    },
+    readOnly: true,
+    run: async (ws, a) => {
+      const sources = a.include_generated === true ? [...OWN_MEDIA, ...GEN_MEDIA] : OWN_MEDIA;
+      const unused = a.unused_only === true;
+      const where = `a.workspace_id=$1 and a.kind='image' and a.source = any($2::text[])${unused ? ` and ${USED_IN} is null` : ""}`;
+      const total = (await one<{ n: number }>(`select count(*)::int as n from media_asset a where ${where}`, [ws, sources]))?.n || 0;
+      if (!total) {
+        return unused
+          ? "Вільних фото в медіатеці немає: усі вже стоять у постах. Можна повторити фото (без unused_only), взяти сток (find_stock_photos) або попросити автора завантажити нові: Налаштування → Джерела → Медіа-бібліотека."
+          : "Медіатека порожня. Автор може завантажити фото в кабінеті (Налаштування → Джерела → Медіа-бібліотека, можна одразу пачкою) або підключити там же папку Google Drive. Поки що - сток (find_stock_photos).";
+      }
+      const pages = Math.ceil(total / MEDIA_PAGE);
+      const page = Math.min(int(a.page, 1, 1, 100000), pages);
+      const rows = await q<{ id: string; original_name: string | null; filename: string; source: string; created_at: string; used_in: string | null }>(
+        `select a.id, a.original_name, a.filename, a.source, a.created_at, ${USED_IN} as used_in
+           from media_asset a where ${where} order by a.created_at desc limit ${MEDIA_PAGE} offset $3`,
+        [ws, sources, (page - 1) * MEDIA_PAGE]);
+      const tz = await wsTz(ws);
+      const thumbs = await Promise.all(rows.map((r) => smallThumb(r.filename)));
+      // номер у тексті мусить збігатися з порядком мініатюр - тож фото без мініатюри (файл не
+      // читається) нумеруємо окремо, а не «пропускаємо», інакше модель прикріпила б не те фото
+      const shown = rows.map((r, i) => ({ r, t: thumbs[i] })).filter((x) => x.t);
+      const broken = rows.filter((_, i) => !thumbs[i]);
+      const line = (r: typeof rows[number], n: number) =>
+        `${n}. ${short(r.id)} · ${fmtWhen(r.created_at, tz)} · ${MEDIA_SRC[r.source] || r.source}` +
+        (r.original_name ? ` · ${oneLine(r.original_name, 40)}` : "") +
+        (r.used_in ? ` · ✓ уже в пості ${usedList(r.used_in)}` : "");
+      return {
+        text: [
+          `Медіатека: ${total} фото${unused ? " без поста" : ""} · сторінка ${page} з ${pages}.`,
+          ...shown.map((x, i) => line(x.r, i + 1)),
+          broken.length ? `Без мініатюри (файл не читається): ${broken.map((r) => short(r.id)).join(", ")}.` : "",
+          shown.length ? `Мініатюри нижче, по черзі: ${shown.map((_, i) => i + 1).join(", ")}.` : "",
+          page < pages ? `Далі - page: ${page + 1}.` : "",
+          "Обране прикріпи через attach_media (id поста + id фото).",
+        ].filter(Boolean).join("\n"),
+        images: shown.map((x) => x.t as ToolImage),
+      };
+    },
+  },
+  {
+    name: "attach_media",
+    title: "Прикріпити фото з медіатеки",
+    description: "БЕЗКОШТОВНО: прикріпити до поста фото з медіатеки кабінету (id з list_media). Фото обрізається під формат (типово 4:5), тримаючи в кадрі головне, і стає зображенням поста в усіх мережах; оригінал у медіатеці лишається. У відповіді - мініатюра того, що вийшло.",
+    properties: {
+      id: S("Id поста."),
+      media: S("Id фото з list_media (короткий #a1b2c3d4 або повний)."),
+      aspect: ASPECT_ARG,
+    },
+    required: ["id", "media"],
+    run: async (ws, a) => {
+      const p = await findPost(ws, a.id);
+      const pat = idPattern(a.media);
+      if (!pat) throw new ToolError("Вкажи id фото з list_media (#a1b2c3d4).");
+      const rows = await q<{ id: string; kind: string; used_in: string | null }>(
+        `select a.id, a.kind, ${USED_IN} as used_in from media_asset a where a.workspace_id=$1 and a.id::text like $2 limit 2`, [ws, pat + "%"]);
+      if (!rows.length) throw new ToolError(`Фото ${short(pat)} у медіатеці цього кабінету немає. Візьми id зі списку list_media.`);
+      if (rows.length > 1) throw new ToolError(`На «${pat}» починається кілька фото - дай довший id.`);
+      if (rows[0].kind !== "image") throw new ToolError("Це відео, а не фото - до поста тут прикріплюються лише зображення.");
+      const others = usedList(rows[0].used_in).split(", ").filter((x) => x && x !== short(p.id));
+      const aspect = aspectArg(a.aspect);
+      const r = await attachCroppedImage(ws, p.id, rows[0].id, aspect);
+      const thumb = await fileThumb(r.filename);
+      return {
+        text: `${short(p.id)}: фото ${short(rows[0].id)} з медіатеки прикріплено (${aspect}).` +
+          (others.length ? ` Це ж фото вже стоїть у ${others.join(", ")} - якщо повтор небажаний, обери інше (list_media з unused_only).` : ""),
+        images: thumb ? [thumb] : [],
+      };
+    },
+  },
+  {
     name: "find_stock_photos",
     title: "Підібрати фото зі стоку",
     description: "БЕЗКОШТОВНО: 3 стокові фото (Pexels) під пост, із мініатюрами - щоб ти бачив, що обираєш. Передай query: 2-4 англійські слова про конкретну сцену чи обʼєкти (не абстракції на кшталт success). З query підбір нічого не коштує; без нього запит складе модель кабінету. Обране фото прикріпи через attach_stock_photo.",
@@ -961,7 +1068,7 @@ export const SERVER_INSTRUCTIONS = [
   "Робочий порядок: 1) brand_voice - прочитай голос бренду; 2) напиши текст САМ у цьому голосі;",
   "3) create_draft - збережи; 4) publish_post або schedule_post. Так генерація нічого не коштує власнику.",
   "generate_posts викликай лише коли тебе прямо просять «згенеруй силами socialio» - він витрачає AI-кредити кабінету.",
-  "Зображення: спершу find_stock_photos з конкретним англійським query і attach_stock_photo - це безкоштовно; generate_image платний (крім provider cloudflare - безкоштовний денний ліміт ~100 зображень, якщо його підключено), бери його, коли сток не підходить або коли людина просить саме генерацію.",
+  "Зображення: спершу медіатека кабінету (list_media → attach_media) - власні фото автора, вони найкращі й безкоштовні; далі сток - find_stock_photos з конкретним англійським query і attach_stock_photo, теж безкоштовно; generate_image платний (крім provider cloudflare - безкоштовний денний ліміт ~100 зображень, якщо його підключено), бери його, коли ні медіатека, ні сток не підходять або коли людина просить саме генерацію.",
   "Якщо кабінетів кілька (list_workspaces), спершу переконайся, що активний саме той бренд: перемкни switch_workspace або передай workspace у виклику. Кожна відповідь називає кабінет у першому рядку - звіряйся з ним перед публікацією.",
   "Факти не вигадуй: бери їх з list_materials / get_material або питай автора.",
   "Перед публікацією показуй текст людині - опублікований пост відкликати не можна.",
