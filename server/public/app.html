@@ -489,6 +489,18 @@
   .pv-more{color:var(--faint);cursor:pointer;font-weight:600}
   .pv-more:hover{text-decoration:underline}
   .pv-note{font-size:10.5px;color:var(--faint);padding:0 13px 9px}
+  /* 💬 перший коментар у прев'ю: так, як його побачать під постом */
+  .pv-fc{display:flex;gap:8px;align-items:flex-start;padding:8px 13px 6px;border-top:1px solid var(--line)}
+  .pv-fc .phone-av{width:22px;height:22px;font-size:10px}
+  .pv-fc-t{font-size:12px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;min-width:0}
+  .pv-fc-t b{font-size:11.5px}
+  .pv-fc-off{font-size:11px;color:var(--faint);padding:7px 13px;border-top:1px solid var(--line)}
+  .pv-fc-act{display:flex;gap:10px;flex-wrap:wrap;padding:0 13px 9px;font-size:11px}
+  .pv-fc-act a{color:var(--brand);text-decoration:none;cursor:pointer;border-bottom:1px dashed var(--brand)}
+  .fcchip{font-size:11.5px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--ink2);background:var(--surface)}
+  .fcchip.off{color:var(--faint);text-decoration:line-through}
+  .fcchip.ok{color:var(--brand);border-color:var(--brand)}
+  .fcchip.bad{color:var(--danger);border-color:var(--danger)}
   /* 🖼 карусель: смужка кадрів у композері */
   .slides-strip{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start}
   .slide-th{position:relative;width:78px}
@@ -1176,6 +1188,7 @@
             <div class="btnrow"><span id="mtStatus" style="font-size:13px;color:var(--muted)">…</span></div>
             <div class="btnrow" id="mtPageRow" style="display:none"><label style="font-size:12px;color:var(--muted)">Акаунт:</label><select id="mtPage" style="width:auto;min-width:200px;font-size:12px;padding:6px 8px"></select></div>
             <div class="btnrow"><a id="mtConnect" class="btn primary" href="/api/integrations/meta/connect" onclick="return connectPopup('/api/integrations/meta/connect')" style="display:none">🔗 Підключити</a><button class="ghost" id="mtStats" style="display:none">📊 Статистика</button><button class="ghost" id="mtVoice" style="display:none">✨ Голос з Instagram</button><button class="ghost" id="mtDisconnect" style="display:none">Відключити</button></div>
+            <div id="mtExtras" style="display:none;margin-top:8px"></div>
             <div id="mtStatsOut" class="out"></div>
           </div>
         </div>

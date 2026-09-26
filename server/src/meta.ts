@@ -74,6 +74,32 @@ export async function getPages(userToken: string): Promise<FbPage[]> {
   return j.data || [];
 }
 
+// Дозволи, які людина реально надала застосунку (а не ті, що ми просили): після кожного підключення.
+export async function grantedPermissions(userToken: string): Promise<string[]> {
+  const j = await fbFetch<{ data: { permission: string; status: string }[] }>(`${GRAPH}/me/permissions?access_token=${encodeURIComponent(userToken)}`);
+  return (j.data || []).filter((p) => p.status === "granted").map((p) => p.permission);
+}
+
+// 💬 Коментар під ВЛАСНИМ щойно опублікованим обʼєктом: пост чи відео Сторінки (токен Сторінки,
+// дозвіл pages_manage_engagement) або медіа Instagram (той самий токен, instagram_manage_comments).
+// Одразу після публікації мережа інколи ще «не бачить» обʼєкт - тоді кілька секунд чекаємо й повторюємо.
+export async function commentOn(objectId: string, token: string, message: string): Promise<{ id: string }> {
+  const body = new URLSearchParams({ message, access_token: token });
+  let last: any = null;
+  for (let att = 0; att < 3; att++) {
+    try {
+      return await fbFetch<{ id: string }>(`${GRAPH}/${objectId}/comments`, {
+        method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body,
+      });
+    } catch (e: any) {
+      last = e;
+      if (!/not available|does not exist|try again|temporar/i.test(String(e.message))) throw e;
+      await new Promise((r) => setTimeout(r, 3000 * (att + 1)));
+    }
+  }
+  throw last || new Error("Meta не прийняла коментар");
+}
+
 // публікація тексту у FB-Сторінку
 export async function publishToPage(pageId: string, pageToken: string, message: string) {
   const body = new URLSearchParams({ message, access_token: pageToken });

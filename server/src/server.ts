@@ -49,6 +49,7 @@ import { scheduleConflicts, describeConflicts } from "./schedule.js";
 import { briefMismatch, brandTextOf } from "./textkind.js";
 import { startDiary } from "./diary.js";
 import { startThreadsAuto } from "./threads-auto.js";
+import { startComments, commentStates, queueMissingComments, processDue as processDueComments } from "./comments.js";
 import { getSettingText } from "./settings.js";
 import { runAbTest, modelCatalog, abSpend } from "./abtest.js";
 import { contextReview, contextIssueCount, suggestFieldFix } from "./context-check.js";
@@ -929,7 +930,7 @@ app.get("/api/channels/status", async (req: any) => {
 
 // повний стан поста для композера (текст, канали, фото)
 app.get("/api/posts/:postId/full", async (req: any, reply) => {
-  const p = await one(`select p.id, p.content, p.review, p.channels, p.headline, p.rubric, p.intent, p.format, p.image_prompt, p.slides_text, (p.image_base is not null) as has_base, ma.filename as media_filename
+  const p = await one(`select p.id, p.content, p.review, p.channels, p.headline, p.rubric, p.intent, p.format, p.image_prompt, p.slides_text, p.first_comment, (p.image_base is not null) as has_base, ma.filename as media_filename
      from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      left join media_asset ma on ma.id=p.media_id
      where p.id=$1 and s.workspace_id=$2`, [req.params.postId, req.user.workspace_id]);
@@ -1137,7 +1138,18 @@ app.get("/api/posts/:postId/publish-state", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
   const sent = await alreadySentNetworks(req.params.postId);
-  return { sent, links: await postPermalinks(ws, req.params.postId) };
+  return { sent, links: await postPermalinks(ws, req.params.postId), comments: await commentStates(req.params.postId) };
+});
+
+// 💬 «Надіслати коментар»: для мереж, куди пост уже вийшов, а першого коментаря ще нема (дописали
+// після публікації, не було дозволу, збій). Ставимо в чергу й одразу надсилаємо у фоні - клієнт
+// бачить результат через /publish-state (там comments), як і після публікації.
+app.post("/api/posts/:postId/first-comment/send", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  const r = await queueMissingComments(ws, req.params.postId);
+  if (r.queued.length) void processDueComments(req.params.postId).catch(() => { /* стан видно в publish-state */ });
+  return { ok: true, ...r };
 });
 
 // 🧵 Тейки для Threads: N коротких чернеток з Банку ідей/щоденника (кнопка в Студії;
@@ -2357,10 +2369,18 @@ app.get("/api/posts/:postId/threads-insights", async (req: any, reply) => {
 // ===================== META (Facebook + Instagram) =====================
 const META_REDIRECT = `${env.appBaseUrl}/api/integrations/meta/callback`;
 const META_SCOPES = ["public_profile", "pages_show_list", "pages_read_engagement", "pages_manage_posts", "instagram_basic", "instagram_content_publish", "instagram_manage_insights"];
+// Розширені дозволи - ОКРЕМИМ запитом на вимогу, а не в базовому підключенні: дозвіл, якого нема в
+// налаштуваннях застосунку Meta (Use cases), валить весь діалог «Invalid Scopes» для розробників. Так
+// базове підключення лишається робочим за будь-якого стану застосунку, а людина просить коментарі чи
+// статистику Facebook, коли вони їй справді потрібні.
+const META_EXTRA: Record<string, string[]> = {
+  comments: ["instagram_manage_comments", "pages_manage_engagement"],   // 💬 перший коментар
+  insights: ["read_insights"],                                          // 📈 перегляди постів Facebook
+};
 
 async function metaCfg(ws: string) {
-  return one<{ page_id: string | null; page_name: string | null; page_token: string | null; ig_user_id: string | null; ig_username: string | null; token_expires_at: string | null }>(
-    `select page_id, page_name, page_token, ig_user_id, ig_username, token_expires_at from meta_config where workspace_id=$1`, [ws]);
+  return one<{ page_id: string | null; page_name: string | null; page_token: string | null; ig_user_id: string | null; ig_username: string | null; token_expires_at: string | null; granted: string | null }>(
+    `select page_id, page_name, page_token, ig_user_id, ig_username, token_expires_at, granted from meta_config where workspace_id=$1`, [ws]);
 }
 
 app.get("/api/integrations/meta", async (req: any) => {
@@ -2371,6 +2391,10 @@ app.get("/api/integrations/meta", async (req: any) => {
     pageName: c?.page_name ?? "",
     igUsername: c?.ig_username ?? "",
     expiresAt: c?.token_expires_at ?? null,
+    // надані розширені дозволи: true/false, null - невідомо (підключено до того, як ми це памʼятали)
+    extras: Object.fromEntries(Object.entries(META_EXTRA).map(([k, perms]) =>
+      [k, c?.granted == null ? null : perms.every((p) => c.granted!.split(",").includes(p))])),
+    granted: c?.granted == null ? null : c.granted.split(",").filter(Boolean),
   };
 });
 
@@ -2378,8 +2402,11 @@ app.get("/api/integrations/meta/connect", async (req: any, reply) => {
   if (!env.meta.appId) return reply.code(400).send({ error: "META_APP_ID не заданий на сервері" });
   const state = auth.newToken();
   reply.setCookie("meta_state", state, stateCookie);
-  await logEvent("info", "meta", `connect redirect_uri=${META_REDIRECT}`, { scopes: META_SCOPES }, req.user.id);
-  return reply.redirect(meta.authUrl(env.meta.appId, META_REDIRECT, state, META_SCOPES));
+  // ?add=comments|insights (через кому) - попросити ще й розширені дозволи; невідоме відкидаємо
+  const add = String(req.query?.add ?? "").split(",").filter((k) => META_EXTRA[k]);
+  const scopes = [...new Set([...META_SCOPES, ...add.flatMap((k) => META_EXTRA[k])])];
+  await logEvent("info", "meta", `connect redirect_uri=${META_REDIRECT}${add.length ? ` +${add.join(",")}` : ""}`, { scopes }, req.user.id);
+  return reply.redirect(meta.authUrl(env.meta.appId, META_REDIRECT, state, scopes));
 });
 
 app.get("/api/integrations/meta/callback", async (req: any, reply) => {
@@ -2394,16 +2421,27 @@ app.get("/api/integrations/meta/callback", async (req: any, reply) => {
     const long = await meta.exchangeLongLived(env.meta.appId, env.meta.appSecret, short.access_token);
     const pages = await meta.getPages(long.access_token);
     if (!pages.length) return reply.redirect("/app?meta=nopage");
-    const page = pages.find((p) => p.instagram_business_account?.id) || pages[0]; // надаємо перевагу сторінці з IG
+    // повторне підключення (зокрема по розширені дозволи) лишає ту сторінку, яку людина обрала раніше;
+    // інакше - сторінку з Instagram. Раніше щоразу бралась перша з IG, і вибір зі списку губився.
+    const prev = await one<{ page_id: string | null }>(`select page_id from meta_config where workspace_id=$1`, [req.user.workspace_id]);
+    const page = (prev?.page_id && pages.find((p) => p.id === prev.page_id)) || pages.find((p) => p.instagram_business_account?.id) || pages[0];
     const exp = long.expires_in ? new Date(Date.now() + long.expires_in * 1000).toISOString() : null;
-    await q(`insert into meta_config(workspace_id, user_token, page_id, page_name, page_token, ig_user_id, ig_username, token_expires_at, updated_at)
-             values($1,$2,$3,$4,$5,$6,$7,$8,now())
+    // які дозволи людина реально дала (могла зняти галочки) - щоб не смикати мережу даремно і казати правду
+    const granted = await meta.grantedPermissions(long.access_token).then((g) => g.join(",")).catch(() => null);
+    await q(`insert into meta_config(workspace_id, user_token, page_id, page_name, page_token, ig_user_id, ig_username, token_expires_at, granted, updated_at)
+             values($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
              on conflict (workspace_id) do update set user_token=excluded.user_token, page_id=excluded.page_id, page_name=excluded.page_name,
                page_token=excluded.page_token, ig_user_id=excluded.ig_user_id, ig_username=excluded.ig_username,
-               token_expires_at=excluded.token_expires_at, updated_at=now()`,
+               token_expires_at=excluded.token_expires_at, granted=excluded.granted, updated_at=now()`,
       [req.user.workspace_id, long.access_token, page.id, page.name, page.access_token,
-       page.instagram_business_account?.id ?? null, page.instagram_business_account?.username ?? null, exp]);
-    await logEvent("info", "meta", `підключено сторінку «${page.name}»${page.instagram_business_account ? ` + IG @${page.instagram_business_account.username || ""}` : ""}`, null, req.user.id);
+       page.instagram_business_account?.id ?? null, page.instagram_business_account?.username ?? null, exp, granted]);
+    // щойно дали статистику Facebook - дописи, яким бракувало переглядів, перепитуємо на найближчому
+    // проході (і кнопкою «Оновити статистику» одразу), а не чекаємо тижневого повтору після відмов
+    if (granted && granted.split(",").includes("read_insights"))
+      await q(`update post_metric pm set err_count=0, fetched_at=now() - interval '2 days'
+                 from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+                where pm.post_id=p.id and s.workspace_id=$1 and pm.network='facebook' and pm.views is null`, [req.user.workspace_id]);
+    await logEvent("info", "meta", `підключено сторінку «${page.name}»${page.instagram_business_account ? ` + IG @${page.instagram_business_account.username || ""}` : ""}${granted ? "" : " (дозволи не прочитались)"}`, null, req.user.id);
     return reply.redirect("/app?meta=ok");
   } catch (e: any) {
     await logEvent("error", "meta", "OAuth callback: " + e.message, null, req.user.id);
@@ -2510,6 +2548,8 @@ app.put("/api/posts/:postId", async (req: any, reply) => {
     await q(`update post set format=$2 where id=$1`, [req.params.postId, req.body.format]);
   if (typeof req.body?.slides_text === "string")
     await q(`update post set slides_text=nullif($2,'') where id=$1`, [req.params.postId, req.body.slides_text.slice(0, 20000)]);
+  if (typeof req.body?.first_comment === "string")
+    await q(`update post set first_comment=nullif(btrim($2),'') where id=$1`, [req.params.postId, req.body.first_comment.slice(0, 8000)]);
   return { ok: true };
 });
 
@@ -2984,7 +3024,7 @@ app.get("/api/bank", async (req: any) => {
 // усі фінальні пости воркспейсу (Студія/Інбокс - глобальний список, НЕ привʼязаний до активного джерела)
 // + sent: у які мережі пост УЖЕ опубліковано (іконки на картці + фільтр «Опубліковані»)
 app.get("/api/posts/studio", async (req: any) => {
-  const rows = await q<any>(`select p.id, p.content, p.review, p.channels, p.rubric, p.intent, p.reel_video, p.format, p.qa, src.origin as source_origin, ma.filename as media_filename, ma.kind as media_kind, ma.duration as media_duration, p.created_at, src.title as source_title
+  const rows = await q<any>(`select p.id, p.content, p.review, p.channels, p.rubric, p.intent, p.reel_video, p.format, p.qa, p.first_comment, src.origin as source_origin, ma.filename as media_filename, ma.kind as media_kind, ma.duration as media_duration, p.created_at, src.title as source_title
             from post p join pipeline_run r on r.id=p.run_id join source src on src.id=r.source_id
             left join media_asset ma on ma.id=p.media_id
             where src.workspace_id=$1 and p.stage='final' and (p.review is null or p.review <> 'archived')
@@ -3011,7 +3051,15 @@ app.get("/api/posts/studio", async (req: any) => {
     yt.forEach((r) => add(r.post_id, "youtube")); tt.forEach((r) => add(r.post_id, "tiktok"));
   }
   const counts = await mediaCounts(ids);
-  return rows.map((r: any) => ({ ...r, sent: sentMap.get(r.id) || [], links: linkMap.get(r.id) || {}, media_count: counts.get(r.id) || 0 }));
+  // 💬 стан перших коментарів: чи десь не вийшов (значок на картці веде в пост)
+  const cmt = new Map<string, { failed: boolean; sent: boolean }>();
+  if (ids.length) {
+    for (const r of await q<{ post_id: string; failed: boolean; sent: boolean }>(
+      `select post_id, bool_or(status='failed') as failed, bool_or(status='sent') as sent from post_comment where post_id=any($1) group by post_id`, [ids]))
+      cmt.set(r.post_id, { failed: r.failed, sent: r.sent });
+  }
+  return rows.map((r: any) => ({ ...r, sent: sentMap.get(r.id) || [], links: linkMap.get(r.id) || {}, media_count: counts.get(r.id) || 0,
+    comment: cmt.get(r.id) || null }));
 });
 
 // видалення поста (замінило архів у UI): опублікованим - відмова, інакше зникла б історія
@@ -3930,8 +3978,8 @@ async function tgOwnPost(ws: string, postId: string): Promise<string | null> {
 // 📄 повна картка поста для редактора Mini App
 app.get("/api/tg/post/:postId", async (req: any, reply) => {
   const u = await tgGuard(req, reply); if (!u) return;
-  const p = await one<{ id: string; content: string; channels: any; review: string | null; rubric: string | null; filename: string | null }>(
-    `select p.id, p.content, p.channels, p.review, p.rubric, ma.filename from post p
+  const p = await one<{ id: string; content: string; channels: any; review: string | null; rubric: string | null; filename: string | null; first_comment: string | null; format: string | null }>(
+    `select p.id, p.content, p.channels, p.review, p.rubric, p.first_comment, p.format, ma.filename from post p
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
        left join media_asset ma on ma.id=p.media_id
      where p.id=$1 and s.workspace_id=$2`, [req.params.postId, u.ws]);
@@ -3940,7 +3988,7 @@ app.get("/api/tg/post/:postId", async (req: any, reply) => {
     `select id, scheduled_at from schedule_slot where post_id=$1 and status='planned' order by scheduled_at limit 1`, [p.id]);
   const sent = (await sentMap([p.id])).get(p.id) || [];
   return { ...p, scheduled_at: slot?.scheduled_at || null, slot_id: slot?.id || null, sent, links: await postPermalinks(u.ws, p.id).catch(() => ({})),
-           media: (await postMediaList(p.id)).map((x) => x.filename) };
+           media: (await postMediaList(p.id)).map((x) => x.filename), comments: await commentStates(p.id) };
 });
 
 // 🖼 фото з телефона. Без нього Mini App лишався «текстовим блокнотом», хоч усі мережі
@@ -4125,7 +4173,18 @@ app.put("/api/tg/post/:postId", async (req: any, reply) => {
     await q(`update post set content=$2 where id=$1`, [own.id, String(req.body.text).slice(0, 8000)]);
   if (req.body?.channels && typeof req.body.channels === "object")
     await q(`update post set channels=$2 where id=$1`, [own.id, JSON.stringify(req.body.channels)]);
+  if (typeof req.body?.first_comment === "string")
+    await q(`update post set first_comment=nullif(btrim($2),'') where id=$1`, [own.id, req.body.first_comment.slice(0, 8000)]);
   return { ok: true };
+});
+
+// 💬 дослати перший коментар у мережі, куди пост уже вийшов (той самий шлях, що в кабінеті)
+app.post("/api/tg/post/:postId/first-comment", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  if (!(await tgOwnPost(u.ws, req.params.postId))) return reply.code(404).send({ error: "пост не знайдено" });
+  const r = await queueMissingComments(u.ws, req.params.postId);
+  if (r.queued.length) void processDueComments(req.params.postId).catch(() => { /* стан видно в картці поста */ });
+  return { ok: true, ...r };
 });
 
 // 🚀 публікація: та сама точка, що й кабінет/бот - дедуп і permalink працюють однаково
@@ -4204,6 +4263,7 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
   startMetrics();
   startDiary();
   startThreadsAuto();
+  startComments();
   startMeetingPull();   // погодинна звірка з хмарою власного транскрибатора
   initTelegramBot();
   refreshOwnBotWebhooks().catch(() => {});

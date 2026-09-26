@@ -19,6 +19,9 @@ const NETS=[['telegram','Telegram'],['instagram','Instagram'],['facebook','Faceb
 const FMT_META={post:['📝','Пост','звичайний текстовий пост'],carousel:['🖼','Карусель','кілька слайдів, які читач перегортає - найкраще збирає збереження'],reel:['🎬','Рілс','короткий вертикальний відео-сценарій - найкраще охоплення'],story:['⚡','Сторіс','ефемерний кадр на 24 години']};
 const FMT_KEYS=['post','carousel','reel','story'];
 const NETVAR={telegram:'--tg',instagram:'--ig',facebook:'--fb',threads:'--th',linkedin:'--li'};
+// 💬 перший коментар: куди він іде і межа довжини в мережі (відповідь у Threads - такий самий пост на 500)
+const FC_NETS=['instagram','facebook','linkedin','threads'];
+const FC_MAX={instagram:2200,facebook:8000,linkedin:1250,threads:500};
 const NETICON={telegram:'M22 4L2 11l6 2 2 6 3-4 5 4 4-15z',instagram:'M7 3h10a4 4 0 014 4v10a4 4 0 01-4 4H7a4 4 0 01-4-4V7a4 4 0 014-4zm5 5a4 4 0 100 8 4 4 0 000-8z',facebook:'M14 9V7c0-1 .5-1.5 1.5-1.5H17V2h-3c-2.5 0-4 1.5-4 4v3H7v3h3v9h4v-9h3l.5-3H14z',threads:'M12 3c5 0 8 3 8 9s-3 9-8 9-8-3-8-9c0-2 .5-3.5 1.5-4.5',linkedin:'M4 4h4v16H4V4zm2-1a2 2 0 110-4 2 2 0 010 4zm5 5h4v2c.8-1.3 2.2-2.3 4-2.3 3 0 5 2 5 5.3V20h-4v-8c0-1.5-.8-2.5-2-2.5s-2 1-2 2.5v8h-5V8z'};
 const CP_LABEL={telegram:'Telegram',instagram:'Instagram',threads:'Threads',facebook:'Facebook'};
 const STEP  = {1:'extract_ideas',3:'drafts',4:'tone',5:'format',6:'deai',7:'strategy'};
@@ -1160,7 +1163,9 @@ function anCoverage(a){
   if(!anyMeasured) parts.push('Перегляди, лайки й коментарі окремих постів віддають <b>Threads, Instagram і Facebook</b> - підключи їх у Налаштування → Канали, і статистика почне збиратись сама.');
   ['threads','instagram','facebook'].forEach(n=>{ const c=cov[n]; if(!c||!c.published) return;
     if(!c.measured&&c.error){ const perm=/дозвол|permission/i.test(c.error);
-      parts.push('<span class="warn">'+AN_LABEL[n]+': перегляди недоступні</span> - '+(perm?'Meta не дала дозволу на статистику постів. Перепідключи '+AN_LABEL[n]+' у Налаштування → Канали і залиш увімкненими всі галочки; лайки й коментарі, якщо їх видно в таблиці, збираються й без цього.':esc(c.error.slice(0,160)))); }
+      parts.push('<span class="warn">'+AN_LABEL[n]+': перегляди недоступні</span> - '+(perm?(n==='facebook'
+        ?'Meta не дала дозволу на статистику дописів. <a href="#" onclick="return connectPopup(\'/api/integrations/meta/connect?add=insights\')" style="color:var(--brand)">📈 Дозволити статистику Facebook</a> (вікно Meta; залиш галочки увімкненими) - реакції й коментарі збираються й без цього.'
+        :'Meta не дала дозволу на статистику постів. Перепідключи '+AN_LABEL[n]+' у Налаштування → Канали і залиш увімкненими всі галочки; лайки й коментарі, якщо їх видно в таблиці, збираються й без цього.'):esc(c.error.slice(0,160)))); }
     else if(c.measured<c.published) parts.push(AN_LABEL[n]+': статистика є для '+c.measured+' з '+c.published+' публікацій (нові пости отримують цифри з найближчим збором).'); });
   const fresh=(a.posts||[]).filter(p=>p.young).length;
   if(fresh) parts.push('🕐 '+fresh+' '+anPlural(fresh,'свіжий пост ще набирає','свіжі пости ще набирають','свіжих постів ще набирають')+' перегляди: з нормою і у висновках вони зʼявляться, коли мине 2 доби після публікації, а цифри оновлюються кожні 6 годин.');
@@ -1891,7 +1896,11 @@ function renderStudio(){
     const im=INTENT_META[p.intent];
     // формат показуємо бейджем лише коли він НЕ звичайний пост (інакше бейдж на кожній картці = шум)
     const fm=FMT_META[p.format]; const fmTag=(p.format&&p.format!=='post'&&fm)?'<span class="ptag" style="color:var(--brand);border-color:var(--brand)" title="Формат: '+fm[2]+'">'+fm[0]+' '+fm[1].toLowerCase()+'</span>':'';
-    const tags=fmTag+(im?'<span class="ptag" title="Намір поста: '+im[2]+'">'+im[0]+' '+im[1]+'</span>':'')+(p.rubric?'<span class="ptag">🏷 '+esc(p.rubric)+'</span>':'')+(p.source_origin&&p.source_origin!=='manual'?'<span class="ptag">'+(ORIGIN_LABEL[p.source_origin]||esc(p.source_origin))+'</span>':'');
+    // 💬 перший коментар: є / уже під постом / не вийшов (тоді клік веде в пост - там причина й «Надіслати»)
+    const fcSet=!!(p.first_comment&&p.first_comment.trim())||FC_NETS.some(k=>p.channels&&p.channels[k]&&typeof p.channels[k].first_comment==='string'&&p.channels[k].first_comment.trim());
+    const fcTag=(p.comment&&p.comment.failed)?'<span class="ptag" data-a="composer" style="cursor:pointer;color:var(--danger);border-color:var(--danger)" title="Перший коментар не вийшов - відкрий пост: там причина і «Надіслати коментар»">💬 ⚠</span>'
+      :(fcSet||(p.comment&&p.comment.sent))?'<span class="ptag" title="'+((p.comment&&p.comment.sent)?'Перший коментар уже під постом':'Є перший коментар - піде одразу після публікації')+'">💬'+((p.comment&&p.comment.sent)?' ✓':'')+'</span>':'';
+    const tags=fmTag+fcTag+(im?'<span class="ptag" title="Намір поста: '+im[2]+'">'+im[0]+' '+im[1]+'</span>':'')+(p.rubric?'<span class="ptag">🏷 '+esc(p.rubric)+'</span>':'')+(p.source_origin&&p.source_origin!=='manual'?'<span class="ptag">'+(ORIGIN_LABEL[p.source_origin]||esc(p.source_origin))+'</span>':'');
     // 🛡 бейджі автоперевірок (settings_block.qa_gates) - показуються ЛИШЕ якщо перевірка знайшла слабке місце
     const qa=p.qa||{}; const qaBad=[];
     if(qa.director&&qa.director!=='yes') qaBad.push(['qad','🎯 '+(qa.director==='no'?'Директор: не веде до цілі':'Директор: частково веде до цілі')]);
@@ -2214,7 +2223,7 @@ async function refreshSentState(postId, sentSet, onState){
     let st=null; try{ st=await api('/posts/'+postId+'/publish-state'); }catch(e){ return; }
     (st.sent||[]).forEach(k=>sentSet.add(k));
     const links=st.links||{};
-    if(onState) onState(links);
+    if(onState) onState(links, st);
     // усі надіслані мережі вже мають лінк - чекати більше нема чого
     if(![...sentSet].some(k=>!links[k])) return;
     await new Promise(r=>setTimeout(r,2000));
@@ -2268,6 +2277,8 @@ async function openComposer(postId, opts){
   // надіслані мережі завжди позначені як обрані (щоб було видно в прев'ю)
   sentSet.forEach(k=>{ C[k]=C[k]||{text:''}; C[k].on=true; });
   let master=full.content||''; let mediaFilename=full.media_filename||null; let rubric=full.rubric||'';
+  // 💬 перший коментар: спільний текст + свій (або вимкнений) для мережі в C[k].first_comment
+  let fcMaster=full.first_comment||''; let savedFc=fcMaster; let cmStates=ps.comments||[]; let metaInfo=null; let onMeta=null;
   // 🖼 кадри поста (обкладинка першою); 2+ = карусель
   let media=(full.media||[]).filter(m=>m&&m.filename); let slidesText=full.slides_text||'';
   const pvIdx={}; // яким кадром гортати прев'ю каруселі в Instagram
@@ -2294,6 +2305,11 @@ async function openComposer(postId, opts){
         +'<textarea id="cmpText" class="txt" style="min-height:240px;font-size:14px;line-height:1.55;resize:vertical"></textarea>'
         +'<div style="font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint);margin-top:12px">🤖 ПОМІЧНИКИ ТЕКСТУ</div>'
         +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="dashbtn" id="cmpRewrite" title="Перепише текст; можна вказати, що саме змінити">✍ Переписати</button><button class="dashbtn" id="cmpHook" title="3 варіанти сильнішого відкриття з кульмінації">🪝 Гачок</button><button class="dashbtn" id="cmpAudit" title="Знайти і точково прибрати сліди AI">🔍 AI-сліди</button><button class="dashbtn" id="cmpHash" title="5-8 релевантних хештегів у кінець тексту"># Хештеги</button></div>'
+        +'<div id="cmpFcBox"><div style="font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint);margin-top:14px">💬 ПЕРШИЙ КОМЕНТАР <span class="qh" title="Одразу після публікації під постом зʼявиться коментар від тебе. Хештеги - в Instagram, посилання - в LinkedIn і Facebook (посилання в самому тексті там ріже охоплення), заклик - у Threads (відповіддю). Порожньо - без коментаря.">?</span></div>'
+          +'<textarea id="cmpFc" class="txt" style="min-height:62px;margin-top:6px;font-size:13px;line-height:1.5;resize:vertical" placeholder="Хештеги, посилання чи заклик - піде коментарем від тебе одразу після публікації"></textarea>'
+          +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px"><button class="dashbtn" id="cmpFcHash" title="5-8 хештегів у коментар, а не в текст поста"># Хештеги в коментар</button><span id="cmpFcCnt" style="font-size:11px;color:var(--faint)"></span></div>'
+          +'<div id="cmpFcNets" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"></div>'
+          +'<div id="cmpFcState" style="font-size:12px;margin-top:6px"></div></div>'
         +'<div style="font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint);margin-top:14px">🖼 МЕДІА</div>'
         +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="dashbtn" id="cmpPhoto" title="Обкладинка: з галереї, з компʼютера, зі стоку чи AI-генерація, текст на фото">🎨 Обкладинка</button><button class="dashbtn" id="cmpAddSlides" title="Кілька фото в одному пості: Instagram і Threads - карусель, Facebook - галерея, Telegram - альбом">＋ Кадри каруселі</button><button class="dashbtn" id="cmpVideo" title="Власне відео: Instagram - Reels, Facebook - відео Сторінки, Threads, Telegram, LinkedIn">🎬 Відео</button></div>'
         +'<div id="cmpMediaWrap" style="margin-top:10px"></div>'
@@ -2318,13 +2334,13 @@ async function openComposer(postId, opts){
   document.body.appendChild(ov);
   _cmpOpenId=postId; writeRoute('post',postId); // 🔗 тепер на цей пост можна дати пряме посилання
   let savedMaster=master; // що вже лежить на сервері: закриття з незбереженим текстом перепитує
-  const leaveOk=()=>master===savedMaster||confirm('Закрити композер? Незбережені зміни в тексті загубляться.');
+  const leaveOk=()=>(master===savedMaster&&fcMaster===savedFc)||confirm('Закрити композер? Незбережені зміни в тексті загубляться.');
   const escH=(e)=>{ if(e.key!=='Escape') return;
     // Escape у діалозі ПОВЕРХ композера (фото, вибір кадрів) - не привід закривати сам композер
     const layers=[...document.querySelectorAll('.cmp-ov,.modal')];
     if(layers[layers.length-1]!==ov) return;
     if(leaveOk()) close(); };
-  function close(){ ov.remove(); document.removeEventListener('keydown',escH); _cmpOpenId=null;
+  function close(){ ov.remove(); document.removeEventListener('keydown',escH); if(onMeta) document.removeEventListener('kg-meta',onMeta); _cmpOpenId=null;
     if(/^#\/post\//.test(location.hash)) location.hash=_routeBack; } // function-декларація: хойститься, безпечна для колбеків вище
   document.addEventListener('keydown',escH);
   const msg=ov.querySelector('#cmpMsg'); const txt=ov.querySelector('#cmpText'); txt.value=master;
@@ -2475,8 +2491,8 @@ async function openComposer(postId, opts){
         +'<div class="pv-note">⚡ у сторіс підпису немає - думка має бути на кадрах; кожен кадр піде окремою сторіс і зникне через 24 год</div>'
         :'<div style="font-size:12px;color:var(--muted);text-align:center">Сторіс ідуть лише в Instagram і Facebook - увімкни їх ліворуч.</div>';
       box.querySelectorAll('[data-snav]').forEach(b=>b.onclick=()=>{ const k='st_'+b.dataset.snav; pvIdx[k]=Math.max(0,Math.min(media.length-1,(pvIdx[k]||0)+(+b.dataset.d))); renderPrev(); });
-      return; }
-    if(!sel.length){ box.innerHTML='<div style="font-size:12px;color:var(--muted);text-align:center">Обери канал ліворуч.</div>'; return; }
+      renderFc(); return; }
+    if(!sel.length){ box.innerHTML='<div style="font-size:12px;color:var(--muted);text-align:center">Обери канал ліворуч.</div>'; renderFc(); return; }
     const av=(($('avatar')&&$('avatar').textContent)||'В').slice(0,2);
     box.innerHTML=sel.map(n=>{ const k=n[0]; const t=textOf(k); const lim=NETLIM[k]||2200; const over=t.length>lim; const sent=sentSet.has(k);
       const img=pvMedia(k);
@@ -2505,12 +2521,88 @@ async function openComposer(postId, opts){
       const ownMark=hasOwn(k)?'<div class="pv-note" style="color:var(--brand)">✨ своя версія для цієї мережі (↺ на каналі - вернути твій текст)</div>':'';
       // 🔗 щойно мережа опублікована - поруч із її плашкою зʼявляється лінк на живий пост
       const open=sentLinks[k]?'<a href="'+esc(sentLinks[k])+'" target="_blank" rel="noopener" class="pv-open" title="Відкрити пост у '+esc(n[1])+'">↗ Відкрити пост</a>':'';
-      return '<div class="pv-label" style="background:var('+NETVAR[k]+')">'+n[1]+'</div>'+open+'<div class="phone">'+body+'</div>'+auto+ownMark; }).join('');
+      return '<div class="pv-label" style="background:var('+NETVAR[k]+')">'+n[1]+'</div>'+open+'<div class="phone">'+body+pvFc(k,av)+'</div>'+auto+ownMark; }).join('');
     box.querySelectorAll('[data-more]').forEach(el=>el.onclick=()=>{ _pvExp.add(el.dataset.more); renderPrev(); });
+    // 💬 свій текст коментаря / без коментаря в цій мережі / назад до спільного
+    box.querySelectorAll('[data-fcedit]').forEach(a=>a.onclick=()=>{ const k=a.dataset.fcedit; const v=prompt('Перший коментар для '+netName(k)+' (порожньо = без коментаря в цій мережі):', fcOf(k)||fcMaster.trim()); if(v===null) return; C[k]=C[k]||{text:''}; C[k].first_comment=v.trim(); renderPrev(); });
+    box.querySelectorAll('[data-fcoff]').forEach(a=>a.onclick=()=>{ const k=a.dataset.fcoff; C[k]=C[k]||{text:''}; C[k].first_comment=''; renderPrev(); });
+    box.querySelectorAll('[data-fcreset]').forEach(a=>a.onclick=()=>{ const k=a.dataset.fcreset; if(C[k]) delete C[k].first_comment; renderPrev(); });
+    renderFc();
     box.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{ pvIdx.instagram=Math.max(0,Math.min(media.length-1,(pvIdx.instagram||0)+(+b.dataset.nav))); renderPrev(); }); }
+  // ----- 💬 перший коментар -----
+  // свій текст мережі (рядок, порожній = без коментаря тут) або спільний; у сторіс і Telegram - нема
+  function fcOwn(k){ return !!(C[k]&&typeof C[k].first_comment==='string'); }
+  function fcOf(k){ if(!FC_NETS.includes(k)||isStory()) return ''; return String(fcOwn(k)?C[k].first_comment:fcMaster).trim(); }
+  function fcStateHtml(cs){ if(!cs) return '';
+    if(cs.status==='sent') return '<span style="color:var(--brand);font-weight:700">✓ опубліковано</span>';
+    if(cs.status==='failed') return '<span style="color:var(--danger)">⚠ не вийшов: '+esc(cs.error||'')+'</span>';
+    return '<span style="color:var(--amber)">⏳ '+(cs.error?('повторимо'+(cs.due_at?' о '+locHM(cs.due_at):'')+': '+esc(cs.error)):'надсилається…')+'</span>'; }
+  // коментар у прев'ю мережі - так, як його побачать під постом
+  function pvFc(k,av){
+    if(isStory()) return '';
+    if(!FC_NETS.includes(k)) return (k==='telegram'&&fcMaster.trim())?'<div class="pv-fc-off">💬 у Telegram коментар не піде: коментарі каналу живуть в окремій групі обговорення, бот туди не пише</div>':'';
+    const own=fcOwn(k), t=fcOf(k), cs=cmStates.find(x=>x.network===k);
+    if(!t&&!own&&!cs) return '';
+    const lim=FC_MAX[k], st=fcStateHtml(cs);
+    const bubble=t
+      ?'<div class="pv-fc"><span class="phone-av">'+esc(av)+'</span><div class="pv-fc-t"><b>ваш_профіль</b>'+(k==='threads'?' · відповідь':'')+'<br>'+esc(t)
+        +(t.length>lim?'<div style="color:var(--danger);font-size:10.5px">'+t.length+'/'+lim+' - задовгий для '+netName(k)+'</div>':'')
+        +(st?'<div style="font-size:10.5px;margin-top:2px">💬 '+st+'</div>':'')+'</div></div>'
+      :'<div class="pv-fc-off">💬 без першого коментаря в '+netName(k)+(st?' · '+st:'')+'</div>';
+    // керування - лише поки коментар цієї мережі ще не під постом
+    const acts=(cs&&cs.status==='sent')?'':'<div class="pv-fc-act">'+(own
+      ?'<a data-fcreset="'+k+'">↺ як у всіх мережах</a>'+(t?'<a data-fcedit="'+k+'">✎ змінити</a>':'')
+      :(fcMaster.trim()?'<a data-fcedit="'+k+'">✎ свій текст для '+netName(k)+'</a><a data-fcoff="'+k+'">✕ без коментаря тут</a>':''))+'</div>';
+    return bubble+acts; }
+  // ліва панель: куди піде, лічильник, дозвіл Meta, «надіслати» для вже опублікованого
+  function renderFc(){ const box=ov.querySelector('#cmpFcBox'); if(!box) return;
+    if(isStory()){ box.style.display='none'; return; } box.style.display='';
+    const sel=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on);
+    const withMaster=sel.filter(k=>FC_NETS.includes(k)&&!fcOwn(k));
+    const cnt=ov.querySelector('#cmpFcCnt'), m=fcMaster.trim();
+    if(cnt){ if(m&&withMaster.length){ const k=withMaster.reduce((a,b)=>FC_MAX[a]<=FC_MAX[b]?a:b); cnt.textContent=m.length+'/'+FC_MAX[k]+' ('+netName(k)+')'; cnt.style.color=m.length>FC_MAX[k]?'var(--danger)':'var(--faint)'; } else cnt.textContent=''; }
+    ov.querySelector('#cmpFcNets').innerHTML=sel.map(k=>{
+      if(!FC_NETS.includes(k)) return m?'<span class="fcchip off" title="Коментарі каналу Telegram живуть в окремій групі обговорення - бот туди не пише">'+netName(k)+'</span>':'';
+      const cs=cmStates.find(x=>x.network===k), t=fcOf(k), own=fcOwn(k);
+      if(cs&&cs.status==='sent') return '<span class="fcchip ok" title="Коментар уже під постом">💬✓ '+netName(k)+'</span>';
+      if(cs&&cs.status==='failed') return '<span class="fcchip bad" title="'+esc(cs.error||'')+'">⚠ '+netName(k)+'</span>';
+      if(!t) return (m||own)?'<span class="fcchip off" title="У цій мережі без коментаря">'+netName(k)+'</span>':'';
+      return '<span class="fcchip" title="'+(own?'свій текст для цієї мережі':'спільний текст')+'">'+(own?'✎ ':'✓ ')+netName(k)+(k==='threads'?' (відповіддю)':'')+'</span>'; }).join('');
+    let html='';
+    const needMeta=sel.filter(k=>(k==='instagram'||k==='facebook')&&fcOf(k)&&!cmStates.some(x=>x.network===k&&x.status==='sent'));
+    if(needMeta.length&&metaInfo&&metaInfo.extras&&metaInfo.extras.comments===false)
+      html+='<div style="color:var(--amber)">⚠ '+needMeta.map(netName).join(' і ')+' ще не дали дозволу на коментарі: пост вийде, а коментар - ні. <a href="#" data-fcperm="1" style="color:var(--brand)">💬 Дозволити коментарі</a></div>';
+    // пост уже вийшов, а коментаря нема (дописали пізніше, не було дозволу, збій) - можна надіслати
+    const missing=[...sentSet].filter(k=>FC_NETS.includes(k)&&fcOf(k)&&!cmStates.some(x=>x.network===k&&(x.status==='sent'||x.status==='sending')));
+    if(missing.length) html+='<div style="margin-top:6px"><button class="dashbtn" id="cmpFcSend">↻ Надіслати коментар ('+missing.map(netName).join(', ')+')</button></div>';
+    const st=ov.querySelector('#cmpFcState'); st.innerHTML=html;
+    const pb=st.querySelector('[data-fcperm]'); if(pb) pb.onclick=(e)=>{ e.preventDefault(); connectPopup('/api/integrations/meta/connect?add=comments'); };
+    const sb=st.querySelector('#cmpFcSend'); if(sb) sb.onclick=sendComments; }
+  // поки коментар «надсилається» (а не чекає запланованого повтору) - перечитуємо стан, до ~45 с
+  async function pollComments(){
+    for(let i=0;i<15;i++){ let st=null; try{ st=await api('/posts/'+postId+'/publish-state'); }catch(e){ return; }
+      cmStates=st.comments||[]; if(st.links) sentLinks=st.links; renderPrev();
+      if(!cmStates.some(x=>x.status==='sending'||(x.status==='pending'&&!x.error))) return;
+      await new Promise(r=>setTimeout(r,3000)); } }
+  async function sendComments(){ const b=ov.querySelector('#cmpFcSend'); if(b) b.disabled=true; setMsg('💬 надсилаю коментар…');
+    try{ await saveDraft(); const r=await api('/posts/'+postId+'/first-comment/send',{method:'POST'});
+      if(!r.queued||!r.queued.length){ setMsg('нема чого надсилати'+(r.sent&&r.sent.length?' (коментар уже під постом)':''),'var(--muted)'); return; }
+      await pollComments();
+      const bad=cmStates.filter(x=>r.queued.includes(x.network)&&x.status!=='sent');
+      setMsg(bad.length?'⚠ '+bad.map(x=>netName(x.network)+': '+(x.error||'ще надсилається')).join('; '):'💬 коментар під постом ✓', bad.length?'var(--danger)':'var(--brand)');
+    }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ renderPrev(); } }
+  const fcTa=ov.querySelector('#cmpFc'); fcTa.value=fcMaster; fcTa.addEventListener('input',()=>{ fcMaster=fcTa.value; renderPrev(); });
+  ov.querySelector('#cmpFcHash').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('# добираю хештеги в коментар…'); aiBusy('# Добираю хештеги…');
+    try{ const r=await api('/posts/'+postId+'/hashtags',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:master})}); const tags=(r.hashtags||[]).join(' ');
+      if(tags){ fcMaster=(fcMaster.trim()?fcMaster.trimEnd()+'\n':'')+tags; fcTa.value=fcMaster; renderPrev(); setMsg('хештеги - у першому коментарі ✓','var(--brand)'); } else setMsg('не знайшлося тегів'); }
+    catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   txt.addEventListener('input',()=>{ master=txt.value; renderPrev(); });
   ov.querySelector('#cmpRubric').onchange=(e)=>{ rubric=e.target.value; };
   renderChips(); renderMedia(); renderPrev();
+  // чи дав Meta дозвіл на коментарі (для попередження ДО публікації); оновлюється, щойно людина дала
+  // дозвіл у вікні Meta просто з композера
+  onMeta=()=>api('/integrations/meta').then(x=>{ metaInfo=x; renderFc(); }).catch(()=>{});
+  onMeta(); document.addEventListener('kg-meta',onMeta);
   // ----- дії: хештеги / фото / переписати -----
   ov.querySelector('#cmpHash').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('# добираю хештеги…'); aiBusy('# Добираю хештеги…'); try{ const r=await api('/posts/'+postId+'/hashtags',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:master})}); const tags=(r.hashtags||[]).join(' '); if(tags){ master=(master.trimEnd()+'\n\n'+tags); txt.value=master; renderPrev(); setMsg('готово ✓','var(--brand)'); } else setMsg('не знайшлося тегів'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpRewrite').onclick=async(e)=>{ const instruction=prompt('Що змінити? (порожньо = переписати іншими словами, голос збережеться)'); if(instruction===null) return; const b=e.target; b.disabled=true; setMsg('✍ переписую…'); aiBusy('✍ Переписую пост…'); try{ await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master})}); const r=await api('/posts/'+postId+'/regenerate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instruction})}); master=r.content||master; txt.value=master; renderPrev(); setMsg('готово ✓','var(--brand)'); rememberVoiceRule(instruction); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
@@ -2578,8 +2670,8 @@ async function openComposer(postId, opts){
     }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; } };
   // ----- зберегти / адаптувати / публікувати / планувати -----
   async function saveDraft(){ const iv=ov.querySelector('#cmpIntent'), fv=ov.querySelector('#cmpFormat');
-    await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master,rubric,intent:iv?iv.value:'',slides_text:slidesText,...(fv?{format:fv.value}:{})})});
-    savedMaster=master;
+    await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master,rubric,intent:iv?iv.value:'',slides_text:slidesText,first_comment:fcMaster,...(fv?{format:fv.value}:{})})});
+    savedMaster=master; savedFc=fcMaster;
     await api('/posts/'+postId+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:C})}); }
   ov.querySelector('#cmpSave').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('💾 зберігаю…'); try{ await saveDraft(); setMsg('чернетку збережено ✓','var(--brand)'); try{await loadStudioPosts();}catch(_){} }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; } };
   // формат «Карусель», а кадрів ще нема: інакше сценарій «Слайд 1…Слайд 10» піде підписом під одним фото
@@ -2605,10 +2697,15 @@ async function openComposer(postId, opts){
           missing.forEach(k=>{ const v=ra.channels&&ra.channels[k]; if(v&&v.text) C[k]={...(C[k]||{}),on:true,text:v.text}; }); renderPrev();
         } finally { aiDone(); } }
     }catch(_){ /* адаптація не критична - публікуємо майстер-текстом */ }
-    setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const res=await runPublish(postId,setMsg); const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); ok.forEach(k=>sentSet.add(k)); await refreshSentState(postId,sentSet,(l)=>{ sentLinks=l; renderChips(); renderPrev(); }); renderChips(); renderPrev(); setMsg((ok.length?'✓ '+ok.join(', '):'')+(err.length?' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; '):''), err.length?'var(--danger)':'var(--brand)'); if(ok.length&&!err.length) flash('Опубліковано ✓ Якщо пост залетить - 🔥 на картці дасть 5 кутів продовження'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)');
+    setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const res=await runPublish(postId,setMsg); const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); ok.forEach(k=>sentSet.add(k)); await refreshSentState(postId,sentSet,(l,st)=>{ sentLinks=l; if(st&&st.comments) cmStates=st.comments; renderChips(); renderPrev(); }); renderChips(); renderPrev();
+      // 💬 перший коментар: окремий рядок - пост уже в мережі, навіть якщо коментар ні
+      const cm=res.filter(x=>x.comment); const cmBad=cm.filter(x=>x.comment.status!=='sent');
+      const cmTxt=cm.length?(' · 💬 '+cm.map(x=>x.channel+(x.comment.status==='sent'?' ✓':x.comment.status==='pending'?' ⏳':' ⚠')).join(', ')):'';
+      setMsg((ok.length?'✓ '+ok.join(', '):'')+cmTxt+(err.length?' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; '):'')+(cmBad.length?' · коментар: '+cmBad.map(x=>x.channel+': '+(x.comment.error||'надсилається')).join('; '):''), (err.length||cmBad.some(x=>x.comment.status==='failed'))?'var(--danger)':'var(--brand)');
+      if(cmStates.some(x=>x.status==='sending'||(x.status==='pending'&&!x.error))) pollComments(); if(ok.length&&!err.length) flash('Опубліковано ✓ Якщо пост залетить - 🔥 на картці дасть 5 кутів продовження'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)');
       // навіть при збої частина мереж могла пройти - перечитуємо ФАКТИЧНИЙ стан, щоб інтерфейс
       // не показував «не опубліковано» на пості, який уже вийшов
-      try{ await refreshSentState(postId,sentSet,(l)=>{ sentLinks=l; renderChips(); renderPrev(); }); }catch(_){ }
+      try{ await refreshSentState(postId,sentSet,(l,st)=>{ sentLinks=l; if(st&&st.comments) cmStates=st.comments; renderChips(); renderPrev(); }); }catch(_){ }
     } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ setMsg('вкажи дату й час','var(--danger)'); return; } const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('немає каналів для планування (усі вже опубліковано)','var(--danger)'); return; } if(!carGuard()) return; const b=e.target; b.disabled=true; setMsg('🗓 зберігаю…'); const at=zonedToUTCISO(d,t); try{ await saveDraft(); if(opts.slotId){ await scheduleApi('/schedule/'+opts.slotId,'PUT',{scheduledAt:at}); } else { await scheduleApi('/schedule','POST',{postId,scheduledAt:at}); } setMsg('заплановано ✓ ('+todo.join(', ')+')','var(--brand)'); try{await loadPublish();}catch(_){} try{await loadStudioPosts();}catch(_){} setTimeout(close,1000); }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); b.disabled=false; } };
 }
@@ -3195,6 +3292,19 @@ async function loadMeta(){
     const row=$('mtPageRow');
     if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.pageName?(' · FB: <b>'+esc(c.pageName)+'</b>'):'')+(c.igUsername?(' · IG: <b>@'+esc(c.igUsername)+'</b>'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-flex'; if(stats)stats.style.display='inline-flex'; if($('mtVoice'))$('mtVoice').style.display=c.igUsername?'inline-flex':'none'; if(row)row.style.display='flex'; loadMetaPages(); }
     else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-flex'; if(dis)dis.style.display='none'; if(stats)stats.style.display='none'; if($('mtVoice'))$('mtVoice').style.display='none'; if(row)row.style.display='none'; }
+    // ➕ розширені дозволи - окремим вікном Meta, лише коли потрібні: базове підключення від них не залежить
+    const ex=$('mtExtras');
+    if(ex){ if(!c.hasToken){ ex.style.display='none'; }
+      else { const ext=c.extras||{};
+        const row2=(key,title,why,btn)=>{ const v=ext[key];
+          return '<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:9px 12px;margin-top:6px"><span style="font-size:13px"><b>'+title+'</b> <span style="color:var(--muted)">- '+why+'</span></span><span style="flex:1"></span>'
+            +(v===true?'<span style="color:var(--brand);font-weight:700;font-size:12.5px">✓ дозволено</span>'
+              :'<button class="ghost" data-mtadd="'+key+'" style="font-size:12.5px">'+btn+'</button>')+'</div>'; };
+        ex.style.display='';
+        ex.innerHTML=row2('comments','💬 Перший коментар','коментар під постом в Instagram і Facebook одразу після публікації','💬 Дозволити коментарі')
+          +row2('insights','📈 Перегляди постів Facebook','скільки людей побачили кожен допис - в Аналітиці','📈 Дозволити статистику')
+          +'<div class="hint" style="margin-top:4px">Відкриється вікно Meta: залиш галочки увімкненими. Поки Meta не схвалила застосунок, це працює для власника застосунку й запрошених тестерів.</div>';
+        ex.querySelectorAll('[data-mtadd]').forEach(b=>b.onclick=()=>connectPopup('/api/integrations/meta/connect?add='+b.dataset.mtadd)); } }
   }catch(e){}
 }
 $('mtDisconnect').onclick=async()=>{ if(!confirm('Відключити Facebook/Instagram?')) return; try{ await api('/integrations/meta/disconnect',{method:'POST'}); await loadMeta(); }catch(e){} };
@@ -4040,7 +4150,7 @@ function oauthFailText(net, why){
 }
 function connectPopup(url){ try{ const w=Math.min(620,screen.width||620), h=Math.min(740,screen.height||740); const x=Math.max(0,((screen.width||w)-w)/2), y=Math.max(0,((screen.height||h)-h)/2); const p=window.open(url,'oauth_connect','width='+w+',height='+h+',left='+x+',top='+y); if(!p) location.href=url; }catch(e){ location.href=url; } return false; }
 window.addEventListener('message',(ev)=>{ if(ev.origin!==location.origin) return; const d=ev.data||{}; if(!d.oauth) return;
-  if(d.meta!=null){ try{loadMeta();}catch(e){} try{loadChanStatus();}catch(e){} const cs=(typeof OB_STEPS!=='undefined')&&OB_STEPS[obIdx];
+  if(d.meta!=null){ try{loadMeta();}catch(e){} try{loadChanStatus();}catch(e){} try{ document.dispatchEvent(new CustomEvent('kg-meta')); }catch(e){} const cs=(typeof OB_STEPS!=='undefined')&&OB_STEPS[obIdx];
     // збій пояснюємо ЗАВЖДИ, і в онбордингу теж: раніше там крок просто перемальовувався мовчки
     if(d.meta==='error') alert(oauthFailText('meta',d.why));
     if($('onboarding')&&$('onboarding').style.display!=='none'&&cs&&cs.type==='connect'){ obVoiceImported=false; renderOb(); } else if(d.meta!=='error') flash(d.meta==='ok'?'Instagram/Facebook підключено ✓':'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).'); }

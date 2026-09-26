@@ -42,6 +42,7 @@ import { generateImageForPost, imageProviders, stockPhotoOptions, attachStockPho
 import { postMediaList, setPostMediaOrder, setPostVideo, MAX_SLIDES, SlideError } from "./slides.js";
 import { renderCarousel, CAROUSEL_THEMES } from "./carousel.js";
 import { briefMismatch, brandTextOf } from "./textkind.js";
+import { COMMENT_NETS, COMMENT_MAX, COMMENT_PERM, commentFor, commentStates, queueMissingComments, processDue as processDueComments, type CommentState } from "./comments.js";
 import { getThumb } from "./media.js";
 import sharp from "sharp";
 
@@ -227,9 +228,10 @@ const originLabel = (o: string) => ORIGIN_LABEL[o] || o;
 type PostRow = {
   id: string; content: string; review: string | null; channels: any; rubric: string | null;
   intent: string | null; format: string | null; created_at: string; origin: string; media: string | null;
+  first_comment: string | null;
 };
 const POST_SELECT = `select p.id, p.content, p.review, p.channels, p.rubric, p.intent, p.format, p.created_at,
-                            s.origin, ma.filename as media
+                            p.first_comment, s.origin, ma.filename as media
                        from post p
                        join pipeline_run r on r.id=p.run_id
                        join source s on s.id=r.source_id
@@ -295,6 +297,67 @@ export function authoredChannels(channels: any, nets: string[], authoredNow: boo
   if (authored && nets.length === 1) { cur.manual_adapt = true; cur.native = nets[0]; }
   else if (nets.length !== 1 && typeof cur.native === "string") { delete cur.native; delete cur.manual_adapt; }
   return cur;
+}
+
+/**
+ * 💬 Записати перший коментар у пост. Спільний текст - post.first_comment, свій для мережі -
+ * channels.<мережа>.first_comment (порожній рядок = у цій мережі без коментаря), як і в композері.
+ * Вертає оновлені канали й рядок для відповіді (null - нічого не мінялось).
+ */
+export async function applyFirstComment(postId: string, channels: any, fc: unknown, byNet: unknown): Promise<{ channels: any; note: string | null }> {
+  const notes: string[] = [];
+  let ch = channels;
+  if (typeof fc === "string") {
+    const t = fc.trim().slice(0, 8000);
+    await q(`update post set first_comment=nullif($2,'') where id=$1`, [postId, t]);
+    notes.push(t ? "перший коментар задано" : "перший коментар прибрано");
+  }
+  if (byNet && typeof byNet === "object" && !Array.isArray(byNet)) {
+    ch = { ...(channels || {}) };
+    for (const n of COMMENT_NETS) if (ch[n] && typeof ch[n] === "object") { const { first_comment: _drop, ...rest } = ch[n]; ch[n] = rest; }
+    const own: string[] = [];
+    for (const [n, v] of Object.entries(byNet as Record<string, unknown>)) {
+      if (!COMMENT_NETS.includes(n) || typeof v !== "string") continue;
+      ch[n] = { ...(ch[n] && typeof ch[n] === "object" ? ch[n] : { on: false }), first_comment: v.trim().slice(0, 8000) };
+      own.push(`${NET_LABEL[n]}: ${v.trim() ? "свій" : "без коментаря"}`);
+    }
+    await q(`update post set channels=$2 where id=$1`, [postId, JSON.stringify(ch)]);
+    notes.push(own.length ? `винятки коментаря - ${own.join(", ")}` : "винятки коментаря прибрано");
+  }
+  return { channels: ch, note: notes.length ? notes.join(", ") : null };
+}
+
+/** Як перший коментар піде в кожну обрану мережу: текст, стан, що заважає. Порожньо - коментаря нема. */
+export function commentPlanLines(post: { first_comment?: string | null; channels?: any; format?: string | null },
+                                 nets: string[], states: CommentState[], sentNets: string[], granted: string | null): string[] {
+  const any = nets.some((n) => commentFor(post, n)) || !!String(post.first_comment || "").trim();
+  if (!any) return [];
+  if (post.format === "story") return ["💬 перший коментар: сторіс коментарів не мають - піде лише у звичайних постах"];
+  const master = String(post.first_comment || "").trim();
+  const out: string[] = master ? [`💬 перший коментар: «${oneLine(master, 200)}»`] : ["💬 перший коментар:"];
+  for (const n of nets) {
+    const label = NET_LABEL[n] || n;
+    if (!COMMENT_NETS.includes(n)) { if (master) out.push(`— ${label}: без коментаря (коментарі каналу живуть в окремій групі обговорення, бот туди не пише)`); continue; }
+    const own = post.channels?.[n]?.first_comment;
+    const text = commentFor(post, n);
+    if (!text) { if (typeof own === "string") out.push(`— ${label}: без коментаря (так задано для цієї мережі)`); continue; }
+    const tag = typeof own === "string" ? ` свій: «${oneLine(text, 120)}»` : "";
+    const st = states.find((x) => x.network === n);
+    const over = text.length > (COMMENT_MAX[n] || 2000) ? ` ⚠️ довший за ${COMMENT_MAX[n]} знаків (${text.length}) - скороти` : "";
+    const perm = COMMENT_PERM[n] && granted != null && !granted.split(",").includes(COMMENT_PERM[n])
+      ? " ⚠️ немає дозволу на коментарі - Налаштування → Канали → Facebook + Instagram → «💬 Дозволити коментарі»" : "";
+    if (st?.status === "sent") out.push(`— ${label}: ✓ надіслано${tag}`);
+    else if (st?.status === "failed") out.push(`— ${label}: ⚠️ не вийшов: ${st.error || "невідома помилка"}${tag} (send_first_comment - спробувати ще раз)`);
+    else if (st) out.push(`— ${label}: ⏳ надсилається${st.error ? ` (повтор після збою: ${oneLine(st.error, 120)})` : ""}${tag}`);
+    else if (sentNets.includes(n)) out.push(`— ${label}: не надіслано - пост вийшов раніше, ніж зʼявився коментар (send_first_comment)${tag}${over}${perm}`);
+    else out.push(`— ${label}: піде одразу після публікації${tag}${over}${perm}`);
+  }
+  return out;
+}
+
+const COMMENT_UA: Record<string, string> = { sent: "✓", failed: "⚠️ не вийшов", pending: "⏳ повторимо", sending: "⏳ надсилається" };
+async function metaGranted(ws: string): Promise<string | null> {
+  return (await one<{ granted: string | null }>(`select granted from meta_config where workspace_id=$1`, [ws]))?.granted ?? null;
 }
 
 async function sentMap(ids: string[]): Promise<Map<string, { net: string; link: string | null; at: string }[]>> {
@@ -455,6 +518,14 @@ const aspectArg = (v: unknown): string => (ASPECTS.includes(String(v)) ? String(
 const S = (description: string, extra: Record<string, any> = {}) => ({ type: "string", description, ...extra });
 const N = (description: string, extra: Record<string, any> = {}) => ({ type: "integer", description, ...extra });
 const NETS_ARG = { type: "array", items: { type: "string", enum: NETS }, description: "Мережі: telegram, instagram, facebook, threads, linkedin." };
+const FC_BY_NET_ARG = {
+  type: "object",
+  description: "Свій перший коментар для окремих мереж, коли спільний не годиться (у LinkedIn - посилання, в Instagram - хештеги). Порожній рядок - у цій мережі без коментаря. Передаєш обʼєкт - він ЗАМІНЮЄ всі винятки: мережі, яких у ньому нема, беруть спільний first_comment.",
+  properties: Object.fromEntries(COMMENT_NETS.map((n) => [n, { type: "string" }])),
+  additionalProperties: false,
+};
+const FC_ARG = S("Перший коментар під постом від імені автора: посилання (у LinkedIn і Facebook воно в тексті ріже охоплення, у коментарі - ні), хештеги для Instagram, заклик. Іде одразу після публікації в Instagram, Facebook, LinkedIn і Threads (там - відповіддю автора). У Telegram і в сторіс коментаря немає. У update_post порожній рядок прибирає коментар.");
+
 const ASPECT_ARG = { type: "string", enum: ASPECTS, description: "Формат: 4:5 (типово - найбільше місця в стрічці, підходить усім мережам), 1:1, 16:9, 9:16 (сторіс; для поста формату story - типово)." };
 
 // Інструменти кабінетів свідомо БЕЗ аргументу workspace (див. WS_ARG): перемикати кабінет,
@@ -719,6 +790,7 @@ export const TOOLS: ToolDef[] = [
           : `⚠️ публікацію в ${netList(busy.map((b) => b.net))} обірвано посеред роботи - наступний publish_post перейме її одразу`) : "",
         enabledNets(p.channels).length ? `публікація: ${publishPlanLine(publishPlan(p.channels, p.content))}` : "",
         sent.length ? `опубліковано: ${sent.map((x) => `${NET_LABEL[x.net]} ${fmtWhen(x.at, tz)}${x.link ? ` ${x.link}` : ""}`).join(", ")}` : "",
+        ...commentPlanLines(p, [...new Set([...enabledNets(p.channels), ...sent.map((x) => x.net)])], await commentStates(p.id), sent.map((x) => x.net), await metaGranted(ws)),
         `\n${p.content}`,
         variants.length ? `\nВерсії під мережі:\n${variants.join("\n")}` : "",
       ].filter(Boolean).join("\n");
@@ -734,6 +806,8 @@ export const TOOLS: ToolDef[] = [
       rubric: S("Рубрика (необовʼязково)."),
       format: S("Формат: post (типово), carousel, reel, story.", { enum: ["post", "carousel", "reel", "story"] }),
       intent: S("Намір: awareness (знайомство), nurture (прогрів), sale (продаж).", { enum: ["awareness", "nurture", "sale"] }),
+      first_comment: FC_ARG,
+      first_comment_by_network: FC_BY_NET_ARG,
       approve: { type: "boolean", description: "true - одразу позначити затвердженим (готовий до календаря)." },
     },
     required: ["text"],
@@ -756,6 +830,10 @@ export const TOOLS: ToolDef[] = [
          ["awareness", "nurture", "sale"].includes(String(a.intent)) ? String(a.intent) : null,
          a.approve === true ? "approved" : null]);
       await logEvent("info", "mcp", `чернетку створено з Claude (${text.length} симв.)`, null);
+      const fc = (a.first_comment !== undefined || a.first_comment_by_network !== undefined)
+        ? await applyFirstComment(post!.id, authoredChannels({}, nets, true), a.first_comment, a.first_comment_by_network) : null;
+      const fcPlan = fc ? commentPlanLines({ first_comment: typeof a.first_comment === "string" ? a.first_comment : null, channels: fc.channels, format: normFormat(a.format) },
+        nets, [], [], await metaGranted(ws)) : [];
       const twin = (await scheduleConflicts(ws, post!.id, null, NETS)).filter((c) => c.kind === "text");
       const storyOff = normFormat(a.format) === "story" ? nets.filter((n) => n !== "instagram" && n !== "facebook") : [];
       return [
@@ -766,7 +844,7 @@ export const TOOLS: ToolDef[] = [
         notConnected.length ? `⚠️ Не підключені в кабінеті: ${netList(notConnected)} - туди публікація не піде.` : "",
         twin.length ? `⚠️ Такий самий текст уже є: ${twin.map((c) => `${short(c.postId)} (${c.state === "sent" ? "опубліковано" : "заплановано"})`).join(", ")} - можливо, це дубль (delete_post, якщо так).` : "",
         "Далі: publish_post (опублікувати зараз) або schedule_post (на дату й час).",
-      ].filter(Boolean).join(" ");
+      ].filter(Boolean).join(" ") + (fcPlan.length ? "\n" + fcPlan.join("\n") : "");
     },
   },
   {
@@ -779,6 +857,8 @@ export const TOOLS: ToolDef[] = [
       channels: NETS_ARG,
       rubric: S("Рубрика (необовʼязково)."),
       format: S("Формат (необовʼязково): post, carousel, reel, story.", { enum: ["post", "carousel", "reel", "story"] }),
+      first_comment: FC_ARG,
+      first_comment_by_network: FC_BY_NET_ARG,
       approve: { type: "boolean", description: "true - затвердити, false - зняти затвердження." },
     },
     required: ["id"],
@@ -808,13 +888,26 @@ export const TOOLS: ToolDef[] = [
       }
       const rubric = str(a.rubric, 60);
       if (rubric) { await q(`update post set rubric=$2 where id=$1`, [p.id, rubric]); done.push(`рубрика: ${rubric}`); }
+      if (a.first_comment !== undefined || a.first_comment_by_network !== undefined) {
+        // канали перечитуємо: вище їх могли щойно змінити (мережі, позначка «дослівно»)
+        const chNow = (await one<{ channels: any }>(`select channels from post where id=$1`, [p.id]))?.channels;
+        const fc = await applyFirstComment(p.id, chNow, a.first_comment, a.first_comment_by_network);
+        if (fc.note) done.push(fc.note);
+        // куди пост уже вийшов, коментар сам не піде: або дослати, або там він уже стоїть (змінити
+        // коментар у мережі можна лише в ній самій - повторно не шлемо)
+        const sentNow = (await alreadySentNetworks(p.id)).filter((n) => COMMENT_NETS.includes(n));
+        const has = (await commentStates(p.id)).filter((x) => x.status === "sent" || x.status === "sending").map((x) => x.network);
+        const late = sentNow.filter((n) => !has.includes(n)), already = sentNow.filter((n) => has.includes(n));
+        if (late.length) done.push(`пост уже вийшов у ${netList(late)} - коментар туди не піде сам: send_first_comment`);
+        if (already.length) done.push(`у ${netList(already)} перший коментар уже стоїть - новий текст туди не піде (змінити його можна лише в самій мережі)`);
+      }
       if (typeof a.approve === "boolean") {
         await q(`update post set review=$2 where id=$1`, [p.id, a.approve ? "approved" : null]);
         done.push(a.approve ? "затверджено" : "затвердження знято");
         // незатверджений текст не має лишатись у календарі: автопостер відправив би його в мережу
         if (!a.approve) { const n = await unschedulePost(p.id); if (n) done.push(`знято з розкладу (${n})`); }
       }
-      if (!done.length) throw new ToolError("Нічого не змінено - передай text, channels, rubric, format або approve.");
+      if (!done.length) throw new ToolError("Нічого не змінено - передай text, channels, rubric, format, first_comment або approve.");
       return `${short(p.id)}: ${done.join(", ")}.`;
     },
   },
@@ -1226,6 +1319,8 @@ export const TOOLS: ToolDef[] = [
         return `⏳ Публікація в ${netList(nets)} триває у фоні: мережі ще обробляють медіа. Результат і посилання - у get_post ${short(p.id)} за хвилину. Повторно publish_post не клич: дубля не буде, але й швидше не стане.`;
       if (j.status !== "done") throw new ToolError(`⚠️ Не опубліковано: ${j.error || "публікацію обірвано - спробуй ще раз"}`);
       const res: PubResult[] = (j.result && j.result.results) || [];
+      const cms = res.filter((r) => r.status === "sent" && r.comment)
+        .map((r) => `${NET_LABEL[r.channel] || r.channel} ${COMMENT_UA[r.comment!.status] || r.comment!.status}${r.comment!.error ? `: ${r.comment!.error}` : ""}`);
       const ok = res.filter((r) => r.status === "sent").map((r) => NET_LABEL[r.channel] || r.channel);
       const skip = res.filter((r) => r.status === "skipped").map((r) => NET_LABEL[r.channel] || r.channel);
       const err = res.filter((r) => r.status === "error");
@@ -1238,6 +1333,7 @@ export const TOOLS: ToolDef[] = [
         skip.length ? `↩️ Пропущено (вже публікувалось): ${skip.join(", ")}` : "",
         err.length ? `⚠️ Не вийшло: ${err.map((e) => `${NET_LABEL[e.channel] || e.channel} - ${e.error}`).join("; ")}` : "",
         offline.length ? `⚠️ Не підключені: ${netList(offline)}` : "",
+        cms.length ? `💬 Перший коментар: ${cms.join("; ")}` : "",
         links.filter((x) => x.link).map((x) => `${NET_LABEL[x.net]}: ${x.link}`).join("\n"),
       ].filter(Boolean).join("\n") || "Нічого не відправлено.";
     },
@@ -1281,7 +1377,9 @@ export const TOOLS: ToolDef[] = [
       if (ex) await q(`update schedule_slot set scheduled_at=$2, retry_at=null, attempts=0, updated_at=now() where id=$1`, [ex.id, at.toISOString()]);
       else await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [p.id, at.toISOString()]);
       await q(`update post set review='approved' where id=$1`, [p.id]);   // запланований = затверджений
-      return `🗓 ${short(p.id)} заплановано на ${fmtWhen(at, tz)}: ${publishPlanLine(publishPlan(chNow, p.content))}.${ex ? " Наявний слот перенесено." : ""}`;
+      const fcPlan = commentPlanLines({ ...p, channels: chNow }, on, await commentStates(p.id), await alreadySentNetworks(p.id), await metaGranted(ws));
+      return `🗓 ${short(p.id)} заплановано на ${fmtWhen(at, tz)}: ${publishPlanLine(publishPlan(chNow, p.content))}.${ex ? " Наявний слот перенесено." : ""}`
+        + (fcPlan.length ? "\n" + fcPlan.join("\n") : "");
     },
   },
   {
@@ -1322,6 +1420,49 @@ export const TOOLS: ToolDef[] = [
       const p = await findPost(ws, a.id);
       const n = await unschedulePost(p.id);
       return n ? `${short(p.id)}: знято з розкладу (${n} ${n === 1 ? "слот" : n < 5 ? "слоти" : "слотів"}). Пост лишився в чернетках.` : `${short(p.id)} у розкладі не стояв.`;
+    },
+  },
+  {
+    name: "send_first_comment",
+    title: "Дослати перший коментар",
+    description: "Поставити перший коментар під постом, який УЖЕ опубліковано: коментар дописали після публікації, раніше не було дозволу або він не вийшов. Можна одразу передати новий текст (text). Іде в Instagram, Facebook, LinkedIn і Threads - туди, куди пост уже вийшов і де коментаря ще нема; другого коментаря не буде. Для ще не опублікованого поста нічого робити не треба: коментар піде сам одразу після публікації.",
+    properties: {
+      id: S("Id поста."),
+      text: S("Новий текст спільного першого коментаря (необовʼязково - інакше береться вже збережений)."),
+    },
+    required: ["id"],
+    run: async (ws, a) => {
+      const p = await findPost(ws, a.id);
+      if (typeof a.text === "string" && a.text.trim()) await applyFirstComment(p.id, p.channels, a.text, undefined);
+      const sentNets = (await alreadySentNetworks(p.id)).filter((n) => COMMENT_NETS.includes(n));
+      if (!sentNets.length) {
+        const nets = enabledNets(p.channels).filter((n) => COMMENT_NETS.includes(n));
+        throw new ToolError(nets.length
+          ? `${short(p.id)} ще не опубліковано в ${netList(nets)} - коментар піде сам одразу після публікації (publish_post або schedule_post).`
+          : `${short(p.id)} не публікувався в мережі з коментарями (Instagram, Facebook, LinkedIn, Threads).`);
+      }
+      const r = await queueMissingComments(ws, p.id);
+      // надсилаємо у фоні й чекаємо ~30 с (межа проксі - 60 с): Meta може повторювати «пост ще не видно»
+      const work = r.queued.length ? processDueComments(p.id).catch(() => [] as CommentState[]) : Promise.resolve([] as CommentState[]);
+      const waitMs = Number(process.env.MCP_PUBLISH_WAIT_MS) || 30_000;
+      await Promise.race([work, sleep(waitMs)]);
+      const states = await commentStates(p.id);
+      const line = (n: string) => {
+        const st = states.find((x) => x.network === n);
+        if (!st) return null;
+        if (st.status === "sent") return `${NET_LABEL[n]} ✓`;
+        if (st.status === "failed") return `${NET_LABEL[n]} ⚠️ ${st.error || "не вийшов"}`;
+        return `${NET_LABEL[n]} ⏳ ${st.error ? `повторимо автоматично (${oneLine(st.error, 120)})` : "надсилається - стан у get_post"}`;
+      };
+      const out = [
+        r.queued.length ? `💬 ${r.queued.map(line).filter(Boolean).join("; ")}` : "",
+        r.sent.length ? `Уже стоїть раніше: ${netList(r.sent)} - другого коментаря не буде.` : "",
+        r.busy.length ? `Саме зараз надсилається: ${netList(r.busy)}.` : "",
+        r.none.length ? `Без тексту коментаря: ${netList(r.none)} - передай text або first_comment через update_post.` : "",
+      ].filter(Boolean);
+      if (!r.queued.length && !r.sent.length && !r.busy.length)
+        throw new ToolError(`Нічого надсилати: у ${short(p.id)} немає тексту першого коментаря - передай text.`);
+      return `${short(p.id)}: ${out.join("\n")}`;
     },
   },
   {
@@ -1493,6 +1634,7 @@ export const SERVER_INSTRUCTIONS = [
   "Якщо кабінетів кілька (list_workspaces), спершу переконайся, що активний саме той бренд: перемкни switch_workspace або передай workspace у виклику. Кожна відповідь називає кабінет у першому рядку - звіряйся з ним перед публікацією.",
   "Файл з інтернету (пряме посилання) чи невеликий файл у base64 - upload_media; папка з компʼютера - media_upload_link.",
   "Календар: schedule_post відмовить, якщо в ту саму мережу майже в той самий час уже стоїть пост або такий текст уже є (свідомо - force: true); прибрати з календаря - unschedule_post, чернетку назавжди - delete_post (опубліковане не видаляється). publish_post, що відповів «триває у фоні», не повторюй - результат у get_post.",
+  "Перший коментар (посилання, хештеги, заклик окремо від тексту): first_comment у create_draft / update_post, свій для мережі - first_comment_by_network; іде сам одразу після публікації в Instagram, Facebook, LinkedIn і Threads (у Telegram і сторіс - ні). Посилання в тексті LinkedIn і Facebook ріже охоплення - краще в перший коментар. Дописали коментар після публікації - send_first_comment.",
   "Статистика постів (перегляди, лайки, відповіді, репости, підписники, що працює) - analytics.",
   "Факти не вигадуй: бери їх з list_materials / get_material або питай автора.",
   "Перед публікацією показуй текст людині - опублікований пост відкликати не можна.",

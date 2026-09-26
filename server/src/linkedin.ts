@@ -147,3 +147,15 @@ export async function publish(token: string, authorUrn: string, text: string, im
   const id = j.__headers?.get?.("x-restli-id") || j.id || "";
   return { postId: String(id) };
 }
+
+// 💬 Коментар від імені автора під його ж постом (перший коментар: посилання тут не ріже охоплення,
+// на відміну від посилання в тексті поста). Текст коментаря - звичайний, без «Little Text Format».
+export const LI_COMMENT_MAX = 1250;
+export async function comment(token: string, actorUrn: string, objectUrn: string, text: string): Promise<{ id: string }> {
+  const j: any = await liFetch(`${API}/rest/socialActions/${encodeURIComponent(objectUrn)}/comments`, {
+    method: "POST", headers: REST_HEADERS(token),
+    body: JSON.stringify({ actor: actorUrn, object: objectUrn, message: { text: text.slice(0, LI_COMMENT_MAX) } }),
+  });
+  const id = j.__headers?.get?.("x-restli-id") || j.id || j.commentUrn || "";
+  return { id: String(id) };
+}

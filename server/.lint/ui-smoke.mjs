@@ -47,6 +47,17 @@ CAR.set(P5, [{ id: "v5", filename: "big.mp4", kind: "video", duration: 400, widt
 const P7 = "77777777-7777-7777-7777-777777777777";
 const P7POST = { id: P7, content: "Ранок у глемпінгу", review: "review", channels: { instagram: { on: true }, facebook: { on: true }, telegram: { on: true } }, format: "story", rubric: "", intent: "", sent: [], links: {} };
 CAR.set(P7, [{ id: "s1", filename: "s1.jpg", kind: "image" }, { id: "s2", filename: "s2.jpg", kind: "image" }, { id: "s3", filename: "s3.mp4", kind: "video", duration: 6 }]);
+// 💬 перший коментар: P8 - чернетка (Instagram, LinkedIn, Telegram), P9 - уже вийшов в Instagram і
+// LinkedIn; коментар в Instagram стоїть, у LinkedIn - не вийшов (стан змінює «Надіслати коментар»)
+const P8 = "88888888-8888-8888-8888-888888888888";
+const P8POST = { id: P8, content: "Три речі, які беремо в похід", review: "review", channels: { instagram: { on: true }, linkedin: { on: true }, telegram: { on: true } }, format: "post", rubric: "", intent: "", first_comment: "Список речей: https://rozum.one/list", sent: [], links: {} };
+CAR.set(P8, [{ id: "c8", filename: "p8.jpg", kind: "image" }]);
+const P9 = "99999999-9999-9999-9999-999999999999";
+const P9POST = { id: P9, content: "Осінь у горах", review: "approved", channels: { instagram: { on: true }, linkedin: { on: true } }, format: "post", rubric: "", intent: "", first_comment: "Маршрут: https://rozum.one/trail", sent: ["instagram", "linkedin"], links: {} };
+CAR.set(P9, [{ id: "c9", filename: "p9.jpg", kind: "image" }]);
+const FC9 = { comments: [{ network: "instagram", status: "sent" }, { network: "linkedin", status: "failed", error: "LinkedIn не дав застосунку дозволу коментувати від імені профілю." }] };
+const fcSends = [];   // POST /posts/:id/first-comment/send
+const postPuts = [];  // PUT /posts/:id - що композер зберіг (текст, перший коментар)
 // заливка частинами: сервер-заглушка тримає «скільки вже прийшло» на кожен uid, як справжній
 const CHUNKS = new Map();
 const chunkPuts = [];
@@ -454,12 +465,13 @@ function handleApi(method, path, body) {
   }
   let m = /^\/posts\/([0-9a-f-]+)\/full$/.exec(path);
   if (m) {
-    const p = m[1] === P4 ? P4POST : m[1] === P5 ? P5POST : m[1] === P7 ? P7POST : (POSTS.find((x) => x.id === m[1]) || POSTS[0]);
+    const p = m[1] === P4 ? P4POST : m[1] === P5 ? P5POST : m[1] === P7 ? P7POST : m[1] === P8 ? P8POST : m[1] === P9 ? P9POST : (POSTS.find((x) => x.id === m[1]) || POSTS[0]);
     return { ...p, image_prompt: "", headline: "", has_base: false, slides_text: "", media: CAR.get(p.id) || (p.media_filename ? [{ id: "c0", filename: p.media_filename }] : []) };
   }
   m = /^\/posts\/([0-9a-f-]+)\/publish-state$/.exec(path);
   if (m) {
-    if (m[1] === P4 || m[1] === P5 || m[1] === P7) return { sent: [], links: {} };
+    if (m[1] === P4 || m[1] === P5 || m[1] === P7 || m[1] === P8) return { sent: [], links: {}, comments: [] };
+    if (m[1] === P9) return { sent: ["instagram", "linkedin"], links: { instagram: "https://www.instagram.com/p/X9/" }, comments: FC9.comments };
     const p = POSTS.find((x) => x.id === m[1]) || POSTS[0];
     return { sent: p.sent || [], links: p.links || {} };
   }
@@ -469,6 +481,16 @@ function handleApi(method, path, body) {
   if (method === "POST" && m) return { ok: true, channels: { telegram: { on: true, text: "TG-версія" }, threads: { on: true, text: "TH-версія" } } };
   m = /^\/posts\/([0-9a-f-]+)\/channels$/.exec(path);
   if (method === "POST" && m) { chanSaves.push({ id: m[1], channels: body && body.channels }); return { ok: true }; }
+  m = /^\/posts\/([0-9a-f-]+)\/first-comment\/send$/.exec(path);
+  if (method === "POST" && m) {
+    fcSends.push(m[1]);
+    // як справжній сервер: у черзі лише мережа, де коментаря ще нема; далі він «надсилається» й стоїть
+    FC9.comments = [{ network: "instagram", status: "sent" }, { network: "linkedin", status: "sending" }];
+    setTimeout(() => { FC9.comments = [{ network: "instagram", status: "sent" }, { network: "linkedin", status: "sent" }]; }, 400);
+    return { ok: true, queued: ["linkedin"], sent: ["instagram"], none: [], busy: [] };
+  }
+  m = /^\/posts\/([0-9a-f-]+)$/.exec(path);
+  if (method === "PUT" && m) { postPuts.push({ id: m[1], body }); return { ok: true }; }
   if (method === "POST" && path === "/ab/generate") return AB_RESULT;
   if (method === "POST" && path === "/brand/context-fix") {
     aiJobPolls = 0;
@@ -2002,6 +2024,115 @@ const run = async () => {
     // матеріал → пост іде джобою і одразу відкриває редактор із написаним текстом
     await tgPage.waitForSelector(".sheet #et", { timeout: 15000 });
     return (await tgPage.$eval(".sheet #et", (el) => el.value.length > 5));
+  });
+
+  await check("fcMetaExtras", async () => {
+    // 💬 дозволи Meta на коментарі й статистику - окремими кнопками в картці Facebook + Instagram;
+    // наданий дозвіл - «✓ дозволено», кнопка веде у вікно Meta саме з ?add=<що>
+    API["GET /integrations/meta"] = { configured: true, hasToken: true, pageName: "Глемпінг", igUsername: "kemp", expiresAt: null, extras: { comments: false, insights: true }, granted: [] };
+    const st = await page.evaluate(async () => {
+      window.__popups = []; window.connectPopup = (u) => { window.__popups.push(u); return false; };
+      selectView("settings"); setSTab("channels"); await loadMeta();
+      const ex = document.getElementById("mtExtras");
+      const btn = ex && ex.querySelector('[data-mtadd="comments"]'); if (btn) btn.click();
+      return { shown: !!ex && ex.style.display !== "none", rows: ex ? ex.querySelectorAll(".card").length : 0,
+        commentsBtn: !!btn && /Дозволити коментарі/.test(btn.textContent), insightsOk: !!ex && /Перегляди постів Facebook[\s\S]*✓ дозволено/.test(ex.textContent),
+        insightsBtn: !!(ex && ex.querySelector('[data-mtadd="insights"]')), popups: window.__popups };
+    });
+    const good = st.shown && st.rows === 2 && st.commentsBtn && st.insightsOk && !st.insightsBtn && st.popups.length === 1 && st.popups[0] === "/api/integrations/meta/connect?add=comments";
+    if (!good) console.log("   ↳ fcMetaExtras:", JSON.stringify(st));
+    return good;
+  });
+
+  await check("fcComposer", async () => {
+    // композер: коментар у прев'ю кожної мережі так, як його побачать під постом; Telegram - чесно «не
+    // піде»; «без коментаря тут» і «↺ як у всіх» для однієї мережі; лічильник - під найсуворішу межу
+    // (LinkedIn 1250); попередження, що Meta ще не дала дозволу (стан з попередньої перевірки)
+    await page.evaluate(() => { window.__cs2 = { ...ChanStatus }; ChanStatus.instagram = true; ChanStatus.linkedin = true; });
+    await closeComposers();
+    await page.evaluate((id) => openComposer(id), P8);
+    await page.waitForSelector(".cmp-ov #cmpFc", { timeout: 6000 });
+    await page.waitForFunction(() => /дозволу на коментарі/.test((document.querySelector("#cmpFcState") || {}).textContent || ""), undefined, { timeout: 6000 }).catch(() => {});
+    const st = await page.evaluate(() => {
+      // телефон мережі - перший .phone після її мітки .pv-label
+      const ph = (k) => { const l = [...document.querySelectorAll("#cmpPrev .pv-label")].find((x) => x.textContent === k); let n = l && l.nextElementSibling; while (n && !n.classList.contains("phone")) n = n.nextElementSibling; return n; };
+      const igPh = ph("Instagram"), liPh = ph("LinkedIn"), tgPh = ph("Telegram");
+      return { val: document.querySelector("#cmpFc").value,
+        ig: igPh && (igPh.querySelector(".pv-fc .pv-fc-t") || {}).textContent, li: liPh && (liPh.querySelector(".pv-fc .pv-fc-t") || {}).textContent,
+        tg: tgPh && (tgPh.querySelector(".pv-fc-off") || {}).textContent, cnt: document.querySelector("#cmpFcCnt").textContent,
+        chips: [...document.querySelectorAll("#cmpFcNets .fcchip")].map((x) => x.textContent + (x.classList.contains("off") ? "(off)" : "")).join("|"),
+        warn: document.querySelector("#cmpFcState").textContent };
+    });
+    // Instagram - без коментаря тут; прев'ю й чіп це показують; потім ↺ повертає спільний
+    await page.evaluate(() => document.querySelector('#cmpPrev [data-fcoff="instagram"]').click());
+    const off = await page.evaluate(() => ({ note: [...document.querySelectorAll("#cmpPrev .pv-fc-off")].map((x) => x.textContent).join("|"),
+      chips: [...document.querySelectorAll("#cmpFcNets .fcchip")].map((x) => x.textContent + (x.classList.contains("off") ? "(off)" : "")).join("|") }));
+    await page.evaluate(() => document.querySelector('#cmpPrev [data-fcreset="instagram"]').click());
+    const back = await page.evaluate(() => document.querySelectorAll("#cmpPrev .pv-fc").length);
+    // задовгий для LinkedIn - лічильник червоний саме з межею LinkedIn
+    await page.evaluate(() => { const t = document.querySelector("#cmpFc"); t.value = "я".repeat(1300); t.dispatchEvent(new Event("input")); });
+    const long = await page.evaluate(() => ({ cnt: document.querySelector("#cmpFcCnt").textContent, red: document.querySelector("#cmpFcCnt").style.color.includes("danger"),
+      liWarn: /1300\/1250 - задовгий для LinkedIn/.test(document.querySelector("#cmpPrev").textContent) }));
+    await page.evaluate(() => { const t = document.querySelector("#cmpFc"); t.value = "  Коротко: https://x  "; t.dispatchEvent(new Event("input")); });
+    postPuts.length = 0; chanSaves.length = 0;
+    await page.evaluate(() => document.querySelector("#cmpSave").click());
+    await page.waitForFunction(() => /збережено/.test((document.querySelector(".cmp-ov #cmpMsg") || {}).textContent || ""), undefined, { timeout: 6000 }).catch(() => {});
+    const put = postPuts.find((x) => x.id === P8);
+    const good = st.val === "Список речей: https://rozum.one/list" && st.ig && st.ig.includes("Список речей") && st.li && st.li.includes("Список речей")
+      && /у Telegram коментар не піде/.test(st.tg || "") && st.cnt === "36/1250 (LinkedIn)" && st.chips === "Telegram(off)|✓ Instagram|✓ LinkedIn"
+      && /Instagram ще не дали дозволу на коментарі/.test(st.warn)
+      && /без першого коментаря в Instagram/.test(off.note) && off.chips === "Telegram(off)|Instagram(off)|✓ LinkedIn" && back === 2
+      && long.cnt === "1300/1250 (LinkedIn)" && long.red && long.liWarn
+      && !!put && put.body.first_comment === "  Коротко: https://x  ";
+    if (!good) console.log("   ↳ fcComposer:", JSON.stringify({ st, off, back, long, put }));
+    await closeComposers();
+    await page.evaluate(() => { Object.assign(ChanStatus, window.__cs2); });
+    return good;
+  });
+
+  await check("fcSend", async () => {
+    // опублікований пост: Instagram - «✓ опубліковано», LinkedIn - «не вийшов» із причиною й кнопкою
+    // «↻ Надіслати коментар (LinkedIn)»; після натискання стан перечитується, аж поки коментар не стоїть
+    API["GET /integrations/meta"] = { configured: true, hasToken: true, pageName: "Глемпінг", igUsername: "kemp", expiresAt: null, extras: { comments: true, insights: true }, granted: [] };
+    await page.evaluate(() => { window.__cs3 = { ...ChanStatus }; ChanStatus.instagram = true; ChanStatus.linkedin = true; });
+    await closeComposers();
+    await page.evaluate((id) => openComposer(id), P9);
+    await page.waitForSelector(".cmp-ov #cmpFcSend", { timeout: 6000 });
+    const before = await page.evaluate(() => ({ btn: document.querySelector("#cmpFcSend").textContent,
+      prev: document.querySelector("#cmpPrev").textContent.replace(/\s+/g, " "),
+      acts: document.querySelectorAll('#cmpPrev [data-fcedit="instagram"], #cmpPrev [data-fcoff="instagram"]').length }));
+    await page.evaluate(() => document.querySelector("#cmpFcSend").click());
+    await page.waitForFunction(() => /коментар під постом ✓/.test((document.querySelector(".cmp-ov #cmpMsg") || {}).textContent || ""), undefined, { timeout: 12000 }).catch(() => {});
+    const after = await page.evaluate(() => ({ msg: document.querySelector(".cmp-ov #cmpMsg").textContent, btn: !!document.querySelector("#cmpFcSend"),
+      chips: [...document.querySelectorAll("#cmpFcNets .fcchip")].map((x) => x.textContent).join("|") }));
+    const good = before.btn === "↻ Надіслати коментар (LinkedIn)" && /✓ опубліковано/.test(before.prev) && /⚠ не вийшов: LinkedIn не дав/.test(before.prev)
+      && before.acts === 0 && fcSends.length === 1 && fcSends[0] === P9 && /коментар під постом ✓/.test(after.msg) && !after.btn && after.chips === "💬✓ Instagram|💬✓ LinkedIn";
+    if (!good) console.log("   ↳ fcSend:", JSON.stringify({ before, after, fcSends }));
+    await closeComposers();
+    await page.evaluate(() => { Object.assign(ChanStatus, window.__cs3); });
+    API["GET /integrations/meta"] = { connected: false };
+    return good;
+  });
+
+  await check("fcStudio", async () => {
+    // картка Студії: коментар не вийшов - червоний «💬 ⚠», клік веде в композер (там причина й кнопка)
+    const st = await page.evaluate(async () => {
+      selectView("create"); setCTab("posts"); await loadStudioPosts();
+      const keep = [StudioFilter, StudioRubric, StudioFormat, StudioOrigin];
+      StudioFilter = "all"; StudioRubric = ""; StudioFormat = ""; StudioOrigin = "";
+      const id = "abababab-abab-abab-abab-abababababab";
+      Finals.push({ id, content: "Пост із коментарем, що не вийшов", review: "approved", channels: { instagram: { on: true } }, first_comment: "x", comment: { failed: true, sent: false }, sent: ["instagram"], links: {}, format: "post" });
+      Finals.push({ id: id.replace(/a/g, "c"), content: "Пост, коментар стоїть", review: "approved", channels: { instagram: { on: true } }, first_comment: "x", comment: { failed: false, sent: true }, sent: ["instagram"], links: {}, format: "post" });
+      StudioFilter = "published"; renderStudio();
+      const tag = [...document.querySelectorAll('.pcard[data-post="' + id + '"] .ptag')].find((x) => x.textContent.includes("💬"));
+      const okTag = [...document.querySelectorAll('.pcard[data-post="' + id.replace(/a/g, "c") + '"] .ptag')].find((x) => x.textContent.includes("💬"));
+      const out = { tag: tag ? tag.textContent : null, a: tag ? tag.dataset.a : null, okTag: okTag ? okTag.textContent : null };
+      Finals.splice(-2, 2); [StudioFilter, StudioRubric, StudioFormat, StudioOrigin] = keep; renderStudio();
+      return out;
+    });
+    const good = st.tag === "💬 ⚠" && st.a === "composer" && st.okTag === "💬 ✓";
+    if (!good) console.log("   ↳ fcStudio:", JSON.stringify(st));
+    return good;
   });
 
   // 🗑 Видалення бренду. Раніше в «Небезпечній зоні» була лише «Видалити акаунт», і її натиснули,

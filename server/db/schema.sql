@@ -850,3 +850,30 @@ update post_metric set reach = views, replies = null
  where network = 'instagram' and measured_at is null and reach is null and views is not null;
 -- решта (Threads і Instagram) знята тоді ж, коли й спроба
 update post_metric set measured_at = fetched_at where measured_at is null and views is not null;
+
+-- 💬 Перший коментар (п.4 дорожньої карти). Одразу після публікації мережа отримує коментар від імені
+-- автора: хештеги для Instagram, посилання для LinkedIn і Facebook (посилання в самому тексті там
+-- ріже охоплення), заклик для Threads. Текст - `post.first_comment` (спільний) або свій для мережі в
+-- `post.channels.<мережа>.first_comment` (порожній рядок = у цій мережі без коментаря).
+alter table post add column if not exists first_comment text;
+-- Один коментар на пост і мережу (unique): повтор публікації, автопостер і кнопка «надіслати ще раз»
+-- не можуть дати два. target_id - id опублікованого поста в мережі, під яким коментар.
+create table if not exists post_comment (
+  id          uuid primary key default gen_random_uuid(),
+  post_id     uuid not null references post(id) on delete cascade,
+  network     text not null,                     -- instagram | facebook | linkedin | threads
+  target_id   text not null,
+  message     text not null,
+  status      text not null default 'pending',   -- pending | sending | sent | failed
+  external_id text,                              -- id коментаря в мережі
+  error       text,
+  attempts    int  not null default 0,
+  due_at      timestamptz not null default now(),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  unique (post_id, network)
+);
+create index if not exists idx_post_comment_due on post_comment(status, due_at);
+-- Дозволи, які людина реально надала застосунку Meta (з /me/permissions після кожного підключення).
+-- NULL = підключено до того, як ми це памʼятали: тоді просто пробуємо, а відмову перекладаємо людською.
+alter table meta_config add column if not exists granted text;

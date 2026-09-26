@@ -18,6 +18,7 @@ import { logEvent } from "./log.js";
 import { startJob } from "./jobs.js";
 import { ensurePostDigest } from "./memory.js";
 import { postMediaList } from "./slides.js";
+import { commentAfterPublish, commentFor } from "./comments.js";
 
 export async function thValidToken(ws: string): Promise<{ token: string; userId: string } | null> {
   const c = await one<{ threads_user_id: string | null; access_token: string | null; token_expires_at: string | null }>(
@@ -35,7 +36,8 @@ export async function thValidToken(ws: string): Promise<{ token: string; userId:
   return { token: c.access_token, userId: c.threads_user_id };
 }
 
-export type PubResult = { channel: string; status: "sent" | "error" | "skipped"; error?: string; note?: string };
+// comment - перший коментар під щойно опублікованим постом (якщо для мережі його задано)
+export type PubResult = { channel: string; status: "sent" | "error" | "skipped"; error?: string; note?: string; comment?: { status: string; error?: string } };
 
 // Мережі, у які сервіс реально публікує. У `post.channels` бувають службові ключі (manual_adapt,
 // reel_caption) і сміття на кшталт «all» із майстер-плану: без цього фільтра такий ключ пролітав
@@ -162,8 +164,8 @@ export function publishPostToChannels(ws: string, postId: string, onlyNets?: str
   return tracked(postId, () => publishPostToChannelsNow(ws, postId, onlyNets));
 }
 async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: string[]): Promise<PubResult[]> {
-  const post = await one<{ content: string; channels: any; format: string | null }>(
-    `select p.content, p.channels, p.intent, p.format from post p
+  const post = await one<{ content: string; channels: any; format: string | null; first_comment: string | null }>(
+    `select p.content, p.channels, p.intent, p.format, p.first_comment from post p
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
   if (!post) throw new Error("пост не знайдено");
@@ -235,6 +237,8 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
   ]);
   for (const k of enabled) {
     if (sentSet.has(k)) { results.push({ channel: k, status: "skipped" }); continue; } // уже опубліковано в цю мережу
+    // id щойно опублікованого поста в мережі - під ним піде перший коментар (Telegram коментарів не має)
+    let target = "";
     try {
       if (k === "telegram") {
         if (!tgc?.bot_token) throw new Error("Telegram не підключено");
@@ -364,9 +368,11 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
             if (pl) await q(`update threads_publish set permalink=$2 where id=$1`, [reserved.id, pl]);
           } catch { /* доберемо в /publish-state */ }
         }
-        // CTA-гілка з затримкою: лінк/кодове слово доклеюємо, коли пост уже розганяється
+        target = rootId;
+        // CTA-гілка з затримкою: лінк/кодове слово доклеюємо, коли пост уже розганяється. Якщо в поста
+        // є свій перший коментар для Threads, він і є цим закликом - друга відповідь від автора зайва.
         const delayMin = Number(strat.cta_min || 0);
-        if (delayMin > 0) {
+        if (delayMin > 0 && !commentFor({ ...post, channels: ch }, "threads")) {
           const cta = await threadsCtaText(ws);
           if (cta) await q(
             `insert into threads_reply_job(workspace_id,post_id,root_media_id,reply_text,due_at)
@@ -387,6 +393,7 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
             // відео Сторінки: Meta сама тягне файл за адресою; вертає id відео (без id сторінки)
             const rv = await meta.publishVideoToPage(mt.page_id, mt.page_token, textOf(k), videoUrl);
             await q(`update meta_publish set external_id=$2, status='sent', permalink=nullif($3,'') where id=$1`, [reserved.id, rv.id, fbVideoLink(rv.id)]);
+            target = rv.id;
           } else {
             const r = carousel ? await meta.publishMultiPhotoToPage(mt.page_id, mt.page_token, textOf(k), imageUrls)
               : imageUrl ? await meta.publishPhotoToPage(mt.page_id, mt.page_token, textOf(k), imageUrl)
@@ -394,6 +401,7 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
             const fbId = (r as any).post_id || r.id;
             // id FB-поста вже містить id сторінки, тож лінк збирається без додаткового запиту
             await q(`update meta_publish set external_id=$2, status='sent', permalink=nullif($3,'') where id=$1`, [reserved.id, fbId, fbLink(fbId)]);
+            target = fbId;
           }
         } catch (e: any) { await q(`delete from meta_publish where id=$1`, [reserved.id]); throw e; }
       } else if (k === "instagram") {
@@ -416,6 +424,7 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
             ? await meta.publishCarouselToInstagram(mt.ig_user_id, mt.page_token, safeUrls, textOf(k))
             : await meta.publishToInstagram(mt.ig_user_id, mt.page_token, safeUrls[0], textOf(k));
           await q(`update meta_publish set external_id=$2, status='sent' where id=$1`, [reserved.id, r.mediaId]);
+          target = r.mediaId;
           // permalink IG - лише окремим запитом; збій не критичний (доберемо лениво в /publish-state)
           try {
             const pl = await meta.mediaPermalink(r.mediaId, mt.page_token);
@@ -439,9 +448,21 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
           // URN поста → лінк збирається детерміновано, без додаткового запиту
           await q(`update linkedin_publish set external_id=$2, status='sent', permalink=nullif($3,'') where id=$1`,
             [reserved.id, r.postId || null, liLink(r.postId || null)]);
+          target = r.postId || "";
         } catch (e: any) { await q(`delete from linkedin_publish where id=$1`, [reserved.id]); throw e; }
       }
-      results.push({ channel: k, status: "sent" });
+      // 💬 перший коментар: пост уже в мережі, тож збій коментаря НЕ робить публікацію помилковою -
+      // він окремим станом поруч (повтор - воркер або кнопка «Надіслати коментар»)
+      let cm: { status: string; error?: string } | undefined;
+      if (target) {
+        try {
+          const st = await commentAfterPublish(postId, k, target);
+          if (st) cm = { status: st.status, ...(st.error ? { error: st.error } : {}) };
+        } catch (e: any) {
+          await logEvent("warn", "comment", `перший коментар не поставлено в чергу: ${e.message}`, { ws, postId });
+        }
+      }
+      results.push({ channel: k, status: "sent", ...(cm ? { comment: cm } : {}) });
     } catch (e: any) { results.push({ channel: k, status: "error", error: e.message }); }
   }
   // 🧠 памʼять контенту: щойно опублікований пост дистилюється в структурований артефакт (гачок,

@@ -38,6 +38,8 @@ body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,
 .pill.warn{color:var(--warn);border-color:var(--warn)}
 .pill.bad{color:var(--bad);border-color:var(--bad)}
 textarea{width:100%;min-height:150px;padding:11px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);font:inherit;resize:vertical}
+textarea.fc{min-height:64px;font-size:13.5px}
+.fclab{font-size:12.5px;font-weight:600;margin:12px 0 5px}
 input.txt{width:100%;padding:10px 11px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--fg);font:inherit}
 .nets{display:flex;gap:7px;flex-wrap:wrap;margin:11px 0}
 .net{padding:7px 12px;border-radius:20px;border:1px solid var(--line);background:transparent;color:var(--muted);font-size:13px;cursor:pointer}
@@ -325,6 +327,7 @@ function drawEditor() {
     + '</div>'
     + (p.filename ? '<button class="go ghost" id="aDelPic">🗑 ' + (isVid(p) ? 'Прибрати відео' : (p.media || []).length > 1 ? 'Прибрати всі фото' : 'Прибрати фото') + '</button>' : '')
     + '<div class="nets" id="enets">' + netBtns + '</div>'
+    + fcBlock(p)
     + (p.scheduled_at ? '<div class="meta"><span class="pill warn">🗓 ' + fmtWhen(p.scheduled_at) + '</span>'
         + '<button class="back" id="aUnsched">скасувати</button></div>' : '')
     + (links ? '<div class="meta">' + links + '</div>' : '')
@@ -363,6 +366,7 @@ function drawEditor() {
     await api('/post/' + cur.id + '/schedule', { method: 'DELETE' });
     cur.scheduled_at = null; drawEditor();
   };
+  if ($('aFc')) $('aFc').onclick = sendComment;
   if ($('aPub')) $('aPub').onclick = doPublish;
   if ($('aWhen')) $('aWhen').onclick = drawWhen;
   if ($('aAppr')) $('aAppr').onclick = async () => {
@@ -381,9 +385,51 @@ function drawEditor() {
 async function saveText() {
   const el = $('et'); if (!el || !cur) return;
   const t = el.value.trim();
-  if (!t || t === cur.content) return;
-  cur.content = t;
-  try { await api('/post/' + cur.id, { method: 'PUT', body: JSON.stringify({ text: t }) }); } catch (e) { /* покажемо на наступній дії */ }
+  const fc = $('efc') ? $('efc').value.trim() : (cur.first_comment || '');
+  const body = {};
+  if (t && t !== cur.content) { body.text = t; cur.content = t; }
+  if (fc !== (cur.first_comment || '')) { body.first_comment = fc; cur.first_comment = fc || null; }
+  if (!Object.keys(body).length) return;
+  try { await api('/post/' + cur.id, { method: 'PUT', body: JSON.stringify(body) }); } catch (e) { /* покажемо на наступній дії */ }
+}
+
+// 💬 перший коментар: іде під пост одразу після публікації (Instagram, Facebook, LinkedIn, Threads).
+// Telegram коментарів через бота не має (вони живуть в окремій групі обговорення), сторіс - теж.
+const FC_NETS = ['instagram', 'facebook', 'linkedin', 'threads'];
+function fcBlock(p) {
+  if (p.format === 'story') return '';
+  const cs = p.comments || [];
+  const st = cs.map((c) => {
+    const n = NETNAME[c.network] || c.network;
+    if (c.status === 'sent') return '<span class="pill ok">💬 ' + n + ' ✓</span>';
+    if (c.status === 'failed') return '<span class="pill bad" title="' + esc(c.error || '') + '">💬 ' + n + ': не вийшов</span>';
+    return '<span class="pill warn">💬 ' + n + ': надсилається…</span>';
+  }).join(' ');
+  const errs = cs.filter((c) => c.status === 'failed' && c.error).map((c) => '<div class="hint">⚠️ ' + esc(c.error) + '</div>').join('');
+  // дописали коментар після публікації або він не вийшов - дослати в ті мережі, куди пост уже пішов
+  const sentFc = (p.sent || []).filter((k) => FC_NETS.includes(k));
+  const missing = sentFc.filter((k) => !cs.some((c) => c.network === k && (c.status === 'sent' || c.status === 'sending')));
+  return '<div class="fclab">💬 Перший коментар</div>'
+    + '<textarea class="fc" id="efc" placeholder="Необовʼязково: посилання, хештеги чи заклик - зʼявиться першим коментарем під постом">' + esc(p.first_comment || '') + '</textarea>'
+    + '<div class="hint">Instagram, Facebook, LinkedIn, Threads. У Telegram коментар не йде.</div>'
+    + (st ? '<div class="meta">' + st + '</div>' : '') + errs
+    + (missing.length ? '<button class="go ghost" id="aFc">💬 Надіслати коментар (' + missing.map((k) => NETNAME[k] || k).join(', ') + ')</button>' : '');
+}
+async function sendComment() {
+  await saveText();
+  if (!(cur.first_comment || '').trim()) { $('em').textContent = '⚠️ Спершу напиши текст коментаря'; return; }
+  $('em').textContent = '💬 Надсилаю коментар…';
+  try {
+    await api('/post/' + cur.id + '/first-comment', { method: 'POST', body: '{}' });
+    // надсилання йде у фоні: кілька разів перечитуємо стан, поки мережі не відповіли
+    for (let i = 0; i < 6; i++) {
+      await new Promise((r) => setTimeout(r, 1500));
+      const fresh = await api('/post/' + cur.id);
+      cur.comments = fresh.comments || [];
+      if (!cur.comments.some((c) => c.status === 'sending' || (c.status === 'pending' && !c.error))) break;
+    }
+    haptic('success'); drawEditor();
+  } catch (e) { $('em').textContent = '⚠️ ' + e.message; }
 }
 
 async function uploadPhoto(e) {
