@@ -79,3 +79,14 @@ test("розкладка: простирадло ріжеться з «…» і 
 test("розкладка: обкладинка крупніша за звичайний слайд", () => {
   assert.ok(layoutSlide(1024, 1280, "Обіцянка", "", true).titleFs > layoutSlide(1024, 1280, "Обіцянка", "Тіло", false).titleFs);
 });
+
+test("сторіс: «Кадр N» розбирається, текст - у безпечній зоні 9:16 (без верхніх 16% і нижніх 22%)", () => {
+  const p = parseSlides("Кадр 1: Ранок у глемпінгу\nКадр 2: Кава на терасі\n**Кадр 3:** Пиши в Direct");
+  assert.deepEqual(p.slides, ["Ранок у глемпінгу", "Кава на терасі", "Пиши в Direct"]);
+  const W = 1080, H = 1920;
+  const L = layoutSlide(W, H, "Заголовок сторіс", "Тіло кадру ".repeat(90), false, true);
+  assert.ok(L.box.y >= Math.round(H * 0.16) && L.box.y + L.box.h <= Math.round(H * 0.78), "поле тексту не заходить під смужки згори й поле відповіді знизу");
+  assert.ok(L.blockH <= L.box.h, "текст влазить у безпечну зону");
+  const feed = layoutSlide(W, H, "Заголовок", "", false);
+  assert.ok(feed.box.h > L.box.h, "у звичайного кадру поле більше, ніж у сторіс");
+});

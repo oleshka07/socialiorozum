@@ -175,6 +175,66 @@ export async function publishReelToInstagram(igUserId: string, pageToken: string
   return igPublishContainer(igUserId, pageToken, c.id);
 }
 
+// 📱 Сторіс Instagram: контейнер STORIES з image_url або video_url - без підпису (у сторіс його нема,
+// текст має бути на самому кадрі), далі той самий шлях: чекаємо FINISHED → media_publish.
+// Одна сторіс = один кадр; відео в сторіс Instagram - до 60 с.
+export async function publishStoryToInstagram(igUserId: string, pageToken: string, media: { imageUrl?: string; videoUrl?: string }) {
+  const body = new URLSearchParams({ media_type: "STORIES", access_token: pageToken });
+  if (media.videoUrl) body.set("video_url", media.videoUrl); else body.set("image_url", String(media.imageUrl || ""));
+  const c = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body,
+  });
+  await igWaitFinished(c.id, pageToken, media.videoUrl ? { tries: 60, everyMs: 5000, what: "відео" } : undefined);
+  return igPublishContainer(igUserId, pageToken, c.id);
+}
+
+// 📱 Сторіс Facebook-Сторінки, фото: спершу фото НЕопублікованим (published=false, у стрічці не
+// зʼявиться), потім /photo_stories з його id.
+export async function publishPhotoStoryToPage(pageId: string, pageToken: string, imageUrl: string): Promise<{ postId: string }> {
+  const form = { "Content-Type": "application/x-www-form-urlencoded" };
+  const ph = await fbFetch<{ id: string }>(`${GRAPH}/${pageId}/photos`, {
+    method: "POST", headers: form, body: new URLSearchParams({ url: imageUrl, published: "false", access_token: pageToken }),
+  });
+  const r = await fbFetch<{ success?: boolean; post_id?: string }>(`${GRAPH}/${pageId}/photo_stories`, {
+    method: "POST", headers: form, body: new URLSearchParams({ photo_id: ph.id, access_token: pageToken }),
+  });
+  return { postId: String(r.post_id || "") };
+}
+
+// 📱 Сторіс Facebook-Сторінки, відео: /video_stories start → upload_url на rupload.facebook.com →
+// туди заголовок file_url (Meta тягне файл сама) → чекаємо завершення завантаження → finish.
+// ⚠️ Шлях саме через upload_url: запит на graph.facebook.com із тим самим file_url Meta мовчки
+// ігнорує, і публікація падає з «Problem with file» (помилка 6000).
+export const FB_UPLOAD_HOST = "rupload.facebook.com";
+export async function publishVideoStoryToPage(pageId: string, pageToken: string, videoUrl: string): Promise<{ postId: string }> {
+  const form = { "Content-Type": "application/x-www-form-urlencoded" };
+  const st = await fbFetch<{ video_id: string; upload_url: string }>(`${GRAPH}/${pageId}/video_stories`, {
+    method: "POST", headers: form, body: new URLSearchParams({ upload_phase: "start", access_token: pageToken }),
+  });
+  // токен Сторінки віддаємо ЛИШЕ хосту завантаження Meta: адресу приносить відповідь API, і без цієї
+  // перевірки підмінена адреса забрала б токен собі
+  let up: URL;
+  try { up = new URL(st.upload_url); } catch { throw new Error("Facebook не дав адреси завантаження відео сторіс"); }
+  if (up.protocol !== "https:" || up.hostname !== FB_UPLOAD_HOST) throw new Error("Facebook дав неочікувану адресу завантаження - публікацію сторіс зупинено");
+  const tr = await fetch(st.upload_url, { method: "POST", headers: { Authorization: `OAuth ${pageToken}`, file_url: videoUrl } });
+  const tj: any = await tr.json().catch(() => ({}));
+  if (!tr.ok || tj.success === false || tj.error) throw new Error(`Facebook не прийняв відео сторіс: ${tj?.error?.message || tj?.debug_info?.message || "HTTP " + tr.status}`);
+  for (let i = 0; i < 60; i++) {
+    let s: any = {};
+    try { s = await fbFetch(`${GRAPH}/${st.video_id}?fields=status&access_token=${encodeURIComponent(pageToken)}`); }
+    catch { /* статус ще не віддається */ }
+    const err = s?.status?.uploading_phase?.error?.message || s?.status?.processing_phase?.error?.message;
+    if (err) throw new Error(`Facebook не зміг обробити відео сторіс: ${err}`);
+    if (s?.status?.uploading_phase?.status === "complete") break;
+    if (i === 59) throw new Error("Facebook довго завантажує відео сторіс - спробуй ще раз за кілька хвилин");
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+  const fin = await fbFetch<{ success?: boolean; post_id?: string }>(`${GRAPH}/${pageId}/video_stories`, {
+    method: "POST", headers: form, body: new URLSearchParams({ upload_phase: "finish", video_id: st.video_id, access_token: pageToken }),
+  });
+  return { postId: String(fin.post_id || "") };
+}
+
 // відео-пост у FB-Сторінку (file_url — Meta сама тягне з нашого /media)
 export async function publishVideoToPage(pageId: string, pageToken: string, description: string, videoUrl: string) {
   const body = new URLSearchParams({ file_url: videoUrl, description, access_token: pageToken });

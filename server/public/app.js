@@ -1877,6 +1877,8 @@ function pickVideo(){ return new Promise(async resolve=>{
 // ---------- композер: опублікувати / запланувати ----------
 // ---------- КОМПОЗЕР: повноекранна панель (ліворуч редактор, праворуч мобільне прев'ю) ----------
 const NETLIM={telegram:1024,threads:500,instagram:2200,facebook:2000,linkedin:3000};
+// ⚡ мережі, що приймають сторіс через API (решта для формату «Сторіс» вимикаються)
+const STORY_NETS=['instagram','facebook'];
 // скільки символів мережа показує ДО «… ще»/«показати повністю» (візуальний згин, як у застосунках); telegram - без згину
 const NETFOLD={instagram:125,facebook:280,threads:320,linkedin:210};
 const NETMORE={instagram:'… ще',facebook:'… ще',threads:'Показати повністю',linkedin:'…more'};
@@ -1977,8 +1979,8 @@ async function openComposer(postId, opts){
         +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="dashbtn" id="cmpPhoto" title="Обкладинка: з галереї, з компʼютера, зі стоку чи AI-генерація, текст на фото">🎨 Обкладинка</button><button class="dashbtn" id="cmpAddSlides" title="Кілька фото в одному пості: Instagram і Threads - карусель, Facebook - галерея, Telegram - альбом">＋ Кадри каруселі</button><button class="dashbtn" id="cmpVideo" title="Власне відео: Instagram - Reels, Facebook - відео Сторінки, Threads, Telegram, LinkedIn">🎬 Відео</button></div>'
         +'<div id="cmpMediaWrap" style="margin-top:10px"></div>'
         +'<div id="cmpCarWrap" style="display:none;margin-top:12px;padding:10px 12px;border:1px dashed var(--line);border-radius:10px">'
-          +'<div style="font-size:12px;font-weight:700;margin-bottom:4px">🎠 Сценарій слайдів</div>'
-          +'<div style="font-size:11.5px;color:var(--muted);margin-bottom:6px">Рядки «Слайд 1: …», «Слайд 2: …» → кадри-картинки з великим текстом (безкоштовно). Порожньо - візьму сценарій із тексту поста, а текст стане підписом під каруселлю.</div>'
+          +'<div id="cmpCarTitle" style="font-size:12px;font-weight:700;margin-bottom:4px">🎠 Сценарій слайдів</div>'
+          +'<div id="cmpCarHint" style="font-size:11.5px;color:var(--muted);margin-bottom:6px">Рядки «Слайд 1: …», «Слайд 2: …» → кадри-картинки з великим текстом (безкоштовно). Порожньо - візьму сценарій із тексту поста, а текст стане підписом під каруселлю.</div>'
           +'<textarea id="cmpSlidesTxt" class="txt" style="min-height:110px;font-size:13px" placeholder="Слайд 1: Обіцянка крупно\nСлайд 2: Друга обкладинка\nСлайд 3: Одна думка на слайд\nПідпис: текст під каруселлю"></textarea>'
           +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">'
             +'<select id="cmpCarTheme" class="txt" style="width:auto;padding:6px 9px"><option value="">тема: авто</option><option value="photo">на фото обкладинки</option><option value="dark">темна</option><option value="light">світла</option></select>'
@@ -2036,7 +2038,8 @@ async function openComposer(postId, opts){
   }
   function renderChips(){ const box=ov.querySelector('#cmpChips'); const thOn=!!(C.threads&&C.threads.on&&C.threads.thread);
     box.innerHTML=NETS.map(n=>{ const k=n[0]; const on=C[k]&&C[k].on; const conn=ChanStatus[k]; const sent=sentSet.has(k);
-      const dimmed=thOn&&k!=='threads'; // режим гілки: серія їде ЛИШЕ в Threads, решта мереж затінені
+      const storyOff=isStory()&&!STORY_NETS.includes(k); // сторіс - лише Instagram і Facebook
+      const dimmed=(thOn&&k!=='threads')||storyOff; // режим гілки: серія їде ЛИШЕ в Threads, решта мереж затінені
       const own=hasOwn(k);             // у мережі вже є СВОЯ версія тексту
       const segOff=!conn||sent||dimmed||!on;
       // ✨ = підлаштувати САМЕ цю мережу; ↺ (лише коли є своя версія) = вернути мій текст.
@@ -2048,14 +2051,14 @@ async function openComposer(postId, opts){
       // Мережа УВІМКНЕНА, але не підключена (пост із бота/плану чи канал відключили): чіп мусить лишатись
       // клікабельним, щоб її можна було ЗНЯТИ - інакше «не можу зняти Telegram» (фідбек тестера).
       const lockOff=sent||dimmed||(!conn&&!on);
-      const chip='<button class="netchip'+(on&&!dimmed?' on':'')+(on&&!conn?' warn':'')+'" data-net="'+k+'"'+(lockOff?' disabled':'')+' style="'+(dimmed?'opacity:.35':'')+'" title="'+(sent?'вже опубліковано':(dimmed?'у режимі гілки пост їде лише в Threads (вимкни 🧵, щоб обрати інші мережі)':(conn?'':(on?'мережа не підключена - клік, щоб зняти її з поста':'не підключено'))))+'">'+(sent?'✓ ':'')+(on&&!conn?'⚠ ':'')+n[1]+'</button>';
+      const chip='<button class="netchip'+(on&&!dimmed?' on':'')+(on&&!conn?' warn':'')+'" data-net="'+k+'"'+(lockOff?' disabled':'')+' style="'+(dimmed?'opacity:.35':'')+'" title="'+(sent?'вже опубліковано':(storyOff?'сторіс через API приймають лише Instagram і Facebook':(dimmed?'у режимі гілки пост їде лише в Threads (вимкни 🧵, щоб обрати інші мережі)':(conn?'':(on?'мережа не підключена - клік, щоб зняти її з поста':'не підключено')))))+'">'+(sent?'✓ ':'')+(on&&!conn?'⚠ ':'')+n[1]+'</button>';
       return '<span class="netgrp">'+chip+seg+rev+'</span>'; }).join('');
     box.querySelectorAll('.netchip').forEach(b=>{ if(b.disabled) return; b.onclick=()=>{ const k=b.dataset.net; C[k]=C[k]||{text:''}; C[k].on=!C[k].on; renderChips(); renderPrev(); if(isVideo()) renderMedia(); }; });
     box.querySelectorAll('[data-adapt]').forEach(b=>{ if(b.disabled) return; b.onclick=()=>adaptOne(b.dataset.adapt,b); });
     box.querySelectorAll('[data-revert]').forEach(b=>{ b.onclick=()=>{ const k=b.dataset.revert; if(C[k]) C[k].text=''; C.manual_adapt=true; renderChips(); renderPrev(); setMsg('вернув твій текст для '+netName(k)+' ✓','var(--brand)'); }; });
     // 🧵 режим «Гілкою»: серія повʼязаних постів (root-гачок + відповіді) з ПОВНОГО тексту
     const tw=ov.querySelector('#cmpThreadWrap');
-    if(tw){ const showTh=C.threads&&C.threads.on&&!sentSet.has('threads'); tw.style.display=showTh?'':'none';
+    if(tw){ const showTh=C.threads&&C.threads.on&&!sentSet.has('threads')&&!isStory(); tw.style.display=showTh?'':'none';
       const tb=ov.querySelector('#cmpThread'), nb=ov.querySelector('#cmpThreadNum'), hint=ov.querySelector('#cmpThreadHint');
       tb.classList.toggle('on',thOn);
       nb.style.display=thOn?'':'none'; nb.classList.toggle('on',thOn&&C.threads.number!==false);
@@ -2070,7 +2073,10 @@ async function openComposer(postId, opts){
   function setMedia(list){ media=(list||[]).filter(m=>m&&m.filename); mediaFilename=media.length?media[0].filename:null; }
   async function reorderMedia(ids){ try{ const r=await api('/posts/'+postId+'/slides',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})}); setMedia(r.media); renderMedia(); renderPrev(); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } }
   // 🎬 відео-пост: відео завжди саме (без фото поруч)
-  function isVideo(){ return media.length===1&&media[0].kind==='video'; }
+  // 📱 сторіс: кожен кадр окремою сторіс лише в Instagram і Facebook (інші мережі сторіс через API не приймають)
+  function isStory(){ const fv=ov.querySelector('#cmpFormat'); return !!fv&&fv.value==='story'; }
+  let storySnap=null; // вибір мереж до переходу в сторіс (вертається, якщо формат змінити назад)
+  function isVideo(){ return !isStory()&&media.length===1&&media[0].kind==='video'; }
   // межі мереж для відео - показуємо ДО публікації, для тих мереж, що обрані на пості
   function videoWarn(v){ const on=(k)=>C[k]&&C[k].on&&!sentSet.has(k); const w=[]; const mb=v.size?Math.round(v.size/1048576):0, d=Number(v.duration)||0;
     if(on('telegram')&&v.size>50*1048576) w.push('Telegram не прийме відео понад 50 МБ (це '+mb+' МБ) - стисни його або зніми Telegram');
@@ -2087,10 +2093,12 @@ async function openComposer(postId, opts){
         +(warn?'<div id="cmpVidWarn" style="font-size:11.5px;color:var(--danger);margin-top:4px">⚠ '+esc(warn)+'</div>':'');
       box.querySelector('#cmpVidRm').onclick=async(e)=>{ e.target.disabled=true; try{ const r=await api('/posts/'+postId+'/video',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:null})}); setMedia(r.media); renderMedia(); renderPrev(); setMsg('відео прибрано'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); e.target.disabled=false; } };
       renderCarBlock(); return; }
-    box.innerHTML='<div class="slides-strip">'+media.map((m,i)=>'<div class="slide-th"><img src="/thumb/'+esc(m.filename)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(m.filename)+'\'"><span class="sn">'+(i===0?'обкл.':(i+1))+'</span><button class="sx" data-rm="'+m.id+'" title="Прибрати кадр">✕</button>'
+    const st=isStory();
+    box.innerHTML='<div class="slides-strip">'+media.map((m,i)=>'<div class="slide-th'+(st?' story':'')+'"><img src="/thumb/'+esc(m.filename)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(m.filename)+'\'"><span class="sn">'+(m.kind==='video'?'▶ '+(fmtDur(m.duration)||''):(st?(i+1):(i===0?'обкл.':(i+1))))+'</span><button class="sx" data-rm="'+m.id+'" title="Прибрати кадр">✕</button>'
         +(n>1?'<div class="sm"><button data-mv="'+i+'" data-d="-1"'+(i===0?' disabled':'')+' title="Раніше">‹</button><button data-mv="'+i+'" data-d="1"'+(i===n-1?' disabled':'')+' title="Пізніше">›</button></div>':'')+'</div>').join('')
       +(n<10?'<button class="slide-add" id="cmpAddMore" title="Додати кадри">＋<br>кадр</button>':'')+'</div>'
-      +(n>1?'<div style="font-size:11.5px;color:var(--muted);margin-top:6px">🖼 Карусель: '+n+' кадрів (до 10). Instagram і Threads - карусель, Facebook - галерея, Telegram - альбом, LinkedIn - кілька фото. Перший кадр - обкладинка.</div>':'');
+      +(st?'<div style="font-size:11.5px;color:var(--muted);margin-top:6px">⚡ Сторіс: '+n+' '+(n===1?'кадр':'кадрів')+' (до 10) - кожен піде окремою сторіс в Instagram і Facebook. Фото ріжуться 9:16, відео можна ставити поруч (в Instagram - до 60 с).</div>'
+        :n>1?'<div style="font-size:11.5px;color:var(--muted);margin-top:6px">🖼 Карусель: '+n+' кадрів (до 10). Instagram і Threads - карусель, Facebook - галерея, Telegram - альбом, LinkedIn - кілька фото. Перший кадр - обкладинка.</div>':'');
     box.querySelectorAll('[data-rm]').forEach(b=>b.onclick=async()=>{ b.disabled=true; try{ const r=await api('/posts/'+postId+'/slides/'+b.dataset.rm,{method:'DELETE'}); setMedia(r.media); renderMedia(); renderPrev(); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); b.disabled=false; } });
     box.querySelectorAll('[data-mv]').forEach(b=>b.onclick=()=>{ const i=+b.dataset.mv, j=i+(+b.dataset.d); const ids=media.map(m=>m.id); [ids[i],ids[j]]=[ids[j],ids[i]]; reorderMedia(ids); });
     const more=box.querySelector('#cmpAddMore'); if(more) more.onclick=addSlides;
@@ -2099,12 +2107,18 @@ async function openComposer(postId, opts){
   async function addSlides(){ if(isVideo()){ setMsg('⚠ Відео публікується окремим постом. Щоб зробити карусель, спершу прибери відео (✕).','var(--danger)'); return; }
     const room=10-media.length; if(room<=0){ setMsg('у каруселі вже 10 кадрів - більше Instagram і Telegram не приймають','var(--danger)'); return; }
     const ids=await pickSlides(room); if(!ids||!ids.length) return;
-    setMsg('🖼 додаю кадри…'); try{ const r=await api('/posts/'+postId+'/slides',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaIds:ids})}); setMedia(r.media); renderMedia(); renderPrev(); setMsg(media.length>1?('карусель: '+media.length+' кадрів ✓'):'фото додано ✓','var(--brand)'); }
+    setMsg('🖼 додаю кадри…'); try{ const r=await api('/posts/'+postId+'/slides',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaIds:ids,...(isStory()?{aspect:'9:16'}:{})})}); setMedia(r.media); renderMedia(); renderPrev(); setMsg(media.length>1?('карусель: '+media.length+' кадрів ✓'):'фото додано ✓','var(--brand)'); }
     catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } }
   // блок «Сценарій слайдів»: видно для формату «Карусель» або коли сценарій уже є
   function renderCarBlock(){ const w=ov.querySelector('#cmpCarWrap'); if(!w) return; const fv=ov.querySelector('#cmpFormat');
-    const show=(fv&&fv.value==='carousel')||!!slidesText.trim()||/(^|\n)\s*\**\s*слайд\s*\d/i.test(master);
-    w.style.display=show?'':'none'; }
+    const show=(fv&&(fv.value==='carousel'||fv.value==='story'))||!!slidesText.trim()||/(^|\n)\s*\**\s*(слайд|кадр)\s*\d/i.test(master);
+    w.style.display=show?'':'none';
+    // сторіс: ті самі кадри-картинки, але 9:16 і «Кадр N» (підпису немає - текст поста не чіпається)
+    const st=isStory(), t=w.querySelector('#cmpCarTitle'), hint=w.querySelector('#cmpCarHint'), b=w.querySelector('#cmpCarBuild'), ta=w.querySelector('#cmpSlidesTxt');
+    if(t) t.textContent=st?'⚡ Сценарій кадрів сторіс':'🎠 Сценарій слайдів';
+    if(hint) hint.textContent=st?'Рядки «Кадр 1: …», «Кадр 2: …» → кадри 9:16 з великим текстом (безкоштовно), кожен - окрема сторіс. Текст на кадрі - коротко: підпису в сторіс немає.':'Рядки «Слайд 1: …», «Слайд 2: …» → кадри-картинки з великим текстом (безкоштовно). Порожньо - візьму сценарій із тексту поста, а текст стане підписом під каруселлю.';
+    if(b) b.textContent=st?'🎨 Зібрати кадри':'🎨 Зібрати слайди';
+    if(ta) ta.placeholder=st?'Кадр 1: Ранок у глемпінгу\nКадр 2: Кава на терасі\nКадр 3: Приїжджай - пиши в Direct':'Слайд 1: Обіцянка крупно\nСлайд 2: Друга обкладинка\nСлайд 3: Одна думка на слайд\nПідпис: текст під каруселлю'; }
   // ----- прев'ю мобільне по кожній обраній мережі -----
   const _pvExp=new Set(); // мережі, де натиснуто «… ще» → показуємо повністю
   const pvCap=(k,t)=>{ const fold=NETFOLD[k];
@@ -2122,7 +2136,21 @@ async function openComposer(postId, opts){
     if(k==='threads') return '<div class="pv-row">'+files.map(f=>'<img src="/thumb/'+esc(f)+'">').join('')+'</div>';
     const show=files.slice(0,4), rest=n-4;
     return '<div class="pv-grid">'+show.map((f,j)=>(j===3&&rest>0)?'<div class="more"><img src="/thumb/'+esc(f)+'"><span>+'+rest+'</span></div>':'<div'+(n===3&&j===0?' class="wide"':'')+'><img src="/thumb/'+esc(f)+'"></div>').join('')+'</div>'; }
+  // ⚡ сторіс так, як її покаже Instagram/Facebook: кадр на весь екран, смужки прогресу згори, тап - наступний
+  function pvStory(k){ const n=media.length;
+    if(!n) return '<div class="pv-story empty">немає кадрів - «＋ Кадри» або «🎨 Зібрати кадри»</div>';
+    const i=Math.min(pvIdx['st_'+k]||0,n-1), m=media[i];
+    const bars='<div class="pv-bars">'+media.map((_,j)=>'<i'+(j<=i?' class="on"':'')+'></i>').join('')+'</div>';
+    const body=m.kind==='video'?'<video src="/media/'+esc(m.filename)+'" poster="/thumb/'+esc(m.filename)+'" controls muted playsinline preload="none"></video>':'<img src="/media/'+esc(m.filename)+'">';
+    return '<div class="pv-story">'+bars+body+(i>0?'<button class="pv-nav pv-prev" data-snav="'+k+'" data-d="-1">‹</button>':'')+(i<n-1?'<button class="pv-nav pv-next" data-snav="'+k+'" data-d="1">›</button>':'')+'<span class="pv-cnt">'+(i+1)+'/'+n+'</span></div>'; }
   function renderPrev(){ const box=ov.querySelector('#cmpPrev'); const sel=NETS.filter(n=>C[n[0]]&&C[n[0]].on);
+    if(isStory()){
+      const ss=sel.filter(n=>STORY_NETS.includes(n[0]));
+      box.innerHTML=ss.length?ss.map(n=>'<div class="pv-label" style="background:var('+NETVAR[n[0]]+')">'+n[1]+' · сторіс</div>'+(sentLinks[n[0]]?'<a href="'+esc(sentLinks[n[0]])+'" target="_blank" rel="noopener" class="pv-open">↗ Відкрити</a>':'')+pvStory(n[0])).join('')
+        +'<div class="pv-note">⚡ у сторіс підпису немає - думка має бути на кадрах; кожен кадр піде окремою сторіс і зникне через 24 год</div>'
+        :'<div style="font-size:12px;color:var(--muted);text-align:center">Сторіс ідуть лише в Instagram і Facebook - увімкни їх ліворуч.</div>';
+      box.querySelectorAll('[data-snav]').forEach(b=>b.onclick=()=>{ const k='st_'+b.dataset.snav; pvIdx[k]=Math.max(0,Math.min(media.length-1,(pvIdx[k]||0)+(+b.dataset.d))); renderPrev(); });
+      return; }
     if(!sel.length){ box.innerHTML='<div style="font-size:12px;color:var(--muted);text-align:center">Обери канал ліворуч.</div>'; return; }
     const av=(($('avatar')&&$('avatar').textContent)||'В').slice(0,2);
     box.innerHTML=sel.map(n=>{ const k=n[0]; const t=textOf(k); const lim=NETLIM[k]||2200; const over=t.length>lim; const sent=sentSet.has(k);
@@ -2192,6 +2220,13 @@ async function openComposer(postId, opts){
     openPhotoTool(postId, full.image_prompt||'', async()=>{ try{ const f2=await api('/posts/'+postId+'/full'); setMedia(f2.media); }catch(_){ } renderMedia(); renderPrev(); }); };
   ov.querySelector('#cmpAddSlides').onclick=addSlides;
   ov.querySelector('#cmpVideo').onclick=async()=>{
+    // у сторіс відео - просто ще один кадр (фото поруч можна)
+    if(isStory()){ if(media.length>=10){ setMsg('у сторіс уже 10 кадрів','var(--danger)'); return; }
+      const vid=await pickVideo(); if(!vid) return;
+      setMsg('⚡ додаю відео-кадр…');
+      try{ const r=await api('/posts/'+postId+'/slides',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaIds:[vid]})}); setMedia(r.media); renderMedia(); renderPrev(); setMsg('⚡ відео-кадр додано ✓','var(--brand)'); }
+      catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); }
+      return; }
     if(media.length&&!isVideo()&&!confirm('Відео замінить фото поста ('+media.length+'). Відео публікується окремим постом, без фото поруч. Продовжити?')) return;
     const id=await pickVideo(); if(!id) return;
     setMsg('🎬 ставлю відео…');
@@ -2199,14 +2234,21 @@ async function openComposer(postId, opts){
       setMedia(r.media); renderMedia(); renderPrev(); setMsg('🎬 відео в пості ✓','var(--brand)'); }
     catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } };
   const slTxt=ov.querySelector('#cmpSlidesTxt'); slTxt.value=slidesText; slTxt.addEventListener('input',()=>{ slidesText=slTxt.value; });
-  const fmtSel=ov.querySelector('#cmpFormat'); if(fmtSel) fmtSel.addEventListener('change',renderCarBlock);
+  const fmtSel=ov.querySelector('#cmpFormat');
+  // перехід у сторіс вимикає мережі без сторіс (і вертає їх, якщо формат змінили назад)
+  if(fmtSel) fmtSel.addEventListener('change',()=>{
+    // знімок УСІХ мереж: повернення формату вертає рівно той вибір, що був до сторіс
+    if(isStory()&&!storySnap){ storySnap={}; NETS.forEach(n=>{ storySnap[n[0]]=!!(C[n[0]]&&C[n[0]].on); });
+      NETS.forEach(n=>{ const k=n[0]; if(sentSet.has(k)) return; if(STORY_NETS.includes(k)){ if(ChanStatus[k]){ C[k]=C[k]||{text:''}; C[k].on=true; } } else if(C[k]) C[k].on=false; }); }
+    else if(!isStory()&&storySnap){ NETS.forEach(n=>{ const k=n[0]; if(sentSet.has(k)) return; if(storySnap[k]){ C[k]=C[k]||{text:''}; C[k].on=true; } else if(C[k]) C[k].on=false; }); storySnap=null; }
+    renderChips(); renderMedia(); renderPrev(); renderCarBlock(); });
   ov.querySelector('#cmpCarBuild').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('🎨 збираю слайди…');
     try{ await saveDraft();
       const r=await api('/posts/'+postId+'/carousel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({theme:ov.querySelector('#cmpCarTheme').value,accent:ov.querySelector('#cmpCarAccent').value})});
       setMedia(r.media); if(typeof r.slides_text==='string'){ slidesText=r.slides_text; slTxt.value=slidesText; }
       if(r.captionChanged&&typeof r.content==='string'){ master=r.content; txt.value=master; NETS.forEach(n=>{ if(C[n[0]]&&typeof C[n[0]].text==='string') C[n[0]].text=''; }); }
-      if(fmtSel) fmtSel.value='carousel'; pvIdx.instagram=0; renderChips(); renderMedia(); renderPrev();
-      setMsg('✓ '+r.count+' кадрів'+(r.captionChanged?' · текст поста тепер підпис під каруселлю':'')+(r.truncated&&r.truncated.length?' · ⚠ на кадрах '+r.truncated.join(', ')+' текст обрізано - скороти їх':''),(r.truncated&&r.truncated.length)?'var(--danger)':'var(--brand)');
+      if(fmtSel&&!isStory()) fmtSel.value='carousel'; pvIdx.instagram=0; pvIdx.st_instagram=0; pvIdx.st_facebook=0; renderChips(); renderMedia(); renderPrev();
+      setMsg('✓ '+r.count+' кадрів'+(isStory()?' сторіс':'')+(r.captionChanged?' · текст поста тепер підпис під каруселлю':'')+(r.truncated&&r.truncated.length?' · ⚠ на кадрах '+r.truncated.join(', ')+' текст обрізано - скороти їх':''),(r.truncated&&r.truncated.length)?'var(--danger)':'var(--brand)');
     }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; } };
   // ----- зберегти / адаптувати / публікувати / планувати -----
   async function saveDraft(){ const iv=ov.querySelector('#cmpIntent'), fv=ov.querySelector('#cmpFormat');
@@ -2215,13 +2257,14 @@ async function openComposer(postId, opts){
   ov.querySelector('#cmpSave').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('💾 зберігаю…'); try{ await saveDraft(); setMsg('чернетку збережено ✓','var(--brand)'); try{await loadStudioPosts();}catch(_){} }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; } };
   // формат «Карусель», а кадрів ще нема: інакше сценарій «Слайд 1…Слайд 10» піде підписом під одним фото
   const carouselNotBuilt=()=>{ const fv=ov.querySelector('#cmpFormat'); return fv&&fv.value==='carousel'&&media.length<2; };
-  const carGuard=()=>!carouselNotBuilt()||confirm('Це карусель, але кадрів ще не зібрано (є '+media.length+').\n\nНатисни «🎨 Зібрати слайди» - тоді сценарій стане кадрами, а текст поста підписом.\n\nОпублікувати як звичайний пост?');
+  const carGuard=()=>(isStory()&&!media.length)?confirm('У сторіс немає жодного кадру - публікація не вийде. Додай фото/відео або «🎨 Зібрати кадри».\n\nВсе одно продовжити?'):!carouselNotBuilt()||confirm('Це карусель, але кадрів ще не зібрано (є '+media.length+').\n\nНатисни «🎨 Зібрати слайди» - тоді сценарій стане кадрами, а текст поста підписом.\n\nОпублікувати як звичайний пост?');
   ov.querySelector('#cmpNow').onclick=async(e)=>{ const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('усі обрані канали вже опубліковано','var(--danger)'); return; } if(!carGuard()) return; const b=e.target; b.disabled=true;
     try{
       // Авто-перепаковка мереж без власної версії - АЛЕ лише поки адаптацією не почала керувати
       // людина. Щойно юзер підлаштував (чи вернув ↺) хоч одну мережу вручну, прев'ю = істина:
       // мережі, які він лишив зі своїм текстом, їдуть саме зі своїм текстом.
-      const missing=C.manual_adapt?[]:todo.filter(k=>!hasOwn(k));
+      // у сторіс підпису немає - пакувати текст під мережі нема чого (і платити за це теж)
+      const missing=(C.manual_adapt||isStory())?[]:todo.filter(k=>!hasOwn(k));
       if(missing.length){ setMsg('✨ пакую під канали…'); aiBusy('✨ Пакую пост під кожну мережу…');
         // ⚠️ aiBusy/aiDone - ЛІЧИЛЬНИК: без парного aiDone саме тут банер «Публікую в канали…»
         // лишався висіти назавжди, бо _aiN ніколи не падав до нуля (finally нижче гасить лише СВІЙ виклик)
@@ -2242,7 +2285,7 @@ async function openComposer(postId, opts){
 // крок 2 - текст на фото (шрифт/місце/фон, безкоштовне перенакладання) + перегенерація з коментарем
 async function openPhotoTool(postId, initPrompt, onDone){
   let full={}; try{ full=await api('/posts/'+postId+'/full'); }catch(e){}
-  let aspect='4:5', fn=full.media_filename||null, hasBase=!!full.has_base, headline=full.headline||'';
+  let aspect=full.format==='story'?'9:16':'4:5', fn=full.media_filename||null, hasBase=!!full.has_base, headline=full.headline||'';
   let lastPrompt=(initPrompt||full.image_prompt||'').trim();
   let canRegen=!!(fn&&hasBase&&lastPrompt); // «перегенерувати» має сенс лише коли є промт
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='90';
@@ -2256,7 +2299,7 @@ async function openPhotoTool(postId, initPrompt, onDone){
   function step1(){
     card.innerHTML=header('🖼 Фото · крок 1: джерело')
       +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Формат зображення <span class="qh" title="Один формат працює в усіх мережах - різні розміри вручну не потрібні. 4:5 рекомендуємо: він займає найбільше місця в стрічці Instagram/Facebook і коректно виглядає всюди.">?</span></div>'
-      +'<div style="display:flex;gap:6px" id="ptAsp">'+[['4:5','📱 Для стрічки','вертикальне, займає найбільше місця (рекоменд.)'],['1:1','⬛ Квадрат','універсальне, компактне'],['16:9','🖥 Широке','для обкладинок/десктопу']].map(a=>'<button class="aspchip'+(a[0]===aspect?' on':'')+'" data-a="'+a[0]+'" title="'+a[2]+'" style="flex:1;min-width:96px;display:flex;flex-direction:column;gap:1px;padding:8px 6px;line-height:1.2"><span>'+a[1]+'</span><span style="font-size:10px;opacity:.6">'+a[0]+'</span></button>').join('')+'</div>'
+      +'<div style="display:flex;gap:6px" id="ptAsp">'+[['4:5','📱 Для стрічки','вертикальне, займає найбільше місця (рекоменд.)'],['1:1','⬛ Квадрат','універсальне, компактне'],['16:9','🖥 Широке','для обкладинок/десктопу'],['9:16','⚡ Сторіс','на весь екран телефона - для сторіс']].map(a=>'<button class="aspchip'+(a[0]===aspect?' on':'')+'" data-a="'+a[0]+'" title="'+a[2]+'" style="flex:1;min-width:96px;display:flex;flex-direction:column;gap:1px;padding:8px 6px;line-height:1.2"><span>'+a[1]+'</span><span style="font-size:10px;opacity:.6">'+a[0]+'</span></button>').join('')+'</div>'
       +'<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="ghost" id="ptGallery" style="flex:1;min-width:110px">📎 З галереї</button><button class="ghost" id="ptUpload" style="flex:1;min-width:110px">⬆ Завантажити</button><button class="ghost" id="ptStock" style="flex:1;min-width:110px" title="Безкоштовні фото Pexels під тему поста">🖼 Зі стоку</button><button class="primary" id="ptGenBtn" style="flex:1;min-width:110px">🎨 Згенерувати</button></div>'
       +'<input type="file" id="ptFile" accept="image/*" style="display:none">'
       +'<div id="ptGenBox" style="display:none;margin-top:12px"><label class="fl">Опис зображення (промт)</label><textarea id="ptPrompt" class="txt" rows="3" placeholder="Що на зображенні…">'+esc(lastPrompt)+'</textarea><div class="btnrow" style="margin-top:10px"><button class="primary" id="ptGen">🎨 Малювати (коштує)</button></div></div>'
@@ -2322,7 +2365,7 @@ async function openPhotoTool(postId, initPrompt, onDone){
       +'<div id="cMsg" style="font-size:12px;color:var(--muted);margin-top:6px;min-height:16px"></div>';
     card.querySelector('#ptX').onclick=close;
     const img=card.querySelector('#cimg'), frame=card.querySelector('#cframe');
-    const dims={'1:1':[1,1],'4:5':[4,5],'16:9':[16,9]}; const d=dims[aspect]||[1,1]; const ratio=d[0]/d[1]; // ширина/висота рамки
+    const dims={'1:1':[1,1],'4:5':[4,5],'16:9':[16,9],'9:16':[9,16]}; const d=dims[aspect]||[1,1]; const ratio=d[0]/d[1]; // ширина/висота рамки
     let fx=0,fy=0,fw=0;
     const layout=()=>{ const iw=img.clientWidth, ih=img.clientHeight; const fh=fw/ratio;
       fx=Math.max(0,Math.min(iw-fw,fx)); fy=Math.max(0,Math.min(ih-fh,fy));

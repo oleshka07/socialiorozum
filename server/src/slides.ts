@@ -85,12 +85,13 @@ export async function setPostMediaOrder(ws: string, postId: string, ids: string[
     if (!m) throw new SlideError("Файл не знайдено в медіатеці цього кабінету.");
     if (m.kind !== "image" && m.kind !== "video") throw new SlideError("Підтримуються лише фото й відео.");
   }
-  // 🎬 відео - окремий пост (Reels, відео у Facebook, Threads, Telegram, LinkedIn): поруч із ним фото
-  // не буває - Facebook-галерея й LinkedIn відео не беруть, а мережі з мішаною каруселлю - не всі
-  if (uniq.some((id) => byId.get(id)!.kind === "video") && uniq.length > 1)
-    throw new SlideError("Відео публікується окремим постом: у каруселі поки лише фото. Прибери відео або фото.");
-  const prev = await one<{ media_id: string | null; image_base: string | null }>(`select media_id, image_base from post where id=$1`, [postId]);
+  const prev = await one<{ media_id: string | null; image_base: string | null; format: string | null }>(`select media_id, image_base, format from post where id=$1`, [postId]);
   if (!prev) throw new SlideError("пост не знайдено");
+  // 🎬 відео - окремий пост (Reels, відео у Facebook, Threads, Telegram, LinkedIn): поруч із ним фото
+  // не буває - Facebook-галерея й LinkedIn відео не беруть, а мережі з мішаною каруселлю - не всі.
+  // Виняток - 📱 сторіс: там кожен кадр публікується окремо, тож фото й відео змішуються вільно.
+  if (prev.format !== "story" && uniq.some((id) => byId.get(id)!.kind === "video") && uniq.length > 1)
+    throw new SlideError("Відео публікується окремим постом: у каруселі поки лише фото. Прибери відео або фото (у сторіс змішувати можна).");
   const before = await postMediaList(postId);
   const cover = uniq[0] || null;
   if (cover !== prev.media_id) {

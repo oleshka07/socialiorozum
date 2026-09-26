@@ -22,7 +22,7 @@ import { setPostMediaOrder, MAX_SLIDES, SlideError } from "./slides.js";
 // «Слайд 3:», «**Слайд 3.**», «Slide 3 -», «### Слайд 3)», «* Слайд 3:» - так пише і наша генерація, і Claude.
 // Жирне навколо мітки (група 1) знімаємо лише парою: «Слайд 1: **Обіцянка**» - це вже жирне
 // в тексті слайда, і його відкривальні ** не можна сприйняти за кінець мітки.
-const SLIDE_MARK = /^\s*[#>\-\s]*(?:\*\s+)?(\*\*|__)?\s*(?:слайд|slide)\s*№?\s*(\d{1,2})\s*(?:[:.)\-–—]|(?=\s))\s*/i;
+const SLIDE_MARK = /^\s*[#>\-\s]*(?:\*\s+)?(\*\*|__)?\s*(?:слайд|slide|кадр|frame)\s*№?\s*(\d{1,2})\s*(?:[:.)\-–—]|(?=\s))\s*/i;
 // «Підпис:» / «Підпис до каруселі:» / «Caption:» - текст, що піде під каруселлю
 const CAPTION_MARK = /^\s*[#>\-\s]*(?:\*\s+)?(\*\*|__)?\s*(?:підпис(?:\s+(?:до|під)\s+каруселл?[юі])?|caption)\s*(?:\*\*|__)?\s*[:\-–—]\s*/i;
 // після мітки: закривальне жирне, якщо мітку відкрили жирним («**Слайд 1:** текст»)
@@ -127,9 +127,11 @@ export type SlideLayout = {
 };
 const TITLE_LH = 1.16, BODY_LH = 1.42;
 
-export function layoutSlide(W: number, H: number, title: string, body: string, isCover: boolean): SlideLayout {
+// story: у сторіс згори - смужки прогресу й імʼя акаунта, знизу - поле відповіді, тож текст тримаємо
+// всередині «безпечної зони» (без верхніх 16% і нижніх 22% кадру)
+export function layoutSlide(W: number, H: number, title: string, body: string, isCover: boolean, story = false): SlideLayout {
   const pad = Math.round(W * 0.085);
-  const top = Math.round(H * 0.12), bottom = Math.round(H * 0.12);
+  const top = Math.round(H * (story ? 0.16 : 0.12)), bottom = Math.round(H * (story ? 0.22 : 0.12));
   const box = { x: pad, y: top, w: W - 2 * pad, h: H - top - bottom };
   let tfs = Math.round(W * (isCover ? 0.1 : (body ? 0.07 : 0.085)));
   let bfs = Math.round(W * 0.042);
@@ -188,7 +190,7 @@ const PALETTE: Record<CarouselTheme, { bg: string; title: string; body: string; 
 
 export async function renderSlide(o: {
   W: number; H: number; theme: CarouselTheme; accent: string; photo: Buffer | null;
-  title: string; body: string; index: number; total: number; handle: string;
+  title: string; body: string; index: number; total: number; handle: string; story?: boolean;
 }): Promise<Buffer> {
   const { W, H } = o;
   const pal = PALETTE[o.theme];
@@ -201,7 +203,7 @@ export async function renderSlide(o: {
   } else {
     base = sharp({ create: { width: W, height: H, channels: 3, background: pal.bg } });
   }
-  const L = layoutSlide(W, H, o.title, o.body, isCover);
+  const L = layoutSlide(W, H, o.title, o.body, isCover, o.story === true);
   // обкладинка на фото - текст унизу над градієнтом (як у стрічці); решта - по центру вільного поля
   const y0 = isCover && o.theme === "photo" && o.photo
     ? L.box.y + L.box.h - L.blockH
@@ -228,7 +230,10 @@ export async function renderSlide(o: {
   const grad = isCover && o.theme === "photo" && o.photo
     ? `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.82"/></linearGradient><linearGradient id="t" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0.45"/><stop offset="1" stop-color="#000" stop-opacity="0"/></linearGradient></defs><rect x="0" y="${Math.max(0, y0 - Math.round(H * 0.12))}" width="${W}" height="${H - Math.max(0, y0 - Math.round(H * 0.12))}" fill="url(#g)"/><rect x="0" y="0" width="${W}" height="${Math.round(H * 0.16)}" fill="url(#t)"/>`
     : "";
-  const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${grad}${kick}${parts.join("")}${handle}${next}</svg>`;
+  // у сторіс лічильник, «→» і нік малює сама мережа (смужки прогресу, акаунт згори) - не дублюємо
+  const svg = o.story
+    ? `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${grad}${parts.join("")}</svg>`
+    : `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${grad}${kick}${parts.join("")}${handle}${next}</svg>`;
   return base.composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).jpeg({ quality: 90 }).toBuffer();
 }
 
@@ -252,26 +257,35 @@ export async function carouselHandle(ws: string): Promise<string> {
 export type RenderResult = { count: number; theme: CarouselTheme; caption: string; captionChanged: boolean; truncated: number[] };
 
 export async function renderCarousel(ws: string, postId: string, opts?: { theme?: string; accent?: string; slides?: string[] }): Promise<RenderResult> {
-  const post = await one<{ content: string; slides_text: string | null; image_base: string | null; cover: string | null; cover_source: string | null; channels: any }>(
-    `select p.content, p.slides_text, p.image_base, m.filename as cover, m.source as cover_source, p.channels
+  const post = await one<{ content: string; slides_text: string | null; image_base: string | null; cover: string | null; cover_source: string | null; channels: any; format: string | null }>(
+    `select p.content, p.slides_text, p.image_base, m.filename as cover, m.source as cover_source, p.channels, p.format
        from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
        left join media_asset m on m.id=p.media_id
       where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
   if (!post) throw new SlideError("пост не знайдено");
   // звідки тексти: явний список (конектор) → збережений сценарій → сам текст поста
+  // 📱 сторіс: ті самі кадри-картинки, але 9:16, у безпечній зоні, від одного кадру, і текст поста
+  // лишається як є (підпису в сторіс немає - уся думка на кадрах)
+  const story = post.format === "story";
+  const minN = story ? 1 : 2, word = story ? "Кадр" : "Слайд";
   let texts: string[] = [], script = post.slides_text || "", caption = post.content, captionChanged = false;
   const given = (opts?.slides || []).map((s) => String(s || "").trim()).filter(Boolean);
   if (given.length) {
     texts = given;
-    script = given.map((t, i) => `Слайд ${i + 1}: ${t}`).join("\n\n");
-  } else if (post.slides_text && parseSlides(post.slides_text).slides.length >= 2) {
+    script = given.map((t, i) => `${word} ${i + 1}: ${t}`).join("\n\n");
+  } else if (post.slides_text && parseSlides(post.slides_text).slides.length >= minN) {
     texts = parseSlides(post.slides_text).slides;
   } else {
     const p = parseSlides(post.content);
     texts = p.slides;
-    if (texts.length >= 2) { script = post.content; caption = p.caption || post.content; captionChanged = caption !== post.content; }
+    if (texts.length >= minN) {
+      script = post.content;
+      if (!story) { caption = p.caption || post.content; captionChanged = caption !== post.content; }
+    }
   }
-  if (texts.length < 2) throw new SlideError("Для каруселі потрібно щонайменше 2 слайди: розпиши текст рядками «Слайд 1: …», «Слайд 2: …» (або розділи слайди рядком ---).");
+  if (texts.length < minN) throw new SlideError(story
+    ? "Для сторіс розпиши кадри рядками «Кадр 1: …», «Кадр 2: …» (або розділи кадри рядком ---)."
+    : "Для каруселі потрібно щонайменше 2 слайди: розпиши текст рядками «Слайд 1: …», «Слайд 2: …» (або розділи слайди рядком ---).");
   // понад 10 кадрів мережі не приймуть: лишаємо перші 9 і фінальний заклик
   if (texts.length > MAX_SLIDES) texts = [...texts.slice(0, MAX_SLIDES - 1), texts[texts.length - 1]];
 
@@ -281,22 +295,22 @@ export async function renderCarousel(ws: string, postId: string, opts?: { theme?
   if (bgFile) { try { photo = await readFile(join(MEDIA_DIR, bgFile)); } catch { photo = null; } }
   const theme: CarouselTheme = (CAROUSEL_THEMES as string[]).includes(String(opts?.theme)) ? opts!.theme as CarouselTheme : (photo ? "photo" : "dark");
   const useTheme: CarouselTheme = theme === "photo" && !photo ? "dark" : theme;
-  const aspect: Aspect = photo ? await postAspect(postId) : "4:5";
+  const aspect: Aspect = story ? "9:16" : photo ? await postAspect(postId) : "4:5";
   const { w: W, h: H } = ASPECT_DIM[aspect];
   const handle = await carouselHandle(ws);
 
   const ids: string[] = []; const truncated: number[] = [];
   for (let i = 0; i < texts.length; i++) {
     const { title, body } = slideTitleBody(texts[i]);
-    if (layoutSlide(W, H, title, body, i === 0).truncated) truncated.push(i + 1);
-    const buf = await renderSlide({ W, H, theme: useTheme, accent: String(opts?.accent || ""), photo, title, body, index: i, total: texts.length, handle });
+    if (layoutSlide(W, H, title, body, i === 0, story).truncated) truncated.push(i + 1);
+    const buf = await renderSlide({ W, H, theme: useTheme, accent: String(opts?.accent || ""), photo, title, body, index: i, total: texts.length, handle, story });
     const saved = await saveMedia(ws, { buffer: buf, mime: "image/jpeg", name: `slide-${i + 1}.jpg`, source: "slide", externalId: `post:${postId}` });
     ids.push(saved.id);
   }
   // кадри стають списком поста; база під текст обкладинки = вихідне фото (щоб його можна було
   // перезібрати чи наклати інший напис), а старі зібрані кадри прибираються самі
   await setPostMediaOrder(ws, postId, ids, { keepBase: true });
-  await q(`update post set image_base=$2, headline=null, slides_text=$3, format='carousel' where id=$1`, [postId, bgFile, script]);
+  await q(`update post set image_base=$2, headline=null, slides_text=$3, format=$4 where id=$1`, [postId, bgFile, script, story ? "story" : "carousel"]);
   if (captionChanged) {
     // текст поста був сценарієм - тепер це підпис. Версії під мережі робились зі сценарію, тож вони
     // застаріли: скидаємо їх (перемикачі мереж лишаються), при публікації спакується вже підпис

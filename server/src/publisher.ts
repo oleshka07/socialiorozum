@@ -70,14 +70,20 @@ export async function alreadySentNetworks(postId: string): Promise<string[]> {
 // (публікація один раз на мережу) — і при ручній публікації, і в автопостері.
 // Якщо жодної мережі не обрано — нічого не публікує (порожній результат), без тихого fallback.
 export async function publishPostToChannels(ws: string, postId: string, onlyNets?: string[]): Promise<PubResult[]> {
-  const post = await one<{ content: string; channels: any }>(
-    `select p.content, p.channels, p.intent from post p
+  const post = await one<{ content: string; channels: any; format: string | null }>(
+    `select p.content, p.channels, p.intent, p.format from post p
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
   if (!post) throw new Error("пост не знайдено");
+  // 📱 сторіс - окремий шлях: кожен кадр окремою сторіс, і лише там, де сторіс є в API
+  if (post.format === "story") return publishStoryToChannels(ws, postId, post.channels || {}, onlyNets);
   // 🖼 кадри поста: обкладинка + кадри каруселі. Один кадр - звичайний фото-пост, 2+ - карусель
   // (Instagram/Threads - CAROUSEL, Facebook - галерея, Telegram - альбом, LinkedIn - multiImage).
   const mediaList = await postMediaList(postId);
+  // відео поруч із фото буває лише в сторіс (кожен кадр окремо); пост із таким набором після зміни
+  // формату не можна тихо обрізати до фото - кажемо прямо
+  if (mediaList.length > 1 && mediaList.some((m) => m.kind === "video"))
+    throw new Error("У пості і відео, і фото: так можна лише в сторіс. Прибери зайве або постав формат «Сторіс».");
   // 🎬 відео-пост: відео стоїть обкладинкою і завжди саме (див. setPostMediaOrder). Instagram -
   // Reels, Facebook - відео Сторінки, Threads - VIDEO, Telegram - sendVideo, LinkedIn - Videos API.
   const video = mediaList[0]?.kind === "video" ? mediaList[0] : null;
@@ -337,6 +343,68 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
   if (results.some((r) => r.status === "sent")) {
     void ensurePostDigest(ws, postId).catch(() => { /* лог пише сама ensurePostDigest */ });
   }
+  return results;
+}
+
+// ===================== 📱 СТОРІС =====================
+// Сторіс є в API лише в Instagram (контейнер STORIES) і Facebook-Сторінки (photo_stories /
+// video_stories). Кожен кадр - окрема сторіс, підпису немає (текст має бути на кадрі), живе 24 год.
+// Telegram, Threads і LinkedIn сторіс через API не приймають - для них чесна відмова, а не тихий
+// звичайний пост замість сторіс.
+export const STORY_NETS = ["instagram", "facebook"];
+const NET_UA: Record<string, string> = { telegram: "Telegram", threads: "Threads", linkedin: "LinkedIn", instagram: "Instagram", facebook: "Facebook" };
+async function publishStoryToChannels(ws: string, postId: string, ch: any, onlyNets?: string[]): Promise<PubResult[]> {
+  const enabled = Object.keys(ch).filter((k) => ch[k] && ch[k].on && k in NET_UA).filter((k) => !onlyNets || onlyNets.includes(k));
+  const sentSet = new Set(await alreadySentNetworks(postId));
+  const frames = await postMediaList(postId);
+  const mt = await one<{ page_id: string | null; page_token: string | null; ig_user_id: string | null; token_expires_at: string | null }>(
+    `select page_id, page_token, ig_user_id, token_expires_at from meta_config where workspace_id=$1`, [ws]);
+  const url = (f: string) => `${env.appBaseUrl}/media/${f}`;
+  const results: PubResult[] = [];
+  for (const k of enabled) {
+    if (sentSet.has(k)) { results.push({ channel: k, status: "skipped" }); continue; }
+    try {
+      if (!STORY_NETS.includes(k)) throw new Error(`сторіс публікуються лише в Instagram і Facebook - ${NET_UA[k]} їх через API не приймає; зніми ${NET_UA[k]} із цього поста`);
+      if (!frames.length) throw new Error("у сторіс немає жодного кадру - додай фото чи відео");
+      if (k === "instagram" && (!mt?.ig_user_id || !mt.page_token)) throw new Error("Instagram не підключено");
+      if (k === "facebook" && (!mt?.page_id || !mt.page_token)) throw new Error("Facebook не підключено");
+      if (mt!.token_expires_at && new Date(mt!.token_expires_at).getTime() < Date.now())
+        throw new Error("Токен Meta (Facebook/Instagram) протух - перепідключи у Налаштування → Канали");
+      // межі - ДО виклику: відео в сторіс Instagram - до 60 с (а мережа сказала б це через хвилину обробки)
+      const longVid = frames.find((m) => m.kind === "video" && Number(m.duration) > 60);
+      if (k === "instagram" && longVid) throw new Error(`відео в сторіс Instagram - до 60 с, а тут ${Math.round(Number(longVid.duration))} с - вріж його`);
+      const reserved = await one<{ id: string }>(
+        `insert into meta_publish(post_id,channel,status) values($1,$2,'sending') on conflict (post_id,channel) do nothing returning id`, [postId, k]);
+      if (!reserved) { results.push({ channel: k, status: "skipped" }); continue; }
+      const ids: string[] = [];
+      try {
+        for (const m of frames) {
+          if (k === "instagram") {
+            const r = m.kind === "video"
+              ? await meta.publishStoryToInstagram(mt!.ig_user_id!, mt!.page_token!, { videoUrl: url(m.filename) })
+              : await meta.publishStoryToInstagram(mt!.ig_user_id!, mt!.page_token!, { imageUrl: url(await ensureIgSafeImage(ws, m.filename, { story: true })) });
+            ids.push(r.mediaId);
+          } else {
+            const r = m.kind === "video"
+              ? await meta.publishVideoStoryToPage(mt!.page_id!, mt!.page_token!, url(m.filename))
+              : await meta.publishPhotoStoryToPage(mt!.page_id!, mt!.page_token!, url(m.filename));
+            ids.push(r.postId);
+          }
+        }
+      } catch (e: any) {
+        if (!ids.length) { await q(`delete from meta_publish where id=$1`, [reserved.id]); throw e; }
+        // частина кадрів уже в мережі: фіксуємо «надіслано», щоб повтор НЕ задублював їх, і кажемо прямо,
+        // скільки вийшло - решту кадрів людина додасть окремою сторіс
+        await q(`update meta_publish set external_id=$2, status='sent' where id=$1`, [reserved.id, ids.join(",")]);
+        await logEvent("warn", "story", `${NET_UA[k]}: опубліковано ${ids.length} з ${frames.length} кадрів сторіс, далі збій: ${e.message}`, { ws, postId });
+        results.push({ channel: k, status: "error", error: `опубліковано ${ids.length} з ${frames.length} кадрів, далі збій: ${e.message}` });
+        continue;
+      }
+      await q(`update meta_publish set external_id=$2, status='sent' where id=$1`, [reserved.id, ids.join(",")]);
+      results.push({ channel: k, status: "sent" });
+    } catch (e: any) { results.push({ channel: k, status: "error", error: e.message }); }
+  }
+  if (results.some((r) => r.status === "sent")) void ensurePostDigest(ws, postId).catch(() => {});
   return results;
 }
 

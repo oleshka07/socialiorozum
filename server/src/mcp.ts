@@ -29,7 +29,7 @@ import { connectedNets, parseWhen, zonedToUtc } from "./tgcompose.js";
 import { publishPostToChannels, alreadySentNetworks } from "./publisher.js";
 import { generatePostsOnePass, normFormat, GOAL_LABELS, CHANNEL_LIMITS } from "./pipeline.js";
 import { logEvent } from "./log.js";
-import { generateImageForPost, imageProviders, stockPhotoOptions, attachStockPhoto, attachCroppedImage, appendCroppedSlide } from "./images.js";
+import { generateImageForPost, imageProviders, stockPhotoOptions, attachStockPhoto, attachCroppedImage, appendCroppedSlide, cropCopy } from "./images.js";
 import { postMediaList, setPostMediaOrder, setPostVideo, MAX_SLIDES, SlideError } from "./slides.js";
 import { renderCarousel, CAROUSEL_THEMES } from "./carousel.js";
 import { getThumb } from "./media.js";
@@ -388,8 +388,9 @@ export const fmtDur = (sec: unknown): string => {
   const n = Math.round(Number(sec) || 0);
   return n ? `${Math.floor(n / 60)}:${String(n % 60).padStart(2, "0")}` : "";
 };
-export const mediaLine = (media: Array<{ id: string; kind?: string; duration?: number | null }>): string =>
-  !media.length ? "" : media[0].kind === "video" ? ` · відео${fmtDur(media[0].duration) ? " " + fmtDur(media[0].duration) : ""}`
+export const mediaLine = (media: Array<{ id: string; kind?: string; duration?: number | null }>, format?: string | null): string =>
+  format === "story" ? (media.length ? ` · сторіс, ${media.length} ${media.length === 1 ? "кадр" : "кадрів"}` : " · сторіс без кадрів")
+    : !media.length ? "" : media[0].kind === "video" ? ` · відео${fmtDur(media[0].duration) ? " " + fmtDur(media[0].duration) : ""}`
     : media.length === 1 ? " · є фото" : ` · карусель, ${media.length} кадрів`;
 // id файлу з медіатеки: короткий #a1b2c3d4 або повний, лише свій кабінет
 async function libraryMediaId(ws: string, raw: unknown): Promise<{ id: string; kind: string }> {
@@ -407,13 +408,13 @@ async function libraryImageId(ws: string, raw: unknown): Promise<string> {
   return m.id;
 }
 
-const ASPECTS = ["4:5", "1:1", "16:9"];
+const ASPECTS = ["4:5", "1:1", "16:9", "9:16"];
 const aspectArg = (v: unknown): string => (ASPECTS.includes(String(v)) ? String(v) : "4:5");
 
 const S = (description: string, extra: Record<string, any> = {}) => ({ type: "string", description, ...extra });
 const N = (description: string, extra: Record<string, any> = {}) => ({ type: "integer", description, ...extra });
 const NETS_ARG = { type: "array", items: { type: "string", enum: NETS }, description: "Мережі: telegram, instagram, facebook, threads, linkedin." };
-const ASPECT_ARG = { type: "string", enum: ASPECTS, description: "Формат: 4:5 (типово - найбільше місця в стрічці, підходить усім мережам), 1:1, 16:9." };
+const ASPECT_ARG = { type: "string", enum: ASPECTS, description: "Формат: 4:5 (типово - найбільше місця в стрічці, підходить усім мережам), 1:1, 16:9, 9:16 (сторіс; для поста формату story - типово)." };
 
 // Інструменти кабінетів свідомо БЕЗ аргументу workspace (див. WS_ARG): перемикати кабінет,
 // перебуваючи в іншому кабінеті, - це зайва плутанина на рівному місці.
@@ -657,7 +658,7 @@ export const TOOLS: ToolDef[] = [
       const tz = await wsTz(ws);
       const variants = NETS.filter((n) => p.channels?.[n]?.text).map((n) => `— ${NET_LABEL[n]}: ${oneLine(p.channels[n].text, 300)}`);
       return [
-        `${short(p.id)} · створено ${fmtWhen(p.created_at, tz)} · ${p.review === "approved" ? "затверджено" : "чернетка"}${mediaLine(await postMediaList(p.id))}`,
+        `${short(p.id)} · створено ${fmtWhen(p.created_at, tz)} · ${p.review === "approved" ? "затверджено" : "чернетка"}${mediaLine(await postMediaList(p.id), p.format)}`,
         `мережі: ${enabledNets(p.channels).length ? netList(enabledNets(p.channels)) : "не обрані"}${p.rubric ? ` · рубрика: ${p.rubric}` : ""}${p.format && p.format !== "post" ? ` · формат: ${p.format}` : ""}`,
         slot?.scheduled_at ? `заплановано: ${fmtWhen(slot.scheduled_at, tz)} (${slot.status})` : "",
         enabledNets(p.channels).length ? `публікація: ${publishPlanLine(publishPlan(p.channels, p.content))}` : "",
@@ -699,9 +700,12 @@ export const TOOLS: ToolDef[] = [
          ["awareness", "nurture", "sale"].includes(String(a.intent)) ? String(a.intent) : null,
          a.approve === true ? "approved" : null]);
       await logEvent("info", "mcp", `чернетку створено з Claude (${text.length} симв.)`, null);
+      const storyOff = normFormat(a.format) === "story" ? nets.filter((n) => n !== "instagram" && n !== "facebook") : [];
       return [
         `Пост збережено: ${short(post!.id)}${a.approve === true ? " (затверджено)" : " (чернетка)"}.`,
         nets.length ? `Мережі: ${netList(nets)}.` : "Мережі не обрані - вкажи їх у publish_post або схвали в кабінеті.",
+        normFormat(a.format) === "story" ? "📱 Сторіс: кожен кадр - окрема сторіс в Instagram і Facebook; підпису немає, тож думка має бути на кадрах - додай фото/відео (attach_media, типово 9:16) або намалюй кадри з тексту render_carousel." : "",
+        storyOff.length ? `⚠️ Сторіс через API приймають лише Instagram і Facebook - у ${netList(storyOff)} цей пост не піде.` : "",
         notConnected.length ? `⚠️ Не підключені в кабінеті: ${netList(notConnected)} - туди публікація не піде.` : "",
         "Далі: publish_post (опублікувати зараз) або schedule_post (на дату й час).",
       ].filter(Boolean).join(" ");
@@ -716,12 +720,18 @@ export const TOOLS: ToolDef[] = [
       text: S("Новий текст (необовʼязково)."),
       channels: NETS_ARG,
       rubric: S("Рубрика (необовʼязково)."),
+      format: S("Формат (необовʼязково): post, carousel, reel, story.", { enum: ["post", "carousel", "reel", "story"] }),
       approve: { type: "boolean", description: "true - затвердити, false - зняти затвердження." },
     },
     required: ["id"],
     run: async (ws, a) => {
       const p = await findPost(ws, a.id);
       const done: string[] = [];
+      if (a.format !== undefined) {
+        const f = normFormat(a.format);
+        await q(`update post set format=$2 where id=$1`, [p.id, f]);
+        done.push(`формат: ${f}` + (f === "story" ? " (сторіс ідуть лише в Instagram і Facebook, кожен кадр - окремо)" : ""));
+      }
       const text = str(a.text, 20000);
       if (text) {
         await q(`update post set content=$2 where id=$1`, [p.id, text]);
@@ -742,7 +752,7 @@ export const TOOLS: ToolDef[] = [
         await q(`update post set review=$2 where id=$1`, [p.id, a.approve ? "approved" : null]);
         done.push(a.approve ? "затверджено" : "затвердження знято");
       }
-      if (!done.length) throw new ToolError("Нічого не змінено - передай text, channels, rubric або approve.");
+      if (!done.length) throw new ToolError("Нічого не змінено - передай text, channels, rubric, format або approve.");
       return `${short(p.id)}: ${done.join(", ")}.`;
     },
   },
@@ -821,11 +831,30 @@ export const TOOLS: ToolDef[] = [
     run: async (ws, a) => {
       const p = await findPost(ws, a.id);
       const raw = Array.isArray(a.media) ? a.media : [a.media];
+      const append = a.append === true;
       if (!raw.length) throw new ToolError("Вкажи id фото з list_media (#a1b2c3d4).");
       if (raw.length > MAX_SLIDES) throw new ToolError(`У каруселі до ${MAX_SLIDES} кадрів - передай не більше.`);
-      // 🎬 відео: одне й саме - замінює всі фото поста (без кропу: відео не ріжемо)
       const found = [];
       for (const r of raw) found.push(await libraryMediaId(ws, r));
+      // 📱 сторіс: кадри по порядку, фото й відео разом; фото ріжемо 9:16, відео - як є
+      if (p.format === "story") {
+        const cur = append ? (await postMediaList(p.id)).map((m) => m.id) : [];
+        if (cur.length + found.length > MAX_SLIDES) throw new ToolError(`У сторіс до ${MAX_SLIDES} кадрів - зараз ${cur.length}.`);
+        const asp = a.aspect ? aspectArg(a.aspect) : "9:16";
+        const ids: string[] = [];
+        for (const m of found) ids.push(m.kind === "video" ? m.id : (await cropCopy(ws, m.id, asp)).id);
+        try { await setPostMediaOrder(ws, p.id, [...cur, ...ids]); }
+        catch (e: any) { if (e instanceof SlideError) throw new ToolError(e.message); throw e; }
+        const after = await postMediaList(p.id);
+        const thumbs = (await Promise.all(after.map((m) => smallThumb(m.filename)))).filter(Boolean) as ToolImage[];
+        const longV = after.find((m) => m.kind === "video" && Number(m.duration) > 60);
+        return {
+          text: `${short(p.id)}: сторіс із ${after.length} ${after.length === 1 ? "кадру" : "кадрів"} (фото ${asp}) - кожен кадр піде окремою сторіс в Instagram і Facebook.` +
+            (longV ? ` ⚠️ Відео ${short(longV.id)} довше за 60 с - Instagram таку сторіс не прийме, вріж його.` : "") + " Мініатюри нижче - по порядку кадрів.",
+          images: thumbs,
+        };
+      }
+      // 🎬 відео: одне й саме - замінює всі фото поста (без кропу: відео не ріжемо)
       if (found.some((m) => m.kind === "video")) {
         if (found.length > 1 || a.append === true)
           throw new ToolError("Відео публікується окремим постом: передай рівно один id відео без append (фото поруч із відео не буває).");
@@ -848,7 +877,6 @@ export const TOOLS: ToolDef[] = [
         };
       }
       const ids = found.map((m) => m.id);
-      const append = a.append === true;
       const before = await postMediaList(p.id);
       if (append && before.length + ids.length > MAX_SLIDES)
         throw new ToolError(`У каруселі до ${MAX_SLIDES} кадрів - зараз ${before.length}, тож додати можна ще ${Math.max(0, MAX_SLIDES - before.length)}.`);
@@ -925,7 +953,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "render_carousel",
     title: "Зібрати кадри каруселі зі сценарію",
-    description: `БЕЗКОШТОВНО (без моделі, лише верстка): намалювати кадри-картинки каруселі зі сценарію - на кожен слайд окрема картинка з великим заголовком і текстом, лічильник 2/8, нік бренду. Передай slides - тексти слайдів по порядку (2-${MAX_SLIDES}; перший рядок слайда стає заголовком, решта - текстом); тоді текст поста лишається підписом під каруселлю, тож пиши його окремо коротким. Без slides сценарій береться з тексту поста (рядки «Слайд 1: …», «Слайд 2: …»), а текст поста стає підписом (з рядка «Підпис: …», якщо він є). theme: photo (на фоні фото поста, типово, якщо фото є), dark, light. Кадри ЗАМІНЮЮТЬ наявні фото поста. У відповіді - мініатюри.`,
+    description: `БЕЗКОШТОВНО (без моделі, лише верстка): намалювати кадри-картинки каруселі зі сценарію - на кожен слайд окрема картинка з великим заголовком і текстом, лічильник 2/8, нік бренду. Передай slides - тексти слайдів по порядку (2-${MAX_SLIDES}; перший рядок слайда стає заголовком, решта - текстом); тоді текст поста лишається підписом під каруселлю, тож пиши його окремо коротким. Без slides сценарій береться з тексту поста (рядки «Слайд 1: …», «Слайд 2: …»), а текст поста стає підписом (з рядка «Підпис: …», якщо він є). theme: photo (на фоні фото поста, типово, якщо фото є), dark, light. Кадри ЗАМІНЮЮТЬ наявні фото поста. Для поста у форматі story - кадри сторіс 9:16 (від одного, рядки «Кадр 1: …»), текст поста не чіпається. У відповіді - мініатюри.`,
     properties: {
       id: S("Id поста."),
       slides: { type: "array", items: { type: "string" }, description: "Тексти слайдів по порядку (необовʼязково)." },
@@ -942,7 +970,7 @@ export const TOOLS: ToolDef[] = [
       const cur = await postMediaList(p.id);
       const thumbs = (await Promise.all(cur.map((m) => smallThumb(m.filename)))).filter(Boolean) as ToolImage[];
       return {
-        text: `${short(p.id)}: зібрано ${r.count} кадрів (тема ${r.theme}).` +
+        text: `${short(p.id)}: зібрано ${r.count} кадрів${p.format === "story" ? " сторіс 9:16" : ""} (тема ${r.theme}).` +
           (r.captionChanged ? ` Сценарій перенесено в слайди, а текст поста тепер ПІДПИС під каруселлю: «${oneLine(r.caption, 200)}». Перевір і за потреби онови update_post.` : "") +
           (r.truncated.length ? ` ⚠️ На кадрах ${r.truncated.join(", ")} текст не вмістився й обрізаний - скороти ці слайди й збери ще раз.` : "") +
           " Мініатюри нижче - по порядку.",
@@ -1268,6 +1296,7 @@ export const SERVER_INSTRUCTIONS = [
   "Зображення: спершу медіатека кабінету (list_media → attach_media) - власні фото автора, вони найкращі й безкоштовні (фото лежать у автора на комп'ютері, а в тебе є термінал - media_upload_link дасть команду, що заллє папку в медіатеку без проходу через чат); далі сток - find_stock_photos з конкретним англійським query і attach_stock_photo, теж безкоштовно; generate_image платний (крім provider cloudflare - безкоштовний денний ліміт ~100 зображень, якщо його підключено), бери його, коли ні медіатека, ні сток не підходять або коли людина просить саме генерацію.",
   `Карусель: кілька фото в одному пості (до ${MAX_SLIDES}) - attach_media масивом id або append: true у attach_media / attach_stock_photo / generate_image; кадри-картинки зі сценарію «Слайд 1: …» малює render_carousel (безкоштовно), і тоді текст поста - це короткий підпис під каруселлю, не сценарій.`,
   "Відео: власні відео автора - list_media з kind: \"video\" → attach_media з одним id; публікується як Reels в Instagram, відео у Facebook, Threads, Telegram (до 50 МБ) і LinkedIn, а текст поста - підпис. Відео з комп'ютера заливає та сама media_upload_link (великі файли - частинами).",
+  "Сторіс: create_draft з format: \"story\" і мережами instagram/facebook (інші сторіс через API не приймають) → кадри через attach_media (фото й відео разом, фото ріжуться 9:16) або render_carousel з рядками «Кадр 1: …»; кожен кадр - окрема сторіс, підпису немає.",
   "Якщо кабінетів кілька (list_workspaces), спершу переконайся, що активний саме той бренд: перемкни switch_workspace або передай workspace у виклику. Кожна відповідь називає кабінет у першому рядку - звіряйся з ним перед публікацією.",
   "Факти не вигадуй: бери їх з list_materials / get_material або питай автора.",
   "Перед публікацією показуй текст людині - опублікований пост відкликати не можна.",

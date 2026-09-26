@@ -15,19 +15,19 @@ import { assertSpend, assertRate, noteSpend } from "./spend.js";
 import { logEvent } from "./log.js";
 
 export type ImgProvider = "openai" | "fal" | "gemini" | "cloudflare";
-export type Aspect = "1:1" | "4:5" | "16:9";
+export type Aspect = "1:1" | "4:5" | "16:9" | "9:16";   // 9:16 - сторіс
 type Img = { buffer: Buffer; mime: string };
 // cloudflare = 0: у межах безкоштовного денного ліміту рахунку немає, а понад нього Free-план просто
 // відмовляє (не списує), тож у стелю витрат кабінету тут іде нуль
 const COSTS: Record<ImgProvider, number> = { openai: 0.011, fal: 0.003, gemini: 0.039, cloudflare: 0 };
 
-export function normAspect(a?: string): Aspect { return a === "4:5" || a === "16:9" ? a : "1:1"; }
+export function normAspect(a?: string): Aspect { return a === "4:5" || a === "16:9" || a === "9:16" ? a : "1:1"; }
 // цільові пропорції картинки для sharp-оверлея (ширина×висота у пікселях базового полотна)
-export const ASPECT_DIM: Record<Aspect, { w: number; h: number }> = { "1:1": { w: 1024, h: 1024 }, "4:5": { w: 1024, h: 1280 }, "16:9": { w: 1280, h: 720 } };
+export const ASPECT_DIM: Record<Aspect, { w: number; h: number }> = { "1:1": { w: 1024, h: 1024 }, "4:5": { w: 1024, h: 1280 }, "16:9": { w: 1280, h: 720 }, "9:16": { w: 1080, h: 1920 } };
 // gpt-image-1 підтримує лише 1024x1024 / 1024x1536 / 1536x1024
-const OPENAI_SIZE: Record<Aspect, string> = { "1:1": "1024x1024", "4:5": "1024x1536", "16:9": "1536x1024" };
+const OPENAI_SIZE: Record<Aspect, string> = { "1:1": "1024x1024", "4:5": "1024x1536", "16:9": "1536x1024", "9:16": "1024x1536" };
 // fal FLUX schnell — іменовані формати
-const FAL_SIZE: Record<Aspect, string> = { "1:1": "square_hd", "4:5": "portrait_4_3", "16:9": "landscape_16_9" };
+const FAL_SIZE: Record<Aspect, string> = { "1:1": "square_hd", "4:5": "portrait_4_3", "16:9": "landscape_16_9", "9:16": "portrait_16_9" };
 
 export function imageProviders(): Record<ImgProvider, boolean> {
   return { openai: !!env.openai.apiKey, fal: !!env.fal.apiKey, gemini: !!env.gemini.apiKey,
@@ -129,7 +129,7 @@ export const CF_SCHNELL = "@cf/black-forest-labs/flux-1-schnell";
 // Розміри для klein: кратні 16 (вимога моделі) і не більше 2×2 плиток 512×512 - так кадр коштує
 // ~$0.0012 (~104 «нейрони»), і безкоштовних 10 000 на добу вистачає приблизно на 100 зображень.
 export const CF_KLEIN_SIZE: Record<Aspect, { w: number; h: number }> = {
-  "1:1": { w: 1024, h: 1024 }, "4:5": { w: 768, h: 960 }, "16:9": { w: 1024, h: 576 },
+  "1:1": { w: 1024, h: 1024 }, "4:5": { w: 768, h: 960 }, "16:9": { w: 1024, h: 576 }, "9:16": { w: 576, h: 1024 },
 };
 
 export function cfUrl(model: string): string {
@@ -212,7 +212,7 @@ async function genCloudflare(prompt: string, aspect: Aspect): Promise<Img> {
   if (r.model === CF_SCHNELL && aspect !== "1:1") {
     const meta = await sharp(buffer).metadata();
     const side = Math.min(meta.width || 1024, meta.height || 1024);
-    const [tw, th] = aspect === "4:5" ? [Math.round(side * 4 / 5), side] : [side, Math.round(side * 9 / 16)];
+    const [tw, th] = aspect === "4:5" ? [Math.round(side * 4 / 5), side] : aspect === "9:16" ? [Math.round(side * 9 / 16), side] : [side, Math.round(side * 9 / 16)];
     return { buffer: await sharp(buffer).resize(tw, th, { fit: "cover", position: "attention" }).jpeg({ quality: 90 }).toBuffer(), mime: "image/jpeg" };
   }
   return { buffer, mime: sniffImageMime(buffer) };
@@ -237,9 +237,12 @@ export async function generateImage(ws: string, prompt: string, providerOverride
   if (p === "cloudflare") assertRate(ws); else await assertSpend(ws);
   const a = normAspect(aspect);
   // gemini не має параметра розміру — підказуємо пропорції в промті
-  const gemPrompt = a === "1:1" ? prompt : `${prompt} Формат зображення: ${a === "4:5" ? "вертикальний 4:5" : "горизонтальний 16:9"}.`;
-  const img = p === "openai" ? await genOpenAI(prompt, a) : p === "fal" ? await genFal(prompt, a)
+  const gemPrompt = a === "1:1" ? prompt : `${prompt} Формат зображення: ${a === "4:5" ? "вертикальний 4:5" : a === "9:16" ? "вертикальний 9:16 (сторіс)" : "горизонтальний 16:9"}.`;
+  let img = p === "openai" ? await genOpenAI(prompt, a) : p === "fal" ? await genFal(prompt, a)
     : p === "cloudflare" ? await genCloudflare(prompt, a) : await genGemini(gemPrompt);
+  // сторіс: жоден провайдер не малює рівно 9:16 (OpenAI - 2:3) - доводимо кадр до 1080×1920,
+  // тримаючи в кадрі найцікавіше, інакше сторіс показувалась би з полями
+  if (a === "9:16") img = { buffer: await sharp(img.buffer).rotate().resize(1080, 1920, { fit: "cover", position: "attention" }).jpeg({ quality: 90 }).toBuffer(), mime: "image/jpeg" };
   try { await q(`insert into llm_usage(workspace_id, step, model, cost) values($1,'image',$2,$3)`, [ws, p, COSTS[p] || 0]); noteSpend(ws, COSTS[p] || 0); } catch { /* облік не критичний */ }
   return img;
 }
@@ -521,7 +524,7 @@ export async function postAspect(postId: string): Promise<Aspect> {
     const W = (rot ? meta.height : meta.width) || 0, H = (rot ? meta.width : meta.height) || 0;
     if (!W || !H) return "4:5";
     const r = W / H;
-    const cands: Array<[Aspect, number]> = [["1:1", 1], ["4:5", 0.8], ["16:9", 16 / 9]];
+    const cands: Array<[Aspect, number]> = [["1:1", 1], ["4:5", 0.8], ["16:9", 16 / 9], ["9:16", 9 / 16]];
     return cands.reduce((best, c2) => (Math.abs(Math.log(r / c2[1])) < Math.abs(Math.log(r / best[1])) ? c2 : best))[0];
   } catch { return "4:5"; }
 }
@@ -538,12 +541,16 @@ export async function appendCroppedSlide(ws: string, postId: string, mediaId: st
 // Instagram приймає ЛИШЕ JPEG із пропорціями 0.8 (4:5) … 1.91 (близько 16:9-широке).
 // Наші AI-зображення без оверлея - PNG, а завантаження бувають будь-якими → перед IG-публікацією
 // робимо сумісну копію: конвертація в JPEG + за потреби центр-кроп до найближчої допустимої пропорції.
-export async function ensureIgSafeImage(ws: string, filename: string): Promise<string> {
+// story: для сторіс пропорцію НЕ чіпаємо (9:16 - саме те, що треба, а кроп до 0.8 зрізав би пів
+// кадру) - лише JPEG. Копія сторіс має свій ключ, щоб не сплутатись із кропом для стрічки.
+export async function ensureIgSafeImage(ws: string, filename: string, opts?: { story?: boolean }): Promise<string> {
+  const story = opts?.story === true;
+  const key = story ? `story:${filename}` : filename;
   // ДЕДУП: сумісну копію для цього файлу вже робили (повторна публікація/адаптація) → реюзаємо,
   // а не плодимо дублі в медіатеці (external_id = ім'я оригіналу)
   const existing = await one<{ filename: string }>(
     `select filename from media_asset where workspace_id=$1 and source='ig-safe' and external_id=$2 order by created_at desc limit 1`,
-    [ws, filename]);
+    [ws, key]);
   if (existing) {
     try { await readFile(join(MEDIA_DIR, existing.filename)); return existing.filename; }
     catch { /* файл стерли з диска - зробимо копію заново */ }
@@ -555,7 +562,7 @@ export async function ensureIgSafeImage(ws: string, filename: string): Promise<s
   const ratio = W / H;
   const MIN = 0.8, MAX = 1.91;
   const okFormat = meta.format === "jpeg";
-  const okRatio = ratio >= MIN && ratio <= MAX;
+  const okRatio = story || (ratio >= MIN && ratio <= MAX);
   if (okFormat && okRatio) return filename;
   let img = sharp(buf).rotate();
   if (!okRatio) {
@@ -566,7 +573,7 @@ export async function ensureIgSafeImage(ws: string, filename: string): Promise<s
     img = img.extract({ left: Math.max(0, Math.round((W - cw) / 2)), top: Math.max(0, Math.round((H - ch) / 2)), width: Math.min(W, cw), height: Math.min(H, ch) });
   }
   const out = await img.jpeg({ quality: 90 }).toBuffer();
-  const saved = await saveMedia(ws, { buffer: out, mime: "image/jpeg", name: "ig-safe.jpg", source: "ig-safe", externalId: filename });
+  const saved = await saveMedia(ws, { buffer: out, mime: "image/jpeg", name: "ig-safe.jpg", source: "ig-safe", externalId: key });
   return saved.filename;
 }
 

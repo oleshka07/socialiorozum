@@ -40,6 +40,10 @@ const carCalls = [];
 const P5 = "55555555-5555-5555-5555-555555555555";
 const P5POST = { id: P5, content: "Ранок у глемпінгу", review: "review", channels: { instagram: { on: true }, telegram: { on: true }, threads: { on: true } }, format: "post", rubric: "", intent: "", sent: [], links: {} };
 CAR.set(P5, [{ id: "v5", filename: "big.mp4", kind: "video", duration: 400, width: 720, height: 1280, size: 60 * 1048576 }]);
+// ⚡ сторіс: 3 кадри (фото, фото, відео); Telegram увімкнено - режим сторіс мусить його затінити
+const P7 = "77777777-7777-7777-7777-777777777777";
+const P7POST = { id: P7, content: "Ранок у глемпінгу", review: "review", channels: { instagram: { on: true }, facebook: { on: true }, telegram: { on: true } }, format: "story", rubric: "", intent: "", sent: [], links: {} };
+CAR.set(P7, [{ id: "s1", filename: "s1.jpg", kind: "image" }, { id: "s2", filename: "s2.jpg", kind: "image" }, { id: "s3", filename: "s3.mp4", kind: "video", duration: 6 }]);
 // заливка частинами: сервер-заглушка тримає «скільки вже прийшло» на кожен uid, як справжній
 const CHUNKS = new Map();
 const chunkPuts = [];
@@ -385,12 +389,12 @@ function handleApi(method, path, body) {
   }
   let m = /^\/posts\/([0-9a-f-]+)\/full$/.exec(path);
   if (m) {
-    const p = m[1] === P4 ? P4POST : m[1] === P5 ? P5POST : (POSTS.find((x) => x.id === m[1]) || POSTS[0]);
+    const p = m[1] === P4 ? P4POST : m[1] === P5 ? P5POST : m[1] === P7 ? P7POST : (POSTS.find((x) => x.id === m[1]) || POSTS[0]);
     return { ...p, image_prompt: "", headline: "", has_base: false, slides_text: "", media: CAR.get(p.id) || (p.media_filename ? [{ id: "c0", filename: p.media_filename }] : []) };
   }
   m = /^\/posts\/([0-9a-f-]+)\/publish-state$/.exec(path);
   if (m) {
-    if (m[1] === P4 || m[1] === P5) return { sent: [], links: {} };
+    if (m[1] === P4 || m[1] === P5 || m[1] === P7) return { sent: [], links: {} };
     const p = POSTS.find((x) => x.id === m[1]) || POSTS[0];
     return { sent: p.sent || [], links: p.links || {} };
   }
@@ -860,6 +864,55 @@ const run = async () => {
     const good = libBadge === "▶ 1:15" && sizes.join(",") === [8 * 1048576, 1048576].join(",") && chunkPuts[1].offset === 8 * 1048576
       && videoCalls.length === 1 && videoCalls[0].pid === P5 && /^nv/.test(videoCalls[0].mediaId) && !st.warn && !st.modal && /відео в пості/.test(st.msg);
     if (!good) console.log("   ↳ videoPick:", JSON.stringify({ libBadge, sizes, videoCalls, st }));
+    return good;
+  });
+
+  await check("storyComposer", async () => {
+    // ⚡ сторіс: мережі без сторіс затінені, прев'ю - кадр 9:16 зі смужками прогресу й гортанням,
+    // сценарій - «Кадр N», у смужці кадрів відео підписане тривалістю
+    await closeComposers();
+    await page.waitForTimeout(150);
+    await page.evaluate((id) => openComposer(id), P7);
+    await page.waitForSelector(".cmp-ov .pv-story", { timeout: 6000 });
+    const st = await page.evaluate(() => {
+      const tg = document.querySelector('.cmp-ov .netchip[data-net="telegram"]');
+      return {
+        tgDim: !!tg && tg.disabled && /Instagram і Facebook/.test(tg.title),
+        stories: document.querySelectorAll("#cmpPrev .pv-story").length,
+        bars: document.querySelectorAll("#cmpPrev .pv-story")[0].querySelectorAll(".pv-bars i").length,
+        cnt: document.querySelector("#cmpPrev .pv-story .pv-cnt").textContent,
+        carTitle: (document.querySelector("#cmpCarTitle") || {}).textContent, build: (document.querySelector("#cmpCarBuild") || {}).textContent,
+        carShown: document.querySelector("#cmpCarWrap").style.display !== "none",
+        vidLabel: [...document.querySelectorAll("#cmpMediaWrap .slide-th .sn")].map((x) => x.textContent).join("|"),
+        storyTiles: document.querySelectorAll("#cmpMediaWrap .slide-th.story").length,
+      };
+    });
+    await page.evaluate(() => document.querySelector('#cmpPrev [data-snav="instagram"][data-d="1"]').click());
+    const cnt2 = await $t("#cmpPrev .pv-story .pv-cnt");
+    const good = st.tgDim && st.stories === 2 && st.bars === 3 && st.cnt === "1/3" && cnt2 === "2/3" && st.carShown
+      && st.carTitle === "⚡ Сценарій кадрів сторіс" && st.build === "🎨 Зібрати кадри" && st.vidLabel === "1|2|▶ 0:06" && st.storyTiles === 3;
+    if (!good) console.log("   ↳ storyComposer:", JSON.stringify({ st, cnt2 }));
+    await closeComposers();
+    return good;
+  });
+
+  await check("storySwitch", async () => {
+    // перемикання формату на «Сторіс» вимикає Telegram і вмикає підключені Instagram/Facebook,
+    // а повернення формату вертає рівно той вибір мереж, що був до сторіс
+    await page.evaluate(() => { window.__cs = { ...ChanStatus }; ChanStatus.instagram = true; ChanStatus.facebook = true; });
+    await page.evaluate((id) => openComposer(id), P2);
+    await page.waitForSelector(".cmp-ov #cmpFormat", { timeout: 6000 });
+    const on = () => page.evaluate(() => [...document.querySelectorAll(".cmp-ov .netchip.on")].map((b) => b.dataset.net).sort().join(","));
+    const before = await on();
+    await page.evaluate(() => { const f = document.querySelector("#cmpFormat"); f.value = "story"; f.dispatchEvent(new Event("change")); });
+    const inStory = await on();
+    const prevOk = await has("#cmpPrev .pv-story");
+    await page.evaluate(() => { const f = document.querySelector("#cmpFormat"); f.value = "post"; f.dispatchEvent(new Event("change")); });
+    const after = await on();
+    await closeComposers();
+    await page.evaluate(() => { Object.assign(ChanStatus, window.__cs); });
+    const good = before === "instagram,telegram" && inStory === "facebook,instagram" && prevOk && after === "instagram,telegram";
+    if (!good) console.log("   ↳ storySwitch:", JSON.stringify({ before, inStory, prevOk, after }));
     return good;
   });
 

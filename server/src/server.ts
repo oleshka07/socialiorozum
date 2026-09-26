@@ -57,7 +57,7 @@ import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUserna
 import { chat } from "./openrouter.js";
 import { handleBody, wantsSse, sseEncode, resolveToken, mcpTokenFor, issueMcpToken, revokeMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
 import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember, deleteBrand, workspaceTitle } from "./workspaces.js";
-import { postMediaList, mediaCounts, setPostMediaOrder, setPostVideo, removePostMedia, promoteIfCoverless, healCoverless, SlideError, MAX_SLIDES } from "./slides.js";
+import { postMediaList, mediaCounts, setPostMediaOrder, setPostVideo, appendPostMedia, removePostMedia, promoteIfCoverless, healCoverless, SlideError, MAX_SLIDES } from "./slides.js";
 import { renderCarousel, CAROUSEL_THEMES } from "./carousel.js";
 import { uploadLinkState, takeUploadSlot, markUploaded, refundUploadSlot, uploadPageHtml, uploadResultText, uploadScript, uploadUrl, UPLOAD_FILE_MAX, UPLOAD_TEXT, type UploadResult } from "./uploadlink.js";
 import { CLI_MODELS, cliAllowedFor, cliHealth, forgetCliAllowed, cliCooldown } from "./claudecli.js";
@@ -940,7 +940,12 @@ app.post("/api/posts/:postId/slides", async (req: any, reply) => {
   const have = (await postMediaList(req.params.postId)).length;
   if (have + ids.length > MAX_SLIDES) return reply.code(400).send({ error: `У каруселі до ${MAX_SLIDES} кадрів - зараз ${have}, тож додати можна ще ${Math.max(0, MAX_SLIDES - have)}.` });
   try {
-    for (const id of ids) await appendCroppedSlide(ws, req.params.postId, id, req.body?.aspect || undefined);
+    for (const id of ids) {
+      // відео не ріжемо (кадр сторіс-відео йде як є), фото - кроп-копія під пропорцію поста
+      const k = await one<{ kind: string }>(`select kind from media_asset where id=$1 and workspace_id=$2`, [id, ws]);
+      if (k?.kind === "video") await appendPostMedia(ws, req.params.postId, [id]);
+      else await appendCroppedSlide(ws, req.params.postId, id, req.body?.aspect || undefined);
+    }
     return await slidesOut(req.params.postId);
   } catch (e: any) { return slideFail(reply, e); }
 });

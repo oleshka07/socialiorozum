@@ -11,7 +11,7 @@ import {
 } from "../dist/images.js";
 
 test("klein: кожен формат кратний 16, пропорція правильна і не більше 4 плиток 512×512", () => {
-  const want = { "1:1": 1, "4:5": 0.8, "16:9": 16 / 9 };
+  const want = { "1:1": 1, "4:5": 0.8, "16:9": 16 / 9, "9:16": 9 / 16 };
   for (const [aspect, { w, h }] of Object.entries(CF_KLEIN_SIZE)) {
     assert.equal(w % 16, 0, `${aspect}: ширина не кратна 16`);
     assert.equal(h % 16, 0, `${aspect}: висота не кратна 16`);
