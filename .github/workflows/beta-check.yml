@@ -1,7 +1,10 @@
 name: beta-check
 
-# Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ з бази, без секретів:
-# журнал підключення Threads з обох стеків + структура кабінетів двох акаунтів (пошти замасковано).
+# Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ: сесія psql у режимі read only,
+# без секретів - пошти, довгі hex-токени й токени ботів/Meta маскуються ще на сервері.
+# Що дивимось на обох стеках: помилки й попередження журналу за 14 днів (згруповано), збої слотів,
+# завислі резервації публікації, втрачені джоби, покриття метрик постів і обсяг публікацій,
+# стан контейнерів і помилки в логах застосунку за 72 год.
 
 on:
   push:
@@ -12,43 +15,78 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Threads connect log + cabinets (prod + beta, read-only)
+      - name: Service health (prod + beta, read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 3m
+          command_timeout: 5m
           script: |
+            mask() { sed -E -e 's/([A-Za-z0-9._%+-]{1,3})[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+)/\1***@\2/g' \
+                            -e 's/[0-9a-fA-F]{24,}/<hex>/g' -e 's/[0-9]{6,}:[A-Za-z0-9_-]{30,}/<bot-token>/g' \
+                            -e 's/EAA[A-Za-z0-9]{20,}/<meta-token>/g' -e 's/TH[A-Za-z0-9]{40,}/<th-token>/g'; }
+            echo "=== host ==="; df -h / | tail -1; free -h | sed -n 2p; uptime
             for d in "${{ secrets.APP_DIR }}" "${{ secrets.APP_DIR }}-beta"; do
-            echo "=================== $d ==================="
+            echo; echo "=================== $d ==================="
             cd "$d/server" || continue
-            docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off' <<'SQL'
-            \echo '--- threads: журнал за 21 день (новіші зверху) ---'
-            select to_char(l.created_at at time zone 'Europe/Kyiv','DD.MM HH24:MI:SS') as t, l.level,
-                   left(regexp_replace(regexp_replace(l.message,'\s+',' ','g'),'([A-Za-z0-9._%+-]{1,4})[A-Za-z0-9._%+-]*@','\1***@','g'),420) as message,
-                   left(coalesce(l.meta::text,''),260) as meta,
-                   coalesce(left(u.email,4)||'***@'||split_part(u.email,'@',2),'-') as who
-              from app_log l left join app_user u on u.id = l.user_id
-             where l.scope = 'threads' and l.created_at > now() - interval '21 days'
-             order by l.created_at desc limit 80;
-            \echo '--- кабінети двох акаунтів ---'
-            select left(u.email,4)||'***' as who, u.created_at::date as reg, (u.deleted_at is not null) as deleted,
-                   left(w.id::text,8) as ws, split_part(w.name,':',1) as kind, coalesce(w.title,'') as title, m.role,
-                   (u.workspace_id = w.id) as home,
-                   (select count(*) from workspace_member x where x.workspace_id = w.id) as members,
-                   exists(select 1 from threads_config t where t.workspace_id = w.id) as threads,
-                   w.created_at::date as ws_created
-              from app_user u join workspace_member m on m.user_id = u.id join workspace w on w.id = m.workspace_id
-             where u.email like 'konstantin%' or u.email like 'o.stepeniev%'
-             order by u.email, m.role desc;
-            \echo '--- акаунт/кабінети: події за 21 день ---'
-            select to_char(l.created_at at time zone 'Europe/Kyiv','DD.MM HH24:MI') as t, l.level, l.scope,
-                   left(regexp_replace(l.message,'([A-Za-z0-9._%+-]{1,4})[A-Za-z0-9._%+-]*@','\1***@','g'),200) as message,
-                   coalesce(left(u.email,4)||'***','-') as who
-              from app_log l left join app_user u on u.id = l.user_id
-             where l.scope in ('account','workspace') and l.created_at > now() - interval '21 days'
-               and (u.email like 'konstantin%' or u.email like 'o.stepeniev%')
-             order by l.created_at desc limit 40;
+            echo "--- HEAD: $(git -C "$d" rev-parse --short HEAD) ($(git -C "$d" log -1 --format=%cd --date=iso))"
+            docker compose ps --format 'table {{.Service}}\t{{.Status}}' 2>/dev/null
+            for c in $(docker compose ps -q 2>/dev/null); do docker inspect -f '{{.Name}} restarts={{.RestartCount}} started={{.State.StartedAt}}' "$c"; done
+            echo "--- app log (72h): errors/exceptions ---"
+            docker compose logs --since 72h --no-color app 2>&1 | grep -iE 'error|unhandled|uncaught|exception|fatal|ECONN|ETIMEDOUT' \
+              | grep -viE 'humanError|errorHandler' | mask | sed -E 's/^[^|]*\| //' | cut -c1-300 | sort | uniq -c | sort -rn | head -40
+            docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -v ON_ERROR_STOP=0' <<'SQL' 2>&1 | mask
+            set session characteristics as transaction read only;
+            \echo '--- журнал: помилки й попередження за 14 днів (згруповано) ---'
+            select l.level, l.scope,
+                   left(regexp_replace(regexp_replace(regexp_replace(l.message,'\s+',' ','g'),'[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}','<uuid>','g'),'\d+','#','g'),220) as msg,
+                   count(*) as n, to_char(max(l.created_at) at time zone 'Europe/Kyiv','DD.MM HH24:MI') as last
+              from app_log l where l.level in ('error','warn') and l.created_at > now() - interval '14 days'
+             group by 1,2,3 order by n desc, last desc limit 70;
+            \echo '--- слоти розкладу за 14 днів: статуси ---'
+            select status, count(*) from schedule_slot where scheduled_at > now() - interval '14 days' group by 1 order by 2 desc;
+            \echo '--- збої слотів за 14 днів (причини) ---'
+            select left(regexp_replace(coalesce(result::text,''),'\d+','#','g'),260) as reason, count(*) as n
+              from schedule_slot where status='failed' and scheduled_at > now() - interval '14 days' group by 1 order by 2 desc limit 25;
+            \echo '--- прострочені planned-слоти (мали вийти >30 хв тому) ---'
+            select count(*) as overdue, min(scheduled_at) as oldest from schedule_slot where status='planned' and scheduled_at < now() - interval '30 minutes';
+            \echo '--- завислі posting-слоти ---'
+            select count(*) from schedule_slot where status='posting' and coalesce(updated_at, scheduled_at) < now() - interval '15 minutes';
+            \echo '--- резервації публікації, що зависли в sending (>15 хв) ---'
+            select 'telegram' t, count(*) from telegram_publish where status='sending' and created_at < now() - interval '15 minutes'
+            union all select 'threads', count(*) from threads_publish where status='sending' and created_at < now() - interval '15 minutes'
+            union all select 'meta', count(*) from meta_publish where status='sending' and created_at < now() - interval '15 minutes'
+            union all select 'linkedin', count(*) from linkedin_publish where status='sending' and created_at < now() - interval '15 minutes';
+            \echo '--- статуси рядків публікації (усі мережі) ---'
+            select 'telegram' t, status, count(*) from telegram_publish group by 2
+            union all select 'threads', status, count(*) from threads_publish group by 2
+            union all select 'meta', status, count(*) from meta_publish group by 2
+            union all select 'linkedin', status, count(*) from linkedin_publish group by 2 order by 1,2;
+            \echo '--- джоби за 7 днів ---'
+            select kind, status, count(*), left(regexp_replace(coalesce(max(error),''),'\d+','#','g'),160) as sample_error
+              from job where created_at > now() - interval '7 days' group by 1,2 order by 1,2;
+            \echo '--- метрики постів: покриття ---'
+            select network, count(*) as posts, count(*) filter (where views>0) as with_views, sum(views) as views, sum(likes) as likes,
+                   to_char(max(fetched_at) at time zone 'Europe/Kyiv','DD.MM HH24:MI') as last_fetch
+              from post_metric group by 1 order by 1;
+            \echo '--- опубліковано за 90 днів: мережа × формат ---'
+            select x.net, coalesce(p.format,'post') as format, count(*) from (
+                select post_id, 'telegram' net from telegram_publish where status='sent' and created_at > now() - interval '90 days'
+                union all select post_id, 'threads' from threads_publish where status='sent' and created_at > now() - interval '90 days'
+                union all select post_id, channel from meta_publish where status='sent' and created_at > now() - interval '90 days'
+                union all select post_id, 'linkedin' from linkedin_publish where status='sent' and created_at > now() - interval '90 days'
+              ) x join post p on p.id=x.post_id group by 1,2 order by 1,2;
+            \echo '--- активність: кабінети з публікаціями за 30 днів ---'
+            select count(distinct s.workspace_id) as workspaces from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+             where exists (select 1 from telegram_publish t where t.post_id=p.id and t.created_at > now() - interval '30 days')
+                or exists (select 1 from threads_publish t where t.post_id=p.id and t.created_at > now() - interval '30 days')
+                or exists (select 1 from meta_publish t where t.post_id=p.id and t.created_at > now() - interval '30 days');
+            \echo '--- медіатека ---'
+            select kind, source, count(*) from media_asset group by 1,2 order by 3 desc limit 20;
+            \echo '--- llm за 7 днів (кроки з нулем токенів = можливі збої) ---'
+            select step, model, count(*), sum(coalesce(prompt_tokens,0)+coalesce(completion_tokens,0)) as tokens, round(sum(coalesce(cost,0))::numeric,3) as usd
+              from llm_usage where created_at > now() - interval '7 days' group by 1,2 order by 3 desc limit 25;
             SQL
             done
+            echo; echo "=== backups ==="; ls -la /opt/socialio-backups 2>/dev/null | tail -6; tail -5 /opt/socialio-backup.log 2>/dev/null
