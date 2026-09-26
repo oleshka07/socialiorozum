@@ -11,6 +11,8 @@ import { q, one } from "./db.js";
 import * as tg from "./telegram.js";
 import { getSetting, setSetting } from "./settings.js";
 import { saveMedia } from "./media.js";
+import { postMediaList, setPostMediaOrder, MAX_SLIDES } from "./slides.js";
+import { appendCroppedSlide } from "./images.js";
 import { publishPostToChannels } from "./publisher.js";
 import { rewritePost } from "./pipeline.js";
 import { logEvent } from "./log.js";
@@ -112,8 +114,9 @@ export async function composeCard(ws: string, postId: string): Promise<{ text: s
   const when = slot ? new Intl.DateTimeFormat("uk-UA", { timeZone: tz, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(slot.scheduled_at)) : "";
 
   const body = p.content.length > 600 ? p.content.slice(0, 600) + "…" : p.content;
+  const frames = (await postMediaList(postId)).length;
   const text = `📝 <b>${p.review === "approved" ? "Затверджено" : "Чернетка"}</b>\n\n${esc(body)}\n\n`
-    + `🖼 Фото: ${p.filename ? "є" : "нема"}\n`
+    + `🖼 Фото: ${frames > 1 ? `карусель, ${frames} кадрів` : p.filename ? "є" : "нема"}\n`
     + `📢 Канали: ${chosen.length ? chosen.map(niceNet).join(", ") : "не обрано"}`
     + (when ? `\n🗓 Заплановано: ${when}` : "");
 
@@ -124,7 +127,8 @@ export async function composeCard(ws: string, postId: string): Promise<{ text: s
       text: `${ch[k] && ch[k].on ? "✅" : "⬜"} ${niceNet(k)}`, data: `cn:${postId}:${k}`,
     })));
   }
-  rows.push([{ text: p.filename ? "🖼 Змінити фото" : "🖼 Додати фото", data: `cp:${postId}` },
+  // альбом, надісланий у відповідь на «Додати фото», стає каруселлю (перше фото - обкладинка)
+  rows.push([{ text: p.filename ? "🖼 Змінити фото" : "🖼 Фото чи альбом", data: `cp:${postId}` },
              { text: "✍ Текст", data: `ce:${postId}` }]);
   rows.push([{ text: "🤖 Переписати (AI)", data: `cr:${postId}` },
              { text: p.review === "approved" ? "↩ У чернетки" : "✅ Затвердити", data: `ca:${postId}` }]);
@@ -162,6 +166,21 @@ export async function setText(ws: string, postId: string, text: string): Promise
 export async function attachPhoto(ws: string, postId: string, buffer: Buffer, mime: string, name: string): Promise<void> {
   const m = await saveMedia(ws, { buffer, mime, name, source: "bot" });
   await q(`update post set media_id=$2 where id=$1`, [postId, m.id]);
+}
+
+// 🖼 перше фото альбому: фото поста замінюються альбомом, обкладинка - кроп 4:5 (найбільше місця в
+// стрічці й валідна пропорція для всіх мереж; решта кадрів ріжеться під неї)
+export async function setAlbumCover(ws: string, postId: string, buffer: Buffer): Promise<void> {
+  const m = await saveMedia(ws, { buffer, mime: "image/jpeg", name: "tg-post.jpg", source: "bot" });
+  await setPostMediaOrder(ws, postId, []);
+  await appendCroppedSlide(ws, postId, m.id, "4:5");
+}
+
+// 🖼 кадр каруселі з альбому: у кінець, у пропорції обкладинки (до 10 кадрів - решту відкидаємо)
+export async function appendPhoto(ws: string, postId: string, buffer: Buffer, mime: string, name: string): Promise<void> {
+  if ((await postMediaList(postId)).length >= MAX_SLIDES) return;
+  const m = await saveMedia(ws, { buffer, mime, name, source: "bot" });
+  await appendCroppedSlide(ws, postId, m.id);
 }
 
 export async function aiRewrite(ws: string, postId: string, instruction?: string): Promise<string> {

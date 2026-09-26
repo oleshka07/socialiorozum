@@ -66,6 +66,42 @@ export async function getMe(token: string) {
   return thFetch<{ id: string; username?: string }>(u.toString());
 }
 
+// НАДІЙНІСТЬ: контейнер (особливо з фото - Threads тягне його з нашого /media) обробляється
+// асинхронно; threads_publish одразу падав «The requested resource does not exist».
+// Док Meta: чекати до ~30с. Полимо статус контейнера до FINISHED, потім публікуємо з ретраями.
+async function thWaitFinished(token: string, containerId: string): Promise<void> {
+  for (let i = 0; i < 20; i++) {
+    let st: { status?: string; error_message?: string } = {};
+    try {
+      const su = new URL(`${GRAPH}/v1.0/${containerId}`);
+      su.searchParams.set("fields", "status,error_message");
+      su.searchParams.set("access_token", token);
+      st = await thFetch(su.toString());
+    } catch { /* статус ще не віддається - чекаємо далі */ }
+    if (st.status === "FINISHED") return;
+    if (st.status === "ERROR") throw new Error("Threads не зміг обробити медіа" + (st.error_message ? `: ${st.error_message}` : ""));
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  throw new Error("Threads довго обробляє медіа - спробуй ще раз за хвилину");
+}
+async function thPublishContainer(token: string, userId: string, creationId: string): Promise<{ mediaId: string }> {
+  const pub = new URL(`${GRAPH}/v1.0/${userId}/threads_publish`);
+  pub.searchParams.set("creation_id", creationId);
+  pub.searchParams.set("access_token", token);
+  let lastErr: any = null;
+  for (let att = 0; att < 4; att++) {
+    try {
+      const p = await thFetch<{ id: string }>(pub.toString(), { method: "POST" });
+      return { mediaId: p.id };
+    } catch (e: any) {
+      lastErr = e;
+      if (!/does not exist|not exist|try again/i.test(String(e.message))) throw e;
+      await new Promise((r) => setTimeout(r, 4000 * (att + 1))); // контейнер/root ще доїжджає
+    }
+  }
+  throw lastErr || new Error("Threads: не вдалося опублікувати");
+}
+
 // двокроковий публіш: текст (+ опційне зображення за URL).
 // replyToId - відповідь у гілку (на ВЛАСНИЙ пост це працює з базовим threads_content_publish;
 // для відповідей на чужі пости потрібен окремий пермішен threads_manage_replies).
@@ -82,37 +118,35 @@ export async function publish(token: string, userId: string, text: string, image
   }
   if (replyToId) create.searchParams.set("reply_to_id", replyToId);
   const c = await thFetch<{ id: string }>(create.toString(), { method: "POST" });
-  // НАДІЙНІСТЬ: контейнер (особливо з фото - Threads тягне його з нашого /media) обробляється
-  // асинхронно; threads_publish одразу падав «The requested resource does not exist».
-  // Док Meta: чекати до ~30с. Полимо статус контейнера до FINISHED, потім публікуємо з ретраями.
-  for (let i = 0; i < 20; i++) {
-    let st: { status?: string; error_message?: string } = {};
-    try {
-      const su = new URL(`${GRAPH}/v1.0/${c.id}`);
-      su.searchParams.set("fields", "status,error_message");
-      su.searchParams.set("access_token", token);
-      st = await thFetch(su.toString());
-    } catch { /* статус ще не віддається - чекаємо далі */ }
-    if (st.status === "FINISHED") break;
-    if (st.status === "ERROR") throw new Error("Threads не зміг обробити медіа" + (st.error_message ? `: ${st.error_message}` : ""));
-    await new Promise((r) => setTimeout(r, 2000));
-    if (i === 19) throw new Error("Threads довго обробляє медіа - спробуй ще раз за хвилину");
+  await thWaitFinished(token, c.id);
+  return thPublishContainer(token, userId, c.id);
+}
+
+// 🖼 Карусель Threads (2-20 кадрів; ми тримаємо до 10, як і решта мереж): контейнер IMAGE з
+// is_carousel_item на кожен кадр → контейнер CAROUSEL з children і текстом → threads_publish.
+export async function publishCarousel(token: string, userId: string, text: string, imageUrls: string[], replyToId?: string) {
+  const urls = imageUrls.slice(0, 20);
+  if (urls.length < 2) throw new Error("Для каруселі Threads потрібно щонайменше 2 фото");
+  const children: string[] = [];
+  for (const url of urls) {
+    const u = new URL(`${GRAPH}/v1.0/${userId}/threads`);
+    u.searchParams.set("media_type", "IMAGE");
+    u.searchParams.set("image_url", url);
+    u.searchParams.set("is_carousel_item", "true");
+    u.searchParams.set("access_token", token);
+    const c = await thFetch<{ id: string }>(u.toString(), { method: "POST" });
+    children.push(c.id);
   }
-  const pub = new URL(`${GRAPH}/v1.0/${userId}/threads_publish`);
-  pub.searchParams.set("creation_id", c.id);
-  pub.searchParams.set("access_token", token);
-  let lastErr: any = null;
-  for (let att = 0; att < 4; att++) {
-    try {
-      const p = await thFetch<{ id: string }>(pub.toString(), { method: "POST" });
-      return { mediaId: p.id };
-    } catch (e: any) {
-      lastErr = e;
-      if (!/does not exist|not exist|try again/i.test(String(e.message))) throw e;
-      await new Promise((r) => setTimeout(r, 4000 * (att + 1))); // контейнер/root ще доїжджає
-    }
-  }
-  throw lastErr || new Error("Threads: не вдалося опублікувати");
+  for (const id of children) await thWaitFinished(token, id);
+  const car = new URL(`${GRAPH}/v1.0/${userId}/threads`);
+  car.searchParams.set("media_type", "CAROUSEL");
+  car.searchParams.set("children", children.join(","));
+  if (text) car.searchParams.set("text", text);
+  if (replyToId) car.searchParams.set("reply_to_id", replyToId);
+  car.searchParams.set("access_token", token);
+  const c = await thFetch<{ id: string }>(car.toString(), { method: "POST" });
+  await thWaitFinished(token, c.id);
+  return thPublishContainer(token, userId, c.id);
 }
 
 // Публічне посилання на опублікований тред. З media_id його НЕ вивести (у permalink інший

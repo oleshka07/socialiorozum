@@ -27,12 +27,21 @@ const P1 = "11111111-1111-1111-1111-111111111111";
 const P2 = "22222222-2222-2222-2222-222222222222";
 const P3 = "33333333-3333-3333-3333-333333333333";
 const TG_LINK = "https://t.me/mychannel/42";
+// 🖼 карусель: P4 відкривається лише в композері (у Студії його нема, тож лічильники інших перевірок
+// не рухаються); кадри постів у заглушці СТАНОВІ - додати/переставити/прибрати/зібрати змінюють їх
+const P4 = "44444444-4444-4444-4444-444444444444";
+const P4POST = { id: P4, content: "Карусель для перевірки", review: "review", channels: { instagram: { on: true }, telegram: { on: true }, threads: { on: true } }, format: "carousel", rubric: "", intent: "", sent: [], links: {} };
+const CAR = new Map([
+  ["11111111-1111-1111-1111-111111111111", [{ id: "f1", filename: "pic.jpg" }, { id: "f2", filename: "pic2.jpg" }, { id: "f3", filename: "pic3.jpg" }]],
+  [P4, [{ id: "g1", filename: "g1.jpg" }, { id: "g2", filename: "g2.jpg" }, { id: "g3", filename: "g3.jpg" }]],
+]);
+const carCalls = [];
 
 const POSTS = [
   {
     id: P1, content: "Слайд 1: чому підрядники зникають\nСлайд 2: що з цим робити", review: "review",
     channels: { telegram: { on: true }, threads: { on: true } }, rubric: "Кейси", source_origin: "diary",
-    format: "carousel", intent: "awareness", media_filename: "pic.jpg",
+    format: "carousel", intent: "awareness", media_filename: "pic.jpg", media_count: 3,
     qa: { director: "partial", aiaudit: 3, storytelling: 5 }, sent: [], links: {},
   },
   {
@@ -150,7 +159,9 @@ const API = {
       { id: "ws-1", emails: "smoke@rozum.one", day: 2.55, month: 7.1, calls: 12, spend_cap_day: null, spend_cap_month: null, cli_enabled: false },
       { id: "ws-2", emails: "oleg@rozum.one", day: 0.4, month: 9.9, calls: 3, spend_cap_day: 0, spend_cap_month: 0, cli_enabled: true },
     ] },
-  "GET /media": [{ id: "md1", filename: "pic.jpg", source: "upload", created_at: iso(0, 8) }],
+  "GET /media": [{ id: "md1", filename: "pic.jpg", kind: "image", source: "upload", created_at: iso(0, 8) },
+    { id: "md2", filename: "pic2.jpg", kind: "image", source: "upload", created_at: iso(0, 7) },
+    { id: "md3", filename: "pic3.jpg", kind: "image", source: "upload", created_at: iso(0, 6) }],
   "GET /sources/recent": [],
   "GET /sources/rss": { feeds: [] },
   "GET /lead-magnets": { magnets: [] },
@@ -338,13 +349,31 @@ function handleApi(method, path, body) {
   if (key in API) return API[key];
   let mm = /^\/materials\/([\w-]+)$/.exec(path);
   if (mm && method === "GET") return { id: mm[1], transcript: "Повний текст запису щоденника про дзвінок." };
+  // 🖼 кадри каруселі
+  let cm = /^\/posts\/([0-9a-f-]+)\/(slides|carousel)(?:\/([\w-]+))?$/.exec(path);
+  if (cm) {
+    const [, pid, kind, mid] = cm;
+    const list = CAR.get(pid) || [];
+    carCalls.push({ method, kind, body, mid });
+    if (kind === "carousel") {
+      const fr = [1, 2, 3, 4].map((i) => ({ id: "s" + i, filename: "slide" + i + ".jpg" }));
+      CAR.set(pid, fr);
+      return { ok: true, count: 4, theme: "dark", caption: "Підпис під каруселлю", captionChanged: true, truncated: [], content: "Підпис під каруселлю", slides_text: "Слайд 1: А\nСлайд 2: Б", media: fr };
+    }
+    if (method === "POST") (body.mediaIds || []).forEach((x) => list.push({ id: "n-" + x, filename: x + ".jpg" }));
+    if (method === "PUT") list.sort((a, b) => body.ids.indexOf(a.id) - body.ids.indexOf(b.id));
+    if (method === "DELETE") list.splice(list.findIndex((x) => x.id === mid), 1);
+    CAR.set(pid, list);
+    return { ok: true, media: list };
+  }
   let m = /^\/posts\/([0-9a-f-]+)\/full$/.exec(path);
   if (m) {
-    const p = POSTS.find((x) => x.id === m[1]) || POSTS[0];
-    return { ...p, image_prompt: "", headline: "", has_base: false };
+    const p = m[1] === P4 ? P4POST : (POSTS.find((x) => x.id === m[1]) || POSTS[0]);
+    return { ...p, image_prompt: "", headline: "", has_base: false, slides_text: "", media: CAR.get(p.id) || (p.media_filename ? [{ id: "c0", filename: p.media_filename }] : []) };
   }
   m = /^\/posts\/([0-9a-f-]+)\/publish-state$/.exec(path);
   if (m) {
+    if (m[1] === P4) return { sent: [], links: {} };
     const p = POSTS.find((x) => x.id === m[1]) || POSTS[0];
     return { sent: p.sent || [], links: p.links || {} };
   }
@@ -366,6 +395,7 @@ function handleApi(method, path, body) {
     return { jobId: "job-ctx" };
   }
   if (method === "POST" && /\/publish-all$/.test(path)) {
+    carCalls.push({ method, kind: "publish", path });
     pubPolls = 0;
     const id = path.split("/")[2];
     const p = POSTS.find((x) => x.id === id);
@@ -648,6 +678,111 @@ const run = async () => {
     // прев'ю мусить ЧЕСНО казати, що мережу без своєї версії сервер спакує сам
     const note = await $t("#cmpPrev");
     return st.grps === 5 && st.tgDisabled && st.thEnabled && st.revert === 0 && note.includes("спакується під цю мережу автоматично");
+  });
+
+  // 🖼 карусель у композері: смужка кадрів, переставляння, прибирання, додавання з медіатеки
+  // попередня перевірка лишає свій композер відкритим - закриваємо, інакше тут було б ДВА оверлеї
+  // і селектори чіплялися б за елементи чужого поста
+  const closeComposers = () => page.evaluate(() => document.querySelectorAll(".cmp-ov").forEach((o) => { const b = o.querySelector("#cmpBack"); if (b) b.click(); else o.remove(); }));
+  await check("carouselStrip", async () => {
+    await closeComposers();
+    await page.waitForTimeout(200);
+    await page.evaluate((id) => openComposer(id), P4);
+    await page.waitForSelector(".cmp-ov .slides-strip .slide-th", { timeout: 6000 });
+    const st = await page.evaluate(() => ({
+      n: document.querySelectorAll("#cmpMediaWrap .slide-th").length,
+      cover: document.querySelector("#cmpMediaWrap .slide-th .sn").textContent,
+      hint: document.querySelector("#cmpMediaWrap").textContent,
+      car: getComputedStyle(document.querySelector("#cmpCarWrap")).display !== "none", // формат «Карусель» → блок сценарію видно
+      grid: document.querySelectorAll("#cmpPrev .pv-grid img").length,       // Telegram - сітка-альбом
+      wide: !!document.querySelector("#cmpPrev .pv-grid .wide"),             // 3 кадри: перший на всю ширину
+      row: document.querySelectorAll("#cmpPrev .pv-row img").length,          // Threads - стрічка
+      igCnt: (document.querySelector("#cmpPrev .pv-car .pv-cnt") || {}).textContent,
+    }));
+    if (!(st.n === 3 && st.cover === "обкл." && /Карусель: 3 кадрів/.test(st.hint) && st.car && st.grid === 3 && st.wide && st.row === 3 && st.igCnt === "1/3"))
+      console.log("   ↳ carouselStrip:", JSON.stringify(st));
+    return st.n === 3 && st.cover === "обкл." && /Карусель: 3 кадрів/.test(st.hint) && st.car && st.grid === 3 && st.wide && st.row === 3 && st.igCnt === "1/3";
+  });
+
+  await check("carouselIgSwipe", async () => {
+    await page.evaluate(() => document.querySelector("#cmpPrev .pv-car .pv-next").click());
+    await page.waitForFunction(() => (document.querySelector("#cmpPrev .pv-car .pv-cnt") || {}).textContent === "2/3", undefined, { timeout: 3000 });
+    const st = await page.evaluate(() => ({ prev: !!document.querySelector("#cmpPrev .pv-car .pv-prev"), dot: [...document.querySelectorAll("#cmpPrev .pv-dots i")].findIndex((i) => i.classList.contains("on")) }));
+    return st.prev && st.dot === 1;
+  });
+
+  await check("carouselReorder", async () => {
+    carCalls.length = 0;
+    // › на обкладинці: вона йде другою, другий кадр стає обкладинкою
+    await page.evaluate(() => document.querySelector('#cmpMediaWrap [data-mv="0"][data-d="1"]').click());
+    await page.waitForFunction(() => /g2\.jpg/.test(document.querySelector("#cmpMediaWrap .slide-th img").getAttribute("src")), undefined, { timeout: 4000 });
+    const put = carCalls.find((c) => c.method === "PUT");
+    return !!put && put.body.ids.join() === "g2,g1,g3";
+  });
+
+  await check("carouselRemove", async () => {
+    carCalls.length = 0;
+    await page.evaluate(() => document.querySelectorAll("#cmpMediaWrap [data-rm]")[2].click());
+    await page.waitForFunction(() => document.querySelectorAll("#cmpMediaWrap .slide-th").length === 2, undefined, { timeout: 4000 });
+    const del = carCalls.find((c) => c.method === "DELETE");
+    return !!del && del.mid === "g3";
+  });
+
+  await check("carouselPick", async () => {
+    carCalls.length = 0;
+    await page.evaluate(() => document.querySelector("#cmpAddSlides").click());
+    await page.waitForSelector(".modal .slide-pick", { timeout: 5000 });
+    // клік визначає ПОРЯДОК: спершу третє фото, потім перше
+    await page.evaluate(() => { const els = document.querySelectorAll(".modal .slide-pick"); els[2].click(); els[0].click(); });
+    const nums = await page.evaluate(() => [...document.querySelectorAll(".modal .slide-pick b")].map((b) => b.textContent));
+    const okTxt = await $t("#psOk");
+    await page.evaluate(() => document.querySelector("#psOk").click());
+    await page.waitForFunction(() => document.querySelectorAll("#cmpMediaWrap .slide-th").length === 4, undefined, { timeout: 4000 });
+    const post = carCalls.find((c) => c.method === "POST" && c.kind === "slides");
+    return nums.join() === "2,1" && okTxt === "Додати 2" && !!post && post.body.mediaIds.join() === "md3,md1";
+  });
+
+  await check("carouselBuild", async () => {
+    await page.evaluate(() => document.querySelector("#cmpCarBuild").click());
+    await page.waitForFunction(() => document.querySelectorAll("#cmpMediaWrap .slide-th").length === 4 && /slide1/.test(document.querySelector("#cmpMediaWrap img").getAttribute("src")), undefined, { timeout: 5000 });
+    const st = await page.evaluate(() => ({ text: document.querySelector("#cmpText").value, slides: document.querySelector("#cmpSlidesTxt").value, msg: document.querySelector("#cmpMsg").textContent }));
+    await page.evaluate(() => { const b = document.querySelector("#cmpBack"); if (b) b.click(); });
+    await page.waitForTimeout(200);
+    // текст поста став підписом, сценарій - у своєму полі, людина бачить, скільки кадрів
+    return st.text === "Підпис під каруселлю" && /Слайд 1: А/.test(st.slides) && /4 кадрів/.test(st.msg) && /підпис під каруселлю/.test(st.msg);
+  });
+
+  await check("carouselGuard", async () => {
+    // формат «Карусель» з одним кадром: публікація питає, бо сценарій пішов би підписом під одним фото
+    CAR.set(P4, [{ id: "g1", filename: "g1.jpg" }]);
+    carCalls.length = 0;
+    await closeComposers();
+    await page.waitForTimeout(200);
+    await page.evaluate((id) => openComposer(id), P4);
+    await page.waitForSelector(".cmp-ov #cmpNow", { timeout: 6000 });
+    // смоук глобально ставить window.confirm = () => true (див. вище) - тут потрібна ВІДМОВА людини,
+    // тож на час перевірки підміняємо його записувачем, що каже «ні», і потім вертаємо «так»
+    await page.evaluate(() => { window.__confirmMsg = ""; window.confirm = (m) => { window.__confirmMsg = String(m); return false; }; });
+    await page.click("#cmpNow");
+    await page.waitForTimeout(400);
+    const dialogMsg = await page.evaluate(() => window.__confirmMsg);
+    await page.evaluate(() => { window.confirm = () => true; });
+    const st = await page.evaluate(() => ({ fmt: (document.querySelector("#cmpFormat") || {}).value, n: document.querySelectorAll("#cmpMediaWrap .slide-th").length, msg: document.querySelector("#cmpMsg").textContent }));
+    await page.evaluate(() => { const b = document.querySelector("#cmpBack"); if (b) b.click(); });
+    await page.waitForTimeout(200);
+    const good = /кадрів ще не зібрано/.test(dialogMsg) && !carCalls.some((c) => c.kind === "publish");
+    if (!good) console.log("   ↳ carouselGuard:", JSON.stringify({ dialogMsg, st, calls: carCalls.map((c) => c.kind) }));
+    return good;
+  });
+
+  await check("carouselBadge", async () => {
+    await closeComposers();
+    // P1 уже «опубліковано» перевіркою slowPublish, а опубліковані живуть у своїй вкладці
+    await page.evaluate(() => { selectView("create"); setCTab("posts"); StudioFilter = "published"; renderStudio(); });
+    await page.waitForFunction((id) => document.querySelector('.pcard[data-post="' + id + '"] .pcard-cnt'), "11111111-1111-1111-1111-111111111111", { timeout: 6000 });
+    const txt = await $t('.pcard[data-post="11111111-1111-1111-1111-111111111111"] .pcard-cnt');
+    await page.evaluate(() => { StudioFilter = "all"; renderStudio(); });
+    return txt === "🖼 3";
   });
 
   await check("deepLink", async () => {

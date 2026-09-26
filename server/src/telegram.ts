@@ -2,10 +2,10 @@
 // Бот має бути доданий АДМІНОМ у канал/групу, щоб публікувати.
 const BASE = "https://api.telegram.org";
 
-async function tg<T = any>(token: string, method: string, body: Record<string, any> = {}): Promise<T> {
+async function tg<T = any>(token: string, method: string, body: Record<string, any> = {}, timeoutMs = 15000): Promise<T> {
   if (!token) throw new Error("Telegram bot token не заданий");
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   let res: Response;
   try {
     res = await fetch(`${BASE}/bot${token}/${method}`, {
@@ -15,7 +15,7 @@ async function tg<T = any>(token: string, method: string, body: Record<string, a
       body: JSON.stringify(body),
     });
   } catch (e: any) {
-    if (e && e.name === "AbortError") throw new Error("Telegram timeout 15s");
+    if (e && e.name === "AbortError") throw new Error(`Telegram не відповів за ${Math.round(timeoutMs / 1000)} с`);
     throw e;
   } finally {
     clearTimeout(timer);
@@ -99,6 +99,22 @@ export async function sendPhoto(token: string, chatId: string, photoUrl: string,
   } catch (e: any) {
     if (/parse entities|unsupported start tag|can't find end/i.test(String(e.message)))
       return tg<{ message_id: number }>(token, "sendPhoto", { chat_id: chatId, photo: photoUrl, caption });
+    throw e;
+  }
+}
+// 🖼 Альбом (карусель): 2-10 фото одним повідомленням. Підпис у Telegram живе на ОДНОМУ кадрі -
+// першому, тоді він показується під усім альбомом. Telegram сам тягне кожне фото за URL, тож на
+// 10 кадрів 15 секунд замало - тут хвилина.
+export async function sendMediaGroup(token: string, chatId: string, photoUrls: string[], caption: string): Promise<Array<{ message_id: number }>> {
+  const media = (html: boolean) => photoUrls.slice(0, 10).map((u, i) => ({
+    type: "photo", media: u,
+    ...(i === 0 && caption ? (html ? { caption: toTgHtml(caption), parse_mode: "HTML" } : { caption }) : {}),
+  }));
+  try {
+    return await tg<Array<{ message_id: number }>>(token, "sendMediaGroup", { chat_id: chatId, media: media(true) }, 60000);
+  } catch (e: any) {
+    if (/parse entities|unsupported start tag|can't find end/i.test(String(e.message)))
+      return tg<Array<{ message_id: number }>>(token, "sendMediaGroup", { chat_id: chatId, media: media(false) }, 60000);
     throw e;
   }
 }

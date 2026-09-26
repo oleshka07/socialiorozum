@@ -1,6 +1,5 @@
 // Meta Graph API (Facebook Login) — постинг у FB-Сторінку + FB/IG аналітика.
 // Окремий від Threads: хост graph.facebook.com, окремий App ID/Secret (META_APP_*).
-// IG публікація НЕ реалізована (IG вимагає зображення; пости socialio — текстові).
 const GV = "v23.0"; // версія Graph API (за потреби синхронізувати з Holos)
 const GRAPH = `https://graph.facebook.com/${GV}`;
 const DIALOG = `https://www.facebook.com/${GV}/dialog/oauth`;
@@ -197,21 +196,19 @@ export async function publishVideoToPage(pageId: string, pageToken: string, desc
 // НАДІЙНІСТЬ: навіть фото-контейнер обробляється асинхронно (IG ще тягне картинку з нашого /media) -
 // media_publish одразу після create періодично падав «Media ID is not available». Тому: чекаємо
 // status_code=FINISHED (фото зазвичай 1-3с) і ретраїмо публіш, якщо IG ще «не бачить» медіа.
-export async function publishToInstagram(igUserId: string, pageToken: string, imageUrl: string, caption: string) {
-  const cbody = new URLSearchParams({ image_url: imageUrl, caption, access_token: pageToken });
-  const c = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media`, {
-    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: cbody,
-  });
+async function igWaitFinished(containerId: string, pageToken: string): Promise<void> {
   for (let i = 0; i < 20; i++) {
     let st: { status_code?: string } = {};
-    try { st = await fbFetch<{ status_code?: string }>(`${GRAPH}/${c.id}?fields=status_code&access_token=${encodeURIComponent(pageToken)}`); }
+    try { st = await fbFetch<{ status_code?: string }>(`${GRAPH}/${containerId}?fields=status_code&access_token=${encodeURIComponent(pageToken)}`); }
     catch { /* статус інколи недоступний одразу - просто чекаємо далі */ }
-    if (st.status_code === "FINISHED") break;
+    if (st.status_code === "FINISHED") return;
     if (st.status_code === "ERROR") throw new Error("Instagram не зміг обробити зображення (формат/недоступний URL фото)");
     await new Promise((r) => setTimeout(r, 2000));
-    if (i === 19) throw new Error("Instagram довго обробляє зображення - спробуй ще раз за хвилину");
   }
-  const pbody = new URLSearchParams({ creation_id: c.id, access_token: pageToken });
+  throw new Error("Instagram довго обробляє зображення - спробуй ще раз за хвилину");
+}
+async function igPublishContainer(igUserId: string, pageToken: string, creationId: string): Promise<{ mediaId: string }> {
+  const pbody = new URLSearchParams({ creation_id: creationId, access_token: pageToken });
   let lastErr: any = null;
   for (let att = 0; att < 4; att++) {
     try {
@@ -227,4 +224,55 @@ export async function publishToInstagram(igUserId: string, pageToken: string, im
     }
   }
   throw lastErr || new Error("Instagram: не вдалося опублікувати");
+}
+export async function publishToInstagram(igUserId: string, pageToken: string, imageUrl: string, caption: string) {
+  const cbody = new URLSearchParams({ image_url: imageUrl, caption, access_token: pageToken });
+  const c = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: cbody,
+  });
+  await igWaitFinished(c.id, pageToken);
+  return igPublishContainer(igUserId, pageToken, c.id);
+}
+
+// 🖼 Instagram-карусель (2-10 кадрів): контейнер на кожен кадр (is_carousel_item, без підпису) →
+// контейнер CAROUSEL з children і підписом → media_publish. Кожен контейнер обробляється асинхронно,
+// тож чекаємо FINISHED і в кадрів, і в самої каруселі - інакше IG відповідає «Media ID is not available».
+// Усі кадри IG обрізає під пропорцію ПЕРШОГО, тому ми ріжемо їх однаково ще до публікації.
+export async function publishCarouselToInstagram(igUserId: string, pageToken: string, imageUrls: string[], caption: string) {
+  const urls = imageUrls.slice(0, 10);
+  if (urls.length < 2) throw new Error("Для каруселі Instagram потрібно щонайменше 2 фото");
+  const children: string[] = [];
+  for (const url of urls) {
+    const body = new URLSearchParams({ image_url: url, is_carousel_item: "true", access_token: pageToken });
+    const c = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media`, {
+      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body,
+    });
+    children.push(c.id);
+  }
+  for (const id of children) await igWaitFinished(id, pageToken);
+  const cbody = new URLSearchParams({ media_type: "CAROUSEL", children: children.join(","), caption, access_token: pageToken });
+  const car = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: cbody,
+  });
+  await igWaitFinished(car.id, pageToken);
+  return igPublishContainer(igUserId, pageToken, car.id);
+}
+
+// 🖼 Кілька фото в одному пості Сторінки: кожне фото вантажимо НЕопублікованим (published=false) і
+// збираємо їхні id в attached_media допису стрічки - так Facebook показує одну публікацію-галерею,
+// а не N окремих фото-постів.
+export async function publishMultiPhotoToPage(pageId: string, pageToken: string, message: string, imageUrls: string[]) {
+  const ids: string[] = [];
+  for (const url of imageUrls.slice(0, 10)) {
+    const body = new URLSearchParams({ url, published: "false", access_token: pageToken });
+    const r = await fbFetch<{ id: string }>(`${GRAPH}/${pageId}/photos`, {
+      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body,
+    });
+    ids.push(r.id);
+  }
+  const body = new URLSearchParams({ message, access_token: pageToken });
+  ids.forEach((id, i) => body.set(`attached_media[${i}]`, JSON.stringify({ media_fbid: id })));
+  return fbFetch<{ id: string }>(`${GRAPH}/${pageId}/feed`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body,
+  });
 }

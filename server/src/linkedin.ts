@@ -75,8 +75,9 @@ export async function uploadImage(token: string, authorUrn: string, imageBuf: Bu
   return init.value.image; // urn:li:image:…
 }
 
-// публікація поста (текст до 3000 симв, опційно зображення)
-export async function publish(token: string, authorUrn: string, text: string, imageBuf?: Buffer): Promise<{ postId: string }> {
+// публікація поста (текст до 3000 симв, опційно зображення). Кілька зображень = multiImage
+// (LinkedIn приймає 2-20), одне - звичайне media.
+export async function publish(token: string, authorUrn: string, text: string, images?: Buffer | Buffer[]): Promise<{ postId: string }> {
   const body: any = {
     author: authorUrn,
     commentary: escapeCommentary(text.slice(0, 3000)),
@@ -85,8 +86,13 @@ export async function publish(token: string, authorUrn: string, text: string, im
     lifecycleState: "PUBLISHED",
     isReshareDisabledByAuthor: false,
   };
-  if (imageBuf) {
-    const imageUrn = await uploadImage(token, authorUrn, imageBuf);
+  const bufs = (Array.isArray(images) ? images : images ? [images] : []).slice(0, 20);
+  if (bufs.length >= 2) {
+    const urns: string[] = [];
+    for (const b of bufs) urns.push(await uploadImage(token, authorUrn, b));
+    body.content = { multiImage: { images: urns.map((id) => ({ id })) } };
+  } else if (bufs.length === 1) {
+    const imageUrn = await uploadImage(token, authorUrn, bufs[0]);
     body.content = { media: { id: imageUrn } };
   }
   const j: any = await liFetch(`${API}/rest/posts`, { method: "POST", headers: REST_HEADERS(token), body: JSON.stringify(body) });

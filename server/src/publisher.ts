@@ -17,6 +17,7 @@ import { tgLink, fbLink, liLink } from "./permalink.js";
 import { logEvent } from "./log.js";
 import { startJob } from "./jobs.js";
 import { ensurePostDigest } from "./memory.js";
+import { postMediaList } from "./slides.js";
 
 export async function thValidToken(ws: string): Promise<{ token: string; userId: string } | null> {
   const c = await one<{ threads_user_id: string | null; access_token: string | null; token_expires_at: string | null }>(
@@ -69,12 +70,16 @@ export async function alreadySentNetworks(postId: string): Promise<string[]> {
 // (публікація один раз на мережу) — і при ручній публікації, і в автопостері.
 // Якщо жодної мережі не обрано — нічого не публікує (порожній результат), без тихого fallback.
 export async function publishPostToChannels(ws: string, postId: string, onlyNets?: string[]): Promise<PubResult[]> {
-  const post = await one<{ content: string; channels: any; filename: string | null }>(
-    `select p.content, p.channels, p.intent, ma.filename from post p
+  const post = await one<{ content: string; channels: any }>(
+    `select p.content, p.channels, p.intent from post p
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
-       left join media_asset ma on ma.id=p.media_id
      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
   if (!post) throw new Error("пост не знайдено");
+  // 🖼 кадри поста: обкладинка + кадри каруселі. Один кадр - звичайний фото-пост, 2+ - карусель
+  // (Instagram/Threads - CAROUSEL, Facebook - галерея, Telegram - альбом, LinkedIn - multiImage).
+  const images = (await postMediaList(postId)).filter((m) => m.kind === "image").map((m) => m.filename);
+  const imageUrls = images.map((f) => `${env.appBaseUrl}/media/${f}`);
+  const carousel = images.length >= 2;
   const ch = post.channels || {};
   const enabled = Object.keys(ch).filter((k) => ch[k] && ch[k].on)
     .filter((k) => !onlyNets || onlyNets.includes(k));
@@ -101,7 +106,7 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
     }
   }
   const textOf = (k: string) => (ch[k] && ch[k].text) || post.content;
-  const imageUrl = post.filename ? `${env.appBaseUrl}/media/${post.filename}` : null;
+  const imageUrl = imageUrls[0] || null;
   const results: PubResult[] = [];
   const [tgc, thTok, mt, li] = await Promise.all([
     one<{ bot_token: string | null; channel_chat_id: string | null; group_chat_id: string | null; channel_username: string | null }>(`select bot_token, channel_chat_id, group_chat_id, channel_username from telegram_config where workspace_id=$1`, [ws]),
@@ -129,7 +134,12 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
           if (!reserved) continue;
           try {
             let r: { message_id: number };
-            if (imageUrl) {
+            if (carousel) {
+              // альбом: підпис на першому кадрі; довший за 1024 - окремим повідомленням під альбомом
+              const msgs = await tg.sendMediaGroup(tgc.bot_token, chat, imageUrls, cap.length <= 1024 ? cap : "");
+              r = msgs[0];
+              if (cap.length > 1024) await tg.sendMessage(tgc.bot_token, chat, cap);
+            } else if (imageUrl) {
               r = await tg.sendPhoto(tgc.bot_token, chat, imageUrl, cap.length <= 1024 ? cap : "");
               if (cap.length > 1024) await tg.sendMessage(tgc.bot_token, chat, cap); // підпис > ліміту Telegram → текст окремо
             } else {
@@ -169,7 +179,10 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
           if (wantThread) {
             // гілка пакує ПОВНИЙ майстер-текст (а не скорочену 500-символьну версію) - у цьому її сенс
             const parts = await threadsSplit(ws, post.content, perPost.number !== false);
-            const first = await threads.publish(thTok.token, thTok.userId, parts[0], imageUrl || undefined);
+            // карусель - у першому пості гілки (root), відповіді лишаються текстовими
+            const first = carousel
+              ? await threads.publishCarousel(thTok.token, thTok.userId, parts[0], imageUrls)
+              : await threads.publish(thTok.token, thTok.userId, parts[0], imageUrl || undefined);
             rootId = first.mediaId;
             // root УЖЕ в мережі → фіксуємо sent ОДРАЗУ: якщо якась ветка впаде, повторна публікація
             // не задублює root (дедуп «раз на мережу» побачить sent)
@@ -187,7 +200,9 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
               }
             }
           } else {
-            const r = await threads.publish(thTok.token, thTok.userId, textOf(k), imageUrl || undefined);
+            const r = carousel
+              ? await threads.publishCarousel(thTok.token, thTok.userId, textOf(k), imageUrls)
+              : await threads.publish(thTok.token, thTok.userId, textOf(k), imageUrl || undefined);
             rootId = r.mediaId;
             await q(`update threads_publish set media_id=$2, status='sent' where id=$1`, [reserved.id, rootId]);
           }
@@ -220,23 +235,30 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
           `insert into meta_publish(post_id,channel,status) values($1,'facebook','sending') on conflict (post_id,channel) do nothing returning id`, [postId]);
         if (!reserved) { results.push({ channel: k, status: "skipped" }); continue; }
         try {
-          const r = imageUrl ? await meta.publishPhotoToPage(mt.page_id, mt.page_token, textOf(k), imageUrl) : await meta.publishToPage(mt.page_id, mt.page_token, textOf(k));
+          const r = carousel ? await meta.publishMultiPhotoToPage(mt.page_id, mt.page_token, textOf(k), imageUrls)
+            : imageUrl ? await meta.publishPhotoToPage(mt.page_id, mt.page_token, textOf(k), imageUrl)
+            : await meta.publishToPage(mt.page_id, mt.page_token, textOf(k));
           const fbId = (r as any).post_id || r.id;
           // id FB-поста вже містить id сторінки, тож лінк збирається без додаткового запиту
           await q(`update meta_publish set external_id=$2, status='sent', permalink=nullif($3,'') where id=$1`, [reserved.id, fbId, fbLink(fbId)]);
         } catch (e: any) { await q(`delete from meta_publish where id=$1`, [reserved.id]); throw e; }
       } else if (k === "instagram") {
         if (!mt?.ig_user_id || !mt.page_token) throw new Error("Instagram не підключено");
-        if (!post.filename) throw new Error("Instagram потребує фото");
+        if (!images.length) throw new Error("Instagram потребує фото");
         if (mt.token_expires_at && new Date(mt.token_expires_at).getTime() < Date.now())
           throw new Error("Токен Meta (Facebook/Instagram) протух - перепідключи у Налаштування → Канали");
         const reserved = await one<{ id: string }>(
           `insert into meta_publish(post_id,channel,status) values($1,'instagram','sending') on conflict (post_id,channel) do nothing returning id`, [postId]);
         if (!reserved) { results.push({ channel: k, status: "skipped" }); continue; }
         try {
-          // IG приймає лише JPEG з пропорціями 0.8-1.91 → за потреби готуємо сумісну копію (PNG з AI-генерації падав)
-          const safe = await ensureIgSafeImage(ws, post.filename);
-          const r = await meta.publishToInstagram(mt.ig_user_id, mt.page_token, `${env.appBaseUrl}/media/${safe}`, textOf(k));
+          // IG приймає лише JPEG з пропорціями 0.8-1.91 → за потреби готуємо сумісну копію (PNG з AI-генерації падав).
+          // Для каруселі - кожен кадр.
+          const safe: string[] = [];
+          for (const f of images) safe.push(await ensureIgSafeImage(ws, f));
+          const safeUrls = safe.map((f) => `${env.appBaseUrl}/media/${f}`);
+          const r = carousel
+            ? await meta.publishCarouselToInstagram(mt.ig_user_id, mt.page_token, safeUrls, textOf(k))
+            : await meta.publishToInstagram(mt.ig_user_id, mt.page_token, safeUrls[0], textOf(k));
           await q(`update meta_publish set external_id=$2, status='sent' where id=$1`, [reserved.id, r.mediaId]);
           // permalink IG - лише окремим запитом; збій не критичний (доберемо лениво в /publish-state)
           try {
@@ -252,10 +274,10 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
           `insert into linkedin_publish(post_id,status) values($1,'sending') on conflict (post_id) do nothing returning id`, [postId]);
         if (!reserved) { results.push({ channel: k, status: "skipped" }); continue; }
         try {
-          // зображення LinkedIn приймає лише через власний upload (не за URL) - читаємо локальний файл
-          let imgBuf: Buffer | undefined;
-          if (post.filename) { try { imgBuf = await readFile(join(MEDIA_DIR, post.filename)); } catch { /* без фото */ } }
-          const r = await linkedin.publish(li.access_token, li.member_urn, textOf(k), imgBuf);
+          // зображення LinkedIn приймає лише через власний upload (не за URL) - читаємо локальні файли
+          const bufs: Buffer[] = [];
+          for (const f of images) { try { bufs.push(await readFile(join(MEDIA_DIR, f))); } catch { /* файл зник - без нього */ } }
+          const r = await linkedin.publish(li.access_token, li.member_urn, textOf(k), bufs);
           // URN поста → лінк збирається детерміновано, без додаткового запиту
           await q(`update linkedin_publish set external_id=$2, status='sent', permalink=nullif($3,'') where id=$1`,
             [reserved.id, r.postId || null, liLink(r.postId || null)]);

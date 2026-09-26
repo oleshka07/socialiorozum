@@ -758,3 +758,17 @@ create table if not exists upload_link (
   created_at   timestamptz not null default now()
 );
 create index if not exists idx_upload_link_exp on upload_link(expires_at);
+
+-- 🖼 Карусель: пост із кількома кадрами. Обкладинка лишається в post.media_id (її вже знають
+-- редактор фото, прев'ю, картка, бот і всі мережі), а кадри 2..N лежать тут, по порядку pos.
+-- Видалили фото з медіатеки - його кадр зникає разом із ним (cascade), порядок решти не ламається.
+create table if not exists post_slide (
+  post_id  uuid not null references post(id) on delete cascade,
+  pos      int  not null,
+  media_id uuid not null references media_asset(id) on delete cascade,
+  primary key (post_id, pos)
+);
+create index if not exists idx_post_slide_media on post_slide(media_id);
+-- Сценарій каруселі («Слайд 1: …», «Слайд 2: …»): з нього зібрано кадри. Коли кадри готові, текст
+-- поста стає ПІДПИСОМ під каруселлю, а сценарій живе тут - щоб слайди можна було перезібрати.
+alter table post add column if not exists slides_text text;

@@ -1583,7 +1583,7 @@ function renderStudio(){
     const qaHtml=qaBad.length?'<div style="display:flex;gap:5px;flex-wrap:wrap;padding:0 14px 4px">'+qaBad.map(b=>'<span class="ptag qabadge" data-qa="'+b[0]+'" style="cursor:pointer;color:var(--amber);border-color:var(--amber)">'+b[1]+'</span>').join('')+'</div>':'';
     return '<div class="pcard'+(ap?' appr':'')+(sel?' selc':'')+'" data-post="'+p.id+'">'
       +'<div class="pcard-h"><input type="checkbox" class="psel" '+(sel?'checked':'')+' title="Обрати для масових дій">'+dots+'<span class="statuspill '+sp[1]+'" style="margin-left:auto">'+sp[0]+'</span></div>'
-      +(p.media_filename?'<div class="pcard-img" data-a="image" style="cursor:pointer" title="Редагувати зображення"><img loading="lazy" src="/thumb/'+esc(p.media_filename)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(p.media_filename)+'\'"></div>':'')
+      +(p.media_filename?'<div class="pcard-img" data-a="image" style="cursor:pointer" title="Редагувати зображення"><img loading="lazy" src="/thumb/'+esc(p.media_filename)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(p.media_filename)+'\'">'+(p.media_count>1?'<span class="pcard-cnt" title="Карусель: '+p.media_count+' кадрів">🖼 '+p.media_count+'</span>':'')+'</div>':'')
       +'<div class="pcard-text pcontent" contenteditable="true">'+esc(p.content)+'</div>'
       +(tags?'<div style="display:flex;gap:5px;flex-wrap:wrap;padding:0 14px 4px">'+tags+'</div>':'')
       +qaHtml
@@ -1823,6 +1823,33 @@ function chooseMedia(){ return new Promise(async resolve=>{
   ov.querySelector('#cmDetach').onclick=()=>{ close(); resolve({id:null,filename:null}); };
   ov.querySelectorAll('img[data-id]').forEach(im=>im.onclick=()=>{ close(); resolve({id:im.dataset.id, filename:im.dataset.fn}); });
 }); }
+// 🖼 вибір кадрів каруселі: кілька фото з медіатеки (номер = порядок кліку) або одразу пачкою з
+// компʼютера. Повертає id у медіатеці в потрібному порядку.
+function pickSlides(room){ return new Promise(async resolve=>{
+  let lib=[]; try{ lib=(await api('/media')).filter(m=>m.kind==='image'); }catch(e){ flash('Не вдалося завантажити медіатеку'); resolve(null); return; }
+  const picked=[];
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='96';
+  ov.innerHTML='<div class="modal-card" style="max-width:660px;padding:20px"><b>＋ Кадри каруселі</b> <span style="font-size:12px;color:var(--muted)">можна ще '+room+' · номер = порядок у каруселі</span>'
+    +'<div style="margin:10px 0"><label class="dashbtn" style="cursor:pointer">⬆ Завантажити з компʼютера<input type="file" id="psFiles" accept="image/*" multiple style="display:none"></label> <span id="psMsg" style="font-size:12px;color:var(--muted)"></span></div>'
+    +'<div id="psGrid" style="display:flex;flex-wrap:wrap;gap:8px;max-height:52vh;overflow:auto">'+(lib.length?lib.map(m=>'<div class="slide-pick" data-id="'+m.id+'"><img loading="lazy" src="/thumb/'+esc(m.filename)+'" onerror="this.style.opacity=.3"></div>').join(''):'<div class="empty">Медіатека порожня - завантаж фото кнопкою вище.</div>')+'</div>'
+    +'<div class="btnrow"><button class="ghost" id="psClose">Скасувати</button><button class="primary" id="psOk" disabled>Додати</button></div></div>';
+  document.body.appendChild(ov);
+  const done=(v)=>{ ov.remove(); resolve(v); };
+  const okB=ov.querySelector('#psOk');
+  const paint=()=>{ ov.querySelectorAll('.slide-pick').forEach(el=>{ const i=picked.indexOf(el.dataset.id); el.classList.toggle('on',i>=0); const old=el.querySelector('b'); if(old) old.remove(); if(i>=0) el.insertAdjacentHTML('beforeend','<b>'+(i+1)+'</b>'); });
+    okB.disabled=!picked.length; okB.textContent=picked.length?('Додати '+picked.length):'Додати'; };
+  ov.querySelectorAll('.slide-pick').forEach(el=>el.onclick=()=>{ const id=el.dataset.id, i=picked.indexOf(id); if(i>=0) picked.splice(i,1); else if(picked.length<room) picked.push(id); else flash('у каруселі до 10 кадрів'); paint(); });
+  ov.addEventListener('click',e=>{ if(e.target===ov) done(null); });
+  ov.querySelector('#psClose').onclick=()=>done(null);
+  okB.onclick=()=>done(picked.slice());
+  ov.querySelector('#psFiles').onchange=async(e)=>{ const files=[...(e.target.files||[])].slice(0,room); if(!files.length) return;
+    const m=ov.querySelector('#psMsg'); m.textContent='завантаження…';
+    const r=await uploadInBatches(files,'/api/media',(d,t)=>{ m.textContent='завантаження… '+d+' з '+t; });
+    const ids=r.saved.map(x=>x.id).filter(Boolean);
+    if(!ids.length){ m.style.color='var(--danger)'; m.textContent=uploadReport(r); return; }
+    if(r.failed.length) flash(uploadReport(r));
+    done(ids); };
+}); }
 // ---------- композер: опублікувати / запланувати ----------
 // ---------- КОМПОЗЕР: повноекранна панель (ліворуч редактор, праворуч мобільне прев'ю) ----------
 const NETLIM={telegram:1024,threads:500,instagram:2200,facebook:2000,linkedin:3000};
@@ -1896,6 +1923,9 @@ async function openComposer(postId, opts){
   // надіслані мережі завжди позначені як обрані (щоб було видно в прев'ю)
   sentSet.forEach(k=>{ C[k]=C[k]||{text:''}; C[k].on=true; });
   let master=full.content||''; let mediaFilename=full.media_filename||null; let rubric=full.rubric||'';
+  // 🖼 кадри поста (обкладинка першою); 2+ = карусель
+  let media=(full.media||[]).filter(m=>m&&m.filename); let slidesText=full.slides_text||'';
+  const pvIdx={}; // яким кадром гортати прев'ю каруселі в Instagram
   let thSnap=null; // мережі, вимкнені режимом «🧵 Гілкою» (відновлюються при вимкненні режиму)
   const initDate=opts.scheduledAt?locDate(opts.scheduledAt):''; const initTime=opts.scheduledAt?locHM(opts.scheduledAt):'11:00';
   const textOf=(k)=> (C[k]&&typeof C[k].text==='string'&&C[k].text) ? C[k].text : master;
@@ -1920,8 +1950,18 @@ async function openComposer(postId, opts){
         +'<div style="font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint);margin-top:12px">🤖 ПОМІЧНИКИ ТЕКСТУ</div>'
         +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="dashbtn" id="cmpRewrite" title="Перепише текст; можна вказати, що саме змінити">✍ Переписати</button><button class="dashbtn" id="cmpHook" title="3 варіанти сильнішого відкриття з кульмінації">🪝 Гачок</button><button class="dashbtn" id="cmpAudit" title="Знайти і точково прибрати сліди AI">🔍 AI-сліди</button><button class="dashbtn" id="cmpHash" title="5-8 релевантних хештегів у кінець тексту"># Хештеги</button></div>'
         +'<div style="font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint);margin-top:14px">🖼 МЕДІА</div>'
-        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="dashbtn" id="cmpPhoto" title="Фото: з галереї, з компʼютера, зі стоку чи AI-генерація">🎨 Зображення</button></div>'
+        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="dashbtn" id="cmpPhoto" title="Обкладинка: з галереї, з компʼютера, зі стоку чи AI-генерація, текст на фото">🎨 Обкладинка</button><button class="dashbtn" id="cmpAddSlides" title="Кілька фото в одному пості: Instagram і Threads - карусель, Facebook - галерея, Telegram - альбом">＋ Кадри каруселі</button></div>'
         +'<div id="cmpMediaWrap" style="margin-top:10px"></div>'
+        +'<div id="cmpCarWrap" style="display:none;margin-top:12px;padding:10px 12px;border:1px dashed var(--line);border-radius:10px">'
+          +'<div style="font-size:12px;font-weight:700;margin-bottom:4px">🎠 Сценарій слайдів</div>'
+          +'<div style="font-size:11.5px;color:var(--muted);margin-bottom:6px">Рядки «Слайд 1: …», «Слайд 2: …» → кадри-картинки з великим текстом (безкоштовно). Порожньо - візьму сценарій із тексту поста, а текст стане підписом під каруселлю.</div>'
+          +'<textarea id="cmpSlidesTxt" class="txt" style="min-height:110px;font-size:13px" placeholder="Слайд 1: Обіцянка крупно\nСлайд 2: Друга обкладинка\nСлайд 3: Одна думка на слайд\nПідпис: текст під каруселлю"></textarea>'
+          +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">'
+            +'<select id="cmpCarTheme" class="txt" style="width:auto;padding:6px 9px"><option value="">тема: авто</option><option value="photo">на фото обкладинки</option><option value="dark">темна</option><option value="light">світла</option></select>'
+            +'<select id="cmpCarAccent" class="txt" style="width:auto;padding:6px 9px">'+[['#F6C444','🟡 жовтий'],['#7FD1FF','🔵 блакитний'],['#FF8FA3','🩷 рожевий'],['#9BE58B','🟢 зелений']].map(o=>'<option value="'+o[0]+'">'+o[1]+'</option>').join('')+'</select>'
+            +'<button class="dashbtn" id="cmpCarBuild">🎨 Зібрати слайди</button>'
+          +'</div>'
+        +'</div>'
         +'<div id="cmpMsg" style="font-size:12.5px;margin-top:10px;min-height:18px"></div>'
       +'</div>'
       +'<div class="cmp-right"><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:14px;text-align:center">Прев\'ю · мобільний</div><div id="cmpPrev"></div></div>'
@@ -2002,26 +2042,54 @@ async function openComposer(postId, opts){
         renderChips(); renderPrev(); };
       nb.onclick=()=>{ C.threads.number=C.threads.number===false?true:false; renderChips(); renderPrev(); }; } }
   // ----- медіа (ліва панель) -----
-  function renderMedia(){ ov.querySelector('#cmpMediaWrap').innerHTML=(mediaFilename
-      ?'<img src="/media/'+esc(mediaFilename)+'" style="max-height:120px;border-radius:10px;border:1px solid var(--line)">'
-      :'<div style="font-size:12px;color:var(--muted)">Фото ще нема - додай через «⚡ AI фото».</div>'); }
+  // 🖼 смужка кадрів: обкладинка першою, ✕ прибрати, ‹ › переставити, «＋» додати ще
+  function setMedia(list){ media=(list||[]).filter(m=>m&&m.filename); mediaFilename=media.length?media[0].filename:null; }
+  async function reorderMedia(ids){ try{ const r=await api('/posts/'+postId+'/slides',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})}); setMedia(r.media); renderMedia(); renderPrev(); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } }
+  function renderMedia(){ const box=ov.querySelector('#cmpMediaWrap'); const n=media.length;
+    if(!n){ box.innerHTML='<div style="font-size:12px;color:var(--muted)">Фото ще нема - «🎨 Обкладинка» або «＋ Кадри каруселі».</div>'; renderCarBlock(); return; }
+    box.innerHTML='<div class="slides-strip">'+media.map((m,i)=>'<div class="slide-th"><img src="/thumb/'+esc(m.filename)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(m.filename)+'\'"><span class="sn">'+(i===0?'обкл.':(i+1))+'</span><button class="sx" data-rm="'+m.id+'" title="Прибрати кадр">✕</button>'
+        +(n>1?'<div class="sm"><button data-mv="'+i+'" data-d="-1"'+(i===0?' disabled':'')+' title="Раніше">‹</button><button data-mv="'+i+'" data-d="1"'+(i===n-1?' disabled':'')+' title="Пізніше">›</button></div>':'')+'</div>').join('')
+      +(n<10?'<button class="slide-add" id="cmpAddMore" title="Додати кадри">＋<br>кадр</button>':'')+'</div>'
+      +(n>1?'<div style="font-size:11.5px;color:var(--muted);margin-top:6px">🖼 Карусель: '+n+' кадрів (до 10). Instagram і Threads - карусель, Facebook - галерея, Telegram - альбом, LinkedIn - кілька фото. Перший кадр - обкладинка.</div>':'');
+    box.querySelectorAll('[data-rm]').forEach(b=>b.onclick=async()=>{ b.disabled=true; try{ const r=await api('/posts/'+postId+'/slides/'+b.dataset.rm,{method:'DELETE'}); setMedia(r.media); renderMedia(); renderPrev(); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); b.disabled=false; } });
+    box.querySelectorAll('[data-mv]').forEach(b=>b.onclick=()=>{ const i=+b.dataset.mv, j=i+(+b.dataset.d); const ids=media.map(m=>m.id); [ids[i],ids[j]]=[ids[j],ids[i]]; reorderMedia(ids); });
+    const more=box.querySelector('#cmpAddMore'); if(more) more.onclick=addSlides;
+    renderCarBlock(); }
+  // ＋ кадри: з медіатеки (кілька, у порядку кліків) або одразу з компʼютера пачкою
+  async function addSlides(){ const room=10-media.length; if(room<=0){ setMsg('у каруселі вже 10 кадрів - більше Instagram і Telegram не приймають','var(--danger)'); return; }
+    const ids=await pickSlides(room); if(!ids||!ids.length) return;
+    setMsg('🖼 додаю кадри…'); try{ const r=await api('/posts/'+postId+'/slides',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaIds:ids})}); setMedia(r.media); renderMedia(); renderPrev(); setMsg(media.length>1?('карусель: '+media.length+' кадрів ✓'):'фото додано ✓','var(--brand)'); }
+    catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } }
+  // блок «Сценарій слайдів»: видно для формату «Карусель» або коли сценарій уже є
+  function renderCarBlock(){ const w=ov.querySelector('#cmpCarWrap'); if(!w) return; const fv=ov.querySelector('#cmpFormat');
+    const show=(fv&&fv.value==='carousel')||!!slidesText.trim()||/(^|\n)\s*\**\s*слайд\s*\d/i.test(master);
+    w.style.display=show?'':'none'; }
   // ----- прев'ю мобільне по кожній обраній мережі -----
   const _pvExp=new Set(); // мережі, де натиснуто «… ще» → показуємо повністю
   const pvCap=(k,t)=>{ const fold=NETFOLD[k];
     if(_pvExp.has(k)||!fold||t.length<=fold) return esc(t);
     let cut=t.slice(0,fold); const sp=cut.lastIndexOf(' '); if(sp>fold*0.6) cut=cut.slice(0,sp);
     return esc(cut).replace(/\s+$/,'')+'… <span class="pv-more" data-more="'+k+'">'+NETMORE[k]+'</span>'; };
+  // кадри в прев'ю так, як їх показує сама мережа
+  function pvMedia(k){ const files=media.map(m=>m.filename); const n=files.length;
+    if(!n) return ''; if(n===1) return '<img src="/media/'+esc(files[0])+'" style="width:100%;display:block">';
+    if(k==='instagram'){ const i=Math.min(pvIdx.instagram||0,n-1);
+      return '<div class="pv-car"><img src="/media/'+esc(files[i])+'"><span class="pv-cnt">'+(i+1)+'/'+n+'</span>'+(i>0?'<button class="pv-nav pv-prev" data-nav="-1">‹</button>':'')+(i<n-1?'<button class="pv-nav pv-next" data-nav="1">›</button>':'')+'</div>'
+        +'<div class="pv-dots">'+files.map((_,j)=>'<i'+(j===i?' class="on"':'')+'></i>').join('')+'</div>'; }
+    if(k==='threads') return '<div class="pv-row">'+files.map(f=>'<img src="/thumb/'+esc(f)+'">').join('')+'</div>';
+    const show=files.slice(0,4), rest=n-4;
+    return '<div class="pv-grid">'+show.map((f,j)=>(j===3&&rest>0)?'<div class="more"><img src="/thumb/'+esc(f)+'"><span>+'+rest+'</span></div>':'<div'+(n===3&&j===0?' class="wide"':'')+'><img src="/thumb/'+esc(f)+'"></div>').join('')+'</div>'; }
   function renderPrev(){ const box=ov.querySelector('#cmpPrev'); const sel=NETS.filter(n=>C[n[0]]&&C[n[0]].on);
     if(!sel.length){ box.innerHTML='<div style="font-size:12px;color:var(--muted);text-align:center">Обери канал ліворуч.</div>'; return; }
     const av=(($('avatar')&&$('avatar').textContent)||'В').slice(0,2);
     box.innerHTML=sel.map(n=>{ const k=n[0]; const t=textOf(k); const lim=NETLIM[k]||2200; const over=t.length>lim; const sent=sentSet.has(k);
-      const img=mediaFilename?'<img src="/media/'+esc(mediaFilename)+'" style="width:100%;display:block">':'';
+      const img=pvMedia(k);
       const cnt=sent?'<span style="margin-left:auto;font-size:11px;font-weight:800;color:var(--brand)">✓</span>':'<span class="cmp-cnt" style="margin-left:auto;color:'+(over?'var(--danger)':'var(--faint)')+'">'+t.length+'/'+lim+'</span>';
       const head='<div class="phone-h"><span class="phone-av">'+esc(av)+'</span><span class="phone-user">ваш_профіль</span>'+cnt+'</div>';
       const empty='<span style="color:var(--muted)">порожньо</span>';
       let body;
       if(k==='instagram') body=head+img+'<div class="ig-acts">♡ 💬 ↗<span class="sp"></span>🔖</div><div class="phone-b"><span class="phone-user">ваш_профіль</span> <span class="phone-txt" style="display:inline">'+(t?pvCap(k,t):empty)+'</span></div>';
-      else if(k==='telegram') body=head+img+'<div class="phone-b"><div class="phone-txt">'+(t?esc(t):empty)+'</div></div>'+((over&&mediaFilename)?'<div class="pv-note">довгий підпис Telegram надішле окремим повідомленням під фото</div>':'');
+      else if(k==='telegram') body=head+img+'<div class="phone-b"><div class="phone-txt">'+(t?esc(t):empty)+'</div></div>'+((over&&mediaFilename)?'<div class="pv-note">довгий підпис Telegram надішле окремим повідомленням під '+(media.length>1?'альбомом':'фото')+'</div>':'');
       else if(k==='threads'&&C.threads&&C.threads.thread){
         // 🧵 прев'ю гілки як у Threads: аватар + вертикальна лінія + частини-відповіді
         // (тут детермінована розбивка по абзацах; при публікації AI переріже точніше, з гачком у root)
@@ -2029,7 +2097,7 @@ async function openComposer(postId, opts){
         body=head+'<div style="padding:10px 12px">'+parts.map((p,i)=>
           '<div style="display:flex;gap:8px">'
             +'<div style="display:flex;flex-direction:column;align-items:center;flex:none"><span class="phone-av" style="width:22px;height:22px;font-size:10px">'+esc(av)+'</span>'+(i<parts.length-1?'<span style="flex:1;width:2px;background:var(--line);margin:3px 0;border-radius:2px"></span>':'')+'</div>'
-            +'<div style="flex:1;min-width:0;padding-bottom:'+(i<parts.length-1?'12px':'0')+'"><div style="font-size:10.5px;color:var(--faint);font-weight:700">ваш_профіль'+(i?' · відповідь':'')+'</div><div class="phone-txt" style="margin-top:2px">'+(num&&i?('<b>'+(i+1)+'/</b> '):'')+esc(p)+'</div>'+(i===0&&mediaFilename?'<img src="/media/'+esc(mediaFilename)+'" style="width:100%;display:block;border-radius:8px;margin-top:6px">':'')+'</div>'
+            +'<div style="flex:1;min-width:0;padding-bottom:'+(i<parts.length-1?'12px':'0')+'"><div style="font-size:10.5px;color:var(--faint);font-weight:700">ваш_профіль'+(i?' · відповідь':'')+'</div><div class="phone-txt" style="margin-top:2px">'+(num&&i?('<b>'+(i+1)+'/</b> '):'')+esc(p)+'</div>'+(i===0&&mediaFilename?'<div style="margin-top:6px;border-radius:8px;overflow:hidden">'+pvMedia('threads')+'</div>':'')+'</div>'
           +'</div>').join('')+'</div>'
           +'<div class="pv-note">🧵 гілка: '+parts.length+' частин(и)'+(num?' з нумерацією 2/ 3/…':' без нумерації')+' - root-гачок + відповіді</div>';
       }
@@ -2042,7 +2110,8 @@ async function openComposer(postId, opts){
       // 🔗 щойно мережа опублікована - поруч із її плашкою зʼявляється лінк на живий пост
       const open=sentLinks[k]?'<a href="'+esc(sentLinks[k])+'" target="_blank" rel="noopener" class="pv-open" title="Відкрити пост у '+esc(n[1])+'">↗ Відкрити пост</a>':'';
       return '<div class="pv-label" style="background:var('+NETVAR[k]+')">'+n[1]+'</div>'+open+'<div class="phone">'+body+'</div>'+auto+ownMark; }).join('');
-    box.querySelectorAll('[data-more]').forEach(el=>el.onclick=()=>{ _pvExp.add(el.dataset.more); renderPrev(); }); }
+    box.querySelectorAll('[data-more]').forEach(el=>el.onclick=()=>{ _pvExp.add(el.dataset.more); renderPrev(); });
+    box.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{ pvIdx.instagram=Math.max(0,Math.min(media.length-1,(pvIdx.instagram||0)+(+b.dataset.nav))); renderPrev(); }); }
   txt.addEventListener('input',()=>{ master=txt.value; renderPrev(); });
   ov.querySelector('#cmpRubric').onchange=(e)=>{ rubric=e.target.value; };
   renderChips(); renderMedia(); renderPrev();
@@ -2075,13 +2144,28 @@ async function openComposer(postId, opts){
       master=rr.content||master; txt.value=master; renderPrev();
       setMsg((rr.remaining&&rr.remaining.length)?('прибрано; лишилось слідів: '+rr.remaining.length+' (запусти ще раз)'):'сліди прибрано, текст чистий ✓','var(--brand)');
     }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
-  ov.querySelector('#cmpPhoto').onclick=()=>openPhotoTool(postId, full.image_prompt||'', (f)=>{ mediaFilename=f; renderMedia(); renderPrev(); });
+  // обкладинку міняє фото-редактор: перечитуємо список кадрів (кадри каруселі лишаються на місці)
+  ov.querySelector('#cmpPhoto').onclick=()=>openPhotoTool(postId, full.image_prompt||'', async()=>{ try{ const f2=await api('/posts/'+postId+'/full'); setMedia(f2.media); }catch(_){ } renderMedia(); renderPrev(); });
+  ov.querySelector('#cmpAddSlides').onclick=addSlides;
+  const slTxt=ov.querySelector('#cmpSlidesTxt'); slTxt.value=slidesText; slTxt.addEventListener('input',()=>{ slidesText=slTxt.value; });
+  const fmtSel=ov.querySelector('#cmpFormat'); if(fmtSel) fmtSel.addEventListener('change',renderCarBlock);
+  ov.querySelector('#cmpCarBuild').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('🎨 збираю слайди…');
+    try{ await saveDraft();
+      const r=await api('/posts/'+postId+'/carousel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({theme:ov.querySelector('#cmpCarTheme').value,accent:ov.querySelector('#cmpCarAccent').value})});
+      setMedia(r.media); if(typeof r.slides_text==='string'){ slidesText=r.slides_text; slTxt.value=slidesText; }
+      if(r.captionChanged&&typeof r.content==='string'){ master=r.content; txt.value=master; NETS.forEach(n=>{ if(C[n[0]]&&typeof C[n[0]].text==='string') C[n[0]].text=''; }); }
+      if(fmtSel) fmtSel.value='carousel'; pvIdx.instagram=0; renderChips(); renderMedia(); renderPrev();
+      setMsg('✓ '+r.count+' кадрів'+(r.captionChanged?' · текст поста тепер підпис під каруселлю':'')+(r.truncated&&r.truncated.length?' · ⚠ на кадрах '+r.truncated.join(', ')+' текст обрізано - скороти їх':''),(r.truncated&&r.truncated.length)?'var(--danger)':'var(--brand)');
+    }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; } };
   // ----- зберегти / адаптувати / публікувати / планувати -----
   async function saveDraft(){ const iv=ov.querySelector('#cmpIntent'), fv=ov.querySelector('#cmpFormat');
-    await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master,rubric,intent:iv?iv.value:'',...(fv?{format:fv.value}:{})})});
+    await api('/posts/'+postId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:master,rubric,intent:iv?iv.value:'',slides_text:slidesText,...(fv?{format:fv.value}:{})})});
     await api('/posts/'+postId+'/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channels:C})}); }
   ov.querySelector('#cmpSave').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('💾 зберігаю…'); try{ await saveDraft(); setMsg('чернетку збережено ✓','var(--brand)'); try{await loadStudioPosts();}catch(_){} }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; } };
-  ov.querySelector('#cmpNow').onclick=async(e)=>{ const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('усі обрані канали вже опубліковано','var(--danger)'); return; } const b=e.target; b.disabled=true;
+  // формат «Карусель», а кадрів ще нема: інакше сценарій «Слайд 1…Слайд 10» піде підписом під одним фото
+  const carouselNotBuilt=()=>{ const fv=ov.querySelector('#cmpFormat'); return fv&&fv.value==='carousel'&&media.length<2; };
+  const carGuard=()=>!carouselNotBuilt()||confirm('Це карусель, але кадрів ще не зібрано (є '+media.length+').\n\nНатисни «🎨 Зібрати слайди» - тоді сценарій стане кадрами, а текст поста підписом.\n\nОпублікувати як звичайний пост?');
+  ov.querySelector('#cmpNow').onclick=async(e)=>{ const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('усі обрані канали вже опубліковано','var(--danger)'); return; } if(!carGuard()) return; const b=e.target; b.disabled=true;
     try{
       // Авто-перепаковка мереж без власної версії - АЛЕ лише поки адаптацією не почала керувати
       // людина. Щойно юзер підлаштував (чи вернув ↺) хоч одну мережу вручну, прев'ю = істина:
@@ -2101,7 +2185,7 @@ async function openComposer(postId, opts){
       // не показував «не опубліковано» на пості, який уже вийшов
       try{ await refreshSentState(postId,sentSet,(l)=>{ sentLinks=l; renderChips(); renderPrev(); }); }catch(_){ }
     } finally{ b.disabled=false; aiDone(); } };
-  ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ setMsg('вкажи дату й час','var(--danger)'); return; } const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('немає каналів для планування (усі вже опубліковано)','var(--danger)'); return; } const b=e.target; b.disabled=true; setMsg('🗓 зберігаю…'); const at=zonedToUTCISO(d,t); try{ await saveDraft(); if(opts.slotId){ await api('/schedule/'+opts.slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:at})}); } else { await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:at})}); } setMsg('заплановано ✓ ('+todo.join(', ')+')','var(--brand)'); try{await loadPublish();}catch(_){} try{await loadStudioPosts();}catch(_){} setTimeout(close,1000); }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); b.disabled=false; } };
+  ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ setMsg('вкажи дату й час','var(--danger)'); return; } const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('немає каналів для планування (усі вже опубліковано)','var(--danger)'); return; } if(!carGuard()) return; const b=e.target; b.disabled=true; setMsg('🗓 зберігаю…'); const at=zonedToUTCISO(d,t); try{ await saveDraft(); if(opts.slotId){ await api('/schedule/'+opts.slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:at})}); } else { await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:at})}); } setMsg('заплановано ✓ ('+todo.join(', ')+')','var(--brand)'); try{await loadPublish();}catch(_){} try{await loadStudioPosts();}catch(_){} setTimeout(close,1000); }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); b.disabled=false; } };
 }
 // двокроковий редактор фото поста: крок 1 - джерело (галерея/завантаження/генерація) + формат (кроп),
 // крок 2 - текст на фото (шрифт/місце/фон, безкоштовне перенакладання) + перегенерація з коментарем

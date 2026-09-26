@@ -49,13 +49,15 @@ import { startThreadsAuto } from "./threads-auto.js";
 import { getSettingText } from "./settings.js";
 import { runAbTest, modelCatalog, abSpend } from "./abtest.js";
 import { contextReview, contextIssueCount, suggestFieldFix } from "./context-check.js";
-import { generateImageForPost, imageProviders, imageCosts, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto } from "./images.js";
+import { generateImageForPost, imageProviders, imageCosts, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto, appendCroppedSlide } from "./images.js";
 import { secretStatuses, setSecret, clearSecret, refreshSecrets } from "./secrets.js";
 import { kieCatalog, kieCredits, kieReady } from "./kie.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook, sharedBotDmWorks } from "./tgbot.js";
 import { chat } from "./openrouter.js";
 import { handleBody, wantsSse, sseEncode, resolveToken, mcpTokenFor, issueMcpToken, revokeMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
 import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember, deleteBrand, workspaceTitle } from "./workspaces.js";
+import { postMediaList, mediaCounts, setPostMediaOrder, removePostMedia, promoteIfCoverless, healCoverless, SlideError, MAX_SLIDES } from "./slides.js";
+import { renderCarousel, CAROUSEL_THEMES } from "./carousel.js";
 import { uploadLinkState, takeUploadSlot, markUploaded, refundUploadSlot, uploadPageHtml, uploadResultText, UPLOAD_FILE_MAX, UPLOAD_TEXT, type UploadResult } from "./uploadlink.js";
 import { CLI_MODELS, cliAllowedFor, cliHealth, forgetCliAllowed, cliCooldown } from "./claudecli.js";
 import { sttChoice, sttAvailable } from "./stt.js";
@@ -800,13 +802,14 @@ app.post("/api/media", async (req: any, reply) => {
 // вони дублювали кожне опубліковане фото і засмічували медіатеку
 app.get("/api/media", async (req: any) =>
   q(`select id, kind, mime, original_name, filename, size, source, created_at from media_asset
-     where workspace_id=$1 and source not in ('ig-safe','ai-base') order by created_at desc limit 200`, [req.user.workspace_id]));
+     where workspace_id=$1 and source not in ('ig-safe','ai-base','slide') order by created_at desc limit 200`, [req.user.workspace_id]));
 
 app.delete("/api/media/:id", async (req: any, reply) => {
   const m = await one<{ filename: string }>(`select filename from media_asset where id=$1 and workspace_id=$2`, [req.params.id, req.user.workspace_id]);
   if (!m) return reply.code(404).send({ error: "медіа не знайдено" });
   await q(`delete from media_asset where id=$1`, [req.params.id]);
   await deleteMediaFile(m.filename);
+  await healCoverless(req.user.workspace_id); // стерли обкладинку каруселі - наступний кадр стає нею
   return { ok: true };
 });
 
@@ -821,6 +824,7 @@ app.post("/api/media/bulk-delete", async (req: any, reply) => {
     await q(`delete from media_asset where id=$1`, [m.id]);
     await deleteMediaFile(m.filename);
   }
+  await healCoverless(req.user.workspace_id);
   return { ok: true, deleted: rows.length };
 });
 
@@ -839,6 +843,8 @@ app.post("/api/posts/:postId/media", async (req: any, reply) => {
   if (mediaId && !(await one(`select id from media_asset where id=$1 and workspace_id=$2`, [mediaId, ws])))
     return reply.code(404).send({ error: "медіа не знайдено" });
   await q(`update post set media_id=$2 where id=$1`, [req.params.postId, mediaId]);
+  // «Без фото» в каруселі = прибрати обкладинку: наступний кадр стає нею, решта лишається
+  if (!mediaId) await promoteIfCoverless(ws, req.params.postId);
   return { ok: true };
 });
 
@@ -872,12 +878,58 @@ app.get("/api/channels/status", async (req: any) => {
 
 // повний стан поста для композера (текст, канали, фото)
 app.get("/api/posts/:postId/full", async (req: any, reply) => {
-  const p = await one(`select p.id, p.content, p.review, p.channels, p.headline, p.rubric, p.intent, p.format, p.image_prompt, (p.image_base is not null) as has_base, ma.filename as media_filename
+  const p = await one(`select p.id, p.content, p.review, p.channels, p.headline, p.rubric, p.intent, p.format, p.image_prompt, p.slides_text, (p.image_base is not null) as has_base, ma.filename as media_filename
      from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      left join media_asset ma on ma.id=p.media_id
      where p.id=$1 and s.workspace_id=$2`, [req.params.postId, req.user.workspace_id]);
   if (!p) return reply.code(404).send({ error: "пост не знайдено" });
-  return p;
+  // 🖼 кадри поста (обкладинка першою) - для смужки кадрів і прев'ю каруселі
+  return { ...p, media: (await postMediaList(p.id)).map((m) => ({ id: m.id, filename: m.filename, kind: m.kind })) };
+});
+
+// ---- 🖼 КАРУСЕЛЬ: кадри поста ----
+const slidesOut = async (postId: string) => ({ ok: true, media: (await postMediaList(postId)).map((m) => ({ id: m.id, filename: m.filename, kind: m.kind })) });
+const slideFail = (reply: any, e: any) => reply.code(e instanceof SlideError ? 400 : 500).send({ error: e?.message || "не вдалося" });
+// додати кадр(и) з медіатеки в кінець (кроп-копія під пропорцію каруселі, оригінал лишається)
+app.post("/api/posts/:postId/slides", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  const ids: string[] = (Array.isArray(req.body?.mediaIds) ? req.body.mediaIds : [req.body?.mediaId]).map((x: any) => String(x || "")).filter(isUuid);
+  if (!ids.length) return reply.code(400).send({ error: "обери фото" });
+  const have = (await postMediaList(req.params.postId)).length;
+  if (have + ids.length > MAX_SLIDES) return reply.code(400).send({ error: `У каруселі до ${MAX_SLIDES} кадрів - зараз ${have}, тож додати можна ще ${Math.max(0, MAX_SLIDES - have)}.` });
+  try {
+    for (const id of ids) await appendCroppedSlide(ws, req.params.postId, id, req.body?.aspect || undefined);
+    return await slidesOut(req.params.postId);
+  } catch (e: any) { return slideFail(reply, e); }
+});
+// переставити й/або прибрати: ids = новий порядок ІСНУЮЧИХ кадрів (яких нема в списку - прибираються)
+app.put("/api/posts/:postId/slides", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  const cur = (await postMediaList(req.params.postId)).map((m) => m.id);
+  const ids: string[] = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(String);
+  if (ids.some((id) => !cur.includes(id))) return reply.code(400).send({ error: "у списку є кадр, якого в пості немає - онови сторінку" });
+  try { await setPostMediaOrder(ws, req.params.postId, ids); return await slidesOut(req.params.postId); }
+  catch (e: any) { return slideFail(reply, e); }
+});
+app.delete("/api/posts/:postId/slides/:mediaId", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  try { await removePostMedia(ws, req.params.postId, String(req.params.mediaId)); return await slidesOut(req.params.postId); }
+  catch (e: any) { return slideFail(reply, e); }
+});
+// зібрати кадри зі сценарію «Слайд N: …» (sharp, без моделі - безкоштовно)
+app.post("/api/posts/:postId/carousel", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  const theme = String(req.body?.theme || "");
+  if (theme && !(CAROUSEL_THEMES as string[]).includes(theme)) return reply.code(400).send({ error: "невідома тема" });
+  try {
+    const r = await renderCarousel(ws, req.params.postId, { theme: theme || undefined, accent: String(req.body?.accent || "") });
+    const p = await one<{ content: string; slides_text: string | null }>(`select content, slides_text from post where id=$1`, [req.params.postId]);
+    return { ...r, content: p?.content, slides_text: p?.slides_text, ...(await slidesOut(req.params.postId)) };
+  } catch (e: any) { return slideFail(reply, e); }
 });
 
 // зберегти вибір мереж + тексти
@@ -2343,6 +2395,8 @@ app.put("/api/posts/:postId", async (req: any, reply) => {
     await q(`update post set intent=nullif($2,'') where id=$1`, [req.params.postId, req.body.intent]);
   if (typeof req.body?.format === "string" && (FORMATS as readonly string[]).includes(req.body.format))
     await q(`update post set format=$2 where id=$1`, [req.params.postId, req.body.format]);
+  if (typeof req.body?.slides_text === "string")
+    await q(`update post set slides_text=nullif($2,'') where id=$1`, [req.params.postId, req.body.slides_text.slice(0, 20000)]);
   return { ok: true };
 });
 
@@ -2841,7 +2895,8 @@ app.get("/api/posts/studio", async (req: any) => {
     mt.forEach((r) => r.channel && add(r.post_id, r.channel, r.permalink)); li.forEach((r) => add(r.post_id, "linkedin", r.permalink));
     yt.forEach((r) => add(r.post_id, "youtube")); tt.forEach((r) => add(r.post_id, "tiktok"));
   }
-  return rows.map((r: any) => ({ ...r, sent: sentMap.get(r.id) || [], links: linkMap.get(r.id) || {} }));
+  const counts = await mediaCounts(ids);
+  return rows.map((r: any) => ({ ...r, sent: sentMap.get(r.id) || [], links: linkMap.get(r.id) || {}, media_count: counts.get(r.id) || 0 }));
 });
 
 // видалення поста (замінило архів у UI): опублікованим - відмова, інакше зникла б історія
@@ -3641,7 +3696,8 @@ app.get("/api/tg/post/:postId", async (req: any, reply) => {
   const slot = await one<{ id: string; scheduled_at: string }>(
     `select id, scheduled_at from schedule_slot where post_id=$1 and status='planned' order by scheduled_at limit 1`, [p.id]);
   const sent = (await sentMap([p.id])).get(p.id) || [];
-  return { ...p, scheduled_at: slot?.scheduled_at || null, slot_id: slot?.id || null, sent, links: await postPermalinks(u.ws, p.id).catch(() => ({})) };
+  return { ...p, scheduled_at: slot?.scheduled_at || null, slot_id: slot?.id || null, sent, links: await postPermalinks(u.ws, p.id).catch(() => ({})),
+           media: (await postMediaList(p.id)).map((x) => x.filename) };
 });
 
 // 🖼 фото з телефона. Без нього Mini App лишався «текстовим блокнотом», хоч усі мережі
@@ -3650,13 +3706,26 @@ app.post("/api/tg/post/:postId/media", async (req: any, reply) => {
   const u = await tgGuard(req, reply); if (!u) return;
   const id = await tgOwnPost(u.ws, req.params.postId);
   if (!id) return reply.code(404).send({ error: "пост не знайдено" });
+  // ?append=1 - кадри каруселі в кінець (можна кілька файлів одразу), інакше - заміна обкладинки
+  const append = String(req.query?.append || "") === "1";
   try {
+    if (append) {
+      let added = 0;
+      for await (const part of req.files()) {
+        const m = await saveMedia(u.ws, { buffer: await part.toBuffer(), mime: part.mimetype || "image/jpeg", name: part.filename || "photo.jpg", source: "upload", dedupe: true });
+        if (m.kind !== "image") { if (!m.existed) { await q(`delete from media_asset where id=$1`, [m.id]); await deleteMediaFile(m.filename); } continue; }
+        await appendCroppedSlide(u.ws, id, m.id);
+        added++;
+      }
+      if (!added) return reply.code(400).send({ error: "потрібні зображення" });
+      return { ok: true, added, media: (await postMediaList(id)).map((x) => x.filename) };
+    }
     const part = await req.file();
     if (!part) return reply.code(400).send({ error: "файл не надійшов" });
     const m = await saveMedia(u.ws, { buffer: await part.toBuffer(), mime: part.mimetype || "image/jpeg", name: part.filename || "photo.jpg", source: "upload" });
     if (m.kind !== "image") { await q(`delete from media_asset where id=$1`, [m.id]); return reply.code(400).send({ error: "потрібне зображення" }); }
     await q(`update post set media_id=$2 where id=$1`, [id, m.id]);
-    return { ok: true, filename: m.filename };
+    return { ok: true, filename: m.filename, media: (await postMediaList(id)).map((x) => x.filename) };
   } catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
 
@@ -3673,8 +3742,10 @@ app.delete("/api/tg/post/:postId/media", async (req: any, reply) => {
   const u = await tgGuard(req, reply); if (!u) return;
   const id = await tgOwnPost(u.ws, req.params.postId);
   if (!id) return reply.code(404).send({ error: "пост не знайдено" });
-  await q(`update post set media_id=null where id=$1`, [id]);
-  return { ok: true };
+  // ?all=1 - прибрати всі кадри каруселі; інакше лише обкладинку (наступний кадр стає нею)
+  if (String(req.query?.all || "") === "1") await setPostMediaOrder(u.ws, id, []);
+  else { await q(`update post set media_id=null where id=$1`, [id]); await promoteIfCoverless(u.ws, id); }
+  return { ok: true, media: (await postMediaList(id)).map((x) => x.filename) };
 });
 
 // ✅ затвердити / вернути в чернетки - той самий прапорець review, що й у Студії

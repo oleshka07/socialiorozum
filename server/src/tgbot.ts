@@ -342,6 +342,12 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
     // щоденником і банком ідей: людина щойно натиснула кнопку й відповідає саме на неї
     {
       const wsC = await ownerWorkspace(fromId);
+      // 🖼 решта фото АЛЬБОМУ, перше з якого вже стало обкладинкою: Telegram шле альбом окремими
+      // повідомленнями, тож без цього кадри 2..N пішли б звичайним шляхом (у щоденник) замість каруселі
+      if (wsC && msg.media_group_id && albumPosts.has(String(msg.media_group_id)) && msg.photo?.length) {
+        albumPhoto(wsC, chatId, msg, token);
+        return;
+      }
       if (wsC) {
         const st = await cmp.getCompose(wsC);
         if (st.await && await composeReply(wsC, chatId, msg, st, token)) return;
@@ -417,12 +423,51 @@ async function openCompose(ws: string, chatId: string, postId: string, token: st
   await liveSend(ws, chatId, "compose", card.text, [...card.buttons, [{ text: "🌐 Відкрити в кабінеті", url: postDeepLink(postId) }]]);
 }
 
+// 🖼 альбом → карусель. Telegram шле альбом окремими повідомленнями з одним media_group_id, і
+// доставити їх може ПАРАЛЕЛЬНО й не по порядку. Тому фото альбому спершу збираються (1,5 с тиші
+// після останнього), а тоді обробляються за message_id - тобто в тому порядку, в якому людина їх
+// обрала: перше замінює фото поста й стає обкладинкою, решта - кадрами. Живе 2 хв.
+type AlbumItem = { mid: number; fileId: string; size: number };
+const albumPosts = new Map<string, { postId: string; until: number; items: AlbumItem[]; done: number; busy: Promise<void>; timer?: ReturnType<typeof setTimeout> }>();
+function albumPhoto(ws: string, chatId: string, msg: any, token: string, postId?: string): boolean {
+  const key = String(msg.media_group_id);
+  for (const [k, v] of albumPosts) if (v.until < Date.now()) albumPosts.delete(k);
+  let a = albumPosts.get(key);
+  if (!a) {
+    if (!postId) return false;
+    a = { postId, until: Date.now() + 120_000, items: [], done: 0, busy: Promise.resolve() };
+    albumPosts.set(key, a);
+  }
+  const ph = msg.photo[msg.photo.length - 1];
+  a.items.push({ mid: Number(msg.message_id) || 0, fileId: ph.file_id, size: ph.file_size || 0 });
+  const al = a;
+  if (al.timer) clearTimeout(al.timer);
+  al.timer = setTimeout(() => {
+    const batch = al.items.splice(0).sort((x, y) => x.mid - y.mid);
+    al.busy = al.busy.then(async () => {
+      for (const it of batch) {
+        try {
+          if (it.size > 19.5 * 1024 * 1024) continue;
+          const f = await tg.getFileBuffer(token, it.fileId);
+          if (al.done === 0) await cmp.setAlbumCover(ws, al.postId, f.buffer);
+          else await cmp.appendPhoto(ws, al.postId, f.buffer, "image/jpeg", "tg-post.jpg");
+          al.done++;
+        } catch (e: any) { await logEvent("warn", "tgbot", `кадр альбому не додався: ${e.message}`, { ws }); }
+      }
+      await openCompose(ws, chatId, al.postId, token); // картку оновлюємо раз на альбом, не на кожен кадр
+    }).catch(() => {});
+  }, 1500);
+  return true;
+}
+
 // відповідь на те, чого композер зараз чекає; true = повідомлення оброблено
 async function composeReply(ws: string, chatId: string, msg: any, st: { postId: string | null; await: string | null }, token: string): Promise<boolean> {
   const text = String(msg.text || "").trim();
   if (st.await === "photo") {
     const ph = msg.photo?.length ? msg.photo[msg.photo.length - 1] : null;
     if (!ph) return false;                       // прислали не фото - хай іде звичайним шляхом
+    // альбом у відповідь на «Фото чи альбом» → карусель (див. albumPhoto)
+    if (msg.media_group_id) return albumPhoto(ws, chatId, msg, token, st.postId!);
     if ((ph.file_size || 0) > 19.5 * 1024 * 1024) { await tg.sendMessage(token, chatId, "⚠️ Файл понад 20 МБ - Telegram не віддає такі ботам."); return true; }
     const f = await tg.getFileBuffer(token, ph.file_id);
     await cmp.attachPhoto(ws, st.postId!, f.buffer, "image/jpeg", "tg-post.jpg");
@@ -462,7 +507,7 @@ async function composeCallback(ws: string, chatId: string, data: string, cbq: an
   switch (head) {
     case "cc":  await tg.answerCallbackQuery(token, cbq.id); await openCompose(ws, chatId, postId, token); return true;
     case "cn":  await cmp.toggleNet(ws, postId, arg); await tg.answerCallbackQuery(token, cbq.id); await openCompose(ws, chatId, postId, token); return true;
-    case "cp":  await cmp.expect(ws, postId, "photo", chatId); await tg.answerCallbackQuery(token, cbq.id, "Надішли фото"); await tg.sendMessage(token, chatId, "🖼 Надішли фото наступним повідомленням."); return true;
+    case "cp":  await cmp.expect(ws, postId, "photo", chatId); await tg.answerCallbackQuery(token, cbq.id, "Надішли фото"); await tg.sendMessage(token, chatId, "🖼 Надішли фото наступним повідомленням. Кілька фото альбомом - вийде карусель (до 10)."); return true;
     case "ce":  await cmp.expect(ws, postId, "text", chatId);  await tg.answerCallbackQuery(token, cbq.id, "Надішли новий текст"); await tg.sendMessage(token, chatId, "✍ Надішли новий текст поста."); return true;
     case "cr":  await cmp.expect(ws, postId, "rewrite", chatId); await tg.answerCallbackQuery(token, cbq.id); await tg.sendMessage(token, chatId, "🤖 Що саме змінити? Напиши побажання (або «-», щоб просто переписати іншими словами)."); return true;
     case "ca":  await tg.answerCallbackQuery(token, cbq.id, await cmp.toggleApprove(ws, postId)); await openCompose(ws, chatId, postId, token); return true;

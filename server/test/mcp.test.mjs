@@ -291,3 +291,26 @@ test("заливка з комп'ютера: інструмент видає п�
   const names = TOOLS.map((x) => x.name);
   assert.ok(names.indexOf("media_upload_link") < names.indexOf("find_stock_photos"));
 });
+
+test("карусель у конекторі: кілька фото масивом, перестановка, збирання слайдів - безкоштовно і перед стоком", () => {
+  const by = Object.fromEntries(TOOLS.map((t) => [t.name, t]));
+  assert.equal(by.attach_media.properties.media.type, "array", "кілька id = карусель");
+  assert.equal(by.attach_media.properties.append.type, "boolean");
+  assert.equal(by.attach_stock_photo.properties.append.type, "boolean");
+  assert.equal(by.generate_image.properties.append.type, "boolean");
+  for (const n of ["edit_post_media", "render_carousel"]) {
+    assert.ok(by[n], `${n} має бути в конекторі`);
+    assert.match(by[n].description, /БЕЗКОШТОВНО/);
+  }
+  assert.deepEqual(by.render_carousel.properties.theme.enum, ["photo", "dark", "light"]);
+  const names = TOOLS.map((t) => t.name);
+  for (const n of ["attach_media", "edit_post_media", "render_carousel"])
+    assert.ok(names.indexOf(n) < names.indexOf("find_stock_photos"), `${n} має стояти перед стоком`);
+});
+
+import { mediaLine } from "../dist/mcp.js";
+test("mediaLine: модель бачить, чи в пості карусель", () => {
+  assert.equal(mediaLine([]), "");
+  assert.equal(mediaLine([{ id: "a" }]), " · є фото");
+  assert.equal(mediaLine([{ id: "a" }, { id: "b" }, { id: "c" }]), " · карусель, 3 кадрів");
+});

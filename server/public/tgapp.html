@@ -314,14 +314,15 @@ function drawEditor() {
   $('sheet').innerHTML = '<div class="sheet">'
     + '<div class="sheethead"><button class="back" id="bk">‹ Назад</button><b>' + (done ? '✈️ Опублікований' : '📝 Чернетка') + '</b>'
     + (p.review === 'approved' && !done ? '<span class="pill ok">✅</span>' : '') + '</div>'
-    + (p.filename ? '<img class="thumb" src="/media/' + esc(p.filename) + '" alt="">' : '')
+    + mediaBlock(p)
     + '<textarea id="et">' + esc(p.content || '') + '</textarea>'
     + '<div class="acts">'
-    + '<button id="aPhoto">🖼 Фото</button>'
+    + '<button id="aPhoto">🖼 ' + (p.filename ? 'Обкладинка' : 'Фото') + '</button>'
+    + (p.filename && (p.media || []).length < 10 ? '<button id="aMore">＋ Ще фото</button>' : '')
     + '<button id="aAi">🎨 AI-фото</button>'
     + '<button id="aRw">🤖 Переписати</button>'
     + '</div>'
-    + (p.filename ? '<button class="go ghost" id="aDelPic">🗑 Прибрати фото</button>' : '')
+    + (p.filename ? '<button class="go ghost" id="aDelPic">🗑 ' + ((p.media || []).length > 1 ? 'Прибрати всі фото' : 'Прибрати фото') + '</button>' : '')
     + '<div class="nets" id="enets">' + netBtns + '</div>'
     + (p.scheduled_at ? '<div class="meta"><span class="pill warn">🗓 ' + fmtWhen(p.scheduled_at) + '</span>'
         + '<button class="back" id="aUnsched">скасувати</button></div>' : '')
@@ -333,6 +334,7 @@ function drawEditor() {
         + '<button class="go ghost" id="aAppr">' + (p.review === 'approved' ? '↩ Вернути в чернетки' : '✅ Затвердити') + '</button>'
         + '<button class="go danger" id="aDel">🗑 Видалити</button>')
     + '<input type="file" id="ef" accept="image/*" style="display:none">'
+    + '<input type="file" id="efm" accept="image/*" multiple style="display:none">'
     + '</div>';
 
   $('bk').onclick = () => saveText().then(() => closeEditor(true));
@@ -345,11 +347,13 @@ function drawEditor() {
   });
   $('aPhoto').onclick = () => $('ef').click();
   $('ef').onchange = uploadPhoto;
+  if ($('aMore')) $('aMore').onclick = () => $('efm').click();
+  $('efm').onchange = uploadMore;
   $('aAi').onclick = genImage;
   $('aRw').onclick = aiRewrite;
   if ($('aDelPic')) $('aDelPic').onclick = async () => {
-    await api('/post/' + cur.id + '/media', { method: 'DELETE' });
-    cur.filename = null; drawEditor();
+    const r = await api('/post/' + cur.id + '/media?all=1', { method: 'DELETE' });
+    cur.media = r.media || []; cur.filename = cur.media[0] || null; drawEditor();
   };
   if ($('aUnsched')) $('aUnsched').onclick = async () => {
     await api('/post/' + cur.id + '/schedule', { method: 'DELETE' });
@@ -385,8 +389,30 @@ async function uploadPhoto(e) {
   try {
     const fd = new FormData(); fd.append('file', f, f.name || 'photo.jpg');
     const r = await api('/post/' + cur.id + '/media', { method: 'POST', body: fd });
-    cur.filename = r.filename; haptic('success'); drawEditor();
+    cur.filename = r.filename; if (r.media) cur.media = r.media; haptic('success'); drawEditor();
   } catch (err) { $('em').textContent = '⚠️ ' + err.message; }
+}
+
+// 🖼 карусель: кілька фото з телефона одразу стають кадрами 2..N (до 10 разом з обкладинкою)
+async function uploadMore(e) {
+  const files = [...(e.target.files || [])].slice(0, 10 - (cur.media || []).length);
+  if (!files.length) return;
+  $('em').textContent = '🖼 Додаю ' + files.length + ' фото…';
+  try {
+    const fd = new FormData(); files.forEach((f) => fd.append('file', f, f.name || 'photo.jpg'));
+    const r = await api('/post/' + cur.id + '/media?append=1', { method: 'POST', body: fd });
+    cur.media = r.media || cur.media; cur.filename = cur.media[0] || cur.filename; haptic('success'); drawEditor();
+    $('em').textContent = cur.media.length > 1 ? '🖼 Карусель: ' + cur.media.length + ' кадрів' : '';
+  } catch (err) { $('em').textContent = '⚠️ ' + err.message; }
+}
+
+// одне фото - велике прев'ю; кілька - стрічка кадрів з позначкою каруселі
+function mediaBlock(p) {
+  const m = p.media && p.media.length ? p.media : (p.filename ? [p.filename] : []);
+  if (!m.length) return '';
+  if (m.length === 1) return '<img class="thumb" src="/media/' + esc(m[0]) + '" alt="">';
+  return '<div class="meta" style="margin-top:10px"><span class="pill ok">🖼 карусель · ' + m.length + ' кадрів</span></div>'
+    + '<div style="display:flex;gap:6px;overflow-x:auto;margin:8px 0">' + m.map((f) => '<img class="thumb sm" src="/thumb/' + esc(f) + '" alt="">').join('') + '</div>';
 }
 
 async function genImage() {

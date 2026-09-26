@@ -8,7 +8,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { saveMedia, MEDIA_DIR, deleteMediaFile } from "./media.js";
+import { saveMedia, MEDIA_DIR } from "./media.js";
+import { appendPostMedia, dropUnusedDerived, MAX_SLIDES } from "./slides.js";
 import { chat, extractJsonArray } from "./openrouter.js";
 import { assertSpend, assertRate, noteSpend } from "./spend.js";
 import { logEvent } from "./log.js";
@@ -20,9 +21,9 @@ type Img = { buffer: Buffer; mime: string };
 // відмовляє (не списує), тож у стелю витрат кабінету тут іде нуль
 const COSTS: Record<ImgProvider, number> = { openai: 0.011, fal: 0.003, gemini: 0.039, cloudflare: 0 };
 
-function normAspect(a?: string): Aspect { return a === "4:5" || a === "16:9" ? a : "1:1"; }
+export function normAspect(a?: string): Aspect { return a === "4:5" || a === "16:9" ? a : "1:1"; }
 // цільові пропорції картинки для sharp-оверлея (ширина×висота у пікселях базового полотна)
-const ASPECT_DIM: Record<Aspect, { w: number; h: number }> = { "1:1": { w: 1024, h: 1024 }, "4:5": { w: 1024, h: 1280 }, "16:9": { w: 1280, h: 720 } };
+export const ASPECT_DIM: Record<Aspect, { w: number; h: number }> = { "1:1": { w: 1024, h: 1024 }, "4:5": { w: 1024, h: 1280 }, "16:9": { w: 1280, h: 720 } };
 // gpt-image-1 підтримує лише 1024x1024 / 1024x1536 / 1536x1024
 const OPENAI_SIZE: Record<Aspect, string> = { "1:1": "1024x1024", "4:5": "1024x1536", "16:9": "1536x1024" };
 // fal FLUX schnell — іменовані формати
@@ -396,7 +397,7 @@ export async function overlayHeadline(buf: Buffer, headline: string, style?: Ove
 // Логіка тексту на зображенні: генерація ЗАВЖДИ чиста (без накладання) — заголовок юзер підтверджує
 // в редакторі зображення і накладає окремо (дешевий /image-text). Виняток: явний opts.headline
 // (кнопка «Згенерувати» в редакторі з заповненим полем) — тоді накладаємо одразу.
-export async function generateImageForPost(ws: string, postId: string, opts?: { headline?: string; provider?: ImgProvider; aspect?: Aspect | string; prompt?: string }): Promise<string> {
+export async function generateImageForPost(ws: string, postId: string, opts?: { headline?: string; provider?: ImgProvider; aspect?: Aspect | string; prompt?: string; append?: boolean }): Promise<string> {
   const post = await one<{ content: string; image_prompt: string | null }>(
     `select p.content, p.image_prompt from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
@@ -406,7 +407,19 @@ export async function generateImageForPost(ws: string, postId: string, opts?: { 
   const styleRow = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='image_style'`, [ws]);
   const style = (styleRow?.content || "").trim() || "чисте, сучасне, мінімалістичне, привабливе";
   const prompt = `${base}. Стиль бренду: ${style}. Без жодного тексту, написів чи літер на зображенні.`;
-  const img = await generateImage(ws, prompt, opts?.provider, normAspect(opts?.aspect));
+  // новий кадр каруселі - у пропорції каруселі, а не дефолтній
+  const aspect = opts?.append && !opts?.aspect ? await postAspect(postId) : normAspect(opts?.aspect);
+  if (opts?.append) {
+    const cnt = (await one<{ n: number }>(`select (case when media_id is null then 0 else 1 end) + (select count(*)::int from post_slide where post_id=$1) as n from post where id=$1`, [postId]))?.n || 0;
+    if (cnt >= MAX_SLIDES) throw new Error(`У каруселі вже ${MAX_SLIDES} кадрів - більше Instagram і Telegram не приймають.`);
+  }
+  const img = await generateImage(ws, prompt, opts?.provider, aspect);
+  if (opts?.append) {
+    // кадр каруселі: обкладинку, її базу й напис не чіпаємо
+    const slide = await saveMedia(ws, { buffer: img.buffer, mime: img.mime, name: `ai.${img.mime.includes("png") ? "png" : "jpg"}`, source: "ai" });
+    await appendPostMedia(ws, postId, [slide.id]);
+    return slide.filename;
+  }
   // зберігаємо БАЗОВЕ зображення (без тексту) окремо — щоб дешево перенакладати текст потім
   const baseSaved = await saveMedia(ws, { buffer: img.buffer, mime: img.mime, name: `ai-base.${img.mime.includes("png") ? "png" : "jpg"}`, source: "ai-base" });
   const headline = (opts?.headline || "").trim();
@@ -420,30 +433,17 @@ export async function generateImageForPost(ws: string, postId: string, opts?: { 
 }
 
 // Підміна фото поста БЕЗ засмічення галереї (фідбек: «після кожної зміни тексту зберігаються
-// великими пачками»): старе ПОХІДНЕ медіа поста (ai/crop/pexels/ai-base) видаляється, якщо ним
-// не користується інший пост. Юзерські завантаження (upload/gdrive/diary/broll) не чіпаємо ніколи.
+// великими пачками»): старе ПОХІДНЕ медіа поста (ai/crop/pexels/ai-base) видаляється, якщо воно
+// ніде більше не стоїть - ні обкладинкою чи базою іншого поста, ні КАДРОМ каруселі (до каруселей
+// перевірялись лише обкладинки, і заміна обкладинки стерла б кадр, який стоїть в іншому пості).
+// Юзерські завантаження (upload/gdrive/diary/broll) не чіпаємо ніколи.
 async function cleanupDerivedMedia(ws: string, postId: string, prev: { media_id: string | null; image_base: string | null } | null): Promise<void> {
   if (!prev) return;
   const cur = await one<{ media_id: string | null; image_base: string | null }>(`select media_id, image_base from post where id=$1`, [postId]);
-  const DERIVED = ["ai", "crop", "pexels", "ai-base"];
-  // старе головне фото
-  if (prev.media_id && prev.media_id !== cur?.media_id) {
-    const m = await one<{ id: string; filename: string; source: string }>(
-      `select id, filename, source from media_asset where id=$1 and workspace_id=$2`, [prev.media_id, ws]);
-    if (m && DERIVED.includes(m.source)) {
-      const used = await one(`select 1 from post where (media_id=$1 or image_base=$2) and id<>$3 limit 1`, [m.id, m.filename, postId]);
-      if (!used) { await q(`delete from media_asset where id=$1`, [m.id]); await deleteMediaFile(m.filename); }
-    }
-  }
-  // стара базова картинка (без тексту), якщо базу замінили
-  if (prev.image_base && prev.image_base !== cur?.image_base) {
-    const b = await one<{ id: string; filename: string; source: string }>(
-      `select id, filename, source from media_asset where filename=$1 and workspace_id=$2`, [prev.image_base, ws]);
-    if (b && DERIVED.includes(b.source)) {
-      const used = await one(`select 1 from post where (media_id=$1 or image_base=$2) limit 1`, [b.id, b.filename]);
-      if (!used) { await q(`delete from media_asset where id=$1`, [b.id]); await deleteMediaFile(b.filename); }
-    }
-  }
+  const gone: Array<{ id?: string | null; filename?: string | null }> = [];
+  if (prev.media_id && prev.media_id !== cur?.media_id) gone.push({ id: prev.media_id });
+  if (prev.image_base && prev.image_base !== cur?.image_base) gone.push({ filename: prev.image_base });
+  await dropUnusedDerived(ws, gone);
 }
 const prevMedia = (postId: string) => one<{ media_id: string | null; image_base: string | null }>(`select media_id, image_base from post where id=$1`, [postId]);
 
@@ -469,7 +469,9 @@ export async function overlayForPost(ws: string, postId: string, headline: strin
 // crop (опційно) - РУЧНА рамка від користувача в нормованих координатах [0..1] вихідного фото;
 // без нього - автоматичний центр-кроп зі smart-фокусом. Копія стає image_base поста.
 export type CropRect = { x: number; y: number; w: number; h: number };
-export async function attachCroppedImage(ws: string, postId: string, mediaId: string, aspect?: Aspect | string, crop?: CropRect): Promise<{ id: string; filename: string }> {
+// Обітнута під формат КОПІЯ фото з медіатеки (оригінал лишається). Спільна для обкладинки й кадрів
+// каруселі: кадри мусять мати ту саму пропорцію, бо Instagram ріже всю карусель під перший кадр.
+export async function cropCopy(ws: string, mediaId: string, aspect?: Aspect | string, crop?: CropRect): Promise<{ id: string; filename: string }> {
   const m = await one<{ filename: string; kind: string }>(`select filename, kind from media_asset where id=$1 and workspace_id=$2`, [mediaId, ws]);
   if (!m) throw new Error("медіа не знайдено");
   if (m.kind !== "image") throw new Error("це не зображення");
@@ -494,10 +496,42 @@ export async function attachCroppedImage(ws: string, postId: string, mediaId: st
   const out = await img.resize(w, h, crop ? { fit: "fill" } : { fit: "cover", position: "attention" }).jpeg({ quality: 90 }).toBuffer();
   // кроп-копія памʼятає свій оригінал (external_id): з цього медіатека конектора знає, в яких
   // постах фото вже стоїть, і не підсуне те саме фото вдруге
-  const saved = await saveMedia(ws, { buffer: out, mime: "image/jpeg", name: "crop.jpg", source: "crop", externalId: mediaId });
+  return saveMedia(ws, { buffer: out, mime: "image/jpeg", name: "crop.jpg", source: "crop", externalId: mediaId });
+}
+
+// прикріпити фото з галереї/завантаження ОБКЛАДИНКОЮ, обітнувши під обраний формат.
+// crop (опційно) - РУЧНА рамка від користувача в нормованих координатах [0..1] вихідного фото;
+// без нього - автоматичний центр-кроп зі smart-фокусом. Копія стає image_base поста.
+export async function attachCroppedImage(ws: string, postId: string, mediaId: string, aspect?: Aspect | string, crop?: CropRect): Promise<{ id: string; filename: string }> {
+  const saved = await cropCopy(ws, mediaId, aspect, crop);
   const prevC = await prevMedia(postId);
   await q(`update post set media_id=$2, image_base=$3, headline=null where id=$1`, [postId, saved.id, saved.filename]);
   cleanupDerivedMedia(ws, postId, prevC).catch(() => { /* зачистка не критична */ });
+  return { id: saved.id, filename: saved.filename };
+}
+
+// Пропорція каруселі = пропорція обкладинки (найближча з 1:1 / 4:5 / 16:9). Нові кадри ріжемо так
+// само, інакше Instagram обріже їх під перший кадр сам - і, можливо, не там, де головне.
+export async function postAspect(postId: string): Promise<Aspect> {
+  const c = await one<{ filename: string }>(`select m.filename from post p join media_asset m on m.id=p.media_id where p.id=$1`, [postId]);
+  if (!c) return "4:5";
+  try {
+    const meta = await sharp(join(MEDIA_DIR, c.filename)).metadata();
+    const rot = (meta.orientation || 1) >= 5;
+    const W = (rot ? meta.height : meta.width) || 0, H = (rot ? meta.width : meta.height) || 0;
+    if (!W || !H) return "4:5";
+    const r = W / H;
+    const cands: Array<[Aspect, number]> = [["1:1", 1], ["4:5", 0.8], ["16:9", 16 / 9]];
+    return cands.reduce((best, c2) => (Math.abs(Math.log(r / c2[1])) < Math.abs(Math.log(r / best[1])) ? c2 : best))[0];
+  } catch { return "4:5"; }
+}
+
+// Додати кадр каруселі з медіатеки: кроп-копія під пропорцію каруселі → у кінець списку кадрів
+export async function appendCroppedSlide(ws: string, postId: string, mediaId: string, aspect?: Aspect | string, crop?: CropRect): Promise<{ id: string; filename: string }> {
+  const a = aspect ? normAspect(aspect) : await postAspect(postId);
+  const saved = await cropCopy(ws, mediaId, a, crop);
+  try { await appendPostMedia(ws, postId, [saved.id]); }
+  catch (e) { await dropUnusedDerived(ws, [{ id: saved.id }]); throw e; } // не влізло в карусель - копію не лишаємо
   return { id: saved.id, filename: saved.filename };
 }
 
@@ -564,7 +598,7 @@ export async function stockPhotoOptions(ws: string, postText: string, aspect?: s
 }
 
 // обране стокове фото → медіатека (source='pexels') → кроп під формат → база поста (текст-оверлей працює)
-export async function attachStockPhoto(ws: string, postId: string, url: string, aspect?: string): Promise<{ id: string; filename: string }> {
+export async function attachStockPhoto(ws: string, postId: string, url: string, aspect?: string, append?: boolean): Promise<{ id: string; filename: string }> {
   if (!/^https:\/\/images\.pexels\.com\//.test(url)) throw new Error("дозволені лише фото з Pexels");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30000);
@@ -575,5 +609,9 @@ export async function attachStockPhoto(ws: string, postId: string, url: string, 
     buf = Buffer.from(await res.arrayBuffer());
   } finally { clearTimeout(timer); }
   const saved = await saveMedia(ws, { buffer: buf, mime: "image/jpeg", name: "pexels.jpg", source: "pexels" });
+  if (append) {
+    try { return await appendCroppedSlide(ws, postId, saved.id, aspect); }
+    finally { await dropUnusedDerived(ws, [{ id: saved.id }]); } // лишається кроп-копія, сирий стоковий файл - ні
+  }
   return attachCroppedImage(ws, postId, saved.id, aspect);
 }

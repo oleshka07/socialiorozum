@@ -29,7 +29,9 @@ import { connectedNets, parseWhen, zonedToUtc } from "./tgcompose.js";
 import { publishPostToChannels, alreadySentNetworks } from "./publisher.js";
 import { generatePostsOnePass, normFormat, GOAL_LABELS, CHANNEL_LIMITS } from "./pipeline.js";
 import { logEvent } from "./log.js";
-import { generateImageForPost, imageProviders, stockPhotoOptions, attachStockPhoto, attachCroppedImage } from "./images.js";
+import { generateImageForPost, imageProviders, stockPhotoOptions, attachStockPhoto, attachCroppedImage, appendCroppedSlide } from "./images.js";
+import { postMediaList, setPostMediaOrder, MAX_SLIDES, SlideError } from "./slides.js";
+import { renderCarousel, CAROUSEL_THEMES } from "./carousel.js";
 import { getThumb } from "./media.js";
 import sharp from "sharp";
 
@@ -368,11 +370,32 @@ const MEDIA_SRC: Record<string, string> = { upload: "завантажено", gd
 // Де фото вже стоїть: напряму (post.media_id) або через кроп-копію під формат поста, яку
 // attachCroppedImage позначає external_id = id оригіналу. Кропи, зроблені до цієї позначки,
 // відстежити нема як - такі фото просто виглядають вільними.
-const USED_IN = `(select string_agg(left(p.id::text, 8), ',' order by p.created_at desc)
-                    from post p left join media_asset c on c.id = p.media_id
-                   where p.media_id = a.id or (c.source = 'crop' and c.external_id = a.id::text))`;
+// Кадр каруселі (post_slide) рахується так само: фото, що стоїть третім кадром, «уже в пості».
+const USED_IN = `(select string_agg(left(u.pid::text, 8), ',' order by u.created_at desc) from (
+                    select distinct p.id as pid, p.created_at
+                      from post p
+                      left join post_slide ps on ps.post_id = p.id
+                      left join media_asset c on c.id = p.media_id
+                      left join media_asset cs on cs.id = ps.media_id
+                     where p.media_id = a.id or ps.media_id = a.id
+                        or (c.source = 'crop' and c.external_id = a.id::text)
+                        or (cs.source = 'crop' and cs.external_id = a.id::text)) u)`;
 export const usedList = (usedIn: string | null | undefined): string =>
   String(usedIn || "").split(",").filter(Boolean).map((x) => "#" + x).join(", ");
+
+// «· є фото» / «· карусель, 5 кадрів» - щоб модель бачила, що в пості вже стоїть
+export const mediaLine = (media: Array<{ id: string }>): string =>
+  !media.length ? "" : media.length === 1 ? " · є фото" : ` · карусель, ${media.length} кадрів`;
+// id фото з медіатеки: короткий #a1b2c3d4 або повний, лише свій кабінет і лише зображення
+async function libraryImageId(ws: string, raw: unknown): Promise<string> {
+  const pat = idPattern(raw);
+  if (!pat) throw new ToolError("Вкажи id фото з list_media (#a1b2c3d4).");
+  const rows = await q<{ id: string; kind: string }>(`select id, kind from media_asset where workspace_id=$1 and id::text like $2 limit 2`, [ws, pat + "%"]);
+  if (!rows.length) throw new ToolError(`Фото ${short(pat)} у медіатеці цього кабінету немає. Візьми id зі списку list_media.`);
+  if (rows.length > 1) throw new ToolError(`На «${pat}» починається кілька фото - дай довший id.`);
+  if (rows[0].kind !== "image") throw new ToolError("Це відео, а не фото - до поста тут прикріплюються лише зображення.");
+  return rows[0].id;
+}
 
 const ASPECTS = ["4:5", "1:1", "16:9"];
 const aspectArg = (v: unknown): string => (ASPECTS.includes(String(v)) ? String(v) : "4:5");
@@ -624,7 +647,7 @@ export const TOOLS: ToolDef[] = [
       const tz = await wsTz(ws);
       const variants = NETS.filter((n) => p.channels?.[n]?.text).map((n) => `— ${NET_LABEL[n]}: ${oneLine(p.channels[n].text, 300)}`);
       return [
-        `${short(p.id)} · створено ${fmtWhen(p.created_at, tz)} · ${p.review === "approved" ? "затверджено" : "чернетка"}${p.media ? " · є фото" : ""}`,
+        `${short(p.id)} · створено ${fmtWhen(p.created_at, tz)} · ${p.review === "approved" ? "затверджено" : "чернетка"}${mediaLine(await postMediaList(p.id))}`,
         `мережі: ${enabledNets(p.channels).length ? netList(enabledNets(p.channels)) : "не обрані"}${p.rubric ? ` · рубрика: ${p.rubric}` : ""}${p.format && p.format !== "post" ? ` · формат: ${p.format}` : ""}`,
         slot?.scheduled_at ? `заплановано: ${fmtWhen(slot.scheduled_at, tz)} (${slot.status})` : "",
         enabledNets(p.channels).length ? `публікація: ${publishPlanLine(publishPlan(p.channels, p.content))}` : "",
@@ -764,31 +787,122 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "attach_media",
-    title: "Прикріпити фото з медіатеки",
-    description: "БЕЗКОШТОВНО: прикріпити до поста фото з медіатеки кабінету (id з list_media). Фото обрізається під формат (типово 4:5), тримаючи в кадрі головне, і стає зображенням поста в усіх мережах; оригінал у медіатеці лишається. У відповіді - мініатюра того, що вийшло.",
+    title: "Прикріпити фото з медіатеки (одне чи карусель)",
+    description: `БЕЗКОШТОВНО: прикріпити до поста фото з медіатеки кабінету (id з list_media). Кілька id масивом = КАРУСЕЛЬ у тому ж порядку (перше - обкладинка), до ${MAX_SLIDES} кадрів: Instagram і Threads отримають карусель, Facebook - галерею, Telegram - альбом, LinkedIn - кілька фото. Кожне фото обрізається під формат (типово 4:5; кадри каруселі - в одній пропорції), оригінали в медіатеці лишаються. Без append фото ЗАМІНЮЮТЬ наявні, з append: true - додаються в кінець. Переставити чи прибрати кадри - edit_post_media. У відповіді - мініатюри того, що вийшло.`,
     properties: {
       id: S("Id поста."),
-      media: S("Id фото з list_media (короткий #a1b2c3d4 або повний)."),
+      // масив, але рядок теж приймаємо: чати, відкриті до каруселей, памʼятають стару схему (один id)
+      media: { type: "array", items: { type: "string" }, description: "Id фото з list_media (#a1b2c3d4) по порядку: одне фото - масив з одного id, кілька - карусель." },
       aspect: ASPECT_ARG,
+      append: { type: "boolean", description: "true - додати в кінець наявних кадрів, а не замінити їх." },
     },
     required: ["id", "media"],
     run: async (ws, a) => {
       const p = await findPost(ws, a.id);
-      const pat = idPattern(a.media);
-      if (!pat) throw new ToolError("Вкажи id фото з list_media (#a1b2c3d4).");
-      const rows = await q<{ id: string; kind: string; used_in: string | null }>(
-        `select a.id, a.kind, ${USED_IN} as used_in from media_asset a where a.workspace_id=$1 and a.id::text like $2 limit 2`, [ws, pat + "%"]);
-      if (!rows.length) throw new ToolError(`Фото ${short(pat)} у медіатеці цього кабінету немає. Візьми id зі списку list_media.`);
-      if (rows.length > 1) throw new ToolError(`На «${pat}» починається кілька фото - дай довший id.`);
-      if (rows[0].kind !== "image") throw new ToolError("Це відео, а не фото - до поста тут прикріплюються лише зображення.");
-      const others = usedList(rows[0].used_in).split(", ").filter((x) => x && x !== short(p.id));
+      const raw = Array.isArray(a.media) ? a.media : [a.media];
+      if (!raw.length) throw new ToolError("Вкажи id фото з list_media (#a1b2c3d4).");
+      if (raw.length > MAX_SLIDES) throw new ToolError(`У каруселі до ${MAX_SLIDES} кадрів - передай не більше.`);
+      const ids: string[] = [];
+      for (const r of raw) ids.push(await libraryImageId(ws, r));
+      const append = a.append === true;
+      const before = await postMediaList(p.id);
+      if (append && before.length + ids.length > MAX_SLIDES)
+        throw new ToolError(`У каруселі до ${MAX_SLIDES} кадрів - зараз ${before.length}, тож додати можна ще ${Math.max(0, MAX_SLIDES - before.length)}.`);
       const aspect = aspectArg(a.aspect);
-      const r = await attachCroppedImage(ws, p.id, rows[0].id, aspect);
-      const thumb = await fileThumb(r.filename);
+      try {
+        if (!append) {
+          // перше - обкладинкою (з базою під текст, як у кабінеті), решта - кадрами в тій самій пропорції
+          await attachCroppedImage(ws, p.id, ids[0], aspect);
+          const cover = (await postMediaList(p.id))[0];
+          await setPostMediaOrder(ws, p.id, cover ? [cover.id] : []);
+          for (const id of ids.slice(1)) await appendCroppedSlide(ws, p.id, id, aspect);
+        } else {
+          for (const id of ids) await appendCroppedSlide(ws, p.id, id, before.length ? undefined : aspect);
+        }
+      } catch (e: any) { if (e instanceof SlideError) throw new ToolError(e.message); throw e; }
+      const after = await postMediaList(p.id);
+      const others = new Set<string>();
+      for (const id of ids) {
+        const used = (await one<{ u: string | null }>(`select ${USED_IN} as u from media_asset a where a.id=$1`, [id]))?.u;
+        usedList(used).split(", ").filter((x) => x && x !== short(p.id)).forEach((x) => others.add(x));
+      }
+      const thumbs = (await Promise.all(after.map((m) => smallThumb(m.filename)))).filter(Boolean) as ToolImage[];
+      // називаємо, ЯКІ саме фото стали кадрами: мініатюри модель бачить, а id - потрібні для наступних кроків
+      const what = append
+        ? `додано ${ids.length} ${ids.length === 1 ? "кадр" : "кадри"} (${ids.map(short).join(", ")}) - тепер ${after.length > 1 ? `карусель із ${after.length} кадрів` : "одне фото"}`
+        : ids.length === 1
+          ? `фото ${short(ids[0])} з медіатеки прикріплено (${aspect})`
+          : `карусель із ${after.length} кадрів (${aspect}): ${ids.map(short).join(", ")} - перше обкладинка`;
+      const repeat = others.size
+        ? (ids.length === 1 ? ` Це фото вже стоїть у ${[...others].join(", ")}` : ` Ці фото вже стоять і в ${[...others].join(", ")}`) + " - якщо повтор небажаний, обери інше (list_media з unused_only)."
+        : "";
+      return { text: `${short(p.id)}: ${what}.${repeat}${after.length > 1 ? " Мініатюри нижче - по порядку кадрів." : ""}`, images: thumbs };
+    },
+  },
+  {
+    name: "edit_post_media",
+    title: "Кадри поста: показати, переставити, прибрати",
+    description: "БЕЗКОШТОВНО: показати фото поста по порядку (з мініатюрами), переставити кадри каруселі чи прибрати зайві. order - повний новий порядок наявних кадрів (id з відповіді цього інструмента); remove - що прибрати. Без order і remove - просто показує кадри. Перший кадр - обкладинка.",
+    properties: {
+      id: S("Id поста."),
+      order: { type: "array", items: { type: "string" }, description: "Новий порядок кадрів (id #a1b2c3d4 з цього інструмента). Кадри, яких нема в списку, прибираються." },
+      remove: { type: "array", items: { type: "string" }, description: "Id кадрів, які прибрати." },
+    },
+    required: ["id"],
+    run: async (ws, a) => {
+      const p = await findPost(ws, a.id);
+      let cur = await postMediaList(p.id);
+      const pick = (v: unknown): string => {
+        const pat = idPattern(v);
+        const hit = pat ? cur.filter((m) => m.id.startsWith(pat)) : [];
+        if (hit.length !== 1) throw new ToolError(`Кадру ${short(String(v || "?"))} у цьому пості немає - візьми id з edit_post_media без аргументів.`);
+        return hit[0].id;
+      };
+      const changed = Array.isArray(a.order) || Array.isArray(a.remove);
+      if (changed) {
+        let ids = Array.isArray(a.order) ? a.order.map(pick) : cur.map((m) => m.id);
+        const drop = Array.isArray(a.remove) ? a.remove.map(pick) : [];
+        ids = ids.filter((id) => !drop.includes(id));
+        try { await setPostMediaOrder(ws, p.id, ids); } catch (e: any) { if (e instanceof SlideError) throw new ToolError(e.message); throw e; }
+        cur = await postMediaList(p.id);
+      }
+      if (!cur.length) return `${short(p.id)}: фото немає. Додати - attach_media (з медіатеки), attach_stock_photo, generate_image чи render_carousel (кадри зі сценарію).`;
+      const thumbs = (await Promise.all(cur.map((m) => smallThumb(m.filename)))).filter(Boolean) as ToolImage[];
       return {
-        text: `${short(p.id)}: фото ${short(rows[0].id)} з медіатеки прикріплено (${aspect}).` +
-          (others.length ? ` Це ж фото вже стоїть у ${others.join(", ")} - якщо повтор небажаний, обери інше (list_media з unused_only).` : ""),
-        images: thumb ? [thumb] : [],
+        text: [
+          `${short(p.id)}: ${cur.length > 1 ? `карусель, ${cur.length} кадрів` : "одне фото"}${changed ? " (оновлено)" : ""}:`,
+          ...cur.map((m, i) => `${i + 1}. ${short(m.id)}${i === 0 ? " · обкладинка" : ""}`),
+          "Мініатюри нижче - у тому ж порядку.",
+        ].join("\n"),
+        images: thumbs,
+      };
+    },
+  },
+  {
+    name: "render_carousel",
+    title: "Зібрати кадри каруселі зі сценарію",
+    description: `БЕЗКОШТОВНО (без моделі, лише верстка): намалювати кадри-картинки каруселі зі сценарію - на кожен слайд окрема картинка з великим заголовком і текстом, лічильник 2/8, нік бренду. Передай slides - тексти слайдів по порядку (2-${MAX_SLIDES}; перший рядок слайда стає заголовком, решта - текстом); тоді текст поста лишається підписом під каруселлю, тож пиши його окремо коротким. Без slides сценарій береться з тексту поста (рядки «Слайд 1: …», «Слайд 2: …»), а текст поста стає підписом (з рядка «Підпис: …», якщо він є). theme: photo (на фоні фото поста, типово, якщо фото є), dark, light. Кадри ЗАМІНЮЮТЬ наявні фото поста. У відповіді - мініатюри.`,
+    properties: {
+      id: S("Id поста."),
+      slides: { type: "array", items: { type: "string" }, description: "Тексти слайдів по порядку (необовʼязково)." },
+      theme: { type: "string", enum: CAROUSEL_THEMES, description: "photo | dark | light." },
+      accent: S("Акцентний колір #RRGGBB (слова в *зірочках* чи **жирні** на кадрі - цим кольором). Типово жовтий."),
+    },
+    required: ["id"],
+    run: async (ws, a) => {
+      const p = await findPost(ws, a.id);
+      const slides = Array.isArray(a.slides) ? a.slides.map((x: unknown) => str(x, 600)).filter(Boolean) : undefined;
+      let r;
+      try { r = await renderCarousel(ws, p.id, { slides, theme: a.theme ? String(a.theme) : undefined, accent: str(a.accent, 7) }); }
+      catch (e: any) { if (e instanceof SlideError) throw new ToolError(e.message); throw e; }
+      const cur = await postMediaList(p.id);
+      const thumbs = (await Promise.all(cur.map((m) => smallThumb(m.filename)))).filter(Boolean) as ToolImage[];
+      return {
+        text: `${short(p.id)}: зібрано ${r.count} кадрів (тема ${r.theme}).` +
+          (r.captionChanged ? ` Сценарій перенесено в слайди, а текст поста тепер ПІДПИС під каруселлю: «${oneLine(r.caption, 200)}». Перевір і за потреби онови update_post.` : "") +
+          (r.truncated.length ? ` ⚠️ На кадрах ${r.truncated.join(", ")} текст не вмістився й обрізаний - скороти ці слайди й збери ще раз.` : "") +
+          " Мініатюри нижче - по порядку.",
+        images: thumbs,
       };
     },
   },
@@ -854,11 +968,12 @@ export const TOOLS: ToolDef[] = [
   {
     name: "attach_stock_photo",
     title: "Прикріпити фото зі стоку",
-    description: "БЕЗКОШТОВНО: прикріпити до поста фото, знайдене через find_stock_photos. Фото обрізається під формат (типово 4:5) і стає зображенням поста в усіх мережах. У відповіді - мініатюра того, що вийшло.",
+    description: "БЕЗКОШТОВНО: прикріпити до поста фото, знайдене через find_stock_photos. Фото обрізається під формат (типово 4:5) і стає зображенням поста в усіх мережах; з append: true - додається кадром каруселі. У відповіді - мініатюра того, що вийшло.",
     properties: {
       id: S("Id поста."),
       url: S("url фото з find_stock_photos."),
       aspect: ASPECT_ARG,
+      append: { type: "boolean", description: "true - додати кадром каруселі в кінець, а не замінити обкладинку." },
     },
     required: ["id", "url"],
     run: async (ws, a) => {
@@ -866,10 +981,14 @@ export const TOOLS: ToolDef[] = [
       const url = str(a.url, 500);
       // лише Pexels: інакше інструмент став би способом змусити сервер завантажити будь-яку адресу
       if (!/^https:\/\/images\.pexels\.com\//.test(url)) throw new ToolError("Приймаю лише url із find_stock_photos (images.pexels.com).");
+      const append = a.append === true && (await postMediaList(p.id)).length > 0;
       const aspect = aspectArg(a.aspect);
-      const r = await attachStockPhoto(ws, p.id, url, aspect);
+      let r;
+      try { r = await attachStockPhoto(ws, p.id, url, append ? undefined : aspect, append); }
+      catch (e: any) { if (e instanceof SlideError) throw new ToolError(e.message); throw e; }
       const thumb = await fileThumb(r.filename);
-      return { text: `${short(p.id)}: фото зі стоку прикріплено (${aspect}).`, images: thumb ? [thumb] : [] };
+      const n = (await postMediaList(p.id)).length;
+      return { text: `${short(p.id)}: фото зі стоку ${append ? `додано кадром ${n}` : `прикріплено (${aspect})`}.`, images: thumb ? [thumb] : [] };
     },
   },
   {
@@ -881,6 +1000,7 @@ export const TOOLS: ToolDef[] = [
       prompt: S("Опис сцени англійською."),
       provider: { type: "string", enum: ["cloudflare", "openai", "fal", "gemini"], description: "Провайдер (необовʼязково)." },
       aspect: ASPECT_ARG,
+      append: { type: "boolean", description: "true - додати кадром каруселі в кінець (обкладинка лишається), а не замінити її." },
     },
     required: ["id"],
     run: async (ws, a) => {
@@ -891,10 +1011,12 @@ export const TOOLS: ToolDef[] = [
         const ok = Object.keys(avail).filter((k) => avail[k]);
         throw new ToolError(`Провайдер ${prov} зараз недоступний. ${ok.length ? `Доступні: ${ok.join(", ")}.` : "Жодного - адміністратор має додати ключ у Налаштування → Профіль → Ключі провайдерів."}`);
       }
+      const append = a.append === true && (await postMediaList(p.id)).length > 0;
       const aspect = aspectArg(a.aspect);
-      const filename = await generateImageForPost(ws, p.id, { prompt: str(a.prompt, 1200) || undefined, provider: (prov || undefined) as any, aspect });
+      const filename = await generateImageForPost(ws, p.id, { prompt: str(a.prompt, 1200) || undefined, provider: (prov || undefined) as any, aspect: append ? undefined : aspect, append });
       const thumb = await fileThumb(filename);
-      return { text: `${short(p.id)}: зображення згенеровано й прикріплено (${aspect}${prov ? `, ${prov}` : ""}).`, images: thumb ? [thumb] : [] };
+      const n = (await postMediaList(p.id)).length;
+      return { text: `${short(p.id)}: зображення згенеровано й ${append ? `додано кадром ${n}` : `прикріплено (${aspect}${prov ? `, ${prov}` : ""})`}.`, images: thumb ? [thumb] : [] };
     },
   },
   {
@@ -1100,6 +1222,7 @@ export const SERVER_INSTRUCTIONS = [
   "3) create_draft - збережи; 4) publish_post або schedule_post. Так генерація нічого не коштує власнику.",
   "generate_posts викликай лише коли тебе прямо просять «згенеруй силами socialio» - він витрачає AI-кредити кабінету.",
   "Зображення: спершу медіатека кабінету (list_media → attach_media) - власні фото автора, вони найкращі й безкоштовні (фото лежать у автора на комп'ютері, а в тебе є термінал - media_upload_link дасть команду, що заллє папку в медіатеку без проходу через чат); далі сток - find_stock_photos з конкретним англійським query і attach_stock_photo, теж безкоштовно; generate_image платний (крім provider cloudflare - безкоштовний денний ліміт ~100 зображень, якщо його підключено), бери його, коли ні медіатека, ні сток не підходять або коли людина просить саме генерацію.",
+  `Карусель: кілька фото в одному пості (до ${MAX_SLIDES}) - attach_media масивом id або append: true у attach_media / attach_stock_photo / generate_image; кадри-картинки зі сценарію «Слайд 1: …» малює render_carousel (безкоштовно), і тоді текст поста - це короткий підпис під каруселлю, не сценарій.`,
   "Якщо кабінетів кілька (list_workspaces), спершу переконайся, що активний саме той бренд: перемкни switch_workspace або передай workspace у виклику. Кожна відповідь називає кабінет у першому рядку - звіряйся з ним перед публікацією.",
   "Факти не вигадуй: бери їх з list_materials / get_material або питай автора.",
   "Перед публікацією показуй текст людині - опублікований пост відкликати не можна.",
