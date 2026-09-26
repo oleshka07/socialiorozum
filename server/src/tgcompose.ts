@@ -13,7 +13,7 @@ import { getSetting, setSetting } from "./settings.js";
 import { saveMedia } from "./media.js";
 import { postMediaList, setPostMediaOrder, setPostVideo, MAX_SLIDES } from "./slides.js";
 import { appendCroppedSlide } from "./images.js";
-import { publishPostToChannels, enabledNets, closeSlotsIfDone, alreadySentNetworks, PUB_NETS } from "./publisher.js";
+import { publishPostToChannels, enabledNets, closeSlotsIfDone, alreadySentNetworks, PUB_NETS, unschedulePost } from "./publisher.js";
 import { rewritePost } from "./pipeline.js";
 import { logEvent } from "./log.js";
 
@@ -159,7 +159,9 @@ export async function toggleApprove(ws: string, postId: string): Promise<string>
   const p = await loadPost(ws, postId); if (!p) throw new Error("пост не знайдено");
   const on = p.review !== "approved";
   await q(`update post set review=$2 where id=$1`, [postId, on ? "approved" : "review"]);
-  return on ? "✅ Затверджено" : "↩ Вернуто в чернетки";
+  // незатверджений пост не має лишатись у календарі: автопостер відправив би його в мережу
+  const gone = on ? 0 : await unschedulePost(postId);
+  return on ? "✅ Затверджено" : `↩ Вернуто в чернетки${gone ? " і знято з розкладу" : ""}`;
 }
 
 const niceNet = (k: string) => (NETS.find((n) => n[0] === k) || [k, k])[1];

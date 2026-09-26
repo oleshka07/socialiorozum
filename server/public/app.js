@@ -57,6 +57,8 @@ let _cmpOpenId=null;      // id поста, відкритого в композ
 let _routeSilent=false;   // перемикаємо розділ БЕЗ запису адреси (її пише той, хто головний - напр. композер)
 let Finals = [];
 let Guide={tips:[],i:0,on:true,busy:false,shownAt:0}; // 🦉 сова-провідник (стан угорі - selectView його читає)
+// 📈 Аналітика: фільтр (памʼятається в браузері), останні дані, сортування й «таблиця замість графіка»
+let AnState={days:90,net:'all'}, AnData=null, AnSort={key:'created_at',dir:-1}, AnShown=30, AnTableView={};
 function owlEl(){ return $('owl'); } // hoisted - безпечно з selectView вище
 
 async function api(path, opts){
@@ -66,12 +68,22 @@ async function api(path, opts){
     // 402 = стеля витрат на AI (не «зламалось», а «ліміт») - код лишаємо в повідомленні для ясності
     // Якщо сервер дав {error:"…"} - це вже людський текст, і префікс «500:» перед ним лише лякає
     // («сервер зламався», хоча це, скажімо, стеля витрат). Статус лишаємо тільки для не-JSON відповідей.
-    const t = await r.text(); let msg='';
-    try{ const j=JSON.parse(t); if(j&&j.error) msg=String(j.error); }catch(e){}
-    throw new Error(msg || (r.status+': '+t.slice(0,200)));
+    const t = await r.text(); let msg='', body=null;
+    try{ body=JSON.parse(t); if(body&&body.error) msg=String(body.error); }catch(e){}
+    // статус і тіло - на самій помилці: декому з викликів треба знати, ЩО саме відповів сервер
+    // (напр. 409 «схоже на дубль» у розкладі - його можна свідомо підтвердити)
+    const err=new Error(msg || (r.status+': '+t.slice(0,200))); err.status=r.status; err.body=body;
+    throw err;
   }
   const ct = r.headers.get('content-type')||'';
   return ct.includes('json') ? r.json() : r.text();
+}
+// 🗓 постановка в розклад із запобіжником від дублів: сервер каже, з чим збіг (той самий час у ту саму
+// мережу чи той самий текст), а людина вирішує - повторити свідомо чи обрати інакше
+async function scheduleApi(path, method, body){
+  const send=(b)=>api(path,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+  try{ return await send(body); }
+  catch(e){ if(e.status===409&&e.body&&e.body.conflict&&confirm(e.message+'\n\nВсе одно поставити?')) return send(Object.assign({},body,{force:true})); throw e; }
 }
 let _toastT; function flash(m){ const t=$('toast'); if(!t) return; t.textContent=m; t.classList.add('show'); clearTimeout(_toastT); _toastT=setTimeout(()=>t.classList.remove('show'),2300); }
 // глобальний індикатор довгої AI-дії: aiBusy('що робимо…') на старті, aiDone() у finally.
@@ -905,30 +917,336 @@ async function loadToday(){
     .catch(()=>{ const el=$('tdComm'); if(el){ el.textContent='—'; el.title='не вдалося прочитати (перепідключи Threads для нових дозволів)'; } }); }
 }
 
+// ===================== 📈 АНАЛІТИКА =====================
+// Екран будується з ОДНОГО запиту /analytics/posts (уся арифметика - на сервері, у чистому
+// analytics.ts), фільтр «період × мережа» зверху керує всім нижче. Графіки - звичайний SVG без
+// бібліотек: кольори мереж з валідованої палітри (.viz у app.html), колір іде за мережею, а не за
+// порядком (фільтр не перефарбовує ті, що лишились). Кожен графік має таблицю-двійника, а підказка
+// при наведенні лише доповнює: жодне число не сховане тільки в ній.
+const AN_NETS=['threads','instagram','facebook','telegram'];
+const AN_LABEL={threads:'Threads',instagram:'Instagram',facebook:'Facebook',telegram:'Telegram',linkedin:'LinkedIn'};
+const AN_ICON={threads:'🧵',instagram:'📸',facebook:'📘',telegram:'✈️',linkedin:'💼'};
+const AN_MEDIA={text:'Текст',photo:'Фото',carousel:'Карусель',video:'Відео',story:'Сторіс'};
+const AN_PERIODS=[[30,'30 днів'],[90,'90 днів'],[365,'Рік']];
+const SVGNS='http://www.w3.org/2000/svg';
+const anPlural=(n,a,b,c)=>{ const x=Math.abs(n)%100, y=x%10; return (x>10&&x<20)?c:y===1?a:(y>=2&&y<=4)?b:c; };
+const anPosts=(n)=>n+' '+anPlural(n,'пост','пости','постів');
+const fmtN=(v)=>v==null?'—':Math.round(v).toLocaleString('uk-UA');
+const fmtK=(v)=>{ if(v==null) return '—'; const a=Math.abs(v);
+  if(a>=1e6) return (v/1e6).toFixed(a>=1e7?0:1).replace('.',',')+' млн';
+  if(a>=1e4) return Math.round(v/1e3)+' тис.';
+  if(a>=1e3) return (v/1e3).toFixed(1).replace('.',',')+' тис.';
+  return String(Math.round(v)); };
+const fmtX=(m)=>m==null?'—':'×'+(Math.round(m*10)/10).toFixed(1);
+const fmtPct=(v)=>v==null?'—':(v*100).toFixed(1).replace('.',',')+'%';
+const fmtDay=(ymd)=>ymd?ymd.slice(8,10)+'.'+ymd.slice(5,7):'';
+
+function sv(tag,attrs,parent){ const e=document.createElementNS(SVGNS,tag); for(const k in attrs) e.setAttribute(k,attrs[k]); if(parent) parent.appendChild(e); return e; }
+function niceMax(v){ if(!(v>0)) return 1; const p=Math.pow(10,Math.floor(Math.log10(v))), f=v/p; return (f<=1?1:f<=2?2:f<=2.5?2.5:f<=5?5:10)*p; }
+// стовпчик: 4px заокруглення лише на кінці даних, біля осі - прямо
+function barPath(x,y,w,h,r){ r=Math.min(r,w/2,h); return 'M'+x+','+(y+h)+'V'+(y+r)+'Q'+x+','+y+' '+(x+r)+','+y+'H'+(x+w-r)+'Q'+(x+w)+','+y+' '+(x+w)+','+(y+r)+'V'+(y+h)+'Z'; }
+
+// одна підказка на всі графіки; текст ставиться лише через textContent (назви постів - дані людей)
+function vizTip(){ let t=$('vizTip'); if(!t){ t=document.createElement('div'); t.id='vizTip'; t.className='viztip'; t.setAttribute('role','tooltip'); document.body.appendChild(t); } return t; }
+function showTip(ev,anchor,head,rows){
+  const t=vizTip(); t.textContent='';
+  if(head){ const h=document.createElement('div'); h.className='vt-h'; h.textContent=head; t.appendChild(h); }
+  rows.forEach(r=>{ const row=document.createElement('div'); row.className='vt-r';
+    if(r.color){ const k=document.createElement('span'); k.className='vt-k'; k.style.background=r.color; row.appendChild(k); }
+    const v=document.createElement('b'); v.textContent=r.value; row.appendChild(v);
+    if(r.name){ const n=document.createElement('span'); n.className='vt-n'; n.textContent=r.name; row.appendChild(n); }
+    t.appendChild(row); });
+  t.style.display='block';
+  let x,y; if(ev&&ev.type!=='focus'&&ev.clientX!=null){ x=ev.clientX; y=ev.clientY; } else { const b=anchor.getBoundingClientRect(); x=b.left+b.width/2; y=b.top; }
+  const w=t.offsetWidth, h=t.offsetHeight; let left=x+14, top=y-h-10;
+  if(left+w>innerWidth-8) left=x-w-14; if(left<8) left=8; if(top<8) top=y+18;
+  t.style.left=left+'px'; t.style.top=top+'px';
+}
+function hideTip(){ const t=$('vizTip'); if(t) t.style.display='none'; }
+function tipOn(el,fn){ el.addEventListener('pointermove',fn); el.addEventListener('pointerleave',hideTip); el.addEventListener('focus',fn); el.addEventListener('blur',hideTip); }
+
+// ---- стовпчики за тижнями/місяцями: перегляди, складені по мережах ----
+function chartColumns(host,series){
+  host.textContent='';
+  const nets=series.nets, B=series.buckets;
+  if(!nets.length||!B.length){ host.innerHTML='<div class="empty">Ще нема переглядів за цей період: статистику віддають Threads, Instagram і Facebook, і вона збирається раз на добу.</div>'; return; }
+  if(nets.length>1){ const lg=document.createElement('div'); lg.className='vz-legend';
+    nets.forEach(n=>{ const s=document.createElement('span'); const sw=document.createElement('i'); sw.className='vz-sw'; sw.style.background='var(--viz-'+n+')'; s.appendChild(sw); s.appendChild(document.createTextNode(AN_LABEL[n])); lg.appendChild(s); });
+    host.appendChild(lg); }
+  const W=Math.max(280,host.clientWidth||600), H=230, pl=50, pr=8, pt=18, pb=28, pw=W-pl-pr, ph=H-pt-pb;
+  const tot=B.map(b=>nets.reduce((a,n)=>a+(b.views[n]||0),0));
+  const max=niceMax(Math.max(0,...tot));
+  const svg=sv('svg',{width:W,height:H,viewBox:'0 0 '+W+' '+H,role:'img','aria-label':'Перегляди за '+(series.unit==='week'?'тижнями':'місяцями')+'; точні числа - у таблиці'},host);
+  for(let i=0;i<=4;i++){ const y=pt+ph-ph*i/4; sv('line',{x1:pl,x2:W-pr,y1:y,y2:y,class:i?'vz-grid':'vz-base'},svg);
+    const t=sv('text',{x:pl-7,y:y+4,class:'vz-tick','text-anchor':'end'},svg); t.textContent=fmtK(max*i/4); }
+  const band=pw/B.length, bw=Math.min(24,Math.max(5,band*0.62));
+  const every=Math.max(1,Math.ceil(B.length/Math.max(1,Math.floor(pw/46))));
+  const maxI=tot.indexOf(Math.max(...tot)), lastI=B.length-1;
+  B.forEach((b,i)=>{
+    const cx=pl+band*i+band/2, x=cx-bw/2;
+    const segs=nets.map(n=>({n,v:b.views[n]||0})).filter(s=>s.v>0);
+    let yb=pt+ph;
+    segs.forEach((s,k)=>{ const h=ph*s.v/max, gap=k>0&&h>3?2:0, y=yb-h, hh=Math.max(0.6,h-gap);
+      if(k===segs.length-1) sv('path',{d:barPath(x,y,bw,hh,4),style:'fill:var(--viz-'+s.n+')'},svg);
+      else sv('rect',{x,y,width:bw,height:hh,style:'fill:var(--viz-'+s.n+')'},svg);
+      yb=y; });
+    // підпис - вибірково: найвищий і останній стовпчик; біля краю вирівнюємо до стовпчика, а не по центру,
+    // інакше число обрізається рамкою графіка
+    const anchorAt=(half)=>cx+half>W-2?['end',x+bw]:cx-half<pl?['start',x]:['middle',cx];
+    if(tot[i]>0&&(i===maxI||i===lastI)){ const lab=fmtK(tot[i]), tw=lab.length*6.8, a=anchorAt(tw/2);
+      const lx0=a[0]==='end'?a[1]-tw:a[0]==='start'?a[1]:a[1]-tw/2, lx1=lx0+tw, base=yb-6;
+      // сусідній вищий стовпчик під підписом - не пишемо (число є в підказці й таблиці)
+      const hits=[i-1,i+1].some(j=>{ if(j<0||j>lastI) return false; const xj=pl+band*j+band/2-bw/2, topj=pt+ph-ph*tot[j]/max;
+        return lx0<xj+bw&&lx1>xj&&topj<base; });
+      if(!hits){ const t=sv('text',{x:a[1],y:base,class:'vz-lab','text-anchor':a[0]},svg); t.textContent=lab; } }
+    // дати - кожна N-та й остання, але не впритул до останньої (інакше «14.0921.09»)
+    if(i===lastI||(i%every===0&&lastI-i>=every)){ const a=anchorAt(b.label.length*3.2);
+      const t=sv('text',{x:a[1],y:H-9,class:'vz-tick','text-anchor':a[0]},svg); t.textContent=b.label; }
+    const hit=sv('rect',{x:pl+band*i,y:pt,width:band,height:ph,class:'vz-hit',tabindex:'0','aria-label':b.label+': '+fmtN(tot[i])+' переглядів'},svg);
+    tipOn(hit,(e)=>showTip(e,hit,(series.unit==='week'?'Тиждень з '+b.label:b.label)+' · '+anPosts(b.posts),
+      nets.map(n=>({value:fmtN(b.views[n]||0),name:AN_LABEL[n],color:'var(--viz-'+n+')'})).concat(nets.length>1?[{value:fmtN(tot[i]),name:'разом'}]:[])));
+  });
+}
+function tableColumns(series){
+  const nets=series.nets;
+  return '<div style="overflow-x:auto"><table class="vz-tbl"><tr><th>'+(series.unit==='week'?'Тиждень з':'Місяць')+'</th><th>Постів</th>'+nets.map(n=>'<th>'+AN_LABEL[n]+'</th>').join('')+(nets.length>1?'<th>Разом</th>':'')+'</tr>'
+    +series.buckets.map(b=>{ const t=nets.reduce((a,n)=>a+(b.views[n]||0),0);
+      return '<tr><td>'+esc(b.label)+'</td><td>'+b.posts+'</td>'+nets.map(n=>'<td>'+fmtN(b.views[n]||0)+'</td>').join('')+(nets.length>1?'<td><b>'+fmtN(t)+'</b></td>':'')+'</tr>'; }).join('')+'</table></div>';
+}
+
+// ---- підписники: окрема мініатюра на мережу (масштаби різні - одна вісь сплющила б малі) ----
+function chartFollowers(host,followers){
+  host.textContent='';
+  const nets=AN_NETS.filter(n=>followers&&followers[n]);
+  if(!nets.length){ host.innerHTML='<div class="empty">Знімків підписників ще нема. Перший зʼявиться з найближчим збором статистики (раз на 6 годин) - або натисни «↻ Оновити статистику».</div>'; return; }
+  const grid=document.createElement('div'); grid.className='vz-facets'; host.appendChild(grid);
+  const cards=[];
+  nets.forEach(n=>{ const f=followers[n];
+    const card=document.createElement('div'); card.className='vz-facet'; grid.appendChild(card);
+    const fnm=document.createElement('div'); fnm.className='fn'; const lk=document.createElement('i'); lk.className='vz-lk'; lk.style.background='var(--viz-'+n+')'; fnm.appendChild(lk); fnm.appendChild(document.createTextNode(AN_LABEL[n])); card.appendChild(fnm);
+    const fv=document.createElement('div'); fv.className='fv'; fv.textContent=fmtN(f.now); card.appendChild(fv);
+    const fh=document.createElement('div'); fh.className='fh';
+    if(f.delta!=null){ const d=document.createElement('span'); d.className=f.delta>0?'vz-up':f.delta<0?'vz-down':'vz-dz'; d.style.fontWeight='700';
+      d.textContent=(f.delta>0?'▲ +':f.delta<0?'▼ ':'')+fmtN(f.delta); fh.appendChild(d); fh.appendChild(document.createTextNode(' з '+fmtDay(f.since))); }
+    else fh.textContent='перший знімок - зміну покаже з наступних днів';
+    card.appendChild(fh);
+    cards.push([n,f,card]); });
+  // ширину міряємо, коли в сітці вже ВСІ картки: одна картка в auto-fill займала б увесь рядок
+  cards.forEach(([n,f,card])=>{
+    const pts=f.points||[];
+    if(pts.length<2) return;
+    const W=Math.max(120,card.clientWidth-26), H=58, pad=6;
+    const vals=pts.map(p=>p.n); let lo=Math.min(...vals), hi=Math.max(...vals); if(lo===hi){ lo-=1; hi+=1; }
+    const X=(i)=>pad+(W-2*pad)*(pts.length===1?0.5:i/(pts.length-1)), Y=(v)=>pad+(H-2*pad)*(1-(v-lo)/(hi-lo));
+    const svg=sv('svg',{width:W,height:H,viewBox:'0 0 '+W+' '+H,role:'img','aria-label':'Підписники '+AN_LABEL[n]+': від '+fmtN(pts[0].n)+' до '+fmtN(pts[pts.length-1].n)},card);
+    svg.style.marginTop='6px';
+    sv('path',{d:pts.map((p,i)=>(i?'L':'M')+X(i).toFixed(1)+','+Y(p.n).toFixed(1)).join(''),style:'fill:none;stroke:var(--viz-'+n+');stroke-width:2;stroke-linejoin:round;stroke-linecap:round'},svg);
+    const last=pts.length-1;
+    sv('circle',{cx:X(last),cy:Y(pts[last].n),r:4,style:'fill:var(--viz-'+n+');stroke:var(--surface);stroke-width:2'},svg);
+    const cross=sv('line',{x1:0,x2:0,y1:0,y2:H,class:'vz-base',style:'display:none'},svg);
+    const dot=sv('circle',{r:4,style:'display:none;fill:var(--viz-'+n+');stroke:var(--surface);stroke-width:2'},svg);
+    const hit=sv('rect',{x:0,y:0,width:W,height:H,class:'vz-hit',tabindex:'0','aria-label':'Підписники '+AN_LABEL[n]+' по днях'},svg);
+    const at=(e)=>{ let i=last; if(e&&e.type!=='focus'&&e.clientX!=null){ const b=svg.getBoundingClientRect(); const rel=(e.clientX-b.left-pad)/(W-2*pad); i=Math.max(0,Math.min(last,Math.round(rel*last))); }
+      cross.setAttribute('x1',X(i)); cross.setAttribute('x2',X(i)); cross.style.display=''; dot.setAttribute('cx',X(i)); dot.setAttribute('cy',Y(pts[i].n)); dot.style.display='';
+      showTip(e,hit,fmtDay(pts[i].day),[{value:fmtN(pts[i].n),name:'підписників '+AN_LABEL[n],color:'var(--viz-'+n+')'}]); };
+    tipOn(hit,at); hit.addEventListener('pointerleave',()=>{ cross.style.display='none'; dot.style.display='none'; }); hit.addEventListener('blur',()=>{ cross.style.display='none'; dot.style.display='none'; });
+  });
+}
+
+// ---- «що впливає»: множник до норми, логарифмічна шкала ×0.5…×2 навколо ×1 ----
+// (×2 і ×0.5 - однакова відстань від норми; далі стовпчик упирається в край, число пише правду)
+const multPos=(m)=>{ const l=Math.max(-1,Math.min(1,Math.log2(Math.max(m,0.01)))); return l*50; }; // % від центру
+function chartDrivers(host,drivers){
+  host.textContent='';
+  if(!drivers.length){ host.innerHTML='<div class="empty">Порівнювати поки нічого: або статистики ще замало, або всі пости однакові за цими ознаками.</div>'; return; }
+  const grid=document.createElement('div'); grid.className='vz-drv'; host.appendChild(grid);
+  drivers.forEach(d=>{
+    const f=document.createElement('div'); f.className='vz-dfacet'; grid.appendChild(f);
+    const t=document.createElement('div'); t.className='dt'; t.textContent=d.title; f.appendChild(t);
+    const h=document.createElement('div'); h.className='dh'; h.textContent=d.hint; f.appendChild(h);
+    d.groups.forEach(g=>{
+      const row=document.createElement('div'); row.className='vz-drow'; row.tabIndex=0; f.appendChild(row);
+      const l=document.createElement('span'); l.className='vz-dl'; l.textContent=g.label; const n=document.createElement('i'); n.textContent=String(g.n); l.appendChild(n); row.appendChild(l);
+      const tr=document.createElement('span'); tr.className='vz-dtrack'; row.appendChild(tr);
+      const mid=document.createElement('span'); mid.className='vz-dmid'; tr.appendChild(mid);
+      const p=multPos(g.median), bar=document.createElement('span');
+      bar.className='vz-dbar '+(p>=0?'up':'down')+(g.thin?' thin':'');
+      bar.style.left=(p>=0?50:50+p)+'%'; bar.style.width=Math.max(Math.abs(p),0.8)+'%'; tr.appendChild(bar);
+      const v=document.createElement('b'); v.className='vz-dv'+(g.thin?' thin':''); v.textContent=fmtX(g.median); row.appendChild(v);
+      row.setAttribute('aria-label',d.title+', '+g.label+': '+fmtX(g.median)+' від норми, '+anPosts(g.n)+(g.thin?', мало даних':''));
+      tipOn(row,(e)=>showTip(e,row,d.title+' · '+g.label,[{value:fmtX(g.median),name:'від твоєї норми',color:g.thin?'var(--viz-thin)':(p>=0?'var(--viz-up)':'var(--viz-down)')},{value:anPosts(g.n),name:g.thin?'мало даних - лише орієнтир':'у групі'}]));
+    });
+    const ax=document.createElement('div'); ax.className='vz-daxis'; ax.innerHTML='<div></div><div><span style="left:0">×0.5</span><span style="left:50%;transform:translateX(-50%)">×1</span><span style="right:0">×2</span></div><div></div>'; f.appendChild(ax);
+  });
+}
+
+// ---- теплова карта: день тижня × час доби, медіана множника ----
+function heatColor(m){ return m<0.7?['var(--viz-down)','#fff']:m<0.87?['var(--viz-down2)','var(--ink)']:m<=1.15?['var(--viz-mid)','var(--ink)']:m<1.5?['var(--viz-up2)','var(--ink)']:['var(--viz-up)','#fff']; }
+function chartHeat(host,heat){
+  host.textContent='';
+  if(!heat.cells.length){ host.innerHTML='<div class="empty">Ще нема постів зі статистикою, щоб побачити, коли вони заходять краще.</div>'; return; }
+  const tbl=document.createElement('table'); tbl.className='vz-heat'; host.appendChild(tbl);
+  const hr=document.createElement('tr'); hr.appendChild(document.createElement('th'));
+  heat.cols.forEach(c=>{ const th=document.createElement('th'); th.textContent=c; hr.appendChild(th); }); tbl.appendChild(hr);
+  heat.rows.forEach((rl,r)=>{ const tr=document.createElement('tr'); const th=document.createElement('th'); th.textContent=rl; tr.appendChild(th);
+    heat.cols.forEach((cl,c)=>{ const td=document.createElement('td'); const cell=heat.cells.find(x=>x.r===r&&x.c===c);
+      if(!cell){ td.className='none'; td.textContent='–'; td.setAttribute('aria-label',rl+', '+cl+': постів не було'); }
+      else { const col=heatColor(cell.median); td.style.background=col[0]; td.style.color=col[1]; td.tabIndex=0;
+        const b=document.createElement('b'); b.textContent=fmtX(cell.median); td.appendChild(b);
+        const i=document.createElement('i'); i.textContent=anPosts(cell.n); td.appendChild(i);
+        td.setAttribute('aria-label',rl+', '+cl+': '+fmtX(cell.median)+' від норми, '+anPosts(cell.n));
+        tipOn(td,(e)=>showTip(e,td,rl+' · '+cl,[{value:fmtX(cell.median),name:'від твоєї норми'},{value:anPosts(cell.n),name:cell.n<3?'мало даних - лише орієнтир':'у клітинці'}])); }
+      tr.appendChild(td); });
+    tbl.appendChild(tr); });
+  const sc=document.createElement('div'); sc.className='vz-scale';
+  [['var(--viz-down)','гірше: до ×0.7'],['var(--viz-down2)','×0.7-0.87'],['var(--viz-mid)','≈ норма'],['var(--viz-up2)','×1.15-1.5'],['var(--viz-up)','краще: від ×1.5']].forEach(x=>{
+    const s=document.createElement('span'); const sw=document.createElement('i'); sw.className='vz-sw'; sw.style.background=x[0]; s.appendChild(sw); s.appendChild(document.createTextNode(x[1])); sc.appendChild(s); });
+  const note=document.createElement('span'); note.textContent='клітинка з 1-2 постами - орієнтир, не правило'; sc.appendChild(note);
+  host.appendChild(sc);
+}
+
+// ---- таблиця всіх публікацій ----
+const AN_COLS=[['created_at','Пост'],['views','Перегляди'],['likes','Лайки'],['replies','Коментарі'],['shares','Поширення'],['saves','Збереження'],['er','ER'],['mult','×Норма']];
+// «Підписались після поста» віддає лише Instagram - колонку показуємо, коли така цифра є хоч в одного поста
+const anCols=()=>(AnData&&(AnData.posts||[]).some(p=>p.follows!=null))?AN_COLS.slice(0,6).concat([['follows','Підписались']],AN_COLS.slice(6)):AN_COLS;
+function anSorted(){
+  const k=AnSort.key, dir=AnSort.dir;
+  return (AnData.posts||[]).slice().sort((a,b)=>{ const x=a[k], y=b[k];
+    if(x==null&&y==null) return 0; if(x==null) return 1; if(y==null) return -1; // «невідомо» завжди внизу
+    return (x<y?-1:x>y?1:0)*dir; });
+}
+function renderAnTable(){
+  const box=$('anTbl'); if(!box||!AnData) return;
+  const rows=anSorted(), shown=rows.slice(0,AnShown);
+  if(!rows.length){ box.innerHTML='<div class="empty">За цей період публікацій не було.</div>'; return; }
+  const cell=(p,k)=>{ const v=p[k];
+    if(v==null){ const why=k==='views'&&p.error?p.error:(p.net==='telegram'||p.net==='linkedin'?AN_LABEL[p.net]+' не віддає статистику окремих постів':'мережа цього не віддала'); return '<td class="na" title="'+esc(why)+'">—</td>'; }
+    if(k==='er') return '<td>'+fmtPct(v)+'</td>';
+    if(k==='mult') return '<td><b class="'+(v>=1.5?'vz-up':v<0.7?'vz-down':'')+'">'+(v>=1.5?'▲ ':v<0.7?'▼ ':'')+fmtX(v)+'</b></td>';
+    return '<td>'+fmtN(v)+'</td>'; };
+  const COLS=anCols();
+  box.innerHTML='<div style="overflow-x:auto"><table class="an-tbl"><tr>'+COLS.map(c=>{ const on=AnSort.key===c[0];
+      return '<th aria-sort="'+(on?(AnSort.dir>0?'ascending':'descending'):'none')+'"><button class="'+(on?'on':'')+'" data-k="'+c[0]+'">'+c[1]+(on?(AnSort.dir>0?' ↑':' ↓'):'')+'</button></th>'; }).join('')+'</tr>'
+    +shown.map(p=>'<tr><td><button class="pt" data-id="'+esc(p.post_id)+'" title="Відкрити пост">'+esc(p.title||'(без тексту)')+'</button>'
+      +'<div class="pm">'+(AN_ICON[p.net]||'')+' '+esc(AN_LABEL[p.net]||p.net)+' · '+esc(new Date(p.created_at).toLocaleString('uk-UA',{timeZone:TZ,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+' · '+esc(AN_MEDIA[p.media]||p.media)
+      +(p.permalink?' · <a href="'+esc(p.permalink)+'" target="_blank" rel="noopener" title="Відкрити в мережі" style="color:var(--brand);text-decoration:none;font-weight:700">↗</a>':'')+'</div></td>'
+      +COLS.slice(1).map(c=>cell(p,c[0])).join('')+'</tr>').join('')+'</table></div>'
+    +(rows.length>shown.length?'<button class="ghost" id="anMore" style="margin-top:10px">Показати ще ('+(rows.length-shown.length)+')</button>':'');
+  box.querySelectorAll('th button').forEach(b=>b.onclick=()=>{ const k=b.dataset.k; AnSort=AnSort.key===k?{key:k,dir:-AnSort.dir}:{key:k,dir:-1}; renderAnTable(); });
+  box.querySelectorAll('.pt').forEach(b=>b.onclick=()=>openComposer(b.dataset.id));
+  const more=$('anMore'); if(more) more.onclick=()=>{ AnShown+=50; renderAnTable(); };
+}
+function anCsv(){
+  if(!AnData) return;
+  const q=(s)=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"', dec=(v,d)=>v==null?'':String(Math.round(v*Math.pow(10,d))/Math.pow(10,d)).replace('.',',');
+  const head=['Дата','Мережа','Пост','Тип','Перегляди','Охоплення','Лайки','Коментарі','Поширення','Збереження','Підписались','ER %','×Норма','Посилання'];
+  const lines=[head.map(q).join(';')].concat(anSorted().map(p=>[
+    new Date(p.created_at).toLocaleString('uk-UA',{timeZone:TZ}), AN_LABEL[p.net]||p.net, p.title, AN_MEDIA[p.media]||p.media,
+    p.views??'', p.reach??'', p.likes??'', p.replies??'', p.shares??'', p.saves??'', p.follows??'', p.er==null?'':dec(p.er*100,2), dec(p.mult,2), p.permalink||'',
+  ].map((v,i)=>i===2||i===0||i===13||i===1||i===3?q(v):v).join(';')));
+  const blob=new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'}); // BOM - щоб Excel прочитав кирилицю
+  // імʼя файлу латиницею: кирилицю в download Chromium мовчки замінює на «download»
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='socialio-stats-'+AnData.from+'-'+AnData.to+'.csv';
+  document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },500);
+}
+
+function anCoverage(a){
+  const parts=[], cov=a.coverage||{}, con=a.connected||{};
+  const anyMeasured=con.threads||con.meta;
+  if(!anyMeasured) parts.push('Перегляди, лайки й коментарі окремих постів віддають <b>Threads, Instagram і Facebook</b> - підключи їх у Налаштування → Канали, і статистика почне збиратись сама.');
+  ['threads','instagram','facebook'].forEach(n=>{ const c=cov[n]; if(!c||!c.published) return;
+    if(!c.measured&&c.error){ const perm=/дозвол|permission/i.test(c.error);
+      parts.push('<span class="warn">'+AN_LABEL[n]+': перегляди недоступні</span> - '+(perm?'Meta не дала дозволу на статистику постів. Перепідключи '+AN_LABEL[n]+' у Налаштування → Канали і залиш увімкненими всі галочки; лайки й коментарі, якщо їх видно в таблиці, збираються й без цього.':esc(c.error.slice(0,160)))); }
+    else if(c.measured<c.published) parts.push(AN_LABEL[n]+': статистика є для '+c.measured+' з '+c.published+' публікацій (нові пости отримують цифри з найближчим збором).'); });
+  const noPer=['telegram','linkedin'].filter(n=>cov[n]&&cov[n].published);
+  if(noPer.length) parts.push(noPer.map(n=>AN_LABEL[n]).join(' і ')+' не '+(noPer.length>1?'віддають':'віддає')+' через API переглядів окремих постів - тут рахуємо '+(noPer.includes('telegram')?'публікації і підписників каналу.':'лише публікації.'));
+  const last=Object.values(cov).map(c=>c.lastFetch).filter(Boolean).sort().pop();
+  if(last) parts.push('Статистику оновлено '+new Date(last).toLocaleString('uk-UA',{timeZone:TZ,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+'.');
+  return parts.length?'<div class="ancov">'+parts.map(p=>'<div>'+p+'</div>').join('')+'</div>':'';
+}
+function anKpi(a){
+  const k=a.kpi, days=a.days;
+  const dl=(cur,prev)=>{ if(!prev||cur==null) return '<div class="vz-delta vz-dz">попередніх '+days+' дн. нема з чим порівняти</div>';
+    const p=Math.round((cur-prev)/prev*100); if(!p) return '<div class="vz-delta vz-dz">як у попередні '+days+' дн.</div>';
+    return '<div class="vz-delta"><span class="'+(p>0?'vz-up':'vz-down')+'">'+(p>0?'▲ +':'▼ ')+p+'%</span> <span class="vz-dsub">до попередніх '+days+' дн.</span></div>'; };
+  const erD=(k.er!=null&&k.erPrev!=null)?(()=>{ const d=Math.round((k.er-k.erPrev)*1000)/10; if(!d) return '<div class="vz-delta vz-dz">як у попередні '+days+' дн.</div>';
+    return '<div class="vz-delta"><span class="'+(d>0?'vz-up':'vz-down')+'">'+(d>0?'▲ +':'▼ ')+String(d).replace('.',',')+' п.п.</span> <span class="vz-dsub">до попередніх</span></div>'; })():'<div class="vz-delta vz-dz">&nbsp;</div>';
+  const fl=Object.values(a.followers||{}), fNow=fl.reduce((s,f)=>s+(f.now||0),0), fD=fl.filter(f=>f.delta!=null);
+  const fDelta=fD.length?fD.reduce((s,f)=>s+f.delta,0):null;
+  const netsSent=Object.entries(k.sendsByNet||{}).map(([n,c])=>(AN_ICON[n]||'')+' '+c).join(' · ');
+  const tile=(l,v,d,sub)=>'<div class="stat"><div class="l">'+l+'</div><div class="v">'+v+'</div>'+d+(sub?'<div class="d">'+sub+'</div>':'')+'</div>';
+  return '<div class="stat-grid an-kpi" style="margin-bottom:14px">'
+    +tile('Публікацій',fmtN(k.posts),dl(k.posts,k.postsPrev),netsSent||'')
+    +tile('Перегляди',k.measured?fmtK(k.views):'—',k.measured?dl(k.views,k.viewsPrev):'<div class="vz-delta vz-dz">ще нема статистики</div>','статистика є для '+k.measured+' з '+k.sends)
+    +tile('Взаємодії',fmtK(k.interactions),dl(k.interactions,k.interactionsPrev),'лайки, коментарі, поширення, збереження')
+    +tile('Залученість',k.er==null?'—':fmtPct(k.er),erD,'взаємодії ÷ перегляди')
+    +tile('Підписники',fl.length?fmtK(fNow):'—',fDelta!=null?'<div class="vz-delta"><span class="'+(fDelta>0?'vz-up':fDelta<0?'vz-down':'vz-dz')+'">'+(fDelta>0?'▲ +':fDelta<0?'▼ ':'')+fmtN(fDelta)+'</span> <span class="vz-dsub">за період</span></div>':'<div class="vz-delta vz-dz">&nbsp;</div>',fl.length?'разом у '+fl.length+' '+anPlural(fl.length,'мережі','мережах','мережах'):'знімок зʼявиться з першим збором')
+    +'</div>';
+}
+
+function drawAnCharts(){
+  if(!AnData) return;
+  const c=$('anCols'); if(c){ if(AnTableView.cols) c.innerHTML=tableColumns(AnData.series); else chartColumns(c,AnData.series); }
+  const f=$('anFollow'); if(f) chartFollowers(f,AnData.followers);
+  const d=$('anDrivers'); if(d) chartDrivers(d,AnData.drivers);
+  const h=$('anHeat'); if(h) chartHeat(h,AnData.heat);
+}
+
 async function loadAnalytics(){
   const box=$('analyticsBox'); if(!box) return;
-  // миттєвий скелетон + ПАРАЛЕЛЬНІ локальні запити; повільна статистика мереж підтягується окремо після рендера
-  box.innerHTML='<div class="stat-grid" style="margin-bottom:18px">'+[1,2,3,4].map(()=>'<div class="stat"><div class="l" style="opacity:.4">…</div><div class="v" style="opacity:.25">—</div></div>').join('')+'</div><div class="empty">Завантажую аналітику…</div>';
-  let usage={},slots=[],bank=[],pub={posts:0,sends:0,recent:[]};
-  const rs=await Promise.allSettled([api('/usage'),api('/schedule'),api('/bank'),api('/published')]);
-  if(rs[0].status==='fulfilled') usage=rs[0].value; if(rs[1].status==='fulfilled') slots=rs[1].value;
-  if(rs[2].status==='fulfilled') bank=rs[2].value;  if(rs[3].status==='fulfilled') pub=rs[3].value;
-  const mstats={}; // мережева статистика вантажиться асинхронно нижче (не блокує сторінку)
-  const queued=slots.filter(s=>s.status==='planned').length; const failed=slots.filter(s=>s.status==='failed').length;
-  const toks=(usage.prompt_tokens||0)+(usage.completion_tokens||0);
-  const stats=[['Опубліковано',pub.posts,pub.sends+' у мережах'],['У черзі',queued,'заплановано'+(failed?(' · '+failed+' ⚠'):'')],['Витрати на AI','$'+(Number(usage.cost)||0).toFixed(2),toks.toLocaleString('uk')+' токенів'],['У банку',bank.length,'затверджених']];
-  const rec=pub.recent||[];
-  const wk=[0,0,0,0,0,0,0,0];
-  const weekStart=new Date(); weekStart.setHours(0,0,0,0); weekStart.setDate(weekStart.getDate()-49);
-  rec.forEach(r=>{ const diff=Math.floor((new Date(r.created_at)-weekStart)/(7*864e5)); if(diff>=0&&diff<8) wk[diff]++; });
-  const mx=Math.max(1,...wk);
-  const chCount={telegram:0,instagram:0,facebook:0,threads:0}; let chTot=0;
-  rec.forEach(r=>{ if(chCount[r.net]!=null){ chCount[r.net]++; chTot++; } });
-  const CHN={telegram:['Telegram','--tg'],instagram:['Instagram','--ig'],facebook:['Facebook','--fb'],threads:['Threads','--th']};
-  const igHtml = '<div id="igLive" style="margin-top:14px;padding:13px;border-radius:11px;background:var(--brand-soft);font-size:12.5px;color:var(--brand)"><span class="spin"></span> Завантажую статистику Instagram/Facebook…</div>';
-  // 💸 куди йдуть гроші на AI: розріз за моделями й кроками (30 днів) + вхід у порівняння моделей.
-  // Дані лежали в llm_usage з першого дня, але ніде не показувались, а панель порівняння була
-  // захована в меню аватара - тут і те, й те опиняється саме там, де виникає питання «яка модель».
+  try{ const s=JSON.parse(localStorage.getItem('kg_an')||'{}'); if(AN_PERIODS.some(p=>p[0]===s.days)) AnState.days=s.days; if(s.net) AnState.net=s.net; }catch(e){ /* немає сховища - типові */ }
+  // перезавантаження тримає попередню картинку приглушеною - без стрибка сторінки
+  if(AnData) box.style.opacity='.55'; else box.innerHTML='<div class="empty">Завантажую аналітику…</div>';
+  let a=null, err='';
+  try{ a=await api('/analytics/posts?days='+AnState.days+'&net='+encodeURIComponent(AnState.net)); }catch(e){ err=e.message; }
+  box.style.opacity='';
+  if(!a){ box.innerHTML='<div class="empty">Не вдалося завантажити аналітику: '+esc(err)+'</div>'; return; }
+  AnData=a; AnShown=30;
+  // повільні панелі (Threads, витрати) довантажуються окремо - до того тримаємо їхній попередній
+  // вигляд, а не порожнє місце, що стрибає під курсором
+  const prevTh=$('thAnPanel'), prevThHtml=prevTh&&prevTh.style.display!=='none'?prevTh.innerHTML:'', prevSpend=($('anSpend')||{}).innerHTML||'';
+  const netOpts=[['all','Усі мережі']].concat(['threads','instagram','facebook','telegram','linkedin'].map(n=>[n,(AN_ICON[n]||'')+' '+AN_LABEL[n]]));
+  const ins=(a.insights||[]);
+  box.innerHTML='<div class="viz">'
+    +'<div class="anbar"><div class="anseg" role="group" aria-label="Період">'+AN_PERIODS.map(p=>'<button data-d="'+p[0]+'" class="'+(p[0]===a.days?'on':'')+'" aria-pressed="'+(p[0]===a.days)+'">'+p[1]+'</button>').join('')+'</div>'
+    +'<select id="anNet" aria-label="Мережа">'+netOpts.map(o=>'<option value="'+o[0]+'"'+(o[0]===a.net?' selected':'')+'>'+o[1]+'</option>').join('')+'</select>'
+    +'<span style="flex:1"></span><button class="ghost" id="anRefresh" title="Забрати свіжі перегляди й лайки з мереж зараз, не чекаючи нічного збору">↻ Оновити статистику</button>'
+    +'<button class="ghost" id="anCsv" title="Усі публікації періоду з цифрами - файл для Excel чи Google Таблиць">⬇ CSV</button></div>'
+    +anCoverage(a)+anKpi(a)
+    +'<div class="panel" style="margin:0 0 18px"><div class="vz-head"><div class="vz-title">💡 Висновки</div><span class="vz-sub">порівняння з твоєю ж нормою, без чужих бенчмарків</span>'
+      +'<button class="ghost vz-toggle" id="topPatBtn" title="AI читає твої найкращі пости й шукає, що в них спільного">🔍 Що спрацювало</button></div>'
+      +'<ul class="an-ins">'+ins.map(x=>'<li><span class="ic '+x.tone+'">'+(x.tone==='good'?'▲':x.tone==='bad'?'▼':'ℹ')+'</span><span>'+esc(x.text)+'</span></li>').join('')+'</ul></div>'
+    +'<div class="grid2" style="grid-template-columns:1.4fr 1fr;margin-bottom:18px">'
+      +'<div class="panel" style="margin:0"><div class="vz-head"><div class="vz-title">Перегляди за '+(a.series.unit==='week'?'тижнями':'місяцями')+'</div><span class="vz-sub">постів, що вийшли в цей '+(a.series.unit==='week'?'тиждень':'місяць')+'</span>'
+        +'<button class="ghost vz-toggle" data-tv="cols">'+(AnTableView.cols?'Графік':'Таблиця')+'</button></div><div id="anCols" class="vz-chart"></div></div>'
+      +'<div class="panel" style="margin:0"><div class="vz-head"><div class="vz-title">Підписники</div><span class="vz-sub">щоденні знімки</span></div><div id="anFollow"></div></div>'
+    +'</div>'
+    +'<div class="panel"><div class="vz-head"><div class="vz-title">Що впливає на результат</div><span class="vz-sub">медіана «×норми» в групі: ×1 - твій звичайний пост у тій самій мережі; сіре - менше 3 постів, лише орієнтир</span></div><div id="anDrivers"></div></div>'
+    +'<div class="panel"><div class="vz-head"><div class="vz-title">Коли публікувати</div><span class="vz-sub">день тижня × час доби за поясом кабінету ('+esc(a.tz)+')</span></div><div id="anHeat"></div></div>'
+    +'<div class="panel"><div class="vz-head"><div class="vz-title">Усі публікації</div><span class="vz-sub">клік по заголовку колонки сортує, по посту - відкриває його</span></div><div id="anTbl"></div></div>'
+    +'</div>'
+    +'<div class="panel" id="thAnPanel" style="margin:18px 0 0;'+(prevThHtml?'':'display:none')+'">'+prevThHtml+'</div>'
+    +'<div id="anSpend" style="margin-top:18px">'+prevSpend+'</div>';
+  box.querySelectorAll('.anseg button').forEach(b=>b.onclick=()=>{ AnState.days=+b.dataset.d; try{ localStorage.setItem('kg_an',JSON.stringify(AnState)); }catch(e){ /* ignore */ } loadAnalytics(); });
+  $('anNet').onchange=(e)=>{ AnState.net=e.target.value; try{ localStorage.setItem('kg_an',JSON.stringify(AnState)); }catch(err){ /* ignore */ } loadAnalytics(); };
+  $('anCsv').onclick=anCsv;
+  $('topPatBtn').onclick=topPatterns;
+  const rb=$('anRefresh'); rb.onclick=async()=>{ rb.disabled=true; const t0=rb.textContent;
+    try{ const r=await runAiJob('/analytics/refresh',{},(s)=>{ rb.textContent='↻ Збираю… '+s+'с'; });
+      flash('📈 Оновлено: '+((r&&r.posts)||0)+' '+anPlural((r&&r.posts)||0,'пост','пости','постів')+(r&&r.followers?' і підписники':''));
+      loadAnalytics(); }
+    catch(e){ flash('⚠ '+e.message); } finally{ rb.disabled=false; rb.textContent=t0; } };
+  box.querySelectorAll('[data-tv]').forEach(b=>b.onclick=()=>{ const k=b.dataset.tv; AnTableView[k]=!AnTableView[k]; b.textContent=AnTableView[k]?'Графік':'Таблиця'; drawAnCharts(); });
+  drawAnCharts(); renderAnTable();
+  loadThreadsPanel(); loadSpendPanel();
+}
+let _anResize=null;
+window.addEventListener('resize',()=>{ if(curView!=='analytics'||!AnData) return; clearTimeout(_anResize); _anResize=setTimeout(drawAnCharts,200); });
+
+// 💸 Витрати на AI - окремий блок унизу Аналітики (дані лежали в llm_usage з першого дня)
+async function loadSpendPanel(){
+  const el=$('anSpend'); if(!el) return;
+  let usage={}; try{ usage=await api('/usage'); }catch(e){ return; }
   const usageRow=(r,tot)=>'<div style="display:flex;align-items:baseline;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:12.5px">'
     +'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(r.name)+'</span>'
     +'<span style="color:var(--muted);font-variant-numeric:tabular-nums">'+(r.calls||0)+' викл.</span>'
@@ -937,49 +1255,28 @@ async function loadAnalytics(){
   const byModel=(usage.byModel||[]).slice(0,6).map(r=>({name:r.model,calls:r.calls,cost:r.cost}));
   const byStep=(usage.byStep||[]).slice(0,6).map(r=>({name:r.step,calls:r.calls,cost:r.cost}));
   const totCost=(usage.byModel||[]).reduce((a,r)=>a+(Number(r.cost)||0),0);
-  // стеля витрат: видно ДО того, як упрешся в неї (0 = без обмеження)
   const cap=usage.cap||{}; const capRow=(label,spent,lim)=>{ const pct=lim>0?Math.min(100,Math.round(spent/lim*100)):0; const warn=pct>=80;
     return '<div style="margin-top:6px"><div style="display:flex;justify-content:space-between;font-size:12.5px"><span>'+label+'</span><span style="font-variant-numeric:tabular-nums;font-weight:600;color:'+(warn?'var(--amber)':'inherit')+'">$'+(Number(spent)||0).toFixed(2)+(lim>0?' із $'+Number(lim).toFixed(2):' · без стелі')+'</span></div>'
       +(lim>0?'<div style="height:6px;border-radius:4px;background:var(--surface2);overflow:hidden;margin-top:3px"><div id="capBar'+label.slice(0,1)+'" style="width:'+pct+'%;height:100%;background:'+(warn?'var(--amber)':'var(--brand)')+'"></div></div>':'')+'</div>'; };
   const capHtml = cap.capDay!=null ? '<div id="capBox" style="margin-bottom:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px"><div style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.08em">Стеля витрат на AI</div>'
     +capRow('Сьогодні',cap.spentDay,cap.capDay)+capRow('Цей місяць',cap.spentMonth,cap.capMonth)
     +'<div class="hint" style="margin-top:6px">Коли стеля вичерпана, генерація зупиняється до опівночі (UTC). Потрібно більше - напиши адміністратору.</div></div>' : '';
-  const spendHtml='<div class="panel" style="margin:0 0 18px"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">'
+  el.innerHTML='<div class="panel" style="margin:0"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">'
     +'<div style="font-weight:700;font-size:14px">💸 Куди йдуть гроші на AI</div>'
-    +'<span style="font-size:12px;color:var(--muted)">за 30 днів</span>'
+    +'<span style="font-size:12px;color:var(--muted)">за 30 днів · усього $'+(Number(usage.cost)||0).toFixed(2)+'</span>'
     +'<button class="ghost" id="anAbBtn" style="margin-left:auto;padding:5px 12px;font-size:12.5px" title="Прогнати один матеріал кількома моделями і порівняти тексти поруч">🧪 Порівняти моделі</button></div>'
     +capHtml
-    // 🤖 Виклики через підписку коштують чесний нуль, тобто в таблиці витрат їх не видно взагалі.
-    // Цей рядок - єдине місце, де відповідь на «а воно взагалі економить?» стає числом.
     +((usage.saved&&Number(usage.saved.usd)>0)
       ? '<div id="cliSaved" style="margin-bottom:10px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;font-size:12.5px">🤖 Через підписку Claude (без оплати токенів): <b>'+Number(usage.saved.calls||0)+'</b> викликів · заощаджено <b>$'+Number(usage.saved.usd).toFixed(2)+'</b> за 30 днів</div>' : '')
     +(byModel.length
       ? '<div class="grid2" style="gap:16px"><div><div style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">За моделями</div>'+byModel.map(r=>usageRow(r,totCost)).join('')+'</div>'
         +'<div><div style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">За кроками</div>'+byStep.map(r=>usageRow(r,totCost)).join('')+'</div></div>'
       : '<div class="empty" style="padding:12px">За останні 30 днів викликів не було.</div>')+'</div>';
-  box.innerHTML=
-    '<div class="stat-grid" style="margin-bottom:18px">'+stats.map(s=>'<div class="stat"><div class="l">'+s[0]+'</div><div class="v">'+s[1]+'</div><div class="d">'+s[2]+'</div></div>').join('')+'</div>'
-    +spendHtml
-    +'<div class="grid2" style="grid-template-columns:1.5fr 1fr">'
-    +'<div class="panel" style="margin:0"><div style="font-weight:700;font-size:14px;margin-bottom:18px">Опубліковано за тиждень</div><div class="bars">'+wk.map((v,i)=>'<div class="bar"><div class="b" style="height:'+(v/mx*100)+'%;background:'+(i===7?'var(--brand)':'var(--brand-soft2)')+'"></div><div class="lab">Т'+(i+1)+'</div></div>').join('')+'</div></div>'
-    +'<div class="panel" style="margin:0"><div style="font-weight:700;font-size:14px;margin-bottom:14px">За каналами</div>'
-      +(chTot?Object.keys(CHN).map(k=>{ const pct=Math.round(chCount[k]/chTot*100); return '<div style="margin-bottom:14px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="width:11px;height:11px;border-radius:4px;background:var('+CHN[k][1]+')"></span><span style="font-size:13px;font-weight:600;flex:1">'+CHN[k][0]+'</span><span style="font-size:13px;font-weight:700">'+pct+'%</span></div><div style="height:7px;border-radius:5px;background:var(--surface2);overflow:hidden"><div style="width:'+pct+'%;height:100%;background:var('+CHN[k][1]+')"></div></div></div>'; }).join(''):'<div class="empty">Ще немає опублікованих постів.</div>')
-      +igHtml+'</div>'
-    +'</div>'
-    +'<div class="panel" style="margin:18px 0 0"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><div style="font-weight:700;font-size:14px">📊 Пости відносно твоєї норми</div><button class="ghost" id="topPatBtn" style="margin-left:auto;padding:5px 12px;font-size:12.5px" title="AI розбирає топ-пости і знаходить 1-2 патерни, що повторюються в усіх хітах">🔍 Що спрацювало</button></div><div class="hint" style="margin-bottom:8px">Норма = медіана переглядів твоїх постів у мережі за 90 днів. ×2.0 = удвічі краще за твій звичайний пост. Статистика збирається автоматично раз на добу.</div><div id="bmLive"><span class="spin"></span></div></div>'
-    +'<div class="panel" id="thAnPanel" style="margin:18px 0 0;display:none"></div>'
-    +'<div class="panel" style="margin:18px 0 0"><div style="font-weight:700;font-size:14px;margin-bottom:6px">Останні публікації</div>'+(rec.length?rec.slice(0,12).map(r=>'<div style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--line)"><span style="font-size:15px">'+({telegram:"✈️",instagram:"📸",facebook:"📘",threads:"🧵"}[r.net]||"•")+'</span><div style="flex:1;min-width:0"><div style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc((r.content||"").replace(/\n+/g," ").slice(0,80))+'</div><div style="font-size:11px;color:var(--muted)">'+(CHN[r.net]?CHN[r.net][0]:r.net)+" · "+new Date(r.created_at).toLocaleString("uk")+'</div></div>'+(r.permalink?'<a href="'+esc(r.permalink)+'" target="_blank" rel="noopener" title="Відкрити пост у мережі" style="font-size:12px;font-weight:700;color:var(--brand);text-decoration:none;flex:none">↗</a>':'')+'</div>').join(""):'<div class="empty">Ще нічого не опубліковано. Опублікуй пост - і він зʼявиться тут.</div>')+'</div>';
-  if($('topPatBtn')) $('topPatBtn').onclick=topPatterns;
-  if($('anAbBtn')) $('anAbBtn').onclick=()=>{ selectView('tools'); setTimeout(()=>{ const p=$('abModels'); if(p) p.closest('.panel').scrollIntoView({behavior:'smooth',block:'center'}); },250); };
-  api('/analytics/benchmarks').then(b=>{
-    const el=$('bmLive'); if(!el) return;
-    const nets=Object.keys(b.networks||{});
-    if(!nets.length){ el.innerHTML='<div class="empty" style="padding:10px 0">Ще збираю статистику опублікованих постів (Threads / Instagram / Facebook). Потрібно ≥3 пости з метриками на мережу - зазирни за день-два.</div>'; return; }
-    const NICO={threads:'🧵',instagram:'📸',facebook:'📘'};
-    el.innerHTML='<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px">'+nets.map(n=>'<span style="font-size:12.5px;color:var(--muted)">'+(NICO[n]||'')+' норма '+n+': <b style="color:var(--ink)">'+b.networks[n].median.toLocaleString('uk')+'</b> переглядів ('+b.networks[n].count+' постів)</span>').join('')+'</div>'
-      +(b.posts||[]).slice(0,10).map(p=>{ const c=p.mult>=1.5?'var(--ok,#22a06b)':(p.mult<0.7?'var(--danger)':'var(--muted)');
-        return '<div style="display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px solid var(--line)"><b style="min-width:48px;color:'+c+'">×'+p.mult+'</b><span style="font-size:14px">'+(NICO[p.network]||'')+'</span><div style="flex:1;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(p.title)+'</div><span style="font-size:11.5px;color:var(--muted)">'+p.views.toLocaleString('uk')+'</span></div>'; }).join('');
-  }).catch(()=>{ const el=$('bmLive'); if(el) el.innerHTML='<div class="empty" style="padding:10px 0">Не вдалося завантажити бенчмарки.</div>'; });
+  const ab=$('anAbBtn'); if(ab) ab.onclick=()=>{ selectView('tools'); setTimeout(()=>{ const p=$('abModels'); if(p) p.closest('.panel').scrollIntoView({behavior:'smooth',block:'center'}); },250); };
+}
+
+// 🧵 Threads: живі інсайти профілю (перегляди, лайки… за 7 днів з дельтами), демографія, останні пости
+function loadThreadsPanel(){
   // 🧵 розширена аналітика Threads (живі інсайти профілю + таблиця постів; кеш 15 хв на сервері)
   api('/analytics/threads').then(t=>{
     const el=$('thAnPanel'); if(!el) return; el.style.display='';
@@ -1019,15 +1316,6 @@ async function loadAnalytics(){
       +'<div style="font-weight:700;font-size:13px;margin-bottom:6px">Останні пости</div>'+posts+demo;
     const cb=$('anThComments'); if(cb) cb.onclick=()=>openThreadsComments(cb);
   }).catch(()=>{ /* Threads не підключено - панель лишається схованою */ });
-  // мережева статистика довантажується ПІСЛЯ рендера сторінки (Graph API повільний - не блокуємо аналітику)
-  api('/integrations/meta/stats').then(m=>{
-    const el=$('igLive'); if(!el) return;
-    const ig=m.instagram, igi=m.instagramInsights||{}, fb=m.facebook;
-    el.innerHTML=(ig||fb)
-      ? (ig?'<div style="font-size:12.5px;font-weight:700;color:var(--brand)">📸 Instagram @'+esc(ig.username||'')+'</div><div style="font-size:12.5px;color:var(--ink2);margin-top:3px">'+(ig.followers_count||0)+' підписників · '+(ig.media_count||0)+' постів'+(igi.reach!=null?(' · охоплення 28д: <b>'+igi.reach+'</b>'):'')+'</div>':'')
-        +(fb?'<div style="font-size:12.5px;font-weight:700;color:var(--brand);margin-top:'+(ig?'8px':'0')+'">📘 Facebook '+esc(fb.name||'')+'</div><div style="font-size:12.5px;color:var(--ink2);margin-top:3px">'+(fb.followers_count||fb.fan_count||0)+' підписників</div>':'')
-      : 'Підключи Instagram/Facebook у Налаштуваннях, щоб бачити охоплення й підписників.';
-  }).catch(()=>{ const el=$('igLive'); if(el) el.textContent='Підключи Instagram/Facebook у Налаштуваннях, щоб бачити охоплення й підписників.'; });
 }
 
 // 🔍 «Що спрацювало»: AI-розбір топ-постів (за ×N) → повторювані патерни → правило голосу в 1 клік
@@ -2316,7 +2604,7 @@ async function openComposer(postId, opts){
       // не показував «не опубліковано» на пості, який уже вийшов
       try{ await refreshSentState(postId,sentSet,(l)=>{ sentLinks=l; renderChips(); renderPrev(); }); }catch(_){ }
     } finally{ b.disabled=false; aiDone(); } };
-  ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ setMsg('вкажи дату й час','var(--danger)'); return; } const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('немає каналів для планування (усі вже опубліковано)','var(--danger)'); return; } if(!carGuard()) return; const b=e.target; b.disabled=true; setMsg('🗓 зберігаю…'); const at=zonedToUTCISO(d,t); try{ await saveDraft(); if(opts.slotId){ await api('/schedule/'+opts.slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:at})}); } else { await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId,scheduledAt:at})}); } setMsg('заплановано ✓ ('+todo.join(', ')+')','var(--brand)'); try{await loadPublish();}catch(_){} try{await loadStudioPosts();}catch(_){} setTimeout(close,1000); }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); b.disabled=false; } };
+  ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ setMsg('вкажи дату й час','var(--danger)'); return; } const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('немає каналів для планування (усі вже опубліковано)','var(--danger)'); return; } if(!carGuard()) return; const b=e.target; b.disabled=true; setMsg('🗓 зберігаю…'); const at=zonedToUTCISO(d,t); try{ await saveDraft(); if(opts.slotId){ await scheduleApi('/schedule/'+opts.slotId,'PUT',{scheduledAt:at}); } else { await scheduleApi('/schedule','POST',{postId,scheduledAt:at}); } setMsg('заплановано ✓ ('+todo.join(', ')+')','var(--brand)'); try{await loadPublish();}catch(_){} try{await loadStudioPosts();}catch(_){} setTimeout(close,1000); }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); b.disabled=false; } };
 }
 // двокроковий редактор фото поста: крок 1 - джерело (галерея/завантаження/генерація) + формат (кроп),
 // крок 2 - текст на фото (шрифт/місце/фон, безкоштовне перенакладання) + перегенерація з коментарем
@@ -2693,9 +2981,9 @@ function renderCal(){
     cell.addEventListener('dragleave',()=>cell.classList.remove('over'));
     cell.addEventListener('drop',async ev=>{ev.preventDefault();cell.classList.remove('over');const d=ev.dataTransfer.getData('text/plain');
       try{
-        if(d.indexOf('post:')===0){ await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId:d.slice(5),scheduledAt:zonedToUTCISO(iso,'09:00')})}); await loadPublish(); return; }
+        if(d.indexOf('post:')===0){ await scheduleApi('/schedule','POST',{postId:d.slice(5),scheduledAt:zonedToUTCISO(iso,'09:00')}); await loadPublish(); return; }
         if(d.indexOf('slot:')===0){ const rest=d.slice(5); const sep=rest.indexOf(':'); const slotId=sep>0?rest.slice(0,sep):rest; const time=sep>0?rest.slice(sep+1):'09:00';
-          await api('/schedule/'+slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:zonedToUTCISO(iso,time||'09:00')})}); await loadPublish(); return; }
+          await scheduleApi('/schedule/'+slotId,'PUT',{scheduledAt:zonedToUTCISO(iso,time||'09:00')}); await loadPublish(); return; }
       }catch(e){ flash('⚠ '+e.message); } });
     cell.addEventListener('click',ev=>{ if(ev.target.closest('.pchip')) return; openDayScheduler(iso); });
     cal.appendChild(cell);
@@ -2769,9 +3057,9 @@ function renderWeekGrid(wrap, days, byDay, todayIso){
       const d=ev.dataTransfer.getData('text/plain');
       const time=yToTime(ev.clientY-col.getBoundingClientRect().top); // час = точка дропу (крок 15 хв)
       try{
-        if(d.indexOf('post:')===0){ await api('/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postId:d.slice(5),scheduledAt:zonedToUTCISO(iso,time)})}); await loadPublish(); return; }
+        if(d.indexOf('post:')===0){ await scheduleApi('/schedule','POST',{postId:d.slice(5),scheduledAt:zonedToUTCISO(iso,time)}); await loadPublish(); return; }
         if(d.indexOf('slot:')===0){ const rest=d.slice(5); const sep=rest.indexOf(':'); const slotId=sep>0?rest.slice(0,sep):rest;
-          await api('/schedule/'+slotId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledAt:zonedToUTCISO(iso,time)})}); await loadPublish(); return; }
+          await scheduleApi('/schedule/'+slotId,'PUT',{scheduledAt:zonedToUTCISO(iso,time)}); await loadPublish(); return; }
       }catch(e){ flash('⚠ '+e.message); } });
     col.addEventListener('click',ev=>{ if(ev.target.closest('.pchip')) return; openDayScheduler(iso); });
     grid.appendChild(col);

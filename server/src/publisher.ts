@@ -52,9 +52,14 @@ type PubTable = "telegram_publish" | "threads_publish" | "meta_publish" | "linke
 async function reservePub(table: PubTable, key: Record<string, string>, extra: Record<string, string> = {}): Promise<{ id: string } | "sent" | "busy"> {
   const kc = Object.keys(key), kv = Object.values(key);
   const cond = kc.map((c, i) => `${c}=$${i + 1}`).join(" and ");
+  // Застосунок - один процес, тож «хто зараз публікує цей пост» відомо точно (inFlightPosts). Якщо
+  // крім нас ніхто, резервація 'sending' - сирота: публікацію обірвав перезапуск, падіння чи 502, що
+  // вбив запит посеред роботи. Переймаємо одразу, а не через 20 хв - раніше саме ці 20 хв людина
+  // бачила «пост саме зараз публікується» і не могла повторити (фідбек тестера).
+  const orphan = (inFlightPosts.get(key.post_id) || 0) <= 1;
   const stale = await q<{ id: string }>(
-    `delete from ${table} where ${cond} and status='sending' and created_at < now() - interval '${STALE_SENDING}' returning id`, kv);
-  if (stale.length) await logEvent("warn", "publish", `${table}: перейнято завислу резервацію (попередню публікацію обірвав перезапуск)`, { postId: key.post_id });
+    `delete from ${table} where ${cond} and status='sending' and (${orphan ? "true" : "false"} or created_at < now() - interval '${STALE_SENDING}') returning id`, kv);
+  if (stale.length) await logEvent("warn", "publish", `${table}: перейнято завислу резервацію (попередню публікацію обірвав перезапуск або збій)`, { postId: key.post_id });
   const cols = [...kc, ...Object.keys(extra)], vals = [...kv, ...Object.values(extra)];
   const r = await one<{ id: string }>(
     `insert into ${table}(${cols.join(",")},status) values(${vals.map((_, i) => `$${i + 1}`).join(",")},'sending')
@@ -116,17 +121,45 @@ export async function alreadySentNetworks(postId: string): Promise<string[]> {
 // хвилинами), мусить дійти до кінця, інакше пост міг вийти в мережу, а ми про це не дізнались.
 // server.ts на SIGTERM ставить `stopping` і чекає, поки лічильник не впаде до нуля.
 let inFlight = 0, stopping = false;
+const inFlightPosts = new Map<string, number>();   // які пости публікуються в цьому процесі просто зараз
 export const publishesInFlight = () => inFlight;
+export const isPublishingNow = (postId: string) => (inFlightPosts.get(postId) || 0) > 0;
 export const isStopping = () => stopping;
 export function beginShutdown(): void { stopping = true; }
-async function tracked<T>(work: () => Promise<T>): Promise<T> {
+async function tracked<T>(postId: string, work: () => Promise<T>): Promise<T> {
   if (stopping) throw new Error("сервер саме перезапускається - спробуй за хвилину");
   inFlight++;
-  try { return await work(); } finally { inFlight--; }
+  inFlightPosts.set(postId, (inFlightPosts.get(postId) || 0) + 1);
+  try { return await work(); } finally {
+    inFlight--;
+    const n = (inFlightPosts.get(postId) || 1) - 1;
+    if (n > 0) inFlightPosts.set(postId, n); else inFlightPosts.delete(postId);
+  }
+}
+
+// Мережі, куди пост публікується просто зараз (рядок-резервація 'sending'), - для «стану поста».
+export async function publishingNow(postId: string): Promise<{ net: string; since: string }[]> {
+  return q<{ net: string; since: string }>(
+    `select 'telegram'::text as net, min(created_at) as since from telegram_publish where post_id=$1 and status='sending' having count(*) > 0
+     union all select 'threads', created_at from threads_publish where post_id=$1 and status='sending'
+     union all select channel, created_at from meta_publish where post_id=$1 and status='sending'
+     union all select 'linkedin', created_at from linkedin_publish where post_id=$1 and status='sending'`, [postId]);
+}
+
+/**
+ * Зняти пост із розкладу: заплановані й невдалі слоти (опубліковані - це історія, їх не чіпаємо).
+ * Кличеться, коли з поста знімають затвердження або прибирають усі мережі: інакше він лишався в
+ * календарі як «заплановано» (автопостер відправив би незатверджений текст) чи висів там порожнім.
+ */
+export async function unschedulePost(postId: string): Promise<number> {
+  const gone = await q<{ id: string }>(`delete from schedule_slot where post_id=$1 and status in ('planned','failed') returning id`, [postId]);
+  await q(`update plan_slot ps set status = case when p.review='approved' then 'approved' else 'drafted' end
+             from post p where p.id=ps.post_id and ps.post_id=$1 and ps.status='scheduled'`, [postId]);
+  return gone.length;
 }
 
 export function publishPostToChannels(ws: string, postId: string, onlyNets?: string[]): Promise<PubResult[]> {
-  return tracked(() => publishPostToChannelsNow(ws, postId, onlyNets));
+  return tracked(postId, () => publishPostToChannelsNow(ws, postId, onlyNets));
 }
 async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: string[]): Promise<PubResult[]> {
   const post = await one<{ content: string; channels: any; format: string | null }>(
@@ -516,7 +549,7 @@ async function freshToken(
 }
 
 export function publishReelToChannels(ws: string, postId: string, nets: string[]): Promise<PubResult[]> {
-  return tracked(() => publishReelToChannelsNow(ws, postId, nets));
+  return tracked(postId, () => publishReelToChannelsNow(ws, postId, nets));
 }
 async function publishReelToChannelsNow(ws: string, postId: string, nets: string[]): Promise<PubResult[]> {
   const post = await one<{ content: string; channels: any; reel_video: string | null; own_video: string | null }>(

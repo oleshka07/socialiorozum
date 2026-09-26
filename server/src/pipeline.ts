@@ -4,7 +4,8 @@ import { chat, extractJsonArray, extractJsonObject } from "./openrouter.js";
 // памʼять контенту: пост дистилюється ОДИН раз при публікації, генерація лише читає збережене
 // (було - стиснення 15 останніх постів окремим LLM-викликом на КОЖНІЙ генерації)
 import { usedDigest } from "./memory.js";
-import { topicKeywords } from "./textkind.js";
+import { topicKeywords, briefMismatch, brandTextOf } from "./textkind.js";
+import { logEvent } from "./log.js";
 import { env } from "./env.js";
 import { getSetting } from "./settings.js";
 
@@ -289,6 +290,10 @@ export async function deriveBrandFromText(workspaceId: string, text: string): Pr
 
 export async function generateStrategy(workspaceId: string): Promise<any> {
   const s = await loadSettings(workspaceId);
+  // з порожнього бренду стратегію довелось би вигадати: так у кабінет консалтингу з продажів потрапив
+  // бриф «софту для управління проєктами» - і пішов у кожну генерацію як «джерело правди»
+  if (brandTextOf(s).replace(/\s+/g, " ").trim().length < 120)
+    throw new Error("Спершу розкажи про бренд (Бренд → Голос: ніша й аудиторія, або 3-5 своїх постів) - інакше стратегію довелось би вигадати, і вона описувала б чужий бізнес.");
   if (s.prompt_engine !== "legacy") return generateStrategyV2(workspaceId, s);
   const lang = (s.output_language || "Українська").trim();
   const system =
@@ -401,12 +406,24 @@ export function mainModel(s: Record<string, string>): string {
   return (s.main_model || "").trim() || DEFAULT_MAIN_MODEL;
 }
 
+const briefWarned = new Set<string>();
 async function loadSettings(workspaceId: string): Promise<Record<string, string>> {
   const rows = await q<{ key: string; content: string }>(
     `select key, content from settings_block where workspace_id=$1`,
     [workspaceId]
   );
-  return Object.fromEntries(rows.map((r) => [r.key, r.content]));
+  const s: Record<string, string> = Object.fromEntries(rows.map((r) => [r.key, r.content]));
+  // Стратегічний бриф про ІНШИЙ бізнес (модель склала його, коли бренд був порожній, і вигадала
+  // компанію сама) у промт не йде: він помічений там як «джерело правди» і тягнув би пости не в ту
+  // нішу. Людина бачить це в 🩺 «Перевірці контексту» критичною знахідкою з порадою перегенерувати.
+  if (s.strategy_brief && briefMismatch(s.strategy_brief, brandTextOf(s))) {
+    delete s.strategy_brief;
+    if (!briefWarned.has(workspaceId)) {
+      briefWarned.add(workspaceId);
+      logEvent("warn", "brief", "стратегічний бриф не збігається з описом бренду - у генерацію не йде (треба перегенерувати)", { ws: workspaceId }).catch(() => {});
+    }
+  }
+  return s;
 }
 
 function fillPrompt(t: string, settings: Record<string, string>): string {
@@ -1115,7 +1132,7 @@ export async function threadsNicheReview(workspaceId: string): Promise<{ pattern
   const own = await q<{ content: string; views: number }>(
     `select p.content, pm.views from post_metric pm join post p on p.id=pm.post_id
        join pipeline_run r on r.id=p.run_id join source s2 on s2.id=r.source_id
-     where s2.workspace_id=$1 and pm.network='threads' order by pm.views desc limit 5`, [workspaceId]);
+     where s2.workspace_id=$1 and pm.network='threads' and pm.views is not null order by pm.views desc limit 5`, [workspaceId]);
   const material =
     "ПОСТИ ТОП-АВТОРІВ НІШІ:\n" + mats.map((m) => "- " + (m.transcript || m.title || "").replace(/\s+/g, " ").slice(0, 400)).join("\n") +
     (own.length ? "\n\nВЛАСНІ ТОП-ПОСТИ БРЕНДУ (перегляди):\n" + own.map((o) => `- [${o.views}] ` + (o.content || "").replace(/\s+/g, " ").slice(0, 300)).join("\n") : "");

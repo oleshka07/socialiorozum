@@ -15,6 +15,9 @@ import { readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+// 📈 дані для екрана Аналітики рахує СПРАВЖНІЙ модуль (dist/analytics.js), а не рукописна заглушка:
+// інакше смоук перевіряв би верстку проти форми даних, якої сервер ніколи не віддає
+import { buildAnalytics } from "../dist/analytics.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUB = join(HERE, "..", "public");
@@ -307,7 +310,68 @@ const brandDeleted = [];
 const mediaPosts = [];   // скільки файлів прийшло в КОЖНОМУ запиті завантаження в медіатеку
 const mediaBytes = [];   // і скільки байтів у кожному (nginx на беті пропускає до 20 МБ)
 
+// ---- 📈 синтетичні публікації для Аналітики (детерміновано: той самий набір щоразу) ----
+const anQueries = [];
+let anRefreshes = 0;
+function anRows() {
+  let seed = 42;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const DAY = 864e5, now = Date.now(), rows = [];
+  const firsts = ["Чому клієнти йдуть після першої зустрічі?", "5 помилок власника глемпінгу", "Я помилився в найпростішому.", "Скільки коштує порожній будиночок у травні", "Що я зрозумів за рік роботи з гостями."];
+  const body = " Ми довго думали, що справа в ціні. Виявилось - у тому, як ми відповідаємо на перше повідомлення.";
+  const rubrics = ["Кейси", "Поради", "Особисте", "Новини ніші"], intents = ["awareness", "awareness", "nurture", "sale"], origins = ["diary", "topic", "mcp", "rss"];
+  let n = 0;
+  const add = (net, ago, over) => {
+    n++;
+    const hour = [8, 13, 19, 22][n % 4], first = firsts[n % firsts.length];
+    const at = new Date(now - ago * DAY); at.setUTCHours(hour - 3, 10, 0, 0);
+    const text = first + "\n" + body.repeat(1 + (n % 4) * 3);
+    rows.push({ post_id: "an-" + n, net, created_at: at.toISOString(), permalink: net === "telegram" ? "https://t.me/mychannel/" + n : null, text,
+      format: "post", rubric: rubrics[n % 4], intent: intents[n % 4], origin: origins[n % 4], media_kind: "text",
+      views: null, reach: null, likes: null, replies: null, reposts: null, quotes: null, shares: null, saves: null, m_error: null, fetched_at: new Date(now - 3 * 3600e3).toISOString(), ...over(n, hour, first) });
+  };
+  // Threads: каруселі й вечір - сильніші, питання в першому рядку - слабше; + попередній період
+  for (let i = 0; i < 70; i++) add("threads", 1 + i * 2.5, (k, hour, first) => {
+    const media = ["text", "text", "photo", "carousel", "text"][k % 5];
+    const f = (media === "carousel" ? 2 : media === "photo" ? 1.2 : 1) * (hour === 19 ? 1.4 : hour === 8 ? 0.8 : 1) * (first.endsWith("?") ? 0.8 : 1) * (0.8 + rnd() * 0.4) * (i < 36 ? 1.25 : 1);
+    const v = Math.round(1500 * f);
+    return { media_kind: media, views: v, likes: Math.round(v * 0.03), replies: Math.round(v * 0.005), reposts: Math.round(v * 0.003), quotes: Math.round(v * 0.001), shares: Math.round(v * 0.002) };
+  });
+  for (let i = 0; i < 16; i++) add("instagram", 2 + i * 5, (k) => {
+    const media = ["photo", "carousel", "video", "photo"][k % 4];
+    const v = Math.round(800 * (media === "carousel" ? 1.7 : media === "video" ? 2.4 : 1) * (0.8 + rnd() * 0.4));
+    return { media_kind: media, views: v, reach: Math.round(v * 0.8), likes: Math.round(v * 0.05), replies: Math.round(v * 0.004), saves: Math.round(v * 0.01), shares: Math.round(v * 0.006) };
+  });
+  // Facebook: реакції є, а перегляди Meta не віддала (нема дозволу на статистику постів)
+  for (let i = 0; i < 10; i++) add("facebook", 3 + i * 8, () => ({ media_kind: "photo", likes: 4 + (i % 5), replies: i % 3, shares: i % 2, m_error: "перегляди недоступні: Meta не дає на це дозволу ((#10) Application does not have permission) - перепідключи у Налаштування → Канали." }));
+  for (let i = 0; i < 20; i++) add("telegram", 1 + i * 4, () => ({ fetched_at: null }));
+  return rows;
+}
+const AN_ROWS = anRows();
+function anFollowers() {
+  const out = [], now = Date.now();
+  const day = (ago) => new Date(now - ago * 864e5).toISOString().slice(0, 10);
+  for (let ago = 120; ago >= 0; ago -= 3) {
+    out.push({ network: "threads", day: day(ago), followers: 1000 - ago * 2 });
+    out.push({ network: "instagram", day: day(ago), followers: 5100 - Math.round(ago * 1.5) });
+    out.push({ network: "telegram", day: day(ago), followers: 340 - Math.round(ago / 3) });
+  }
+  out.push({ network: "facebook", day: day(0), followers: 1200 }); // один знімок - «зміну покаже з наступних днів»
+  return out;
+}
+const AN_FOLLOW = anFollowers();
+
 function handleApi(method, path, body) {
+  if (method === "GET" && path.startsWith("/analytics/posts")) {
+    const qp = new URL(path, "http://x").searchParams;
+    const days = [7, 30, 90, 180, 365].includes(+qp.get("days")) ? +qp.get("days") : 90, net = qp.get("net") || "all";
+    anQueries.push({ days, net });
+    return { ...buildAnalytics(AN_ROWS, AN_FOLLOW, { days, net, tz: "Europe/Kyiv" }), connected: { threads: true, meta: true, telegram: true, linkedin: false } };
+  }
+  if (method === "POST" && path === "/analytics/refresh") {
+    anRefreshes++; aiJobPolls = 0; AI_JOB_RESULT.set("job-an", { posts: 7, followers: 3 });
+    return { jobId: "job-an" };
+  }
   if (path.startsWith("/tg/")) return handleTg(method, path.slice(3), body);
   const key = method + " " + path.split("?")[0];
   if (key === "GET /admin/keys") return { keys: KEYS, kie: { ready: KEYS[1].set, credits: KEYS[1].set ? 1200 : null } };
@@ -1312,6 +1376,155 @@ const run = async () => {
     return before.includes("не заданий") && before.includes("з .env") &&
       !st.leaked && st.tail && st.cleared && st.credits;
   });
+
+  // 📈 Аналітика 2.0: екран малюється з того, що віддає СПРАВЖНІЙ модуль аналітики; фільтр,
+  // сортування, підказки, «таблиця замість графіка», CSV і «Оновити статистику» реально працюють.
+  await check("analyticsV2", async () => {
+    await page.evaluate(() => { try { localStorage.removeItem("kg_an"); } catch (e) { /* ignore */ } AnData = null; selectView("analytics"); });
+    await page.waitForFunction(() => document.querySelector("#anCols svg") && document.querySelectorAll("#anTbl tr").length > 5
+      && document.querySelector("#anDrivers .vz-dfacet") && document.querySelector("#anHeat table"), undefined, { timeout: 10000 });
+    const st = await page.evaluate(() => ({
+      kpi: document.querySelector(".an-kpi").innerText,
+      ins: [...document.querySelectorAll(".an-ins li")].map((l) => l.innerText),
+      facets: document.querySelectorAll("#anDrivers .vz-dfacet").length,
+      heatRows: document.querySelectorAll("#anHeat .vz-heat tr").length,
+      legend: document.querySelector("#anCols .vz-legend")?.innerText || "",
+      marks: document.querySelectorAll("#anCols svg path, #anCols svg rect:not(.vz-hit)").length,
+      follow: [...document.querySelectorAll("#anFollow .vz-facet")].map((f) => ({ t: f.innerText, svg: !!f.querySelector("svg path") })),
+      cov: document.querySelector(".ancov")?.innerText || "",
+      rows: document.querySelectorAll("#anTbl .an-tbl tr").length - 1,
+      more: !!document.getElementById("anMore"),
+      fbNa: [...document.querySelectorAll("#anTbl .an-tbl tr")].some((tr) => tr.innerText.includes("Facebook") && tr.querySelector("td.na[title*='дозволу']")),
+    }));
+    const ok = st.kpi.includes("Публікацій") && st.kpi.includes("Перегляди") && st.kpi.includes("%")
+      && st.ins.length >= 2 && st.ins.some((t) => /Тип поста|Час публікації|Перший рядок|День тижня/.test(t))
+      && st.facets >= 4 && st.heatRows === 8 && st.legend.includes("Threads") && st.legend.includes("Instagram")
+      && st.marks > 10 && st.follow.length === 4 && st.follow.filter((f) => f.svg).length === 3 && st.follow.some((f) => f.t.includes("перший знімок"))
+      && st.cov.includes("Facebook: перегляди недоступні") && st.cov.includes("Telegram")
+      && st.rows === 30 && st.more && st.fbNa;
+    if (!ok) console.log("   ↳ analyticsV2:", JSON.stringify(st).slice(0, 1600));
+    return ok;
+  });
+
+  await check("analyticsTip", async () => {
+    // підказка при наведенні (стовпчик) і з клавіатури (клітинка теплової карти, рядок «що впливає»)
+    const hits = await page.$$("#anCols .vz-hit");
+    await hits[hits.length - 1].scrollIntoViewIfNeeded();
+    const bb = await hits[hits.length - 1].boundingBox();
+    await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2);
+    await page.waitForFunction(() => document.getElementById("vizTip")?.style.display === "block", undefined, { timeout: 4000 });
+    const col = await $t("#vizTip");
+    await page.evaluate(() => document.querySelector("#anHeat td[tabindex]").focus());
+    const heat = await $t("#vizTip");
+    await page.evaluate(() => document.querySelector("#anDrivers .vz-drow").focus());
+    const drv = await $t("#vizTip");
+    await page.evaluate(() => document.activeElement.blur());
+    const hidden = await page.evaluate(() => document.getElementById("vizTip").style.display === "none");
+    const ok = /Тиждень з/.test(col) && col.includes("Threads") && col.includes("Instagram") && col.includes("разом")
+      && heat.includes("від твоєї норми") && drv.includes("від твоєї норми") && hidden;
+    if (!ok) console.log("   ↳ analyticsTip:", JSON.stringify({ col, heat, drv, hidden }));
+    return ok;
+  });
+
+  await check("analyticsSort", async () => {
+    // перегляди за спаданням; «невідомо» (Telegram, Facebook без переглядів) - унизу в обох напрямках
+    await page.click('#anTbl th button[data-k="views"]');
+    await page.evaluate(() => { for (let i = 0; i < 10 && document.getElementById("anMore"); i++) document.getElementById("anMore").click(); });
+    const col = await page.$$eval("#anTbl .an-tbl tr", (trs) => trs.slice(1).map((tr) => tr.children[1].textContent));
+    await page.click('#anTbl th button[data-k="views"]');
+    const asc = await page.$$eval("#anTbl .an-tbl tr", (trs) => trs.slice(1).map((tr) => tr.children[1].textContent));
+    const num = (t) => (t === "—" ? null : Number(t.replace(/\s/g, "")));
+    const nums = col.map(num), firstNull = nums.indexOf(null);
+    const desc = nums.slice(0, firstNull).every((v, i, a) => i === 0 || a[i - 1] >= v) && nums.slice(firstNull).every((v) => v === null);
+    const an = asc.map(num), aNull = an.indexOf(null);
+    const ascOk = an.slice(0, aNull).every((v, i, a) => i === 0 || a[i - 1] <= v) && an.slice(aNull).every((v) => v === null);
+    const aria = await page.$eval('#anTbl th[aria-sort="ascending"] button', (b) => b.dataset.k).catch(() => "");
+    await page.click('#anTbl th button[data-k="created_at"]');
+    const ok = firstNull > 10 && desc && ascOk && aria === "views";
+    if (!ok) console.log("   ↳ analyticsSort:", JSON.stringify({ firstNull, desc, ascOk, aria, col: col.slice(0, 8) }));
+    return ok;
+  });
+
+  await check("analyticsTableView", async () => {
+    await page.click('[data-tv="cols"]');
+    const rows = await page.evaluate(() => document.querySelectorAll("#anCols table.vz-tbl tr").length);
+    const buckets = await page.evaluate(() => AnData.series.buckets.length);
+    await page.click('[data-tv="cols"]');
+    const back = await page.evaluate(() => !!document.querySelector("#anCols svg"));
+    return rows === buckets + 1 && back;
+  });
+
+  await check("analyticsCsv", async () => {
+    const [dl] = await Promise.all([page.waitForEvent("download", { timeout: 8000 }), page.click("#anCsv")]);
+    const txt = readFileSync(await dl.path(), "utf8");
+    const lines = txt.replace(/^﻿/, "").split("\r\n");
+    const total = await page.evaluate(() => AnData.posts.length);
+    const ok = txt.startsWith("﻿") && dl.suggestedFilename().startsWith("socialio-") && lines[0].startsWith('"Дата";"Мережа";"Пост"') && lines.length - 1 === total;
+    if (!ok) console.log("   ↳ analyticsCsv:", JSON.stringify({ name: dl.suggestedFilename(), head: lines[0], n: lines.length, total }));
+    return ok;
+  });
+
+  await check("analyticsFilter", async () => {
+    const before = anQueries.length;
+    await page.evaluate(() => [...document.querySelectorAll(".anseg button")].find((b) => b.textContent === "30 днів").click());
+    await page.waitForFunction(() => document.querySelector(".anseg button.on")?.textContent === "30 днів", undefined, { timeout: 8000 });
+    await page.selectOption("#anNet", "threads");
+    await page.waitForFunction(() => document.getElementById("anNet")?.value === "threads"
+      && [...document.querySelectorAll("#anTbl .an-tbl tr")].slice(1).every((tr) => tr.innerText.includes("Threads")), undefined, { timeout: 8000 });
+    const q = anQueries.slice(before);
+    const st = await page.evaluate(() => ({ legend: !!document.querySelector("#anCols .vz-legend"), stored: localStorage.getItem("kg_an") || "",
+      follow: document.querySelectorAll("#anFollow .vz-facet").length }));
+    // назад на типове, щоб наступні перевірки бачили повну картину
+    await page.selectOption("#anNet", "all");
+    await page.waitForFunction(() => document.getElementById("anNet")?.value === "all", undefined, { timeout: 8000 });
+    await page.evaluate(() => [...document.querySelectorAll(".anseg button")].find((b) => b.textContent === "90 днів").click());
+    await page.waitForFunction(() => document.querySelector(".anseg button.on")?.textContent === "90 днів", undefined, { timeout: 8000 });
+    const ok = q.some((x) => x.days === 30 && x.net === "all") && q.some((x) => x.days === 30 && x.net === "threads")
+      && !st.legend && st.follow === 1 && st.stored.includes('"threads"');
+    if (!ok) console.log("   ↳ analyticsFilter:", JSON.stringify({ q, st }));
+    return ok;
+  });
+
+  await check("analyticsRefresh", async () => {
+    const q0 = anQueries.length, r0 = anRefreshes;
+    // кліком із JS: бульбашка сови-підказки може лежати над кнопкою (людина її просто закриє)
+    await page.evaluate(() => document.getElementById("anRefresh").click());
+    await page.waitForFunction((n) => document.getElementById("toast")?.textContent.includes("Оновлено"), q0, { timeout: 10000 });
+    await page.waitForTimeout(300);
+    const toast = await $t("#toast");
+    return anRefreshes === r0 + 1 && anQueries.length > q0 && toast.includes("7 постів") && toast.includes("підписники");
+  });
+
+  await check("analyticsMobile", async () => {
+    // на телефоні сторінка не їде вбік: широка таблиця гортається у своїй рамці, графіки - по ширині
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => selectView("analytics"));
+    await page.waitForTimeout(700);
+    const st = await page.evaluate(() => {
+      // хто вилазить за правий край (крім того, що живе у власній рамці з гортанням)
+      const inScroller = (el) => { for (let p = el.parentElement; p; p = p.parentElement) { if (/auto|scroll/.test(getComputedStyle(p).overflowX)) return true; } return false; };
+      const off = [...document.querySelectorAll("#analyticsBox *")].filter((el) => { const r = el.getBoundingClientRect(); return r.width && r.right > innerWidth + 1 && !inScroller(el); })
+        .slice(0, 6).map((el) => el.tagName + "." + (el.className?.baseVal ?? el.className) + " " + Math.round(el.getBoundingClientRect().right));
+      return { sw: document.documentElement.scrollWidth, w: innerWidth, off,
+        svgW: document.querySelector("#anCols svg")?.getAttribute("width"), tblScroll: getComputedStyle(document.querySelector("#anTbl > div")).overflowX };
+    });
+    if (process.env.SMOKE_SHOTS) await page.screenshot({ path: join(HERE, "an-mobile.png"), fullPage: true });
+    await page.setViewportSize({ width: 1400, height: 950 });
+    await page.waitForTimeout(400);
+    const ok = st.sw <= st.w + 1 && !st.off.length && Number(st.svgW) <= 390 && st.tblScroll === "auto";
+    if (!ok) console.log("   ↳ analyticsMobile:", JSON.stringify(st));
+    return ok;
+  });
+
+  if (process.env.SMOKE_SHOTS) {
+    await page.evaluate(() => selectView("analytics"));
+    await page.waitForTimeout(600);
+    await page.screenshot({ path: join(HERE, "an-light.png"), fullPage: true });
+    await page.evaluate(() => document.body.setAttribute("data-theme", "dark"));
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: join(HERE, "an-dark.png"), fullPage: true });
+    await page.evaluate(() => document.body.setAttribute("data-theme", "light"));
+  }
 
   await check("spendCap", async () => {
     // стеля має бути видимою ДО того, як людина в неї впреться: бар у Аналітиці з сумою «із $X»,

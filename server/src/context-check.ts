@@ -17,6 +17,7 @@
 import { q, one } from "./db.js";
 import { chat, extractJsonObject } from "./openrouter.js";
 import { buildLitePrompt, scanAiTraces, stripPlaceholders, mainModel } from "./pipeline.js";
+import { briefFit, briefMismatch, brandTextOf } from "./textkind.js";
 
 export type Finding = {
   severity: "critical" | "warn" | "info";
@@ -91,7 +92,18 @@ export function deterministicFindings(s: Record<string, string>, rubricShareSum 
   }
 
   // 4. Бриф позначений у промті як «джерело правди», тож кліше звідти має найбільшу вагу.
-  if (brief) {
+  if (brief && briefMismatch(brief, brandTextOf(s))) {
+    // найгірший випадок: бриф про ІНШИЙ бізнес (модель вигадала компанію, поки бренд був порожній)
+    const miss = briefFit(brief, brandTextOf(s)).missing;
+    const words = brief.split(/[^\p{L}\p{N}ʼ'’-]+/u).filter((w) => w.length >= 5);
+    const norm = (w: string) => w.toLowerCase().replace(/є/g, "е").replace(/ї/g, "і").replace(/ґ/g, "г").replace(/[ʼ'’]/g, "");
+    const quotes = miss.map((st) => words.find((w) => norm(w).startsWith(st))).filter(Boolean).slice(0, 6) as string[];
+    out.push({ severity: "critical", field: "Бренд → Бриф і цілі → Стратегічний бриф",
+      title: "Стратегічний бриф описує інший бізнес",
+      why: `Його склала модель, коли опис бренду був порожній чи інший, - і компанію вона вигадала сама: у брифі йдеться про ${quotes.slice(0, 4).map((q) => `«${q}»`).join(", ")}, а в описі бренду такого нема. У генерацію такий бриф уже не йде, але без свого брифу пости не знають пілерів і воронки.`,
+      fix: "Перегенеруй стратегію (Бренд і стратегія → Бриф і цілі → «Згенерувати») - тепер вона складеться з твого опису бренду. Або очисть бриф.",
+      key: "strategy_brief", mode: "manual", quotes });
+  } else if (brief) {
     const bt = scanAiTraces(brief);
     if (bt.length) {
       out.push({ severity: "warn", field: "Бренд → Бриф і цілі → Стратегічний бриф",

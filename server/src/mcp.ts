@@ -27,12 +27,21 @@ import { getSettingText } from "./settings.js";
 import { listWorkspaces, isMember, workspaceTitle } from "./workspaces.js";
 import { issueUploadLink, uploadCommands, uploadUrl, clampMinutes, UPLOAD_MAX_FILES } from "./uploadlink.js";
 import { connectedNets, parseWhen, zonedToUtc } from "./tgcompose.js";
-import { publishPostToChannels, alreadySentNetworks, closeSlotsIfDone } from "./publisher.js";
+import { publishPostToChannels, alreadySentNetworks, reelSentNetworks, closeSlotsIfDone, publishingNow, isPublishingNow, unschedulePost, type PubResult } from "./publisher.js";
+import { scheduleConflicts, describeConflicts, schedulable } from "./schedule.js";
+import { startJob, getJob } from "./jobs.js";
+import { analyticsFor } from "./metrics.js";
+import { fmtMult } from "./analytics.js";
+import { publicFetch } from "./netguard.js";
+import { saveMediaFile, MEDIA_DIR } from "./media.js";
+import { writeFile, mkdir, unlink, open as openFile } from "node:fs/promises";
+import { join } from "node:path";
 import { generatePostsOnePass, normFormat, GOAL_LABELS, CHANNEL_LIMITS } from "./pipeline.js";
 import { logEvent } from "./log.js";
 import { generateImageForPost, imageProviders, stockPhotoOptions, attachStockPhoto, attachCroppedImage, appendCroppedSlide, cropCopy } from "./images.js";
 import { postMediaList, setPostMediaOrder, setPostVideo, MAX_SLIDES, SlideError } from "./slides.js";
 import { renderCarousel, CAROUSEL_THEMES } from "./carousel.js";
+import { briefMismatch, brandTextOf } from "./textkind.js";
 import { getThumb } from "./media.js";
 import sharp from "sharp";
 
@@ -288,24 +297,52 @@ export function authoredChannels(channels: any, nets: string[], authoredNow: boo
   return cur;
 }
 
-async function sentMap(ids: string[]): Promise<Map<string, { net: string; link: string | null }[]>> {
-  const out = new Map<string, { net: string; link: string | null }[]>();
+async function sentMap(ids: string[]): Promise<Map<string, { net: string; link: string | null; at: string }[]>> {
+  const out = new Map<string, { net: string; link: string | null; at: string }[]>();
   if (!ids.length) return out;
-  const add = (pid: string, net: string, link: string | null) => {
-    const a = out.get(pid) || [];
-    if (!a.some((x) => x.net === net)) a.push({ net, link });
-    out.set(pid, a);
-  };
-  const [tg, th, mt, li] = await Promise.all([
-    q<{ post_id: string; permalink: string | null }>(`select distinct post_id, permalink from telegram_publish where status='sent' and post_id=any($1)`, [ids]),
-    q<{ post_id: string; permalink: string | null }>(`select distinct post_id, permalink from threads_publish where status='sent' and post_id=any($1)`, [ids]),
-    q<{ post_id: string; channel: string; permalink: string | null }>(`select distinct post_id, channel, permalink from meta_publish where status='sent' and post_id=any($1)`, [ids]),
-    q<{ post_id: string; permalink: string | null }>(`select distinct post_id, permalink from linkedin_publish where status='sent' and post_id=any($1)`, [ids]),
+  // час відправки теж: у списках постів людина питає «коли вийшло», а не «коли я це написав»
+  const rows = await q<{ post_id: string; net: string; permalink: string | null; at: string }>(
+    `select post_id, net, max(permalink) as permalink, min(created_at) as at from (
+        select post_id, 'telegram'::text as net, permalink, created_at from telegram_publish where status='sent' and post_id=any($1)
+        union all select post_id, 'threads', permalink, created_at from threads_publish where status='sent' and post_id=any($1)
+        union all select post_id, channel, permalink, created_at from meta_publish where status='sent' and post_id=any($1)
+        union all select post_id, 'linkedin', permalink, created_at from linkedin_publish where status='sent' and post_id=any($1)
+      ) x group by post_id, net order by min(created_at)`, [ids]);
+  for (const r of rows) {
+    const a = out.get(r.post_id) || [];
+    a.push({ net: r.net, link: r.permalink, at: r.at });
+    out.set(r.post_id, a);
+  }
+  return out;
+}
+// найближчий запланований слот кожного поста (для списків «коли вийде»)
+async function plannedMap(ids: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!ids.length) return out;
+  for (const r of await q<{ post_id: string; at: string }>(
+    `select post_id, min(scheduled_at) as at from schedule_slot where status='planned' and post_id=any($1) group by post_id`, [ids])) out.set(r.post_id, r.at);
+  return out;
+}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const SLOT_STATE: Record<string, string> = { planned: "чекає публікації", posting: "публікується", posted: "опубліковано", failed: "не вийшло" };
+
+// Які САМЕ акаунти підключені: «Threads підключено» без імені не дає звірити, чи це той профіль
+// (фідбек тестера). Беремо те, що вже лежить у конфігах мереж, без запитів в API.
+async function accountNames(ws: string): Promise<Record<string, string>> {
+  const [th, mt, tgc, li] = await Promise.all([
+    one<{ username: string | null }>(`select username from threads_config where workspace_id=$1 and access_token is not null`, [ws]),
+    one<{ page_name: string | null; ig_username: string | null; page_token: string | null; ig_user_id: string | null }>(
+      `select page_name, ig_username, page_token, ig_user_id from meta_config where workspace_id=$1`, [ws]),
+    one<{ channel_title: string | null; channel_username: string | null; channel_chat_id: string | null }>(
+      `select channel_title, channel_username, channel_chat_id from telegram_config where workspace_id=$1`, [ws]),
+    one<{ display_name: string | null }>(`select display_name from linkedin_config where workspace_id=$1`, [ws]),
   ]);
-  tg.forEach((r) => add(r.post_id, "telegram", r.permalink));
-  th.forEach((r) => add(r.post_id, "threads", r.permalink));
-  mt.forEach((r) => r.channel && add(r.post_id, r.channel, r.permalink));
-  li.forEach((r) => add(r.post_id, "linkedin", r.permalink));
+  const out: Record<string, string> = {};
+  if (th?.username) out.threads = "@" + th.username.replace(/^@/, "");
+  if (mt?.page_token && mt.ig_user_id && mt.ig_username) out.instagram = "@" + mt.ig_username.replace(/^@/, "");
+  if (mt?.page_token && mt.page_name) out.facebook = `Сторінка «${mt.page_name}»`;
+  if (tgc?.channel_chat_id) out.telegram = [tgc.channel_title ? `«${tgc.channel_title}»` : "", tgc.channel_username ? "@" + tgc.channel_username.replace(/^@/, "") : ""].filter(Boolean).join(" ") || tgc.channel_chat_id;
+  if (li?.display_name) out.linkedin = li.display_name;
   return out;
 }
 
@@ -472,16 +509,20 @@ export const TOOLS: ToolDef[] = [
              (select count(*) from idea_bank where workspace_id=$1 and status='new')::int as ideas,
              (select count(*) from schedule_slot ss join post p on p.id=ss.post_id
                 join pipeline_run r on r.id=p.run_id join source src on src.id=r.source_id
-               where src.workspace_id=$1 and ss.status='planned')::int as planned`, [ws]),
+               where src.workspace_id=$1 and ss.status='planned'
+                 and exists (select 1 from jsonb_each(coalesce(p.channels,'{}'::jsonb)) e
+                              where jsonb_typeof(e.value)='object' and e.value->>'on'='true'
+                                and e.key in ('telegram','threads','facebook','instagram','linkedin')))::int as planned`, [ws]),
       ]);
       const off = NETS.filter((n) => !nets.includes(n));
+      const acc = await accountNames(ws);
       return [
         "КАБІНЕТ socialio (КонтентГров)",
         s.marketing_context ? `Бренд і аудиторія: ${oneLine(s.marketing_context, 400)}` : "Бренд ще не заповнений (Бренд → Голос у кабінеті).",
         s.brand_thesis ? `Позиціонування: ${oneLine(s.brand_thesis, 200)}` : "",
         s.primary_goal && GOAL_LABELS[s.primary_goal] ? `Головна ціль: ${GOAL_LABELS[s.primary_goal]}` : "",
         `Мова контенту: ${s.output_language || "Українська"} · Часовий пояс: ${s.timezone || "Europe/Kyiv"}`,
-        `Підключені мережі: ${nets.length ? netList(nets) : "жодної"}${off.length ? ` (не підключені: ${netList(off)})` : ""}`,
+        `Підключені мережі: ${nets.length ? nets.map((n) => `${NET_LABEL[n]}${acc[n] ? ` (${acc[n]})` : ""}`).join(", ") : "жодної"}${off.length ? ` · не підключені: ${netList(off)}` : ""}`,
         `Чернеток: ${counts?.drafts ?? 0} (затверджених ${counts?.approved ?? 0}) · Матеріалів: ${counts?.materials ?? 0} · Ідей у банку: ${counts?.ideas ?? 0} · Заплановано: ${counts?.planned ?? 0}`,
       ].filter(Boolean).join("\n");
     },
@@ -505,7 +546,9 @@ export const TOOLS: ToolDef[] = [
         block("Позиціонування", s.brand_thesis, 400),
         block("Болі клієнта", s.pain_points, 1200),
         block("Tone of voice", s.tone_of_voice || s.tone_of_voice_derived, 1800),
-        block("Стратегічний бриф", s.strategy_brief, 1800),
+        briefMismatch(s.strategy_brief || "", brandTextOf(s))
+          ? "\n## Стратегічний бриф\n(не показано: бриф описує інший бізнес, ніж опис бренду вище, - його треба перегенерувати в кабінеті. Орієнтуйся на опис бренду й болі.)"
+          : block("Стратегічний бриф", s.strategy_brief, 1800),
         s.voice_address || s.voice_signature || s.voice_stoplist || s.voice_emoji
           ? `\n## Паспорт голосу\n${[
               s.voice_address ? `Звертання: ${s.voice_address}` : "",
@@ -624,7 +667,7 @@ export const TOOLS: ToolDef[] = [
       const rows = await q<PostRow>(
         `${POST_SELECT} where s.workspace_id=$1 and p.stage='final' and (p.review is null or p.review<>'archived')
          order by p.created_at desc limit 120`, [ws]);
-      const sent = await sentMap(rows.map((r) => r.id));
+      const [sent, planned] = await Promise.all([sentMap(rows.map((r) => r.id)), plannedMap(rows.map((r) => r.id))]);
       const limit = int(a.limit, 15, 1, 50);
       const picked = rows.filter((r) => {
         const isSent = sent.has(r.id);
@@ -638,8 +681,12 @@ export const TOOLS: ToolDef[] = [
         const s = sent.get(r.id) || [];
         const state = s.length ? `опубліковано: ${netList(s.map((x) => x.net))}` : r.review === "approved" ? "затверджено" : "чернетка";
         const nets = enabledNets(r.channels);
+        // два часи: коли пост створено і коли він вийшов / вийде - «список показує лише створення»
+        const when = [`створено ${fmtWhen(r.created_at, tz)}`,
+          s.length ? `вийшов ${fmtWhen(s[0].at, tz)}` : "",
+          planned.get(r.id) ? `заплановано на ${fmtWhen(planned.get(r.id)!, tz)}` : ""].filter(Boolean).join(" · ");
         return [
-          `${short(r.id)} · ${fmtWhen(r.created_at, tz)} · ${state}`,
+          `${short(r.id)} · ${state} · ${when}`,
           [nets.length ? `мережі: ${netList(nets)}` : "", r.rubric ? `рубрика: ${r.rubric}` : "", r.format && r.format !== "post" ? `формат: ${r.format}` : "", r.media ? "є фото" : ""].filter(Boolean).join(" · "),
           oneLine(r.content, 180),
           s.filter((x) => x.link).map((x) => `${NET_LABEL[x.net]}: ${x.link}`).join(" · "),
@@ -658,15 +705,20 @@ export const TOOLS: ToolDef[] = [
       const p = await findPost(ws, a.id);
       const sent = (await sentMap([p.id])).get(p.id) || [];
       const slot = await one<{ scheduled_at: string; status: string }>(
-        `select scheduled_at, status from schedule_slot where post_id=$1 order by scheduled_at limit 1`, [p.id]);
+        `select scheduled_at, status from schedule_slot where post_id=$1 order by (status='planned') desc, scheduled_at limit 1`, [p.id]);
       const tz = await wsTz(ws);
+      const busy = await publishingNow(p.id);
+      const live = isPublishingNow(p.id);
       const variants = NETS.filter((n) => p.channels?.[n]?.text).map((n) => `— ${NET_LABEL[n]}: ${oneLine(p.channels[n].text, 300)}`);
       return [
         `${short(p.id)} · створено ${fmtWhen(p.created_at, tz)} · ${p.review === "approved" ? "затверджено" : "чернетка"}${mediaLine(await postMediaList(p.id), p.format)}`,
         `мережі: ${enabledNets(p.channels).length ? netList(enabledNets(p.channels)) : "не обрані"}${p.rubric ? ` · рубрика: ${p.rubric}` : ""}${p.format && p.format !== "post" ? ` · формат: ${p.format}` : ""}`,
-        slot?.scheduled_at ? `заплановано: ${fmtWhen(slot.scheduled_at, tz)} (${slot.status})` : "",
+        slot?.scheduled_at ? `заплановано: ${fmtWhen(slot.scheduled_at, tz)} (${SLOT_STATE[slot.status] || slot.status})` : "",
+        busy.length ? (live
+          ? `⏳ публікується просто зараз: ${busy.map((b) => `${NET_LABEL[b.net] || b.net} (з ${fmtWhen(b.since, tz)})`).join(", ")} - дочекайся результату`
+          : `⚠️ публікацію в ${netList(busy.map((b) => b.net))} обірвано посеред роботи - наступний publish_post перейме її одразу`) : "",
         enabledNets(p.channels).length ? `публікація: ${publishPlanLine(publishPlan(p.channels, p.content))}` : "",
-        sent.length ? `опубліковано: ${sent.map((x) => `${NET_LABEL[x.net]}${x.link ? ` ${x.link}` : ""}`).join(", ")}` : "",
+        sent.length ? `опубліковано: ${sent.map((x) => `${NET_LABEL[x.net]} ${fmtWhen(x.at, tz)}${x.link ? ` ${x.link}` : ""}`).join(", ")}` : "",
         `\n${p.content}`,
         variants.length ? `\nВерсії під мережі:\n${variants.join("\n")}` : "",
       ].filter(Boolean).join("\n");
@@ -704,6 +756,7 @@ export const TOOLS: ToolDef[] = [
          ["awareness", "nurture", "sale"].includes(String(a.intent)) ? String(a.intent) : null,
          a.approve === true ? "approved" : null]);
       await logEvent("info", "mcp", `чернетку створено з Claude (${text.length} симв.)`, null);
+      const twin = (await scheduleConflicts(ws, post!.id, null, NETS)).filter((c) => c.kind === "text");
       const storyOff = normFormat(a.format) === "story" ? nets.filter((n) => n !== "instagram" && n !== "facebook") : [];
       return [
         `Пост збережено: ${short(post!.id)}${a.approve === true ? " (затверджено)" : " (чернетка)"}.`,
@@ -711,6 +764,7 @@ export const TOOLS: ToolDef[] = [
         normFormat(a.format) === "story" ? "📱 Сторіс: кожен кадр - окрема сторіс в Instagram і Facebook; підпису немає, тож думка має бути на кадрах - додай фото/відео (attach_media, типово 9:16) або намалюй кадри з тексту render_carousel." : "",
         storyOff.length ? `⚠️ Сторіс через API приймають лише Instagram і Facebook - у ${netList(storyOff)} цей пост не піде.` : "",
         notConnected.length ? `⚠️ Не підключені в кабінеті: ${netList(notConnected)} - туди публікація не піде.` : "",
+        twin.length ? `⚠️ Такий самий текст уже є: ${twin.map((c) => `${short(c.postId)} (${c.state === "sent" ? "опубліковано" : "заплановано"})`).join(", ")} - можливо, це дубль (delete_post, якщо так).` : "",
         "Далі: publish_post (опублікувати зараз) або schedule_post (на дату й час).",
       ].filter(Boolean).join(" ");
     },
@@ -749,12 +803,16 @@ export const TOOLS: ToolDef[] = [
         const nets = pickNets(a.channels);
         await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(authoredChannels(p.channels, nets, !!text))]);
         done.push(nets.length ? `мережі: ${netList(nets)}` : "мережі знято");
+        // без жодної мережі пост нікуди не вийде - у календарі він лише висів би порожнім
+        if (!nets.length) { const n = await unschedulePost(p.id); if (n) done.push(`знято з розкладу (${n})`); }
       }
       const rubric = str(a.rubric, 60);
       if (rubric) { await q(`update post set rubric=$2 where id=$1`, [p.id, rubric]); done.push(`рубрика: ${rubric}`); }
       if (typeof a.approve === "boolean") {
         await q(`update post set review=$2 where id=$1`, [p.id, a.approve ? "approved" : null]);
         done.push(a.approve ? "затверджено" : "затвердження знято");
+        // незатверджений текст не має лишатись у календарі: автопостер відправив би його в мережу
+        if (!a.approve) { const n = await unschedulePost(p.id); if (n) done.push(`знято з розкладу (${n})`); }
       }
       if (!done.length) throw new ToolError("Нічого не змінено - передай text, channels, rubric, format або approve.");
       return `${short(p.id)}: ${done.join(", ")}.`;
@@ -1127,10 +1185,11 @@ export const TOOLS: ToolDef[] = [
   {
     name: "publish_post",
     title: "Опублікувати зараз",
-    description: "Опублікувати пост у соцмережі ПРЯМО ЗАРАЗ. Публікація йде тим самим шляхом, що й з кабінету: дедуп «раз на мережу», авто-упаковка під формат мережі, посилання після відправки.",
+    description: "Опублікувати пост у соцмережі ПРЯМО ЗАРАЗ. Публікація йде тим самим шляхом, що й з кабінету: дедуп «раз на мережу», авто-упаковка під формат мережі, посилання після відправки. Якщо мережі обробляють медіа довше за ~40 с, відповідь скаже «триває у фоні» - тоді результат і посилання дивись у get_post, повторно не клич. Такий самий текст, уже опублікований у цю мережу, відхиляється як дубль (свідомо повторити - force: true).",
     properties: {
       id: S("Id поста."),
       channels: { ...NETS_ARG, description: "Мережі (необовʼязково - інакше беруться вже обрані на пості)." },
+      force: { type: "boolean", description: "true - опублікувати, навіть якщо такий самий текст уже виходив у цю мережу." },
     },
     required: ["id"],
     run: async (ws, a) => {
@@ -1144,10 +1203,29 @@ export const TOOLS: ToolDef[] = [
       if (!nets.length)
         throw new ToolError(`Не обрано жодної мережі. Підключені в кабінеті: ${connected.length ? netList(connected) : "жодної - спершу підключи канал у Налаштуваннях"}.`);
       const offline = nets.filter((n) => !connected.includes(n));
-      const res = await publishPostToChannels(ws, p.id);
-      // погасити запланований слот (інакше автопостер відправив би той самий пост удруге) - лише коли
-      // вийшло в усі обрані мережі: збій «зараз» не має тихо скасовувати заплановану публікацію
-      await closeSlotsIfDone(p.id, "опубліковано з Claude (MCP)");
+      if (a.force !== true) {
+        const tz0 = await wsTz(ws);
+        const dup = (await scheduleConflicts(ws, p.id, null, nets)).filter((c) => c.kind === "text" && c.state === "sent");
+        if (dup.length) throw new ToolError(`⚠️ Схоже на дубль: ${describeConflicts(dup, (x) => fmtWhen(x, tz0), (n) => NET_LABEL[n] || n, short).join("; ")}. Якщо так і задумано - повтори з force: true.`);
+      }
+      // Публікація - та сама фонова джоба, що й у кабінеті (дедуп за постом): Instagram і Threads
+      // обробляють медіа до хвилини, і один довгий запит упирався в 60-секундну межу проксі - конектор
+      // бачив 502, хоча публікація тривала, а повтор натикався на «пост саме зараз публікується».
+      const job = await startJob("publish", p.id, ws, async () => {
+        const results = await publishPostToChannels(ws, p.id);
+        // погасити запланований слот (інакше автопостер відправив би той самий пост удруге) - лише коли
+        // вийшло в усі обрані мережі: збій «зараз» не має тихо скасовувати заплановану публікацію
+        if (results.some((r) => r.status === "sent")) await closeSlotsIfDone(p.id, "опубліковано з Claude (MCP)");
+        return { results };
+      });
+      let j: any = job;
+      // ~40 с - із запасом до 60-секундної межі проксі (у тестах коротше: MCP_PUBLISH_WAIT_MS)
+      const waitMs = Number(process.env.MCP_PUBLISH_WAIT_MS) || 40_000;
+      for (const t0 = Date.now(); j && j.status === "running" && Date.now() - t0 < waitMs;) { await sleep(500); j = await getJob(job.id); }
+      if (!j || j.status === "running")
+        return `⏳ Публікація в ${netList(nets)} триває у фоні: мережі ще обробляють медіа. Результат і посилання - у get_post ${short(p.id)} за хвилину. Повторно publish_post не клич: дубля не буде, але й швидше не стане.`;
+      if (j.status !== "done") throw new ToolError(`⚠️ Не опубліковано: ${j.error || "публікацію обірвано - спробуй ще раз"}`);
+      const res: PubResult[] = (j.result && j.result.results) || [];
       const ok = res.filter((r) => r.status === "sent").map((r) => NET_LABEL[r.channel] || r.channel);
       const skip = res.filter((r) => r.status === "skipped").map((r) => NET_LABEL[r.channel] || r.channel);
       const err = res.filter((r) => r.status === "error");
@@ -1167,11 +1245,12 @@ export const TOOLS: ToolDef[] = [
   {
     name: "schedule_post",
     title: "Запланувати публікацію",
-    description: "Поставити пост у календар на дату й час. Час читається в часовому поясі кабінету. Відправить автопостер - нічого додатково робити не треба.",
+    description: "Поставити пост у календар на дату й час. Час читається в часовому поясі кабінету. Відправить автопостер - нічого додатково робити не треба. Відмовить, якщо в ту саму мережу ±5 хв уже стоїть інший пост або такий самий текст уже заплановано чи опубліковано (свідомо - force: true). Прибрати з календаря - unschedule_post.",
     properties: {
       id: S("Id поста."),
       at: S("Коли: «2026-09-14 09:00», «завтра 18:30», «14.09 09:00» або ISO з Z."),
       channels: { ...NETS_ARG, description: "Мережі (необовʼязково - інакше вже обрані на пості)." },
+      force: { type: "boolean", description: "true - поставити попри збіг часу чи тексту з іншим постом." },
     },
     required: ["id", "at"],
     run: async (ws, a) => {
@@ -1184,6 +1263,11 @@ export const TOOLS: ToolDef[] = [
       const nets = pickNets(a.channels);
       const on = nets.length ? nets : enabledNets(p.channels);
       if (!on.length) throw new ToolError("Спершу обери мережі (channels) - інакше автопостеру нема куди публікувати.");
+      if (!String(p.content || "").trim() && p.format !== "story") throw new ToolError("Пост порожній - спершу додай текст (update_post).");
+      if (a.force !== true) {
+        const clash = await scheduleConflicts(ws, p.id, at, on);
+        if (clash.length) throw new ToolError(`⚠️ Не ставлю, щоб не вийшов дубль: ${describeConflicts(clash, (x) => fmtWhen(x, tz), (n) => NET_LABEL[n] || n, short).join("; ")}. Обери інший час або текст; якщо так і задумано - повтори з force: true.`);
+      }
       // Текст, який Claude написав сам (create_draft → origin 'mcp'), під одну мережу йде ДОСЛІВНО.
       // Це ж доліковує чернетки, збережені до появи позначки: досить їх (пере)запланувати. Пост,
       // зроблений у кабінеті, як і раніше не позначаємо - його майстер-текст має спакуватись.
@@ -1209,8 +1293,8 @@ export const TOOLS: ToolDef[] = [
     run: async (ws, a) => {
       const tz = await wsTz(ws);
       const days = int(a.days, 14, 1, 60);
-      const rows = await q<{ id: string; scheduled_at: string; status: string; result: string | null; post_id: string; content: string; channels: any }>(
-        `select ss.id, ss.scheduled_at, ss.status, ss.result, p.id as post_id, p.content, coalesce(ss.channels, p.channels) as channels
+      const rows = await q<{ id: string; scheduled_at: string; status: string; result: string | null; post_id: string; content: string; channels: any; slot_ch: any; review: string | null }>(
+        `select ss.id, ss.scheduled_at, ss.status, ss.result, p.id as post_id, p.content, p.channels, ss.channels as slot_ch, p.review
            from schedule_slot ss
            join post p on p.id=ss.post_id
            join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
@@ -1219,46 +1303,148 @@ export const TOOLS: ToolDef[] = [
           order by ss.scheduled_at`, [ws, String(days)]);
       if (!rows.length) return `На найближчі ${days} дн. нічого не заплановано.`;
       return rows.map((r) => {
-        const mark = r.status === "posted" ? "✈️" : r.status === "failed" ? "⚠️" : "🗓";
-        return `${mark} ${fmtWhen(r.scheduled_at, tz)} · ${short(r.post_id)} · ${netList(enabledNets(r.channels))}${r.status === "failed" && r.result ? ` · помилка: ${oneLine(r.result, 120)}` : ""}\n${oneLine(r.content, 140)}`;
+        const mark = r.status === "posted" ? "✈️" : r.status === "failed" ? "⚠️" : r.status === "posting" ? "⏳" : "🗓";
+        // мережі - як їх візьме автопостер: увімкнені в пості (× підмножина слота, якщо вона є)
+        const nets = enabledNets(r.channels).filter((n) => !r.slot_ch || (r.slot_ch[n] && r.slot_ch[n].on));
+        const warn = r.status === "planned" && !nets.length ? " · ⚠️ без мереж - не вийде (unschedule_post)" : "";
+        const draft = r.status === "planned" && r.review !== "approved" ? " · не затверджено" : "";
+        return `${mark} ${fmtWhen(r.scheduled_at, tz)} · ${short(r.post_id)} · ${nets.length ? netList(nets) : "мережі не обрані"}${draft}${warn}${r.status === "failed" && r.result ? ` · помилка: ${oneLine(r.result, 120)}` : ""}\n${oneLine(r.content, 140)}`;
       }).join("\n\n");
+    },
+  },
+  {
+    name: "unschedule_post",
+    title: "Зняти з розкладу",
+    description: "Прибрати пост із календаря: заплановані й невдалі слоти видаляються, сам пост лишається (як чернетка чи затверджений - затвердження не знімається). Опубліковане не чіпає.",
+    properties: { id: S("Id поста.") },
+    required: ["id"],
+    run: async (ws, a) => {
+      const p = await findPost(ws, a.id);
+      const n = await unschedulePost(p.id);
+      return n ? `${short(p.id)}: знято з розкладу (${n} ${n === 1 ? "слот" : n < 5 ? "слоти" : "слотів"}). Пост лишився в чернетках.` : `${short(p.id)} у розкладі не стояв.`;
+    },
+  },
+  {
+    name: "delete_post",
+    title: "Видалити пост",
+    description: "Видалити чернетку чи запланований пост НАЗАВЖДИ (разом із його слотами в календарі). Опублікований пост видалити не можна - він лишається в історії й аналітиці; прибрати його з календаря - unschedule_post. Незворотно: спершу покажи людині, що саме видаляєш.",
+    properties: { id: S("Id поста.") },
+    required: ["id"],
+    run: async (ws, a) => {
+      const p = await findPost(ws, a.id);
+      if (isPublishingNow(p.id)) throw new ToolError("Пост саме зараз публікується - дочекайся результату (get_post).");
+      const sent = [...new Set([...(await alreadySentNetworks(p.id)), ...(await reelSentNetworks(p.id))])];
+      if (sent.length) throw new ToolError(`Пост уже опубліковано (${netList(sent)}) - видалення стерло б історію публікацій і аналітику. Прибрати з календаря: unschedule_post.`);
+      // скелет плану, що чекав на цей пост, звільняється (інакше слот плану вказував би в нікуди)
+      await q(`update plan_slot set status = case when match_source_id is null then 'empty' else 'matched' end, post_id=null
+               where post_id=$1 and status in ('drafted','approved','scheduled')`, [p.id]);
+      await q(`delete from post where id=$1`, [p.id]);
+      await logEvent("info", "mcp", `пост ${short(p.id)} видалено з Claude`, null);
+      return `🗑 ${short(p.id)} видалено («${oneLine(p.content, 80)}»).`;
+    },
+  },
+  {
+    name: "upload_media",
+    title: "Завантажити файл у медіатеку",
+    description: "Завантажити ОДНЕ фото чи відео в медіатеку кабінету: за прямим публічним посиланням на файл (url) або вмістом у base64 (лише невеликі файли, до 5 МБ - base64 іде через чат і зʼїдає контекст). Папку з компʼютера чи великі відео краще заливати через media_upload_link: скрипт шле файли напряму, повз чат. Той самий файл удруге не дублюється. Отриманий id передай в attach_media.",
+    properties: {
+      url: S("Пряме посилання на сам файл (https://…/photo.jpg). Сторінка, на якій картинка, не підійде."),
+      base64: S("Вміст файлу в base64 (можна з префіксом data:…), до 5 МБ."),
+      filename: S("Імʼя файлу з розширенням, напр. photo.jpg (для base64 бажано)."),
+    },
+    run: async (ws, a) => {
+      const url = str(a.url, 2000);
+      const b64 = String(a.base64 ?? "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
+      if (!url && !b64) throw new ToolError("Передай url (пряме посилання на файл) або base64. Для папки з компʼютера - media_upload_link.");
+      const dir = join(MEDIA_DIR, "tmp");
+      await mkdir(dir, { recursive: true });
+      const tmp = join(dir, `mcp-${randomBytes(8).toString("hex")}`);
+      let name = str(a.filename, 120);
+      const max = (Number(process.env.UPLOAD_MAX_MB) || 500) * 1048576;
+      try {
+        if (b64) {
+          if (b64.length > 7_000_000) throw new ToolError("base64 завеликий (понад ~5 МБ). Для великих файлів - url або media_upload_link.");
+          const buf = Buffer.from(b64, "base64");
+          if (buf.length < 64) throw new ToolError("base64 порожній або битий.");
+          await writeFile(tmp, buf);
+        } else {
+          let res: Response;
+          try { res = await publicFetch(url, { signal: AbortSignal.timeout(120_000), headers: { "user-agent": "socialio-media-import/1.0" } }); }
+          catch (e: any) { throw new ToolError(`Не вдалося завантажити за посиланням: ${e.message}`); }
+          if (!res.ok || !res.body) throw new ToolError(`Посилання відповіло ${res.status} - потрібне пряме публічне посилання на файл.`);
+          const len = Number(res.headers.get("content-length") || 0);
+          if (len > max) throw new ToolError(`Файл ${Math.round(len / 1048576)} МБ - більше за межу ${Math.round(max / 1048576)} МБ.`);
+          const fh = await openFile(tmp, "w");
+          let got = 0;
+          try {
+            for await (const chunk of res.body as any) {
+              got += chunk.length;
+              if (got > max) throw new ToolError(`Файл більший за ${Math.round(max / 1048576)} МБ.`);
+              await fh.write(chunk);
+            }
+          } finally { await fh.close(); }
+          if (!name) { try { name = decodeURIComponent(new URL(url).pathname.split("/").pop() || ""); } catch { name = ""; } }
+        }
+        let saved: { id: string; kind: string; existed?: boolean };
+        try { saved = await saveMediaFile(ws, tmp, { name: name || "upload", source: "upload", dedupe: true }); }
+        catch (e: any) { throw new ToolError(e.message); }
+        await logEvent("info", "mcp", `файл у медіатеку з Claude (${saved.kind}${saved.existed ? ", уже був" : ""})`, null);
+        return `${saved.existed ? "↩️ Такий файл уже є в медіатеці" : "✅ Завантажено"}: ${saved.kind === "video" ? "відео" : "фото"} ${short(saved.id)}. Далі: attach_media з id ${short(saved.id)} і id поста.`;
+      } finally { await unlink(tmp).catch(() => {}); }
     },
   },
   {
     name: "analytics",
     title: "Аналітика публікацій",
-    description: "Скільки постів вийшло по мережах за період і останні опубліковані з посиланнями.",
-    properties: { days: N("Період у днях (1-365, типово 30).", { minimum: 1, maximum: 365 }) },
+    description: "Статистика за період: скільки постів вийшло по мережах, перегляди, лайки, відповіді й коментарі, репости й поширення, збереження, залученість по КОЖНОМУ посту, приріст підписників по мережах, висновки «що працює» (тип поста, перший рядок, довжина, час, рубрика) і найсильніші пости відносно норми мережі. Цифри по постах віддають Threads, Instagram і Facebook (Instagram - ще й скільки людей підписалось після поста); Telegram і LinkedIn через API - лише факт публікації (для Telegram - ще підписники каналу). Статистика оновлюється раз на добу.",
+    properties: {
+      days: N("Період у днях (1-365, типово 30).", { minimum: 1, maximum: 365 }),
+      network: S("Лише одна мережа (необовʼязково).", { enum: ["threads", "instagram", "facebook", "telegram", "linkedin"] }),
+      sort: S("Порядок постів: new (типово - новіші перші) або top (найсильніші відносно норми мережі).", { enum: ["new", "top"] }),
+      limit: N("Скільки постів показати (1-50, типово 15).", { minimum: 1, maximum: 50 }),
+    },
     readOnly: true,
     run: async (ws, a) => {
       const tz = await wsTz(ws);
       const days = int(a.days, 30, 1, 365);
-      const rows = await q<{ channel: string; created_at: string; permalink: string | null; content: string; post_id: string }>(
-        `select x.channel, x.created_at, x.permalink, p.content, p.id as post_id from (
-             select 'telegram' as channel, post_id, created_at, permalink from telegram_publish where status='sent'
-             union all select 'threads', post_id, created_at, permalink from threads_publish where status='sent'
-             union all select channel, post_id, created_at, permalink from meta_publish where status='sent'
-             union all select 'linkedin', post_id, created_at, permalink from linkedin_publish where status='sent'
-           ) x
-           join post p on p.id=x.post_id
-           join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
-          where s.workspace_id=$1 and x.created_at > now() - ($2 || ' days')::interval
-          order by x.created_at desc`, [ws, String(days)]);
-      if (!rows.length) return `За ${days} дн. публікацій не було.`;
-      const perNet = new Map<string, number>();
-      for (const r of rows) perNet.set(r.channel, (perNet.get(r.channel) || 0) + 1);
-      const recent = rows.slice(0, 10).map((r) =>
-        `${fmtWhen(r.created_at, tz)} · ${NET_LABEL[r.channel] || r.channel} · ${short(r.post_id)}${r.permalink ? ` · ${r.permalink}` : ""}\n${oneLine(r.content, 120)}`);
+      const net = ["threads", "instagram", "facebook", "telegram", "linkedin"].includes(String(a.network)) ? String(a.network) : "all";
+      const an = await analyticsFor(ws, days, net);
+      const k = an.kpi;
+      if (!k.sends) return `За ${days} дн. публікацій не було${net !== "all" ? ` у ${NET_LABEL[net]}` : ""}.`;
+      const nf = (x: number) => Math.round(x).toLocaleString("uk-UA");
+      const vsPrev = (cur: number, prev: number) => (prev ? ` (${cur >= prev ? "+" : ""}${Math.round(((cur - prev) / prev) * 100)}% до попередніх ${days} дн.)` : "");
+      const lines: string[] = [
+        `За ${days} дн. опубліковано ${k.posts} постів (${k.sends} відправок): ${Object.entries(k.sendsByNet).map(([n, c]) => `${NET_LABEL[n] || n} ${c}`).join(" · ")}`,
+      ];
+      if (k.measured) lines.push(`Перегляди: ${nf(k.views)}${vsPrev(k.views, k.viewsPrev)} · взаємодії: ${nf(k.interactions)} · залученість: ${k.er == null ? "—" : (k.er * 100).toFixed(1) + "%"} (цифри є для ${k.measured} з ${k.sends} публікацій)`);
+      const fl = Object.entries(an.followers);
+      if (fl.length) lines.push(`Підписники: ${fl.map(([n, f]) => `${NET_LABEL[n] || n} ${f.now == null ? "—" : nf(f.now)}${f.delta != null ? ` (${f.delta >= 0 ? "+" : ""}${nf(f.delta)} з ${f.since})` : ""}`).join(" · ")}`);
+      for (const n of ["threads", "instagram", "facebook"]) {
+        const c = (an.coverage as any)[n];
+        if (c && c.published && !c.measured && c.error) lines.push(`⚠️ ${NET_LABEL[n]}: переглядів нема - ${oneLine(c.error, 170)}`);
+      }
+      const noPer = ["telegram", "linkedin"].filter((n) => (an.coverage as any)[n]?.published);
+      if (noPer.length) lines.push(`${netList(noPer)}: API не віддає переглядів окремих постів - там лише факт публікації.`);
+      if (an.insights.length) lines.push("", "Висновки:", ...an.insights.map((i) => `- ${i.text}`));
+      const withNums = an.posts.filter((p) => p.views != null || p.likes != null || p.replies != null);
+      // «найсильніші»: за множником до норми мережі, а поки норми нема (менше 3 постів) - за переглядами й лайками
+      const list = a.sort === "top" ? [...withNums].sort((x, y) => ((y.mult ?? -1) - (x.mult ?? -1)) || ((y.views ?? -1) - (x.views ?? -1)) || ((y.likes ?? -1) - (x.likes ?? -1))) : withNums;
+      if (list.length) {
+        lines.push("", `${a.sort === "top" ? "Найсильніші пости" : "Пости з цифрами (новіші перші)"}; ×норма = перегляди до медіани своєї мережі за період:`);
+        for (const p of list.slice(0, int(a.limit, 15, 1, 50))) {
+          const m = [
+            p.views != null ? `👁 ${nf(p.views)}` : "", p.likes != null ? `❤️ ${nf(p.likes)}` : "",
+            p.replies != null ? `💬 ${nf(p.replies)}` : "", p.shares != null ? `🔁 ${nf(p.shares)}` : "",
+            p.saves != null ? `🔖 ${nf(p.saves)}` : "", p.follows != null ? `➕ ${nf(p.follows)} підписок` : "",
+            p.er != null ? `ER ${(p.er * 100).toFixed(1)}%` : "", p.mult != null ? fmtMult(p.mult) : "",
+          ].filter(Boolean).join(" · ");
+          lines.push(`${fmtWhen(p.created_at, tz)} · ${NET_LABEL[p.net] || p.net} · ${short(p.post_id)} · ${m}${p.permalink ? ` · ${p.permalink}` : ""}\n«${oneLine(p.title, 110)}»`);
+        }
+      } else if (an.posts.length) lines.push("", "Цифр по постах ще нема: статистика збирається раз на добу після публікації.");
       const cost = await one<{ usd: string }>(
         `select coalesce(sum(cost),0)::text as usd from llm_usage where workspace_id=$1 and created_at > now() - ($2 || ' days')::interval`, [ws, String(days)]);
-      return [
-        `За ${days} дн. опубліковано ${rows.length} постів.`,
-        [...perNet.entries()].map(([n, c]) => `${NET_LABEL[n] || n}: ${c}`).join(" · "),
-        `Витрати на AI socialio за період: $${Number(cost?.usd || 0).toFixed(2)}`,
-        "",
-        "Останні публікації:",
-        ...recent,
-      ].join("\n");
+      lines.push("", `Витрати на AI socialio за період: $${Number(cost?.usd || 0).toFixed(2)}`);
+      return lines.join("\n");
     },
   },
 ];
@@ -1303,6 +1489,9 @@ export const SERVER_INSTRUCTIONS = [
   "Відео: власні відео автора - list_media з kind: \"video\" → attach_media з одним id; публікується як Reels в Instagram, відео у Facebook, Threads, Telegram (до 50 МБ) і LinkedIn, а текст поста - підпис. Відео з комп'ютера заливає та сама media_upload_link (великі файли - частинами).",
   "Сторіс: create_draft з format: \"story\" і мережами instagram/facebook (інші сторіс через API не приймають) → кадри через attach_media (фото й відео разом, фото ріжуться 9:16) або render_carousel з рядками «Кадр 1: …»; кожен кадр - окрема сторіс, підпису немає.",
   "Якщо кабінетів кілька (list_workspaces), спершу переконайся, що активний саме той бренд: перемкни switch_workspace або передай workspace у виклику. Кожна відповідь називає кабінет у першому рядку - звіряйся з ним перед публікацією.",
+  "Файл з інтернету (пряме посилання) чи невеликий файл у base64 - upload_media; папка з компʼютера - media_upload_link.",
+  "Календар: schedule_post відмовить, якщо в ту саму мережу майже в той самий час уже стоїть пост або такий текст уже є (свідомо - force: true); прибрати з календаря - unschedule_post, чернетку назавжди - delete_post (опубліковане не видаляється). publish_post, що відповів «триває у фоні», не повторюй - результат у get_post.",
+  "Статистика постів (перегляди, лайки, відповіді, репости, підписники, що працює) - analytics.",
   "Факти не вигадуй: бери їх з list_materials / get_material або питай автора.",
   "Перед публікацією показуй текст людині - опублікований пост відкликати не можна.",
 ].join(" ");

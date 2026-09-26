@@ -790,3 +790,45 @@ alter table schedule_slot add column if not exists retry_at timestamptz;
 -- тепер забирає й доступ через бота/Mini App (раніше звʼязок Telegram↔кабінет лишався назавжди).
 alter table tg_connect add column if not exists created_by uuid references app_user(id) on delete cascade;
 alter table tg_owner add column if not exists user_id uuid references app_user(id) on delete set null;
+
+-- 📈 Аналітика 2.0: повна статистика поста, а не лише «перегляди + лайки».
+-- NULL означає «мережа цього не віддала», а 0 - «справді нуль». Раніше все невідоме записувалось
+-- нулем: у Facebook, де Meta вимкнула post_impressions, кожен пост мав «0 переглядів» і тягнув
+-- норму мережі вниз. reach - унікальні люди (Instagram reach, Facebook unique views); replies - також
+-- коментарі Instagram і Facebook; saves - збереження Instagram; shares - поширення в усіх трьох мережах.
+alter table post_metric alter column views drop not null;
+alter table post_metric alter column likes drop not null;
+alter table post_metric alter column replies drop not null;
+alter table post_metric add column if not exists reach    int;
+alter table post_metric add column if not exists shares   int;
+alter table post_metric add column if not exists saves    int;
+-- Instagram віддає, скільки людей підписалось після конкретного поста (follows) - єдина мережа, де
+-- «приріст підписників по посту» є справжньою цифрою, а не здогадкою з денного графіка
+alter table post_metric add column if not exists follows  int;
+-- Причина, чому метрики неповні чи їх нема (без дозволу на перегляди, пост видалено, токен протух).
+-- Збій теж пишеться рядком: інакше пост, з якого нічого не витягнути, вибирався на КОЖНОМУ проході
+-- першим і відтісняв решту (25 найновіших битих постів = жоден інший ніколи не отримав би метрик).
+alter table post_metric add column if not exists error     text;
+alter table post_metric add column if not exists err_count int not null default 0;
+
+-- Підписники по мережах, один знімок на день (останнє значення дня перезаписує попереднє).
+-- Графік росту аудиторії будується лише з власних знімків: історії підписників API мереж не віддають.
+create table if not exists follower_snapshot (
+  workspace_id uuid not null references workspace(id) on delete cascade,
+  network      text not null,              -- threads | instagram | facebook | telegram
+  day          date not null,              -- дата за часовим поясом кабінету
+  followers    int  not null,
+  updated_at   timestamptz not null default now(),
+  primary key (workspace_id, network, day)
+);
+
+-- 🧹 Календар без «порожніх» постів: слот поста, у якого не лишилось жодної мережі, нікуди не вийде
+-- (planned) або вже впав і висить червоним (failed). Зняття мереж і зняття затвердження тепер самі
+-- прибирають пост із розкладу (unschedulePost); тут - прибирання того, що накопичилось до цього.
+delete from schedule_slot ss using post p
+ where p.id = ss.post_id and ss.status in ('planned','failed')
+   and not exists (
+     select 1 from jsonb_each(coalesce(case when jsonb_typeof(p.channels)='object' then p.channels end, '{}'::jsonb)) e
+      where e.key in ('telegram','threads','facebook','instagram','linkedin')
+        and jsonb_typeof(e.value)='object' and e.value->>'on'='true'
+        and (ss.channels is null or jsonb_typeof(ss.channels)<>'object' or ss.channels->e.key->>'on'='true'));

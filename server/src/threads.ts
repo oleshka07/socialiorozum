@@ -212,10 +212,11 @@ export async function mediaReplies(token: string, mediaId: string): Promise<Thre
   })).filter((r) => r.id && r.text);
 }
 
-// інсайти по опублікованому посту
-export async function mediaInsights(token: string, mediaId: string): Promise<Record<string, number>> {
+// інсайти по опублікованому посту (shares Threads додав пізніше за решту - тому набір задається ззовні,
+// а збирач метрик уміє відступити на старий, якщо API його не прийме)
+export async function mediaInsights(token: string, mediaId: string, metrics: string[] = ["views", "likes", "replies", "reposts", "quotes"]): Promise<Record<string, number>> {
   const u = new URL(`${GRAPH}/v1.0/${mediaId}/insights`);
-  u.searchParams.set("metric", "views,likes,replies,reposts,quotes");
+  u.searchParams.set("metric", metrics.join(","));
   u.searchParams.set("access_token", token);
   const j = await thFetch<{ data: Array<{ name: string; values?: Array<{ value: number }>; total_value?: { value: number } }> }>(u.toString());
   const out: Record<string, number> = {};

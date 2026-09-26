@@ -46,6 +46,8 @@ export function humanTgError(status: number, description?: string): string {
 export const getMe = (token: string) => tg<{ id: number; username?: string; first_name?: string }>(token, "getMe");
 export const getChat = (token: string, chatId: string) =>
   tg<{ id: number; title?: string; username?: string; type?: string }>(token, "getChat", { chat_id: chatId });
+// кількість учасників каналу/групи (для графіка росту аудиторії; бот має бути в каналі)
+export const getChatMemberCount = (token: string, chatId: string) => tg<number>(token, "getChatMemberCount", { chat_id: chatId });
 export const getChatMember = (token: string, chatId: string, userId: number) =>
   tg<{ status: string; can_post_messages?: boolean }>(token, "getChatMember", { chat_id: chatId, user_id: userId });
 // Розмітка постів (**жирний**, __курсив__, ~~закреслений~~, `код`) -> Telegram HTML.

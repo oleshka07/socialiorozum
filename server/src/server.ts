@@ -41,10 +41,12 @@ import { readdir, stat } from "node:fs/promises";
 import { startMeetingPull, testPull, pullOnce } from "./meetings-pull.js";
 import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
 import * as gdrive from "./gdrive.js";
-import { publishPostToChannels, alreadySentNetworks, startReelPublishJob, reelSentNetworks, closeSlotsIfDone, enabledNets, beginShutdown, publishesInFlight } from "./publisher.js";
+import { publishPostToChannels, alreadySentNetworks, startReelPublishJob, reelSentNetworks, closeSlotsIfDone, enabledNets, beginShutdown, publishesInFlight, unschedulePost, isPublishingNow } from "./publisher.js";
 import { startLifecycleWorker } from "./lifecycle.js";
 import { startDigest } from "./digest.js";
-import { startMetrics, networkBenchmarks } from "./metrics.js";
+import { startMetrics, networkBenchmarks, collectWorkspace, analyticsFor } from "./metrics.js";
+import { scheduleConflicts, describeConflicts } from "./schedule.js";
+import { briefMismatch, brandTextOf } from "./textkind.js";
 import { startDiary } from "./diary.js";
 import { startThreadsAuto } from "./threads-auto.js";
 import { getSettingText } from "./settings.js";
@@ -693,9 +695,11 @@ app.post("/api/brand/context-fix", async (req: any) => {
 app.post("/api/brand/suggest-pains", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   try {
-    const rows = await q<{ key: string; content: string }>(`select key, content from settings_block where workspace_id=$1 and key in ('marketing_context','strategy_brief','brand_thesis')`, [ws]);
+    const rows = await q<{ key: string; content: string }>(`select key, content from settings_block where workspace_id=$1 and key in ('marketing_context','strategy_brief','brand_thesis','voice_examples')`, [ws]);
     const s: Record<string, string> = {}; for (const r of rows) s[r.key] = r.content || "";
-    const ctx = (s.strategy_brief || s.marketing_context || "").trim();
+    // опис бренду - першим; бриф - лише якщо він про цей самий бізнес (інакше болі вийшли б чужі)
+    const brief = s.strategy_brief && !briefMismatch(s.strategy_brief, brandTextOf(s)) ? s.strategy_brief : "";
+    const ctx = [s.marketing_context, brief].filter((x) => (x || "").trim()).join("\n\n").trim();
     if (!ctx) return reply.code(400).send({ error: "Спершу заповни Базу бренду (ніша й аудиторія)" });
     const raw = await chat(env.cheapModel,
       "Ти маркетолог-практик. Склади список з 8-10 РЕАЛЬНИХ болів ідеального клієнта цього бренду. Кожен рядок СТРОГО у форматі: «біль дослівно словами клієнта» → що бренд робить із цим → доказ/цифра (якщо з контексту невідомо - постав [доказ?]). Болі - конкретні й побутові, не абстракції. Мова - мова бренду. Поверни ЛИШЕ рядки списку, без вступу і нумерації.",
@@ -1001,8 +1005,11 @@ app.post("/api/posts/:postId/carousel", async (req: any, reply) => {
 // зберегти вибір мереж + тексти
 app.post("/api/posts/:postId/channels", async (req: any, reply) => {
   if (!(await postOwned(req.params.postId, req.user.workspace_id))) return reply.code(404).send({ error: "пост не знайдено" });
-  await q(`update post set channels=$2 where id=$1`, [req.params.postId, JSON.stringify(req.body?.channels ?? {})]);
-  return { ok: true };
+  const ch = req.body?.channels ?? {};
+  await q(`update post set channels=$2 where id=$1`, [req.params.postId, JSON.stringify(ch)]);
+  // без жодної мережі пост нікуди не вийде - у календарі він лише висів би порожнім
+  const unscheduled = enabledNets(ch).length ? 0 : await unschedulePost(req.params.postId);
+  return { ok: true, unscheduled };
 });
 
 // AI-адаптація під обрані мережі
@@ -1566,6 +1573,32 @@ app.post("/api/guide/log", async (req: any) => {
 });
 
 app.get("/api/analytics/benchmarks", async (req: any) => networkBenchmarks(req.user.workspace_id));
+
+// 📈 Статистика постів: перегляди, взаємодії, розрізи «що працює», теплова карта часу, підписники.
+// Сирі рядки - одним запитом (публікація × метрики мережі × ознаки поста), уся арифметика - у
+// чистому analytics.ts. Беремо подвійний період: попередній потрібен для порівняння «до/після».
+app.get("/api/analytics/posts", async (req: any) => {
+  const days = [7, 30, 90, 180, 365].includes(Number(req.query?.days)) ? Number(req.query.days) : 90;
+  const net = ["all", "threads", "instagram", "facebook", "telegram", "linkedin"].includes(String(req.query?.net)) ? String(req.query.net) : "all";
+  return analyticsFor(req.user.workspace_id, days, net);
+});
+
+// «Оновити статистику зараз»: воркер ходить по метрики раз на 6 год, а людина, що щойно
+// опублікувала пост, хоче бачити цифри сьогодні. Раз на 10 хвилин на кабінет - щоб не впертись у
+// ліміти Graph API кнопкою.
+const metricsRefreshAt = new Map<string, number>();
+app.post("/api/analytics/refresh", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const last = metricsRefreshAt.get(ws) || 0;
+  if (Date.now() - last < 10 * 60e3) {
+    const running = await getJobByKey("metrics", ws);
+    if (running?.status === "running") return { jobId: running.id };
+    return reply.code(429).send({ error: `Статистику щойно оновлено - наступне оновлення за ${Math.ceil((10 * 60e3 - (Date.now() - last)) / 60e3)} хв.` });
+  }
+  metricsRefreshAt.set(ws, Date.now());
+  const j = await startJob("metrics", ws, ws, () => collectWorkspace(ws, 1));
+  return { jobId: j.id };
+});
 
 // 🧵 Розширена аналітика Threads: профіль за 7 днів (з дельтами до попередніх 7), підписники,
 // таблиця останніх постів, інтервал постингу, стрік, демографія (якщо API віддає).
@@ -2485,13 +2518,15 @@ app.post("/api/posts/:postId/review", async (req: any, reply) => {
   const status = String(req.body?.status ?? "");
   if (!["approved", "needs_work", "archived", ""].includes(status)) return reply.code(400).send({ error: "невідомий статус" });
   await q(`update post set review=nullif($2,'') where id=$1`, [req.params.postId, status]);
+  // незатверджений пост не має лишатись у календарі: автопостер відправив би його в мережу
+  const unscheduled = status === "approved" ? 0 : await unschedulePost(req.params.postId);
   // синхронізація скелета плану: затвердив -> слот approved; заархівував -> слот звільняється
   if (status === "approved")
     await q(`update plan_slot set status='approved' where post_id=$1 and status='drafted'`, [req.params.postId]);
   else if (status === "archived")
     await q(`update plan_slot set status = case when match_source_id is null then 'empty' else 'matched' end, post_id=null
              where post_id=$1 and status in ('drafted','approved')`, [req.params.postId]);
-  return { ok: true };
+  return { ok: true, unscheduled };
 });
 
 app.post("/api/posts/:postId/regenerate", async (req: any, reply) => {
@@ -2986,6 +3021,9 @@ app.delete("/api/posts/:postId", async (req: any, reply) => {
   if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
   const sent = new Set([...(await alreadySentNetworks(req.params.postId)), ...(await reelSentNetworks(req.params.postId))]);
   if (sent.size) return reply.code(409).send({ error: "Пост уже опубліковано (" + [...sent].join(", ") + ") - видалення стерло б історію публікацій і аналітику. Він живе у фільтрі «Опубліковані»." });
+  if (isPublishingNow(req.params.postId)) return reply.code(409).send({ error: "Пост саме зараз публікується - дочекайся результату." });
+  await q(`update plan_slot set status = case when match_source_id is null then 'empty' else 'matched' end, post_id=null
+           where post_id=$1 and status in ('drafted','approved','scheduled')`, [req.params.postId]);
   await q(`delete from post where id=$1`, [req.params.postId]);
   return { ok: true };
 });
@@ -3014,8 +3052,17 @@ app.get("/api/published", async (req: any) => {
      join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where s.workspace_id=$1
      order by x.created_at desc limit 100`, [ws]);
-  const posts = new Set(recent.map((r) => r.post_id)).size;
-  return { posts, sends: recent.length, recent };
+  // лічильники - окремим запитом по ВСІХ публікаціях: раніше їх рахували з цих 100 останніх рядків,
+  // тож після сотої відправки «Опубліковано» застигало й брехало
+  const tot = await one<{ posts: number; sends: number }>(
+    `select count(distinct x.post_id)::int as posts, count(*)::int as sends from (
+        select post_id from telegram_publish where status='sent'
+        union all select post_id from threads_publish where status='sent'
+        union all select post_id from meta_publish where status='sent'
+        union all select post_id from linkedin_publish where status='sent'
+     ) x join post p on p.id=x.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+     where s.workspace_id=$1`, [ws]);
+  return { posts: tot?.posts ?? 0, sends: tot?.sends ?? 0, recent };
 });
 
 async function slotOwned(slotId: string, ws: string) {
@@ -3035,6 +3082,8 @@ app.post("/api/schedule", async (req: any, reply) => {
   const cch = cur?.channels || {};
   if (!Object.keys(cch).some((k) => cch[k] && cch[k].on))
     await q(`update post set channels=$2 where id=$1`, [postId, JSON.stringify({ telegram: { on: true } })]);
+  const clash = await slotClash(ws, postId, req.body?.scheduledAt, req.body?.force === true);
+  if (clash) return reply.code(409).send(clash);
   // якщо у поста ВЖЕ є незапощений слот - переносимо його, а не додаємо другий (інакше подвійна публікація)
   const existing = await one<{ id: string }>(`select id from schedule_slot where post_id=$1 and status='planned' limit 1`, [postId]);
   if (existing) {
@@ -3048,8 +3097,30 @@ app.post("/api/schedule", async (req: any, reply) => {
   return { ok: true, id: r!.id };
 });
 
+// Запобіжник від дублів у календарі: той самий час (±5 хв) у ту саму мережу або той самий текст, уже
+// запланований чи опублікований. Не мовчазна заборона - 409 з поясненням, кабінет питає «все одно?».
+async function slotClash(ws: string, postId: string, at: unknown, force: boolean): Promise<{ error: string; conflict: true } | null> {
+  if (force || !at) return null;
+  const d = new Date(String(at));
+  if (isNaN(d.getTime())) return null;
+  const p = await one<{ channels: any }>(`select channels from post where id=$1`, [postId]);
+  const nets = enabledNets(p?.channels);
+  const list = await scheduleConflicts(ws, postId, d, nets.length ? nets : ["telegram"]);
+  if (!list.length) return null;
+  const tzr = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='timezone'`, [ws]);
+  const tz = tzr?.content || "Europe/Kyiv";
+  const fmt = (iso: string) => new Intl.DateTimeFormat("uk-UA", { timeZone: tz, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+  const label = (n: string) => ({ telegram: "Telegram", threads: "Threads", instagram: "Instagram", facebook: "Facebook", linkedin: "LinkedIn" } as Record<string, string>)[n] || n;
+  return { conflict: true, error: "Схоже на дубль: " + describeConflicts(list, fmt, label, (id) => "#" + id.slice(0, 8)).join("; ") + "." };
+}
+
 app.put("/api/schedule/:id", async (req: any, reply) => {
   if (!(await slotOwned(req.params.id, req.user.workspace_id))) return reply.code(404).send({ error: "слот не знайдено" });
+  const sp = await one<{ post_id: string | null }>(`select post_id from schedule_slot where id=$1`, [req.params.id]);
+  if (sp?.post_id) {
+    const clash = await slotClash(req.user.workspace_id, sp.post_id, req.body?.scheduledAt, req.body?.force === true);
+    if (clash) return reply.code(409).send(clash);
+  }
   // переносити можна лише те, що ще не пішло: posted/posting не «воскрешаємо» - це друга публікація
   const r = await one<{ id: string }>(
     `update schedule_slot set scheduled_at=$2, status='planned', retry_at=null, attempts=0, updated_at=now() where id=$1 and status in ('planned','failed') returning id`,
@@ -3952,7 +4023,8 @@ app.post("/api/tg/post/:postId/approve", async (req: any, reply) => {
   if (!id) return reply.code(404).send({ error: "пост не знайдено" });
   const on = req.body?.approved !== false;
   await q(`update post set review=$2 where id=$1`, [id, on ? "approved" : "review"]);
-  return { ok: true, review: on ? "approved" : "review" };
+  const unscheduled = on ? 0 : await unschedulePost(id);
+  return { ok: true, review: on ? "approved" : "review", unscheduled };
 });
 
 // 🗓 планування: реюз тієї самої функції, що й композер у DM (перенос наявного слота, а не

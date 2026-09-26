@@ -83,25 +83,71 @@ export async function publishToPage(pageId: string, pageToken: string, message: 
 }
 
 // інсайти опублікованого FB-поста
-export async function postInsights(postId: string, pageToken: string): Promise<Record<string, number>> {
-  const u = new URL(`${GRAPH}/${postId}/insights`);
-  u.searchParams.set("metric", "post_impressions,post_impressions_unique,post_clicks");
-  u.searchParams.set("access_token", pageToken);
-  const j = await fbFetch<{ data: Array<{ name: string; values?: Array<{ value: number }> }> }>(u.toString());
+// Інсайти одного поста/медіа за списком метрик. Значення приходить або в values[0], або в
+// total_value; метрика-обʼєкт (реакції за типами) сумується. Метрику, якої немає у відповіді, НЕ
+// підставляємо нулем: «мережа не віддала» і «справді нуль» у статистиці - різні речі.
+async function insightsOf(objectId: string, token: string, metrics: string[], extra: Record<string, string> = {}, edge = "insights"): Promise<Record<string, number>> {
+  const u = new URL(`${GRAPH}/${objectId}/${edge}`);
+  u.searchParams.set("metric", metrics.join(","));
+  for (const [k, v] of Object.entries(extra)) u.searchParams.set(k, v);
+  u.searchParams.set("access_token", token);
+  const j = await fbFetch<{ data: Array<{ name: string; values?: Array<{ value: any }>; total_value?: { value: any } }> }>(u.toString());
   const out: Record<string, number> = {};
-  for (const m of j.data || []) out[m.name] = m.values?.[0]?.value ?? 0;
+  for (const m of j.data || []) {
+    const v = m.total_value?.value ?? m.values?.[0]?.value;
+    if (typeof v === "number") out[m.name] = v;
+    else if (v && typeof v === "object") out[m.name] = Object.values(v).reduce((a: number, x: any) => a + (Number(x) || 0), 0);
+  }
   return out;
 }
 
-// інсайти опублікованого IG-поста (media-level): охоплення + лайки (для бенчмарків ×N)
-export async function igMediaInsights(mediaId: string, pageToken: string): Promise<{ reach: number; likes: number }> {
-  const u = new URL(`${GRAPH}/${mediaId}/insights`);
-  u.searchParams.set("metric", "reach,likes");
-  u.searchParams.set("access_token", pageToken);
-  const j = await fbFetch<{ data: Array<{ name: string; values?: Array<{ value: number }>; total_value?: { value: number } }> }>(u.toString());
-  const out: Record<string, number> = {};
-  for (const m of j.data || []) out[m.name] = m.total_value?.value ?? m.values?.[0]?.value ?? 0;
-  return { reach: out.reach || 0, likes: out.likes || 0 };
+// Facebook-допис (<сторінка>_<пост>). З листопада 2025 Meta прибрала post_impressions*, заміна -
+// post_media_view (перегляди) і post_total_media_view_unique (охоплення); старі імена лишаються
+// запасними в collectors (metrics.ts), бо підтримка розходиться між версіями API.
+export const fbPostMetrics = (postId: string, token: string, metrics: string[]) => insightsOf(postId, token, metrics, { period: "lifetime" });
+// Facebook-відео (голий id без сторінки): окремий edge video_insights
+export const fbVideoMetrics = (videoId: string, token: string, metrics: string[]) => insightsOf(videoId, token, metrics, {}, "video_insights");
+// Instagram-медіа: views/reach/likes/comments/saved/shares (impressions і plays Meta вимкнула в v22)
+export const igMediaMetrics = (mediaId: string, token: string, metrics: string[]) => insightsOf(mediaId, token, metrics);
+
+// Для ручної перевірки одного поста (роут facebook-insights): спершу нові метрики, потім старі.
+export async function postInsights(postId: string, pageToken: string): Promise<Record<string, number>> {
+  try { return await fbPostMetrics(postId, pageToken, ["post_media_view", "post_total_media_view_unique"]); }
+  catch { return fbPostMetrics(postId, pageToken, ["post_impressions", "post_impressions_unique"]); }
+}
+
+// Лайки й коментарі Instagram-медіа ПОЛЯМИ: їм вистачає instagram_basic, тож вони є навіть тоді,
+// коли інсайтів (instagram_manage_insights) ще не дали. Заодно тип медіа - від нього залежить,
+// які метрики інсайтів мережа прийме.
+export async function igMediaFields(mediaId: string, token: string): Promise<{ like_count?: number; comments_count?: number; media_type?: string; media_product_type?: string }> {
+  const u = new URL(`${GRAPH}/${mediaId}`);
+  u.searchParams.set("fields", "like_count,comments_count,media_type,media_product_type");
+  u.searchParams.set("access_token", token);
+  return fbFetch(u.toString());
+}
+
+// Реакції, коментарі й поширення Facebook-допису ПОЛЯМИ (pages_read_engagement), без інсайтів.
+// Поле shares Meta не віддає зовсім, коли поширень нуль - тоді це справжній 0, а не «невідомо».
+export async function fbPostEngagement(objectId: string, token: string, isVideo = false): Promise<{ reactions: number | null; comments: number | null; shares: number | null }> {
+  const sets = isVideo
+    ? ["reactions.summary(total_count).limit(0),comments.summary(total_count).limit(0)", "reactions.summary(total_count).limit(0)"]
+    : ["reactions.summary(total_count).limit(0),comments.summary(total_count).limit(0),shares", "reactions.summary(total_count).limit(0),shares"];
+  let last: any;
+  for (const fields of sets) {
+    const u = new URL(`${GRAPH}/${objectId}`);
+    u.searchParams.set("fields", fields);
+    u.searchParams.set("access_token", token);
+    try {
+      const j: any = await fbFetch(u.toString());
+      const num = (x: any) => (typeof x === "number" ? x : null);
+      return {
+        reactions: num(j.reactions?.summary?.total_count),
+        comments: fields.includes("comments") ? num(j.comments?.summary?.total_count) : null,
+        shares: isVideo ? null : (typeof j.shares?.count === "number" ? j.shares.count : 0),
+      };
+    } catch (e) { last = e; }
+  }
+  throw last;
 }
 
 // базова аналітика акаунтів (надійні поля): FB-Сторінка + IG-акаунт
