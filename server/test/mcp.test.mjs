@@ -278,3 +278,16 @@ test("медіатека: власні фото окремо від згенер
   assert.equal(usedList("ab12cd34,ef56ab78"), "#ab12cd34, #ef56ab78");
   assert.equal(usedList(null), "");
 });
+
+test("заливка з комп'ютера: інструмент видає посилання, не читає файлів і стоїть перед стоком", () => {
+  const t = TOOLS.find((x) => x.name === "media_upload_link");
+  assert.ok(t, "media_upload_link має бути в конекторі");
+  assert.notEqual(t.readOnly, true, "видає нове посилання - це не лише читання");
+  assert.equal(t.properties.minutes.minimum, 5);
+  assert.equal(t.properties.minutes.maximum, 180);
+  // головне, що модель мусить зрозуміти з опису: файли йдуть повз чат, а без термінала - посилання людині
+  assert.match(t.description, /МИНАЮЧИ чат/);
+  assert.match(t.description, /браузер/);
+  const names = TOOLS.map((x) => x.name);
+  assert.ok(names.indexOf("media_upload_link") < names.indexOf("find_stock_photos"));
+});

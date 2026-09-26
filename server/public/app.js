@@ -2939,9 +2939,11 @@ async function uploadInBatches(files, url, onProgress){
   }
   return {saved, failed, total:list.length};
 }
-function uploadReport(r){ return r.failed.length
-  ? '⚠ завантажено '+r.saved.length+' з '+r.total+'. Не вдалось: '+r.failed.slice(0,3).map(x=>(x.name?x.name+' - ':'')+x.error).join('; ')+(r.failed.length>3?' …':'')
-  : 'завантажено: '+r.saved.length; }
+// dup - той самий файл уже лежав у медіатеці: сервер не робить копію, а віддає наявний
+function uploadReport(r){ const dup=r.saved.filter(x=>x.dup).length, dupTxt=dup?' (з них '+dup+' уже були в медіатеці)':'';
+  return r.failed.length
+  ? '⚠ завантажено '+r.saved.length+' з '+r.total+dupTxt+'. Не вдалось: '+r.failed.slice(0,3).map(x=>(x.name?x.name+' - ':'')+x.error).join('; ')+(r.failed.length>3?' …':'')
+  : 'завантажено: '+r.saved.length+dupTxt; }
 $('mediaUpload').onclick=async()=>{
   const f=$('mediaFile').files; const m=$('mediaMsg'); if(!f||!f.length){ m.style.color='var(--danger)'; m.textContent='Обери файл(и)'; return; }
   m.style.color='var(--muted)'; m.textContent='завантаження…';

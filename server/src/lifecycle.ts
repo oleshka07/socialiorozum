@@ -5,6 +5,7 @@
 import { q } from "./db.js";
 import { logEvent } from "./log.js";
 import { sweepJobs } from "./jobs.js";
+import { sweepUploadLinks } from "./uploadlink.js";
 import { env } from "./env.js";
 import { MEDIA_DIR, deleteMediaFile } from "./media.js";
 import { sendInactivityWarningEmail } from "./email.js";
@@ -96,6 +97,7 @@ async function tick(): Promise<void> {
     await q(`delete from app_log where level='info' and created_at < now() - interval '7 days'`);
   } catch { /* ignore */ }
   try { await sweepJobs(); } catch { /* ignore */ }
+  try { await sweepUploadLinks(); } catch { /* ignore */ }
   // 5) 🧠 памʼять контенту: наздоганяємо пости, опубліковані ДО появи дистиляції. Порційно (ліміт
   // усередині) - кожен артефакт це виклик моделі, і разовий прохід по всьому архіву коштував би
   // відчутних грошей; за кілька проходів воркера архів наздожене себе сам.

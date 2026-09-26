@@ -31,7 +31,7 @@ import { logEvent } from "./log.js";
 import { startAutopost } from "./autopost.js";
 import { startRssPoller, pullFeed } from "./rss-poller.js";
 import { resolveSource } from "./rss-resolver.js";
-import { MEDIA_DIR, saveMedia, deleteMediaFile, convertAllHeif, getThumb } from "./media.js";
+import { MEDIA_DIR, saveMedia, deleteMediaFile, convertAllHeif, getThumb, sniffKind } from "./media.js";
 import { normalizeMeeting, saveMeeting } from "./meetings.js";
 import { spendStatus, SpendCapError, CAPS } from "./spend.js";
 import { spreadTimes, topicAngles } from "./textkind.js";
@@ -55,7 +55,8 @@ import { kieCatalog, kieCredits, kieReady } from "./kie.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook, sharedBotDmWorks } from "./tgbot.js";
 import { chat } from "./openrouter.js";
 import { handleBody, wantsSse, sseEncode, resolveToken, mcpTokenFor, issueMcpToken, revokeMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
-import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember, deleteBrand } from "./workspaces.js";
+import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember, deleteBrand, workspaceTitle } from "./workspaces.js";
+import { uploadLinkState, takeUploadSlot, markUploaded, refundUploadSlot, uploadPageHtml, uploadResultText, UPLOAD_FILE_MAX, UPLOAD_TEXT, type UploadResult } from "./uploadlink.js";
 import { CLI_MODELS, cliAllowedFor, cliHealth, forgetCliAllowed, cliCooldown } from "./claudecli.js";
 import { sttChoice, sttAvailable } from "./stt.js";
 import { oauthWhy, oauthFailQuery } from "./oauthwhy.js";
@@ -781,9 +782,9 @@ app.post("/api/media", async (req: any, reply) => {
     for await (const part of req.files()) {
       try {
         const buf = await part.toBuffer();
-        const m = await saveMedia(req.user.workspace_id, { buffer: buf, mime: part.mimetype || "application/octet-stream", name: part.filename, source });
+        const m = await saveMedia(req.user.workspace_id, { buffer: buf, mime: part.mimetype || "application/octet-stream", name: part.filename, source, dedupe: true });
         if (source === "broll" && m.kind !== "video") { await q(`delete from media_asset where id=$1`, [m.id]); await deleteMediaFile(m.filename); throw new Error("для b-roll потрібне відео (mp4/mov)"); }
-        saved.push({ id: m.id, kind: m.kind, url: `/media/${m.filename}` });
+        saved.push({ id: m.id, kind: m.kind, url: `/media/${m.filename}`, dup: !!m.existed });
       } catch (e: any) { failed.push({ name: String(part.filename || ""), error: e.message }); }
     }
   } catch (e: any) {
@@ -3464,6 +3465,65 @@ app.delete("/mcp/:token", mcpDelete);
 const mcpOptions = async (_req: any, reply: any) => { mcpCors(reply); return reply.code(204).send(); };
 app.options("/mcp", mcpOptions);
 app.options("/mcp/:token", mcpOptions);
+
+// ---- 📤 разове посилання на заливку фото (інструмент конектора media_upload_link) ----
+// Claude у Cowork чи Claude Code бачить папку з фото, але передати файл через модель не може - тож
+// файли йдуть сюди НАПРЯМУ з комп'ютера (curl у циклі по папці), а людина те саме посилання може
+// відкрити в браузері й перетягнути фото. Живе під /mcp/, бо це продовження конектора: PIN бети
+// його пропускає, кукі-сесія не потрібна. Доступ дає лише свіжий токен у шляху, і вміє він
+// рівно одне - ДОДАТИ фото в медіатеку одного кабінету.
+app.get("/mcp/upload/:token", async (req: any, reply) => {
+  reply.header("Cache-Control", "no-store").header("X-Robots-Tag", "noindex");
+  const st = await uploadLinkState(req.params.token);
+  if (!st || st === "expired") return reply.code(st ? 410 : 404).type("text/html").send(uploadPageHtml({ state: st ? "expired" : "invalid" }));
+  const tz = (await getSettingText(st.ws, "timezone")) || "Europe/Kyiv";
+  const until = new Intl.DateTimeFormat("uk-UA", { timeZone: tz, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(st.expiresAt));
+  return reply.type("text/html").send(uploadPageHtml({ state: "ok", cabinet: await workspaceTitle(st.ws), until, left: st.filesLeft }));
+});
+
+app.post("/mcp/upload/:token", async (req: any, reply) => {
+  reply.header("Cache-Control", "no-store");
+  const asJson = /application\/json/i.test(String(req.headers.accept || ""));
+  const send = (code: number, r: UploadResult) =>
+    asJson ? reply.code(code).send({ ok: r.saved.length > 0, ...r }) : reply.code(code).type("text/plain; charset=utf-8").send(uploadResultText(r));
+  const fail = (code: number, error: string) => send(code, { saved: [], failed: [{ name: "", error }], left: null });
+  // запит = один файл, тож папка на 200 фото плюс її повтор після обриву вміщаються з запасом
+  if (rateLimited("upl:" + req.ip, 600)) return fail(429, "забагато запитів - зачекай хвилину");
+  const token = String(req.params.token || "");
+  const st = await uploadLinkState(token);
+  if (!st) return fail(404, UPLOAD_TEXT.invalid);
+  if (st === "expired") return fail(410, UPLOAD_TEXT.expired);
+  if (!req.isMultipart()) return fail(400, UPLOAD_TEXT.notMultipart);
+
+  const r: UploadResult = { saved: [], failed: [], left: null };
+  try {
+    for await (const part of req.files({ limits: { fileSize: UPLOAD_FILE_MAX } })) {
+      const name = String(part.filename || "").slice(0, 200);
+      // місце забирається ДО читання файлу: паралельні запити скрипта інакше разом проскочили б ліміт
+      if (!(await takeUploadSlot(token))) { part.file.resume(); r.failed.push({ name, error: UPLOAD_TEXT.noSlots }); continue; }
+      try {
+        const buf = await part.toBuffer();
+        const kind = sniffKind(buf);
+        if (!kind) throw new Error(UPLOAD_TEXT.notImage);
+        if (kind.kind !== "image") throw new Error(UPLOAD_TEXT.video);
+        const m = await saveMedia(st.ws, { buffer: buf, mime: part.mimetype || "application/octet-stream", name, source: "upload", dedupe: true });
+        // той самий файл удруге місця не зʼїдає: у медіатеці нічого не додалось
+        if (m.existed) await refundUploadSlot(token); else await markUploaded(token);
+        r.saved.push({ id: "#" + m.id.slice(0, 8), name, dup: !!m.existed });
+      } catch (e: any) {
+        await refundUploadSlot(token);
+        r.failed.push({ name, error: e?.code === "FST_REQ_FILE_TOO_LARGE" ? UPLOAD_TEXT.tooBig : e.message });
+      }
+    }
+  } catch (e: any) {
+    // «завеликий файл» уже записано рядком цього файлу; тут - обірване завантаження чи >10 файлів за раз
+    if (e?.code !== "FST_REQ_FILE_TOO_LARGE")
+      r.failed.push({ name: "", error: e?.code === "FST_FILES_LIMIT" ? "за один запит - до 10 файлів, решту надішли наступним" : e.message });
+  }
+  if (!r.saved.length && !r.failed.length) r.failed.push({ name: "", error: 'файл не надійшов - шли його полем file: curl -F "file=@фото.jpg"' });
+  r.left = (await one<{ n: number }>(`select files_left as n from upload_link where token=$1`, [token]))?.n ?? null;
+  return send(r.saved.length ? 200 : 400, r);
+});
 
 // ---- керування адресою з кабінету (це вже звичайні /api/ роути під кукі-сесією) ----
 app.get("/api/integrations/mcp", async (req: any) => {

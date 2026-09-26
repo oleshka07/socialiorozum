@@ -21,6 +21,10 @@ export async function listWorkspaces(userId: string): Promise<WsRow[]> {
       order by (m.role = 'owner') desc, 2`, [userId]);
 }
 
+export async function workspaceTitle(wsId: string): Promise<string> {
+  return (await one<{ title: string }>(`select ${TITLE_SQL} as title from workspace w where w.id=$1`, [wsId]))?.title || "кабінет";
+}
+
 export async function isMember(userId: string, wsId: string): Promise<boolean> {
   return !!(await one(`select 1 from workspace_member where user_id=$1 and workspace_id=$2`, [userId, wsId]));
 }

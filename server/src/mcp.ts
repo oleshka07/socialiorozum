@@ -23,7 +23,8 @@ import { randomBytes } from "node:crypto";
 import { q, one } from "./db.js";
 import { env } from "./env.js";
 import { getSettingText } from "./settings.js";
-import { listWorkspaces, isMember } from "./workspaces.js";
+import { listWorkspaces, isMember, workspaceTitle } from "./workspaces.js";
+import { issueUploadLink, uploadCommands, uploadUrl, clampMinutes, UPLOAD_MAX_FILES } from "./uploadlink.js";
 import { connectedNets, parseWhen, zonedToUtc } from "./tgcompose.js";
 import { publishPostToChannels, alreadySentNetworks } from "./publisher.js";
 import { generatePostsOnePass, normFormat, GOAL_LABELS, CHANNEL_LIMITS } from "./pipeline.js";
@@ -792,6 +793,36 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "media_upload_link",
+    title: "Залити фото з комп'ютера в медіатеку",
+    description: "Разове посилання, щоб залити фото з комп'ютера автора в медіатеку кабінету, МИНАЮЧИ чат. Є термінал (Claude Code, Cowork) - запусти готову команду з відповіді на папку з фото: файли підуть із диска прямо на сервер, у твій контекст не потрапить жоден байт, тож відкривати фото перед заливкою не треба. Терміналу нема - віддай посилання людині: у браузері воно відкриває сторінку, куди фото просто перетягуються. Посилання лише ДОДАЄ фото в цей кабінет (нічого не читає), діє обмежений час і до 200 фото; повтор тієї самої папки копій не плодить. Після заливки - list_media з unused_only: true.",
+    properties: {
+      minutes: N("Скільки хвилин діє посилання: 5-180, типово 60.", { minimum: 5, maximum: 180 }),
+    },
+    run: async (ws, a, ctx) => {
+      const minutes = clampMinutes(a.minutes);
+      const { token, expiresAt } = await issueUploadLink(ws, ctx.userId, minutes);
+      const url = uploadUrl(token);
+      const cmd = uploadCommands(url);
+      const title = await workspaceTitle(ws);
+      await logEvent("info", "mcp", `посилання на заливку фото в «${title}» на ${minutes} хв`, null);
+      return [
+        `📤 Посилання для заливки фото в медіатеку «${title}» - діє до ${fmtWhen(expiresAt, await wsTz(ws))}, до ${UPLOAD_MAX_FILES} фото:`,
+        url,
+        "",
+        "Є термінал - залий папку однією командою (підстав справжній шлях):",
+        "macOS / Linux / Git Bash:",
+        cmd.unix,
+        "Windows PowerShell:",
+        cmd.windows,
+        "Без -maxdepth 1 піде й з підпапками. На кожен файл - рядок: ✓ збережено, = уже було в медіатеці, ✗ причина.",
+        "",
+        "Терміналу нема - дай посилання людині: у браузері воно відкриває сторінку, куди фото просто перетягуються.",
+        "Лише фото (JPG, PNG, WebP, HEIC) до 20 МБ. Далі: list_media з unused_only: true → attach_media.",
+      ].join("\n");
+    },
+  },
+  {
     name: "find_stock_photos",
     title: "Підібрати фото зі стоку",
     description: "БЕЗКОШТОВНО: 3 стокові фото (Pexels) під пост, із мініатюрами - щоб ти бачив, що обираєш. Передай query: 2-4 англійські слова про конкретну сцену чи обʼєкти (не абстракції на кшталт success). З query підбір нічого не коштує; без нього запит складе модель кабінету. Обране фото прикріпи через attach_stock_photo.",
@@ -1068,7 +1099,7 @@ export const SERVER_INSTRUCTIONS = [
   "Робочий порядок: 1) brand_voice - прочитай голос бренду; 2) напиши текст САМ у цьому голосі;",
   "3) create_draft - збережи; 4) publish_post або schedule_post. Так генерація нічого не коштує власнику.",
   "generate_posts викликай лише коли тебе прямо просять «згенеруй силами socialio» - він витрачає AI-кредити кабінету.",
-  "Зображення: спершу медіатека кабінету (list_media → attach_media) - власні фото автора, вони найкращі й безкоштовні; далі сток - find_stock_photos з конкретним англійським query і attach_stock_photo, теж безкоштовно; generate_image платний (крім provider cloudflare - безкоштовний денний ліміт ~100 зображень, якщо його підключено), бери його, коли ні медіатека, ні сток не підходять або коли людина просить саме генерацію.",
+  "Зображення: спершу медіатека кабінету (list_media → attach_media) - власні фото автора, вони найкращі й безкоштовні (фото лежать у автора на комп'ютері, а в тебе є термінал - media_upload_link дасть команду, що заллє папку в медіатеку без проходу через чат); далі сток - find_stock_photos з конкретним англійським query і attach_stock_photo, теж безкоштовно; generate_image платний (крім provider cloudflare - безкоштовний денний ліміт ~100 зображень, якщо його підключено), бери його, коли ні медіатека, ні сток не підходять або коли людина просить саме генерацію.",
   "Якщо кабінетів кілька (list_workspaces), спершу переконайся, що активний саме той бренд: перемкни switch_workspace або передай workspace у виклику. Кожна відповідь називає кабінет у першому рядку - звіряйся з ним перед публікацією.",
   "Факти не вигадуй: бери їх з list_materials / get_material або питай автора.",
   "Перед публікацією показуй текст людині - опублікований пост відкликати не можна.",

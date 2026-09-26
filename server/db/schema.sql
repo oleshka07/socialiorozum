@@ -743,3 +743,18 @@ alter table workspace add column if not exists cli_enabled boolean not null defa
 -- сплачена) і саме він годує стелю витрат; без окремої колонки питання «скільки ми заощадили»
 -- не має відповіді взагалі.
 alter table llm_usage add column if not exists alt_cost numeric not null default 0;
+
+-- 📤 Разові посилання на завантаження фото в медіатеку (інструмент конектора media_upload_link):
+-- Claude у Cowork / Claude Code заливає папку з комп'ютера СКРИПТОМ, не проганяючи фото через модель.
+-- Посилання вміє лише ДОДАВАТИ фото в медіатеку одного кабінету: нічого не читає, живе хвилини й
+-- має ліміт файлів - тож навіть потрапивши в чужі руки, кабінет воно не відкриває.
+create table if not exists upload_link (
+  token        text primary key,
+  workspace_id uuid not null references workspace(id) on delete cascade,
+  user_id      uuid references app_user(id) on delete cascade,
+  expires_at   timestamptz not null,
+  files_left   int not null default 200,
+  uploaded     int not null default 0,
+  created_at   timestamptz not null default now()
+);
+create index if not exists idx_upload_link_exp on upload_link(expires_at);

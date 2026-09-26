@@ -393,10 +393,11 @@ const server = createServer((req, res) => {
     req.on("end", () => {
       // завантаження в медіатеку: рахуємо файли в запиті - так перевірка бачить, чи кабінет ділить пачку
       if (req.method === "POST" && url.startsWith("/api/media")) {
-        const n = (raw.match(/filename="/g) || []).length;
-        mediaPosts.push(n);
+        const names = [...raw.matchAll(/filename="([^"]*)"/g)].map((m) => m[1]);
+        mediaPosts.push(names.length);
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: true, saved: Array.from({ length: n }, (_, i) => ({ id: "up" + i, kind: "image", url: "/media/x.png" })), failed: [] }));
+        // файл «dup…» сервер уже мав (дедуп за вмістом) - так і каже прапорцем dup
+        res.end(JSON.stringify({ ok: true, saved: names.map((nm, i) => ({ id: "up" + i, kind: "image", url: "/media/x.png", dup: nm.startsWith("dup") })), failed: [] }));
         return;
       }
       let parsed = null;
@@ -1106,15 +1107,17 @@ const run = async () => {
     const msg = await page.evaluate(async () => {
       selectView("settings"); setSTab("sources");
       const dt = new DataTransfer();
-      for (let i = 0; i < 23; i++) dt.items.add(new File([new Uint8Array(64)], "p" + i + ".jpg", { type: "image/jpeg" }));
+      // два файли сервер «уже мав» - людина має побачити, що копій не зроблено
+      for (let i = 0; i < 23; i++) dt.items.add(new File([new Uint8Array(64)], (i < 2 ? "dup" : "p") + i + ".jpg", { type: "image/jpeg" }));
       document.getElementById("mediaFile").files = dt.files;
       document.getElementById("mediaUpload").click();
       const el = document.getElementById("mediaMsg");
       for (let i = 0; i < 80 && !/завантажено/.test(el.textContent); i++) await new Promise((r) => setTimeout(r, 100));
       return el.textContent;
     });
-    if (mediaPosts.join(",") !== "10,10,3" || msg !== "завантажено: 23") console.log("   ↳ mediaBatch:", JSON.stringify({ mediaPosts, msg }));
-    return mediaPosts.join(",") === "10,10,3" && msg === "завантажено: 23";
+    const want = "завантажено: 23 (з них 2 уже були в медіатеці)";
+    if (mediaPosts.join(",") !== "10,10,3" || msg !== want) console.log("   ↳ mediaBatch:", JSON.stringify({ mediaPosts, msg }));
+    return mediaPosts.join(",") === "10,10,3" && msg === want;
   });
 
   await check("cfProvider", async () => {
