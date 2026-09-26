@@ -1395,13 +1395,17 @@ const run = async () => {
       rows: document.querySelectorAll("#anTbl .an-tbl tr").length - 1,
       more: !!document.getElementById("anMore"),
       fbNa: [...document.querySelectorAll("#anTbl .an-tbl tr")].some((tr) => tr.innerText.includes("Facebook") && tr.querySelector("td.na[title*='дозволу']")),
+      // свіжий пост (знімок раніше, ніж за 2 доби після публікації) - «набирає», а не «×0.0» і не ▼
+      young: [...document.querySelectorAll("#anTbl td.na")].filter((td) => td.textContent.includes("набирає") && td.title.includes("2 доби")).length,
+      youngDown: [...document.querySelectorAll("#anTbl .an-tbl tr")].some((tr) => tr.querySelector("td.na")?.textContent.includes("набирає") && tr.querySelector(".vz-down")),
     }));
     const ok = st.kpi.includes("Публікацій") && st.kpi.includes("Перегляди") && st.kpi.includes("%")
       && st.ins.length >= 2 && st.ins.some((t) => /Тип поста|Час публікації|Перший рядок|День тижня/.test(t))
       && st.facets >= 4 && st.heatRows === 8 && st.legend.includes("Threads") && st.legend.includes("Instagram")
       && st.marks > 10 && st.follow.length === 4 && st.follow.filter((f) => f.svg).length === 3 && st.follow.some((f) => f.t.includes("перший знімок"))
       && st.cov.includes("Facebook: перегляди недоступні") && st.cov.includes("Telegram")
-      && st.rows === 30 && st.more && st.fbNa;
+      && st.rows === 30 && st.more && st.fbNa
+      && st.young >= 1 && !st.youngDown && /свіж\S* пост\S* ще набира/.test(st.cov);
     if (!ok) console.log("   ↳ analyticsV2:", JSON.stringify(st).slice(0, 1600));
     return ok;
   });

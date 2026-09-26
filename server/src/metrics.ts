@@ -9,7 +9,7 @@ import * as threads from "./threads.js";
 import * as meta from "./meta.js";
 import * as tg from "./telegram.js";
 import { thValidToken } from "./publisher.js";
-import { buildAnalytics, type PubRow, type FollowerRow } from "./analytics.js";
+import { buildAnalytics, MATURE_H, type PubRow, type FollowerRow } from "./analytics.js";
 
 const PER_TICK = 25; // постів на мережу за прохід (щоб не впертись у ліміти Graph API)
 
@@ -90,17 +90,18 @@ const num = (x: unknown): number | null => (typeof x === "number" && Number.isFi
 
 async function saveMetric(postId: string, network: string, m: MetricSnapshot): Promise<void> {
   await q(
-    `insert into post_metric(post_id, network, views, reach, likes, replies, reposts, quotes, shares, saves, follows, error, err_count, fetched_at)
-     values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,0,now())
+    `insert into post_metric(post_id, network, views, reach, likes, replies, reposts, quotes, shares, saves, follows, error, err_count, fetched_at, measured_at)
+     values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,0,now(),now())
      on conflict (post_id, network) do update set views=excluded.views, reach=excluded.reach, likes=excluded.likes,
        replies=excluded.replies, reposts=excluded.reposts, quotes=excluded.quotes, shares=excluded.shares,
-       saves=excluded.saves, follows=excluded.follows, error=excluded.error, err_count=0, fetched_at=now()`,
+       saves=excluded.saves, follows=excluded.follows, error=excluded.error, err_count=0, fetched_at=now(), measured_at=now()`,
     [postId, network, num(m.views), num(m.reach), num(m.likes), num(m.replies), num(m.reposts) ?? 0, num(m.quotes) ?? 0,
       num(m.shares), num(m.saves), num(m.follows), m.error ? String(m.error).slice(0, 300) : null]);
 }
 
 // Збій теж пишеться (попередні цифри лишаються): інакше пост, з якого нічого не витягнути, вибирався
 // б першим на КОЖНОМУ проході й відтісняв решту. Після 5 збоїв поспіль - спроба раз на тиждень.
+// measured_at збій НЕ чіпає: він каже, коли зняті ті цифри, що лежать у рядку.
 async function saveFailure(postId: string, network: string, err: string): Promise<void> {
   await q(
     `insert into post_metric(post_id, network, views, likes, replies, error, err_count, fetched_at)
@@ -111,6 +112,11 @@ async function saveFailure(postId: string, network: string, err: string): Promis
 
 // Пости мережі, яким потрібен свіжий знімок. Сторіс не беремо: їхні кадри живуть 24 год, а рядок
 // публікації тримає список id кадрів. Порядок - спершу ті, яких ще не питали, далі найдавніше питані.
+// Частота: раз на minAgeH год (воркер - раз на добу), але пост перших 3 днів, чиї цифри ще «не
+// дозріли» (зняті раніше, ніж за MATURE_H год після публікації), і пост, з якого цифр ще не було, -
+// на кожному проході воркера (кожні 6 год). Інакше знімок, зроблений через 20 хв після публікації,
+// висів би добу як «0 переглядів». 5 год, а не 6 - запас, щоб прохід не пропускав пост через секунди.
+const YOUNG_EVERY_H = 5;
 async function staleRows(ws: string, network: "threads" | "instagram" | "facebook", minAgeH = 24): Promise<{ post_id: string; ext: string }[]> {
   return q<{ post_id: string; ext: string }>(
     `select x.post_id, x.ext from (
@@ -122,7 +128,12 @@ async function staleRows(ws: string, network: "threads" | "instagram" | "faceboo
      where s.workspace_id=$1 and x.ext is not null and position(',' in x.ext)=0
        and coalesce(p.format,'post') <> 'story'
        and x.created_at > now() - interval '90 days'
-       and (pm.post_id is null or pm.fetched_at < now() - case when pm.err_count >= 5 then interval '7 days' else make_interval(hours => $3::int) end)
+       and (pm.post_id is null or pm.fetched_at < now() - case
+              when pm.err_count >= 5 then interval '7 days'
+              when pm.measured_at is null
+                or (x.created_at > now() - interval '3 days' and pm.measured_at < x.created_at + make_interval(hours => ${MATURE_H}))
+                then make_interval(hours => least($3::int, ${YOUNG_EVERY_H}))
+              else make_interval(hours => $3::int) end)
      order by pm.fetched_at nulls first, x.created_at desc limit ${PER_TICK}`, [ws, network, minAgeH]);
 }
 
@@ -329,7 +340,7 @@ export async function analyticsFor(ws: string, days: number, net = "all") {
                  when exists (select 1 from post_slide ps where ps.post_id=p.id) then 'carousel'
                  when p.media_id is not null then 'photo' else 'text' end as media_kind,
             pm.views, pm.reach, pm.likes, pm.replies, pm.reposts, pm.quotes, pm.shares, pm.saves, pm.follows,
-            pm.error as m_error, pm.fetched_at
+            pm.error as m_error, pm.fetched_at, pm.measured_at
        from (
          (select distinct on (post_id) post_id, 'telegram'::text as net, created_at, permalink
             from telegram_publish where status='sent' order by post_id, (target <> 'channel'), created_at)

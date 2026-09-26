@@ -937,7 +937,10 @@ const fmtK=(v)=>{ if(v==null) return '—'; const a=Math.abs(v);
   if(a>=1e4) return Math.round(v/1e3)+' тис.';
   if(a>=1e3) return (v/1e3).toFixed(1).replace('.',',')+' тис.';
   return String(Math.round(v)); };
-const fmtX=(m)=>m==null?'—':'×'+(Math.round(m*10)/10).toFixed(1);
+// ×0.04 не показуємо «×0.0»: це не нуль, а пост, який побачили в 25 разів менше за звичайний
+const fmtX=(m)=>m==null?'—':(m>0&&m<0.1?'×'+(Math.round(m*100)/100).toFixed(2):'×'+(Math.round(m*10)/10).toFixed(1));
+// скільки минуло від публікації до знімка цифр (для постів, що ще набирають перегляди)
+const anSnapAge=(h)=>h==null?'перші години':h<1?Math.max(1,Math.round(h*60))+' хв':Math.round(h)+' год';
 const fmtPct=(v)=>v==null?'—':(v*100).toFixed(1).replace('.',',')+'%';
 const fmtDay=(ymd)=>ymd?ymd.slice(8,10)+'.'+ymd.slice(5,7):'';
 
@@ -969,7 +972,7 @@ function tipOn(el,fn){ el.addEventListener('pointermove',fn); el.addEventListene
 function chartColumns(host,series){
   host.textContent='';
   const nets=series.nets, B=series.buckets;
-  if(!nets.length||!B.length){ host.innerHTML='<div class="empty">Ще нема переглядів за цей період: статистику віддають Threads, Instagram і Facebook, і вона збирається раз на добу.</div>'; return; }
+  if(!nets.length||!B.length){ host.innerHTML='<div class="empty">Ще нема переглядів за цей період: статистику віддають Threads, Instagram і Facebook, і вона збирається сама - свіжі пости кожні 6 годин, далі раз на добу.</div>'; return; }
   if(nets.length>1){ const lg=document.createElement('div'); lg.className='vz-legend';
     nets.forEach(n=>{ const s=document.createElement('span'); const sw=document.createElement('i'); sw.className='vz-sw'; sw.style.background='var(--viz-'+n+')'; s.appendChild(sw); s.appendChild(document.createTextNode(AN_LABEL[n])); lg.appendChild(s); });
     host.appendChild(lg); }
@@ -1120,6 +1123,7 @@ function renderAnTable(){
   const rows=anSorted(), shown=rows.slice(0,AnShown);
   if(!rows.length){ box.innerHTML='<div class="empty">За цей період публікацій не було.</div>'; return; }
   const cell=(p,k)=>{ const v=p[k];
+    if(k==='mult'&&p.young) return '<td class="na" title="'+esc('Пост ще набирає перегляди: цифри зняті через '+anSnapAge(p.snap_h)+' після публікації. З нормою порівняємо, коли мине 2 доби - раніше будь-який пост виглядав би слабким.')+'">🕐 набирає</td>';
     if(v==null){ const why=k==='views'&&p.error?p.error:(p.net==='telegram'||p.net==='linkedin'?AN_LABEL[p.net]+' не віддає статистику окремих постів':'мережа цього не віддала'); return '<td class="na" title="'+esc(why)+'">—</td>'; }
     if(k==='er') return '<td>'+fmtPct(v)+'</td>';
     if(k==='mult') return '<td><b class="'+(v>=1.5?'vz-up':v<0.7?'vz-down':'')+'">'+(v>=1.5?'▲ ':v<0.7?'▼ ':'')+fmtX(v)+'</b></td>';
@@ -1158,6 +1162,8 @@ function anCoverage(a){
     if(!c.measured&&c.error){ const perm=/дозвол|permission/i.test(c.error);
       parts.push('<span class="warn">'+AN_LABEL[n]+': перегляди недоступні</span> - '+(perm?'Meta не дала дозволу на статистику постів. Перепідключи '+AN_LABEL[n]+' у Налаштування → Канали і залиш увімкненими всі галочки; лайки й коментарі, якщо їх видно в таблиці, збираються й без цього.':esc(c.error.slice(0,160)))); }
     else if(c.measured<c.published) parts.push(AN_LABEL[n]+': статистика є для '+c.measured+' з '+c.published+' публікацій (нові пости отримують цифри з найближчим збором).'); });
+  const fresh=(a.posts||[]).filter(p=>p.young).length;
+  if(fresh) parts.push('🕐 '+fresh+' '+anPlural(fresh,'свіжий пост ще набирає','свіжі пости ще набирають','свіжих постів ще набирають')+' перегляди: з нормою і у висновках вони зʼявляться, коли мине 2 доби після публікації, а цифри оновлюються кожні 6 годин.');
   const noPer=['telegram','linkedin'].filter(n=>cov[n]&&cov[n].published);
   if(noPer.length) parts.push(noPer.map(n=>AN_LABEL[n]).join(' і ')+' не '+(noPer.length>1?'віддають':'віддає')+' через API переглядів окремих постів - тут рахуємо '+(noPer.includes('telegram')?'публікації і підписників каналу.':'лише публікації.'));
   const last=Object.values(cov).map(c=>c.lastFetch).filter(Boolean).sort().pop();

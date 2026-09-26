@@ -832,3 +832,21 @@ delete from schedule_slot ss using post p
       where e.key in ('telegram','threads','facebook','instagram','linkedin')
         and jsonb_typeof(e.value)='object' and e.value->>'on'='true'
         and (ss.channels is null or jsonb_typeof(ss.channels)<>'object' or ss.channels->e.key->>'on'='true'));
+
+-- Коли мережа ОСТАННІЙ РАЗ справді віддала цифри. fetched_at - остання СПРОБА (її пише й збій), тож
+-- по ньому не видно, чи «0 переглядів» зняті через 20 хв після публікації, чи через тиждень. Від
+-- цього залежить, чи можна порівнювати пост з нормою: свіжий завжди виглядав би найгіршим.
+alter table post_metric add column if not exists measured_at timestamptz;
+-- Рядки старого збирача (до measured_at) у Meta частково вигадані. Facebook: перегляди з
+-- post_impressions, яку Meta вимкнула (виходив 0), і likes=0 без жодного запиту - замість нулів
+-- «невідомо», а порожній measured_at змусить збирач переміряти рядок на найближчому проході.
+-- Instagram: у перегляди йшло охоплення (так робить і новий збирач, коли views нема - лишаємо і
+-- кладемо ще й у reach), а коментарі старий код не питав і писав нулем - теж «невідомо».
+-- Рядки нового збирача мають reach/shares, тож ці оновлення їх не чіпають, а повтор - no-op.
+-- (reposts/quotes не чіпаємо: вони NOT NULL, а у Facebook їх нема - новий збирач теж пише там 0)
+update post_metric set views = null, likes = null, replies = null
+ where network = 'facebook' and measured_at is null and reach is null and shares is null and views is not null;
+update post_metric set reach = views, replies = null
+ where network = 'instagram' and measured_at is null and reach is null and views is not null;
+-- решта (Threads і Instagram) знята тоді ж, коли й спроба
+update post_metric set measured_at = fetched_at where measured_at is null and views is not null;

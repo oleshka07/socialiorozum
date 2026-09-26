@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { narrowMetrics, isMetricRequestError, fetchMetrics } from "../dist/metrics.js";
 import {
   buildAnalytics, interactionsOf, plural, localParts, daypartOf, hookGroup, lengthGroup, originGroup, driverInsight, median,
+  fmtMult, snapAgeH, MATURE_H,
 } from "../dist/analytics.js";
 
 // ---------- збір метрик ----------
@@ -194,7 +195,7 @@ test("buildAnalytics: мало даних - чесне «замало для в�
   const a = buildAnalytics(rows, [], { days: 30, net: "all", tz: "Europe/Kyiv", now: NOW });
   assert.equal(a.insights.length, 1);
   assert.equal(a.insights[0].key, "few");
-  assert.match(a.insights[0].text, /Зараз зі статистикою 3\./);
+  assert.match(a.insights[0].text, /Зараз таких 3\./);
 });
 
 test("buildAnalytics: фільтр мережі і підписники", () => {
@@ -241,4 +242,78 @@ test("buildAnalytics: рік групується помісячно", () => {
   assert.ok(a.series.buckets.length === 13 || a.series.buckets.length === 12, `${a.series.buckets.length} місяців`);
   assert.equal(a.series.buckets.reduce((s, b) => s + (b.views.threads || 0), 0), 60);
   assert.match(a.series.buckets[a.series.buckets.length - 1].label, /^вер 26$/);
+});
+
+// ---------- свіжі пости: цифри є, але з нормою ще рано ----------
+// Знайдено на живій беті: пост, знятий через 18 хв після публікації, мав «👁 0 · ×0.0» і був
+// «найгіршим» постом тижня, хоча його просто ще ніхто не встиг побачити.
+const H = 36e5;
+test("fmtMult: малий множник не округлюється до нуля", () => {
+  assert.equal(fmtMult(0.04), "×0.04");
+  assert.equal(fmtMult(0), "×0.0");
+  assert.equal(fmtMult(0.1), "×0.1");
+  assert.equal(fmtMult(1.24), "×1.2");
+  assert.equal(fmtMult(6.08), "×6.1");
+});
+
+test("snapAgeH: вік знімка - від measured_at, інакше fetched_at, інакше невідомо", () => {
+  const created_at = "2026-09-20T10:00:00Z";
+  assert.equal(snapAgeH({ created_at, fetched_at: null, measured_at: null }), null);
+  assert.equal(snapAgeH({ created_at, fetched_at: "2026-09-20T13:00:00Z" }), 3);
+  // збій оновлює fetched_at, але цифри в рядку - з раннього знімка: рахуємо від measured_at
+  assert.equal(snapAgeH({ created_at, fetched_at: "2026-09-25T10:00:00Z", measured_at: "2026-09-20T10:18:00Z" }), 0.3);
+});
+
+test("buildAnalytics: свіжий пост не тягне норму вниз і не стає «найгіршим»", () => {
+  seq = 0;
+  const rows = [];
+  // 6 дозрілих Threads-постів, зняті через 3 доби після публікації
+  for (let i = 0; i < 6; i++) {
+    const created = NOW - (5 + i * 3) * day;
+    rows.push(row({ created_at: new Date(created).toISOString(), views: 400 + i * 20, likes: 4,
+      measured_at: new Date(created + 72 * H).toISOString(), fetched_at: new Date(created + 72 * H).toISOString() }));
+  }
+  // щойно опублікований: знятий через 18 хв - 0 переглядів
+  const fresh = NOW - 3 * H;
+  rows.push(row({ post_id: "fresh", created_at: new Date(fresh).toISOString(), views: 0, likes: 0,
+    measured_at: new Date(fresh + 0.3 * H).toISOString(), fetched_at: new Date(fresh + 0.3 * H).toISOString() }));
+  // старий пост, у якого вдалий знімок був лише ранній, а потім спроби падали (fetched_at свіжий)
+  const old = NOW - 10 * day;
+  rows.push(row({ post_id: "early", created_at: new Date(old).toISOString(), views: 3, likes: 0,
+    measured_at: new Date(old + 0.5 * H).toISOString(), fetched_at: new Date(NOW - H).toISOString(), m_error: "тимчасово недоступно" }));
+
+  const a = buildAnalytics(rows, [], { days: 30, net: "all", tz: "Europe/Kyiv", now: NOW });
+  assert.equal(a.norms.threads.n, 6, "у норму йдуть лише дозрілі цифри");
+  assert.equal(a.norms.threads.median, median([400, 420, 440, 460, 480, 500]));
+  const f = a.posts.find((p) => p.post_id === "fresh"), e = a.posts.find((p) => p.post_id === "early");
+  assert.equal(f.young, true); assert.equal(f.mult, null); assert.equal(f.snap_h, 0.3);
+  assert.equal(f.views, 0, "цифри свіжого поста видно - просто без порівняння");
+  assert.equal(e.young, true, "ранній знімок лишається раннім, хоч спроба була щойно");
+  assert.equal(e.mult, null);
+  assert.ok(a.posts.filter((p) => !["fresh", "early"].includes(p.post_id)).every((p) => p.young === false && p.mult > 0));
+  // ні теплова карта, ні розрізи їх не бачать
+  const heatN = a.heat.cells.reduce((s, c) => s + c.n, 0);
+  assert.equal(heatN, 6);
+  const wd = a.drivers.find((d) => d.key === "weekday");
+  assert.equal(wd.groups.reduce((s, g) => s + g.n, 0), 6);
+  // а перегляди в сумі періоду - рахуються (це правда: стільки вже побачили)
+  assert.equal(a.kpi.measured, 8);
+  assert.equal(a.kpi.views, 400 + 420 + 440 + 460 + 480 + 500 + 0 + 3);
+  // рівно на межі - уже дозрілий
+  const edge = NOW - 5 * day;
+  const b = buildAnalytics([...rows, row({ post_id: "edge", created_at: new Date(edge).toISOString(), views: 450,
+    measured_at: new Date(edge + MATURE_H * H).toISOString() })], [], { days: 30, net: "all", tz: "Europe/Kyiv", now: NOW });
+  assert.equal(b.posts.find((p) => p.post_id === "edge").young, false);
+  assert.equal(b.norms.threads.n, 7);
+});
+
+test("buildAnalytics: «замало даних» чесно каже про свіжі пости і мережі без норми", () => {
+  seq = 0;
+  const rows = [row({ views: 100 }), row({ views: 300 }), row({ views: 200 })];
+  const fresh = NOW - 2 * H;
+  for (let i = 0; i < 2; i++) rows.push(row({ created_at: new Date(fresh).toISOString(), views: 5, measured_at: new Date(fresh + H).toISOString() }));
+  rows.push(row({ net: "instagram", views: 50 }), row({ net: "instagram", views: 70 }));
+  const a = buildAnalytics(rows, [], { days: 30, net: "all", tz: "Europe/Kyiv", now: NOW });
+  assert.equal(a.insights[0].key, "few");
+  assert.match(a.insights[0].text, /Зараз таких 3; ще 2 свіжі пости набирають перегляди; ще 2 пости - у мережі, де поки менше 3 постів/);
 });

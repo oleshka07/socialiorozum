@@ -1396,7 +1396,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "analytics",
     title: "Аналітика публікацій",
-    description: "Статистика за період: скільки постів вийшло по мережах, перегляди, лайки, відповіді й коментарі, репости й поширення, збереження, залученість по КОЖНОМУ посту, приріст підписників по мережах, висновки «що працює» (тип поста, перший рядок, довжина, час, рубрика) і найсильніші пости відносно норми мережі. Цифри по постах віддають Threads, Instagram і Facebook (Instagram - ще й скільки людей підписалось після поста); Telegram і LinkedIn через API - лише факт публікації (для Telegram - ще підписники каналу). Статистика оновлюється раз на добу.",
+    description: "Статистика за період: скільки постів вийшло по мережах, перегляди, лайки, відповіді й коментарі, репости й поширення, збереження, залученість по КОЖНОМУ посту, приріст підписників по мережах, висновки «що працює» (тип поста, перший рядок, довжина, час, рубрика) і найсильніші пости відносно норми мережі. Цифри по постах віддають Threads, Instagram і Facebook (Instagram - ще й скільки людей підписалось після поста); Telegram і LinkedIn через API - лише факт публікації (для Telegram - ще підписники каналу). Статистика оновлюється раз на добу, свіжі пости - кожні 6 годин; з нормою мережі пост порівнюється, коли минуло 2 доби після публікації (раніше він ще набирає перегляди).",
     properties: {
       days: N("Період у днях (1-365, типово 30).", { minimum: 1, maximum: 365 }),
       network: S("Лише одна мережа (необовʼязково).", { enum: ["threads", "instagram", "facebook", "telegram", "linkedin"] }),
@@ -1412,6 +1412,7 @@ export const TOOLS: ToolDef[] = [
       const k = an.kpi;
       if (!k.sends) return `За ${days} дн. публікацій не було${net !== "all" ? ` у ${NET_LABEL[net]}` : ""}.`;
       const nf = (x: number) => Math.round(x).toLocaleString("uk-UA");
+      const snapAge = (h: number | null) => (h == null ? "перші години" : h < 1 ? `${Math.max(1, Math.round(h * 60))} хв` : `${Math.round(h)} год`);
       const vsPrev = (cur: number, prev: number) => (prev ? ` (${cur >= prev ? "+" : ""}${Math.round(((cur - prev) / prev) * 100)}% до попередніх ${days} дн.)` : "");
       const lines: string[] = [
         `За ${days} дн. опубліковано ${k.posts} постів (${k.sends} відправок): ${Object.entries(k.sendsByNet).map(([n, c]) => `${NET_LABEL[n] || n} ${c}`).join(" · ")}`,
@@ -1430,13 +1431,14 @@ export const TOOLS: ToolDef[] = [
       // «найсильніші»: за множником до норми мережі, а поки норми нема (менше 3 постів) - за переглядами й лайками
       const list = a.sort === "top" ? [...withNums].sort((x, y) => ((y.mult ?? -1) - (x.mult ?? -1)) || ((y.views ?? -1) - (x.views ?? -1)) || ((y.likes ?? -1) - (x.likes ?? -1))) : withNums;
       if (list.length) {
-        lines.push("", `${a.sort === "top" ? "Найсильніші пости" : "Пости з цифрами (новіші перші)"}; ×норма = перегляди до медіани своєї мережі за період:`);
+        lines.push("", `${a.sort === "top" ? "Найсильніші пости" : "Пости з цифрами (новіші перші)"}; ×норма = перегляди до медіани своєї мережі за період (пости молодші за 2 доби ще набирають перегляди - з нормою їх не порівнюємо):`);
         for (const p of list.slice(0, int(a.limit, 15, 1, 50))) {
           const m = [
             p.views != null ? `👁 ${nf(p.views)}` : "", p.likes != null ? `❤️ ${nf(p.likes)}` : "",
             p.replies != null ? `💬 ${nf(p.replies)}` : "", p.shares != null ? `🔁 ${nf(p.shares)}` : "",
             p.saves != null ? `🔖 ${nf(p.saves)}` : "", p.follows != null ? `➕ ${nf(p.follows)} підписок` : "",
-            p.er != null ? `ER ${(p.er * 100).toFixed(1)}%` : "", p.mult != null ? fmtMult(p.mult) : "",
+            p.er != null ? `ER ${(p.er * 100).toFixed(1)}%` : "",
+            p.young ? `🕐 ще набирає (цифри за ${snapAge(p.snap_h)} після публікації)` : p.mult != null ? fmtMult(p.mult) : "",
           ].filter(Boolean).join(" · ");
           lines.push(`${fmtWhen(p.created_at, tz)} · ${NET_LABEL[p.net] || p.net} · ${short(p.post_id)} · ${m}${p.permalink ? ` · ${p.permalink}` : ""}\n«${oneLine(p.title, 110)}»`);
         }

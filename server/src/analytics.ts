@@ -10,6 +10,10 @@
 //  • У групі - МЕДІАНА множників, не середнє: один вірусний пост не робить формат «найкращим».
 //  • Висновок пишемо лише коли обидві порівнювані групи мають щонайменше 3 пости і різниця ≥30%;
 //    кількість постів завжди в тексті - людина бачить, на чому він тримається.
+//  • З нормою порівнюємо лише «дозрілі» цифри: зняті щонайменше через MATURE_H год після публікації.
+//    Пост, знятий через 20 хвилин, має 0 переглядів не тому, що він слабкий, а тому, що його ще не
+//    бачили; без цього порогу найсвіжіший пост завжди виглядав би найгіршим і тягнув униз день і
+//    годину, коли його опублікували.
 
 export type PubRow = {
   post_id: string; net: string; created_at: string; permalink: string | null;
@@ -19,7 +23,9 @@ export type PubRow = {
   views: number | null; reach: number | null; likes: number | null; replies: number | null;
   reposts: number | null; quotes: number | null; shares: number | null; saves: number | null;
   follows?: number | null;    // Instagram: скільки людей підписалось після поста
-  m_error: string | null; fetched_at: string | null;
+  m_error: string | null;
+  fetched_at: string | null;  // остання СПРОБА збору (її пише й невдала)
+  measured_at?: string | null; // коли мережа востаннє справді віддала цифри
 };
 export type FollowerRow = { network: string; day: string; followers: number };
 export type AnalyticsOpts = { days: number; net: string; tz: string; now?: number };
@@ -36,6 +42,9 @@ const DAYPARTS = [
 const MONTHS = ["січ", "лют", "бер", "кві", "тра", "чер", "лип", "сер", "вер", "жов", "лис", "гру"];
 const MIN_GROUP = 3;      // стільки постів у групі, щоб її медіані можна було вірити
 const MIN_INSIGHTS = 6;   // стільки постів зі статистикою, щоб узагалі говорити про висновки
+// Основні перегляди пост набирає за перші 1-2 доби (Threads, Instagram і Facebook показують свіже
+// передусім). Цифри, зняті раніше, - «ще набирає»: видно, але з нормою не порівнюємо.
+export const MATURE_H = 48;
 
 export function plural(n: number, one: string, few: string, many: string): string {
   const a = Math.abs(n) % 100, b = a % 10;
@@ -46,7 +55,16 @@ export function plural(n: number, one: string, few: string, many: string): strin
 }
 const postsWord = (n: number) => `${n} ${plural(n, "пост", "пости", "постів")}`;
 const fmtNum = (n: number) => Math.round(n).toLocaleString("uk-UA");
-export const fmtMult = (m: number) => "×" + (Math.round(m * 10) / 10).toFixed(1);
+// ×0.04 не округлюємо до «×0.0»: це не нуль, а пост, який побачили в 25 разів менше за звичайний
+export const fmtMult = (m: number) => (m > 0 && m < 0.1 ? "×" + (Math.round(m * 100) / 100).toFixed(2) : "×" + (Math.round(m * 10) / 10).toFixed(1));
+
+/** Через скільки годин після публікації знято цифри; null - момент невідомий (тоді не відсікаємо). */
+export function snapAgeH(r: Pick<PubRow, "created_at" | "fetched_at" | "measured_at">): number | null {
+  const at = r.measured_at || r.fetched_at;
+  if (!at) return null;
+  const h = (Date.parse(at) - Date.parse(r.created_at)) / 36e5;
+  return Number.isFinite(h) ? Math.max(0, h) : null;
+}
 
 export function median(values: number[]): number {
   if (!values.length) return 0;
@@ -110,7 +128,7 @@ export function originGroup(origin: string | null): { key: string; label: string
   return { key: "other", label: "Інше" };
 }
 
-type Enriched = PubRow & { interactions: number | null; er: number | null; mult: number | null; lp: { ymd: string; wd: number; hour: number } };
+type Enriched = PubRow & { interactions: number | null; er: number | null; mult: number | null; young: boolean; snapH: number | null; lp: { ymd: string; wd: number; hour: number } };
 export type Group = { key: string; label: string; n: number; median: number; thin: boolean };
 export type Driver = { key: string; title: string; hint: string; groups: Group[] };
 
@@ -195,11 +213,14 @@ export function buildInsights(measured: Enriched[], drivers: Driver[], kpi: Kpi,
   }
   const withMult = measured.filter((r) => r.mult != null);
   if (withMult.length < MIN_INSIGHTS) {
-    const withViews = measured.filter((r) => r.views != null).length;
+    const fresh = measured.filter((r) => r.young).length;
+    const noNorm = measured.filter((r) => r.views != null && !r.young && r.mult == null).length;
     out.push({
       key: "few", tone: "info",
-      text: `Для висновків «що працює» потрібно хоча б ${MIN_INSIGHTS} постів зі статистикою переглядів (Threads, Instagram чи Facebook, від 3 на мережу). Зараз зі статистикою ${withViews}` +
-        (withViews && !withMult.length ? " - але в жодній мережі ще нема 3, щоб порахувати її норму" : "") + ". Статистика збирається сама раз на добу.",
+      text: `Для висновків «що працює» потрібно хоча б ${MIN_INSIGHTS} постів, які вже можна порівняти з нормою своєї мережі (Threads, Instagram чи Facebook: від 3 постів на мережу, кожному щонайменше 2 доби). Зараз таких ${withMult.length}` +
+        (fresh ? `; ще ${fresh} ${plural(fresh, "свіжий пост набирає", "свіжі пости набирають", "свіжих постів набирають")} перегляди` : "") +
+        (noNorm ? `; ще ${postsWord(noNorm)} - у мережі, де поки менше 3 постів, тож її норми нема` : "") +
+        ". Статистика збирається сама: свіжі пости - кожні 6 годин, далі раз на добу.",
     });
     return out;
   }
@@ -296,22 +317,29 @@ export function buildAnalytics(all: PubRow[], followers: FollowerRow[], o: Analy
   const inPrev = (r: PubRow) => { const t = Date.parse(r.created_at); return t >= prevFrom && t < curFrom; };
   // драйвер БД віддає час обʼєктом Date - зводимо до ISO, щоб порівняння й JSON були однозначні
   const iso = (x: unknown): string => new Date(x as any).toISOString();
-  const rows = all.filter(netOk).map((r) => ({ ...r, created_at: iso(r.created_at), fetched_at: r.fetched_at ? iso(r.fetched_at) : null }));
+  const rows = all.filter(netOk).map((r) => ({
+    ...r, created_at: iso(r.created_at), fetched_at: r.fetched_at ? iso(r.fetched_at) : null,
+    measured_at: r.measured_at ? iso(r.measured_at) : null,
+  }));
   const cur = rows.filter(inCur), prev = rows.filter(inPrev);
+  // «ще набирає»: цифри є, але зняті раніше, ніж пост устиг їх набрати
+  const isYoung = (r: PubRow) => { if (r.views == null) return false; const h = snapAgeH(r); return h != null && h < MATURE_H; };
 
-  // норма кожної мережі - медіана переглядів у цьому ж зрізі (від 3 постів)
+  // норма кожної мережі - медіана «дозрілих» переглядів у цьому ж зрізі (від 3 постів)
   const norms: Record<string, { median: number; n: number }> = {};
   for (const net of MEASURED_NETS) {
-    const v = cur.filter((r) => r.net === net && r.views != null).map((r) => r.views as number);
+    const v = cur.filter((r) => r.net === net && r.views != null && !isYoung(r)).map((r) => r.views as number);
     if (v.length >= MIN_GROUP) norms[net] = { median: Math.max(1, median(v)), n: v.length };
   }
   const enriched: Enriched[] = cur.map((r) => {
     const interactions = interactionsOf(r);
     const norm = norms[r.net];
+    const young = isYoung(r);
     return {
-      ...r, interactions,
+      ...r, interactions, young, snapH: r.views == null ? null : snapAgeH(r),
       er: r.views != null && r.views > 0 && interactions != null ? interactions / r.views : null,
-      mult: norm && r.views != null ? Math.round((r.views / norm.median) * 100) / 100 : null,
+      // множник лише для дозрілих: свіжий пост ще не має з чим чесно порівнюватись
+      mult: norm && r.views != null && !young ? Math.round((r.views / norm.median) * 100) / 100 : null,
       lp: localParts(r.created_at, o.tz),
     };
   });
@@ -346,6 +374,7 @@ export function buildAnalytics(all: PubRow[], followers: FollowerRow[], o: Analy
       shares: r.shares == null && r.reposts == null && r.quotes == null ? null : (r.shares || 0) + (r.reposts || 0) + (r.quotes || 0),
       saves: r.saves, follows: r.follows ?? null, interactions: r.interactions,
       er: r.er == null ? null : Math.round(r.er * 10000) / 10000, mult: r.mult, error: r.views == null ? r.m_error : null,
+      young: r.young, snap_h: r.snapH == null ? null : Math.round(r.snapH * 10) / 10,
     })),
   };
 }
