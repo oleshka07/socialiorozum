@@ -280,6 +280,7 @@ let tgJob = null, tgPubPolls = 0;
 let mtToken = "tok-aaaa1111", mtPull = false, sttProv = "auto";
 const brandDeleted = [];
 const mediaPosts = [];   // скільки файлів прийшло в КОЖНОМУ запиті завантаження в медіатеку
+const mediaBytes = [];   // і скільки байтів у кожному (nginx на беті пропускає до 20 МБ)
 
 function handleApi(method, path, body) {
   if (path.startsWith("/tg/")) return handleTg(method, path.slice(3), body);
@@ -395,6 +396,9 @@ const server = createServer((req, res) => {
       if (req.method === "POST" && url.startsWith("/api/media")) {
         const names = [...raw.matchAll(/filename="([^"]*)"/g)].map((m) => m[1]);
         mediaPosts.push(names.length);
+        mediaBytes.push(raw.length);
+        // так відповідає nginx на тіло понад client_max_body_size (20 МБ) - HTML, а не JSON
+        if (raw.length > 20 * 1024 * 1024) { res.writeHead(413, { "content-type": "text/html" }); res.end("<html><body><h1>413 Request Entity Too Large</h1></body></html>"); return; }
         res.writeHead(200, { "content-type": "application/json" });
         // файл «dup…» сервер уже мав (дедуп за вмістом) - так і каже прапорцем dup
         res.end(JSON.stringify({ ok: true, saved: names.map((nm, i) => ({ id: "up" + i, kind: "image", url: "/media/x.png", dup: nm.startsWith("dup") })), failed: [] }));
@@ -1118,6 +1122,25 @@ const run = async () => {
     const want = "завантажено: 23 (з них 2 уже були в медіатеці)";
     if (mediaPosts.join(",") !== "10,10,3" || msg !== want) console.log("   ↳ mediaBatch:", JSON.stringify({ mediaPosts, msg }));
     return mediaPosts.join(",") === "10,10,3" && msg === want;
+  });
+
+  await check("mediaBytes", async () => {
+    // порція не більша за 20 МБ nginx: 3 фото по 8 МБ ідуть двома запитами, а не одним на 24 МБ,
+    // який nginx відбив би цілком; файл на 25 МБ іде сам і падає з людською причиною
+    mediaPosts.length = 0; mediaBytes.length = 0;
+    const msg = await page.evaluate(async () => {
+      const dt = new DataTransfer();
+      for (const [n, mb] of [["a.jpg", 8], ["b.jpg", 8], ["c.jpg", 8], ["huge.jpg", 25]]) dt.items.add(new File([new Uint8Array(mb * 1024 * 1024)], n, { type: "image/jpeg" }));
+      document.getElementById("mediaFile").files = dt.files;
+      document.getElementById("mediaUpload").click();
+      const el = document.getElementById("mediaMsg");
+      for (let i = 0; i < 150 && !/завантажено/.test(el.textContent); i++) await new Promise((r) => setTimeout(r, 100));
+      return el.textContent;
+    });
+    const good = mediaPosts.join(",") === "2,1,1" && mediaBytes.slice(0, 2).every((b) => b <= 20 * 1024 * 1024)
+      && /^⚠ завантажено 3 з 4\. Не вдалось: huge\.jpg - завеликий файл: сервер приймає до 20 МБ за раз$/.test(msg);
+    if (!good) console.log("   ↳ mediaBytes:", JSON.stringify({ mediaPosts, mb: mediaBytes.map((b) => Math.round(b / 1048576)), msg }));
+    return good;
   });
 
   await check("cfProvider", async () => {

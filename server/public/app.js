@@ -2921,19 +2921,22 @@ async function loadMedia(){
     }
   }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }
-// Завантаження пачкою: сервер приймає до 10 файлів за запит, а nginx - обмежений обсяг тіла, тож
-// ділимо на порції (до 10 файлів і до 40 МБ). Раніше 30 фото йшли одним запитом: зберігались перші
-// 10, решта падала з «reach files limit», і про вже збережені людина навіть не дізнавалась.
+// Завантаження пачкою: сервер приймає до 10 файлів за запит, а nginx - до 20 МБ тіла запиту
+// (client_max_body_size), тож ділимо на порції: до 10 файлів і до 18 МБ (запас на обгортку
+// multipart). Раніше 30 фото йшли одним запитом: зберігались перші 10, решта падала з «reach files
+// limit»; а порція в 40 МБ цілком відбивалась nginx-ом (413) - 10 фото з телефона по 4 МБ не
+// заливались жодне. Файл, більший за порцію, іде сам.
+const UPLOAD_BATCH_BYTES=18*1024*1024;
 async function uploadInBatches(files, url, onProgress){
   const list=[...files], batches=[]; let cur=[], bytes=0;
-  for(const f of list){ if(cur.length&&(cur.length>=10||bytes+f.size>40*1024*1024)){ batches.push(cur); cur=[]; bytes=0; } cur.push(f); bytes+=f.size; }
+  for(const f of list){ if(cur.length&&(cur.length>=10||bytes+f.size>UPLOAD_BATCH_BYTES)){ batches.push(cur); cur=[]; bytes=0; } cur.push(f); bytes+=f.size; }
   if(cur.length) batches.push(cur);
   const saved=[], failed=[];
   for(const b of batches){
     if(onProgress) onProgress(saved.length+failed.length, list.length);
     const fd=new FormData(); b.forEach(f=>fd.append('file',f));
     try{ const r=await fetch(url,{method:'POST',body:fd,credentials:'same-origin'}); const j=await r.json().catch(()=>({}));
-      if(!r.ok) throw new Error(j.error||('HTTP '+r.status));
+      if(!r.ok) throw new Error(j.error||(r.status===413?'завеликий файл: сервер приймає до 20 МБ за раз':'HTTP '+r.status));
       saved.push(...(j.saved||[])); failed.push(...(j.failed||[]));
     }catch(e){ b.forEach(f=>failed.push({name:f.name,error:e.message})); }   // порція впала цілком - позначаємо кожен її файл
   }
