@@ -118,6 +118,49 @@ export async function sendMediaGroup(token: string, chatId: string, photoUrls: s
     throw e;
   }
 }
+// multipart-виклик Bot API (файл їде від нас, а не за адресою): для відео понад 20 МБ - Telegram
+// сам за URL тягне лише до 20 МБ
+async function tgForm<T = any>(token: string, method: string, form: FormData, timeoutMs: number): Promise<T> {
+  if (!token) throw new Error("Telegram bot token не заданий");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let res: Response;
+  try { res = await fetch(`${BASE}/bot${token}/${method}`, { method: "POST", body: form, signal: controller.signal }); }
+  catch (e: any) {
+    if (e && e.name === "AbortError") throw new Error(`Telegram не відповів за ${Math.round(timeoutMs / 1000)} с`);
+    throw e;
+  } finally { clearTimeout(timer); }
+  const j: any = await res.json().catch(() => ({}));
+  if (!j.ok) throw new Error(humanTgError(res.status, j.description));
+  return j.result as T;
+}
+
+// 🎬 Відео в канал. Межі Bot API: за адресою Telegram сам тягне файл лише до 20 МБ, а завантаженням
+// від бота - до 50 МБ; більше бот не надішле взагалі (це межа Telegram, не наша).
+export const TG_VIDEO_URL_MAX = 20 * 1024 * 1024;
+export const TG_VIDEO_MAX = 50 * 1024 * 1024;
+export async function sendVideo(token: string, chatId: string, video: { url: string } | { file: Buffer; name: string }, caption: string,
+  meta?: { width?: number | null; height?: number | null; duration?: number | null }) {
+  // розмір кадру й тривалість - щоб Telegram одразу показав плеєр правильної форми, а не квадрат
+  const dims: Record<string, string | number | boolean> = { chat_id: chatId, supports_streaming: true };
+  if (meta?.width) dims.width = meta.width;
+  if (meta?.height) dims.height = meta.height;
+  if (meta?.duration) dims.duration = Math.round(meta.duration);
+  const attempt = (html: boolean) => {
+    const cap = caption ? (html ? { caption: toTgHtml(caption), parse_mode: "HTML" } : { caption }) : {};
+    if ("url" in video) return tg<{ message_id: number }>(token, "sendVideo", { ...dims, video: video.url, ...cap }, 120000);
+    const form = new FormData();
+    for (const [k, v] of Object.entries({ ...dims, ...cap })) form.append(k, String(v));
+    form.append("video", new Blob([new Uint8Array(video.file)]), video.name);
+    return tgForm<{ message_id: number }>(token, "sendVideo", form, 300000);
+  };
+  try { return await attempt(true); }
+  catch (e: any) {
+    if (/parse entities|unsupported start tag|can't find end/i.test(String(e.message))) return attempt(false);
+    throw e;
+  }
+}
+
 // завантажити файл, надісланий боту (голос/фото/відео щоденника). Bot API віддає файли до 20 МБ -
 // на більших getFile повертає "file is too big" (обробляється у викликача дружнім повідомленням).
 export async function getFileBuffer(token: string, fileId: string): Promise<{ buffer: Buffer; path: string }> {

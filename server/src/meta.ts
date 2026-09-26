@@ -163,25 +163,16 @@ export async function businessDiscovery(igUserId: string, pageToken: string, tar
 }
 
 // Instagram Reels: контейнер media_type=REELS з video_url → чекаємо обробки відео → media_publish.
-// IG вимагає MP4 H.264+AAC, 9:16 — саме такий наш рілс із збірки.
-export async function publishReelToInstagram(igUserId: string, pageToken: string, videoUrl: string, caption: string) {
-  const cbody = new URLSearchParams({ media_type: "REELS", video_url: videoUrl, caption, access_token: pageToken });
+// IG приймає MP4/MOV (H.264 або HEVC, AAC), 3 с - 15 хв; найкраще 9:16. share_to_feed - щоб рілс
+// показувався і в стрічці профілю, а не лише у вкладці Reels.
+export async function publishReelToInstagram(igUserId: string, pageToken: string, videoUrl: string, caption: string, opts?: { shareToFeed?: boolean }) {
+  const cbody = new URLSearchParams({ media_type: "REELS", video_url: videoUrl, caption, share_to_feed: opts?.shareToFeed === false ? "false" : "true", access_token: pageToken });
   const c = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media`, {
     method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: cbody,
   });
-  // відео обробляється асинхронно: публікувати можна лише після status_code=FINISHED
-  for (let i = 0; i < 40; i++) {
-    await new Promise((r) => setTimeout(r, 5000));
-    const st = await fbFetch<{ status_code?: string }>(`${GRAPH}/${c.id}?fields=status_code&access_token=${encodeURIComponent(pageToken)}`);
-    if (st.status_code === "FINISHED") break;
-    if (st.status_code === "ERROR") throw new Error("Instagram не зміг обробити відео (перевір формат MP4 9:16)");
-    if (i === 39) throw new Error("Instagram довго обробляє відео - спробуй ще раз за кілька хвилин");
-  }
-  const pbody = new URLSearchParams({ creation_id: c.id, access_token: pageToken });
-  const p = await fbFetch<{ id: string }>(`${GRAPH}/${igUserId}/media_publish`, {
-    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: pbody,
-  });
-  return { mediaId: p.id };
+  // відео обробляється асинхронно: публікувати можна лише після status_code=FINISHED (до ~5 хв)
+  await igWaitFinished(c.id, pageToken, { tries: 60, everyMs: 5000, what: "відео" });
+  return igPublishContainer(igUserId, pageToken, c.id);
 }
 
 // відео-пост у FB-Сторінку (file_url — Meta сама тягне з нашого /media)
@@ -196,16 +187,18 @@ export async function publishVideoToPage(pageId: string, pageToken: string, desc
 // НАДІЙНІСТЬ: навіть фото-контейнер обробляється асинхронно (IG ще тягне картинку з нашого /media) -
 // media_publish одразу після create періодично падав «Media ID is not available». Тому: чекаємо
 // status_code=FINISHED (фото зазвичай 1-3с) і ретраїмо публіш, якщо IG ще «не бачить» медіа.
-async function igWaitFinished(containerId: string, pageToken: string): Promise<void> {
-  for (let i = 0; i < 20; i++) {
-    let st: { status_code?: string } = {};
-    try { st = await fbFetch<{ status_code?: string }>(`${GRAPH}/${containerId}?fields=status_code&access_token=${encodeURIComponent(pageToken)}`); }
+async function igWaitFinished(containerId: string, pageToken: string, o?: { tries?: number; everyMs?: number; what?: string }): Promise<void> {
+  const what = o?.what || "зображення";
+  for (let i = 0; i < (o?.tries ?? 20); i++) {
+    let st: { status_code?: string; status?: string } = {};
+    try { st = await fbFetch<{ status_code?: string; status?: string }>(`${GRAPH}/${containerId}?fields=status_code,status&access_token=${encodeURIComponent(pageToken)}`); }
     catch { /* статус інколи недоступний одразу - просто чекаємо далі */ }
     if (st.status_code === "FINISHED") return;
-    if (st.status_code === "ERROR") throw new Error("Instagram не зміг обробити зображення (формат/недоступний URL фото)");
-    await new Promise((r) => setTimeout(r, 2000));
+    // у status IG пише причину («Error: … codec …») - без неї людина не знає, що переробити
+    if (st.status_code === "ERROR") throw new Error(`Instagram не зміг обробити ${what}` + (st.status ? `: ${String(st.status).slice(0, 200)}` : what === "відео" ? " (потрібно MP4/MOV, H.264, 3 с - 15 хв)" : " (формат/недоступний URL фото)"));
+    await new Promise((r) => setTimeout(r, o?.everyMs ?? 2000));
   }
-  throw new Error("Instagram довго обробляє зображення - спробуй ще раз за хвилину");
+  throw new Error(`Instagram довго обробляє ${what} - спробуй ще раз за кілька хвилин`);
 }
 async function igPublishContainer(igUserId: string, pageToken: string, creationId: string): Promise<{ mediaId: string }> {
   const pbody = new URLSearchParams({ creation_id: creationId, access_token: pageToken });

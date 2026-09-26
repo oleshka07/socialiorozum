@@ -36,6 +36,14 @@ const CAR = new Map([
   [P4, [{ id: "g1", filename: "g1.jpg" }, { id: "g2", filename: "g2.jpg" }, { id: "g3", filename: "g3.jpg" }]],
 ]);
 const carCalls = [];
+// 🎬 відео-пост: відкривається лише в композері; відео завелике для Telegram (60 МБ) і задовге для Threads (6:40)
+const P5 = "55555555-5555-5555-5555-555555555555";
+const P5POST = { id: P5, content: "Ранок у глемпінгу", review: "review", channels: { instagram: { on: true }, telegram: { on: true }, threads: { on: true } }, format: "post", rubric: "", intent: "", sent: [], links: {} };
+CAR.set(P5, [{ id: "v5", filename: "big.mp4", kind: "video", duration: 400, width: 720, height: 1280, size: 60 * 1048576 }]);
+// заливка частинами: сервер-заглушка тримає «скільки вже прийшло» на кожен uid, як справжній
+const CHUNKS = new Map();
+const chunkPuts = [];
+const videoCalls = [];
 
 const POSTS = [
   {
@@ -159,7 +167,8 @@ const API = {
       { id: "ws-1", emails: "smoke@rozum.one", day: 2.55, month: 7.1, calls: 12, spend_cap_day: null, spend_cap_month: null, cli_enabled: false },
       { id: "ws-2", emails: "oleg@rozum.one", day: 0.4, month: 9.9, calls: 3, spend_cap_day: 0, spend_cap_month: 0, cli_enabled: true },
     ] },
-  "GET /media": [{ id: "md1", filename: "pic.jpg", kind: "image", source: "upload", created_at: iso(0, 8) },
+  "GET /media": [{ id: "mv1", filename: "lib.mp4", kind: "video", source: "upload", duration: 75, width: 720, height: 1280, size: 12000000, created_at: iso(0, 9) },
+    { id: "md1", filename: "pic.jpg", kind: "image", source: "upload", created_at: iso(0, 8) },
     { id: "md2", filename: "pic2.jpg", kind: "image", source: "upload", created_at: iso(0, 7) },
     { id: "md3", filename: "pic3.jpg", kind: "image", source: "upload", created_at: iso(0, 6) }],
   "GET /sources/recent": [],
@@ -366,14 +375,22 @@ function handleApi(method, path, body) {
     CAR.set(pid, list);
     return { ok: true, media: list };
   }
+  // 🎬 відео поста: замінює всі кадри (null - прибрати)
+  let vm = /^\/posts\/([0-9a-f-]+)\/video$/.exec(path);
+  if (vm && method === "PUT") {
+    videoCalls.push({ pid: vm[1], mediaId: body?.mediaId ?? null });
+    const list = body?.mediaId ? [{ id: body.mediaId, filename: body.mediaId + ".mp4", kind: "video", duration: 6, width: 720, height: 1280, size: 9 * 1048576 }] : [];
+    CAR.set(vm[1], list);
+    return { ok: true, media: list };
+  }
   let m = /^\/posts\/([0-9a-f-]+)\/full$/.exec(path);
   if (m) {
-    const p = m[1] === P4 ? P4POST : (POSTS.find((x) => x.id === m[1]) || POSTS[0]);
+    const p = m[1] === P4 ? P4POST : m[1] === P5 ? P5POST : (POSTS.find((x) => x.id === m[1]) || POSTS[0]);
     return { ...p, image_prompt: "", headline: "", has_base: false, slides_text: "", media: CAR.get(p.id) || (p.media_filename ? [{ id: "c0", filename: p.media_filename }] : []) };
   }
   m = /^\/posts\/([0-9a-f-]+)\/publish-state$/.exec(path);
   if (m) {
-    if (m[1] === P4) return { sent: [], links: {} };
+    if (m[1] === P4 || m[1] === P5) return { sent: [], links: {} };
     const p = POSTS.find((x) => x.id === m[1]) || POSTS[0];
     return { sent: p.sent || [], links: p.links || {} };
   }
@@ -418,17 +435,33 @@ const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const server = createServer((req, res) => {
   const url = req.url || "/";
   if (url.startsWith("/api/")) {
-    // тіло читаємо, бо перевірка ключів мусить бачити, ЩО САМЕ надіслав клієнт
-    let raw = "";
-    req.on("data", (c) => { raw += c; });
+    // тіло читаємо, бо перевірка ключів мусить бачити, ЩО САМЕ надіслав клієнт (Buffer - шматки
+    // відео бінарні, рядок перекрутив би їхню довжину)
+    const bufs = [];
+    req.on("data", (c) => { bufs.push(c); });
     req.on("end", () => {
+      const rawBuf = Buffer.concat(bufs), raw = rawBuf.toString();
+      // ⬆ заливка частинами: offset мусить дорівнювати тому, що вже прийшло (як на справжньому сервері)
+      if (req.method === "PUT" && url.startsWith("/api/media/chunk")) {
+        const qp = new URL(url, "http://x").searchParams;
+        const uid = qp.get("uid"), size = +qp.get("size"), off = +qp.get("offset");
+        const name = decodeURIComponent(String(req.headers["x-file-name"] || ""));
+        const have = CHUNKS.get(uid) || 0;
+        chunkPuts.push({ uid, offset: off, bytes: rawBuf.length, name });
+        const send = (code, o) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(o)); };
+        if (off !== have) return send(409, { error: "бракує даних", received: have });
+        const got = have + rawBuf.length; CHUNKS.set(uid, got);
+        if (got < size) return send(200, { ok: true, done: false, received: got, size });
+        const video = /\.(mp4|mov|m4v|webm)$/i.test(name);
+        return send(200, { ok: true, done: true, received: got, size, saved: { id: "nv" + chunkPuts.length, kind: video ? "video" : "image", filename: "new" + (video ? ".mp4" : ".jpg"), url: "/media/new.mp4", dup: false } });
+      }
       // завантаження в медіатеку: рахуємо файли в запиті - так перевірка бачить, чи кабінет ділить пачку
       if (req.method === "POST" && url.startsWith("/api/media")) {
         const names = [...raw.matchAll(/filename="([^"]*)"/g)].map((m) => m[1]);
         mediaPosts.push(names.length);
-        mediaBytes.push(raw.length);
+        mediaBytes.push(rawBuf.length);
         // так відповідає nginx на тіло понад client_max_body_size (20 МБ) - HTML, а не JSON
-        if (raw.length > 20 * 1024 * 1024) { res.writeHead(413, { "content-type": "text/html" }); res.end("<html><body><h1>413 Request Entity Too Large</h1></body></html>"); return; }
+        if (rawBuf.length > 20 * 1024 * 1024) { res.writeHead(413, { "content-type": "text/html" }); res.end("<html><body><h1>413 Request Entity Too Large</h1></body></html>"); return; }
         res.writeHead(200, { "content-type": "application/json" });
         // файл «dup…» сервер уже мав (дедуп за вмістом) - так і каже прапорцем dup
         res.end(JSON.stringify({ ok: true, saved: names.map((nm, i) => ({ id: "up" + i, kind: "image", url: "/media/x.png", dup: nm.startsWith("dup") })), failed: [] }));
@@ -783,6 +816,70 @@ const run = async () => {
     const txt = await $t('.pcard[data-post="11111111-1111-1111-1111-111111111111"] .pcard-cnt');
     await page.evaluate(() => { StudioFilter = "all"; renderStudio(); });
     return txt === "🖼 3";
+  });
+
+  await check("videoComposer", async () => {
+    // 🎬 відео-пост: плитка з тривалістю, ліміти мереж видно ДО публікації, прев'ю - плеєр (IG - Reels),
+    // а «＋ Кадри каруселі» не відкриває вибір: відео йде окремим постом
+    await closeComposers();
+    await page.waitForTimeout(150);
+    await page.evaluate((id) => openComposer(id), P5);
+    await page.waitForSelector(".cmp-ov #cmpVidWarn", { timeout: 6000 });
+    const st = await page.evaluate(() => ({
+      tile: (document.querySelector("#cmpMediaWrap .slide-th .sn") || {}).textContent,
+      warn: document.querySelector("#cmpVidWarn").textContent,
+      videos: document.querySelectorAll("#cmpPrev video").length,
+      reel: !!document.querySelector("#cmpPrev .pv-video.reel video") && /Reels/.test((document.querySelector("#cmpPrev .pv-video.reel") || {}).textContent || ""),
+    }));
+    await page.evaluate(() => document.querySelector("#cmpAddSlides").click());
+    await page.waitForTimeout(250);
+    const msg = await $t("#cmpMsg");
+    const picker = await has(".modal .slide-pick");
+    const good = st.tile === "▶ 6:40" && /Telegram не прийме відео понад 50 МБ \(це 60 МБ\)/.test(st.warn) && /Threads приймає відео до 5 хв/.test(st.warn)
+      && st.videos === 3 && st.reel && /окремим постом/.test(msg) && !picker;
+    if (!good) console.log("   ↳ videoComposer:", JSON.stringify({ st, msg, picker }));
+    return good;
+  });
+
+  await check("videoPick", async () => {
+    // вибір відео: у медіатеці - кадр і тривалість; з компʼютера - ЧАСТИНАМИ по 8 МБ (9 МБ = 2 запити),
+    // потім відео стає медіа поста, і попередження зникають (6 с, 9 МБ - усім мережам ок)
+    chunkPuts.length = 0; videoCalls.length = 0;
+    await page.evaluate(() => document.querySelector("#cmpVideo").click());
+    await page.waitForSelector(".modal #pvFile", { state: "attached", timeout: 5000 });
+    const libBadge = await $t('.modal .slide-pick[data-id="mv1"] .vbadge');
+    await page.evaluate(() => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([new Uint8Array(9 * 1024 * 1024)], "clip.mp4", { type: "video/mp4" }));
+      const inp = document.querySelector("#pvFile"); inp.files = dt.files; inp.dispatchEvent(new Event("change"));
+    });
+    await page.waitForFunction(() => /0:06/.test((document.querySelector("#cmpMediaWrap .slide-th .sn") || {}).textContent || ""), undefined, { timeout: 8000 });
+    const st = await page.evaluate(() => ({ warn: !!document.querySelector("#cmpVidWarn"), msg: document.querySelector("#cmpMsg").textContent, modal: !!document.querySelector(".modal #pvFile") }));
+    await closeComposers();
+    const sizes = chunkPuts.map((c) => c.bytes);
+    const good = libBadge === "▶ 1:15" && sizes.join(",") === [8 * 1048576, 1048576].join(",") && chunkPuts[1].offset === 8 * 1048576
+      && videoCalls.length === 1 && videoCalls[0].pid === P5 && /^nv/.test(videoCalls[0].mediaId) && !st.warn && !st.modal && /відео в пості/.test(st.msg);
+    if (!good) console.log("   ↳ videoPick:", JSON.stringify({ libBadge, sizes, videoCalls, st }));
+    return good;
+  });
+
+  await check("videoCard", async () => {
+    // картка Студії: відео-пост - кадр із ролика й тривалість, клік веде в композер (не в редактор фото)
+    const st = await page.evaluate(async () => {
+      selectView("create"); setCTab("posts");
+      await loadStudioPosts();   // перемикання вкладки саме перечитує Finals - дочекатись, інакше він затре наш пост
+      // фільтри Студії могли лишитись від попередніх перевірок - на час перевірки знімаємо, потім вертаємо
+      const keep = [StudioFilter, StudioRubric, StudioFormat, StudioOrigin];
+      StudioFilter = "all"; StudioRubric = ""; StudioFormat = ""; StudioOrigin = "";
+      Finals.push({ id: "66666666-6666-6666-6666-666666666666", content: "Відео-пост", review: "review", channels: { instagram: { on: true } }, media_filename: "reel.mp4", media_kind: "video", media_duration: 42, media_count: 1, sent: [], links: {}, format: "post" });
+      renderStudio();
+      const el = document.querySelector('.pcard[data-post="66666666-6666-6666-6666-666666666666"] .pcard-img');
+      const out = el ? { cnt: (el.querySelector(".pcard-cnt") || {}).textContent, a: el.dataset.a } : null;
+      Finals.pop(); [StudioFilter, StudioRubric, StudioFormat, StudioOrigin] = keep; renderStudio();
+      return out;
+    });
+    if (!(st && st.cnt === "▶ 0:42" && st.a === "composer")) console.log("   ↳ videoCard:", JSON.stringify(st));
+    return !!st && st.cnt === "▶ 0:42" && st.a === "composer";
   });
 
   await check("deepLink", async () => {
@@ -1261,8 +1358,8 @@ const run = async () => {
 
   await check("mediaBytes", async () => {
     // порція не більша за 20 МБ nginx: 3 фото по 8 МБ ідуть двома запитами, а не одним на 24 МБ,
-    // який nginx відбив би цілком; файл на 25 МБ іде сам і падає з людською причиною
-    mediaPosts.length = 0; mediaBytes.length = 0;
+    // який nginx відбив би цілком; файл на 25 МБ (більший за порцію) іде ЧАСТИНАМИ по 8 МБ і доходить
+    mediaPosts.length = 0; mediaBytes.length = 0; chunkPuts.length = 0;
     const msg = await page.evaluate(async () => {
       const dt = new DataTransfer();
       for (const [n, mb] of [["a.jpg", 8], ["b.jpg", 8], ["c.jpg", 8], ["huge.jpg", 25]]) dt.items.add(new File([new Uint8Array(mb * 1024 * 1024)], n, { type: "image/jpeg" }));
@@ -1272,10 +1369,23 @@ const run = async () => {
       for (let i = 0; i < 150 && !/завантажено/.test(el.textContent); i++) await new Promise((r) => setTimeout(r, 100));
       return el.textContent;
     });
-    const good = mediaPosts.join(",") === "2,1,1" && mediaBytes.slice(0, 2).every((b) => b <= 20 * 1024 * 1024)
-      && /^⚠ завантажено 3 з 4\. Не вдалось: huge\.jpg - завеликий файл: сервер приймає до 20 МБ за раз$/.test(msg);
-    if (!good) console.log("   ↳ mediaBytes:", JSON.stringify({ mediaPosts, mb: mediaBytes.map((b) => Math.round(b / 1048576)), msg }));
+    const huge = chunkPuts.filter((c) => c.name === "huge.jpg");
+    const MB = 1024 * 1024;
+    const good = mediaPosts.join(",") === "2,1" && mediaBytes.every((b) => b <= 20 * MB)
+      && huge.map((c) => c.bytes).join(",") === [8 * MB, 8 * MB, 8 * MB, MB].join(",") && huge.every((c, i) => c.offset === i * 8 * MB)
+      && msg === "завантажено: 4";
+    if (!good) console.log("   ↳ mediaBytes:", JSON.stringify({ mediaPosts, mb: mediaBytes.map((b) => Math.round(b / 1048576)), huge, msg }));
     return good;
+  });
+
+  await check("videoLibrary", async () => {
+    // відео в медіатеці - кадр-мініатюра з тривалістю, а не <video>, що тягнув би весь файл
+    await page.evaluate(() => { selectView("settings"); setSTab("sources"); return loadMedia(); });
+    await page.waitForSelector('#mediaGrid [data-id="mv1"] .vbadge', { timeout: 5000 });
+    const st = await page.evaluate(() => ({ badge: document.querySelector('#mediaGrid [data-id="mv1"] .vbadge').textContent,
+      src: document.querySelector('#mediaGrid [data-id="mv1"] img').getAttribute("src"), videos: document.querySelectorAll("#mediaGrid video").length }));
+    if (!(st.badge === "▶ 1:15" && st.src === "/thumb/lib.mp4" && st.videos === 0)) console.log("   ↳ videoLibrary:", JSON.stringify(st));
+    return st.badge === "▶ 1:15" && st.src === "/thumb/lib.mp4" && st.videos === 0;
   });
 
   await check("cfProvider", async () => {
@@ -1526,7 +1636,19 @@ const run = async () => {
     const pic = await tgPage.$eval(".sheet img.thumb", (el) => el.getAttribute("src"));
     await tgPage.click("#aRw");                              // переписування - теж джоба
     await tgPage.waitForFunction(() => document.querySelector(".sheet #et").value.includes("Переписаний"), undefined, { timeout: 12000 });
-    return acts.length === 3 && acts.some((a) => a.includes("Фото")) && pic.includes("ai.jpg");
+    return acts.length === 4 && acts.some((a) => a.includes("Фото")) && acts.some((a) => a.includes("Відео")) && pic.includes("ai.jpg");
+  });
+
+  await check("tgappVideo", async () => {
+    // 🎬 пост із відео в Mini App: плеєр замість фото, «Прибрати відео», без «＋ Ще фото»
+    const st = await tgPage.evaluate(() => {
+      const keep = { media: cur.media, filename: cur.filename };
+      cur.media = ["clip.mp4"]; cur.filename = "clip.mp4"; drawEditor();
+      const out = { video: !!document.querySelector(".sheet video.thumb"), del: (document.getElementById("aDelPic") || {}).textContent || "", more: !!document.getElementById("aMore"), vid: !!document.getElementById("aVid") };
+      cur.media = keep.media; cur.filename = keep.filename; drawEditor();
+      return out;
+    });
+    return st.video && /Прибрати відео/.test(st.del) && !st.more && st.vid;
   });
 
   await check("tgappApprove", async () => {

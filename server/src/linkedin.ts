@@ -75,9 +75,55 @@ export async function uploadImage(token: string, authorUrn: string, imageBuf: Bu
   return init.value.image; // urn:li:image:…
 }
 
-// публікація поста (текст до 3000 симв, опційно зображення). Кілька зображень = multiImage
-// (LinkedIn приймає 2-20), одне - звичайне media.
-export async function publish(token: string, authorUrn: string, text: string, images?: Buffer | Buffer[]): Promise<{ postId: string }> {
+// 🎬 Відео: initializeUpload (LinkedIn сам ділить файл на частини по ~4 МБ і дає адресу на кожну) →
+// PUT кожної частини (відповідь несе ETag) → finalizeUpload зі списком ETag → чекаємо AVAILABLE.
+// Файл читаємо частинами з диска, а не цілим: відео буває на сотні МБ.
+export async function uploadVideo(token: string, authorUrn: string, filePath: string, size: number): Promise<string> {
+  const { open } = await import("node:fs/promises");
+  const init = await liFetch<{ value: { video: string; uploadToken?: string; uploadInstructions: Array<{ uploadUrl: string; firstByte: number; lastByte: number }> } }>(
+    `${API}/rest/videos?action=initializeUpload`, {
+      method: "POST", headers: REST_HEADERS(token),
+      body: JSON.stringify({ initializeUploadRequest: { owner: authorUrn, fileSizeBytes: size, uploadCaptions: false, uploadThumbnail: false } }),
+    });
+  const v = init.value;
+  const etags: string[] = [];
+  const fh = await open(filePath, "r");
+  try {
+    for (const part of v.uploadInstructions || []) {
+      const len = part.lastByte - part.firstByte + 1;
+      const buf = Buffer.alloc(len);
+      await fh.read(buf, 0, len, part.firstByte);
+      let res: Response | null = null;
+      for (let att = 0; att < 3; att++) {
+        try {
+          res = await fetch(part.uploadUrl, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/octet-stream" }, body: new Uint8Array(buf) });
+          if (res.ok) break;
+        } catch { /* мережа моргнула - повторимо частину */ }
+        await new Promise((r) => setTimeout(r, 2000 * (att + 1)));
+      }
+      if (!res || !res.ok) throw new Error(`LinkedIn: не вдалося завантажити частину відео (HTTP ${res?.status ?? "мережа"})`);
+      etags.push(String(res.headers.get("etag") || "").replace(/^W\//, ""));
+    }
+  } finally { await fh.close(); }
+  await liFetch(`${API}/rest/videos?action=finalizeUpload`, {
+    method: "POST", headers: REST_HEADERS(token),
+    body: JSON.stringify({ finalizeUploadRequest: { video: v.video, uploadToken: v.uploadToken || "", uploadedPartIds: etags } }),
+  });
+  // пост із ще не обробленим відео LinkedIn відхиляє - чекаємо, поки стане AVAILABLE (до ~3 хв)
+  for (let i = 0; i < 36; i++) {
+    let st = "";
+    try { st = String((await liFetch<{ status?: string }>(`${API}/rest/videos/${encodeURIComponent(v.video)}`, { headers: REST_HEADERS(token) })).status || ""); }
+    catch { /* статус ще не віддається */ }
+    if (st === "AVAILABLE") return v.video;
+    if (st === "PROCESSING_FAILED") throw new Error("LinkedIn не зміг обробити відео (потрібно MP4, від 3 с до 30 хв)");
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+  throw new Error("LinkedIn довго обробляє відео - спробуй опублікувати ще раз за кілька хвилин");
+}
+
+// публікація поста (текст до 3000 симв, опційно зображення або відео). Кілька зображень = multiImage
+// (LinkedIn приймає 2-20), одне - звичайне media; відео - media з urn:li:video.
+export async function publish(token: string, authorUrn: string, text: string, images?: Buffer | Buffer[], video?: { path: string; size: number }): Promise<{ postId: string }> {
   const body: any = {
     author: authorUrn,
     commentary: escapeCommentary(text.slice(0, 3000)),
@@ -87,7 +133,9 @@ export async function publish(token: string, authorUrn: string, text: string, im
     isReshareDisabledByAuthor: false,
   };
   const bufs = (Array.isArray(images) ? images : images ? [images] : []).slice(0, 20);
-  if (bufs.length >= 2) {
+  if (video) {
+    body.content = { media: { id: await uploadVideo(token, authorUrn, video.path, video.size) } };
+  } else if (bufs.length >= 2) {
     const urns: string[] = [];
     for (const b of bufs) urns.push(await uploadImage(token, authorUrn, b));
     body.content = { multiImage: { images: urns.map((id) => ({ id })) } };

@@ -69,8 +69,8 @@ export async function getMe(token: string) {
 // НАДІЙНІСТЬ: контейнер (особливо з фото - Threads тягне його з нашого /media) обробляється
 // асинхронно; threads_publish одразу падав «The requested resource does not exist».
 // Док Meta: чекати до ~30с. Полимо статус контейнера до FINISHED, потім публікуємо з ретраями.
-async function thWaitFinished(token: string, containerId: string): Promise<void> {
-  for (let i = 0; i < 20; i++) {
+async function thWaitFinished(token: string, containerId: string, tries = 20, everyMs = 2000): Promise<void> {
+  for (let i = 0; i < tries; i++) {
     let st: { status?: string; error_message?: string } = {};
     try {
       const su = new URL(`${GRAPH}/v1.0/${containerId}`);
@@ -80,7 +80,7 @@ async function thWaitFinished(token: string, containerId: string): Promise<void>
     } catch { /* статус ще не віддається - чекаємо далі */ }
     if (st.status === "FINISHED") return;
     if (st.status === "ERROR") throw new Error("Threads не зміг обробити медіа" + (st.error_message ? `: ${st.error_message}` : ""));
-    await new Promise((r) => setTimeout(r, 2000));
+    await new Promise((r) => setTimeout(r, everyMs));
   }
   throw new Error("Threads довго обробляє медіа - спробуй ще раз за хвилину");
 }
@@ -146,6 +146,20 @@ export async function publishCarousel(token: string, userId: string, text: strin
   car.searchParams.set("access_token", token);
   const c = await thFetch<{ id: string }>(car.toString(), { method: "POST" });
   await thWaitFinished(token, c.id);
+  return thPublishContainer(token, userId, c.id);
+}
+
+// 🎬 Відео в Threads: контейнер VIDEO з video_url → чекаємо обробки → threads_publish. Відео Threads
+// обробляє довше за фото (хвилини, а не секунди), тож і чекаємо до 5 хв. Межі Threads: до 5 хв і 1 ГБ.
+export async function publishVideo(token: string, userId: string, text: string, videoUrl: string, replyToId?: string) {
+  const create = new URL(`${GRAPH}/v1.0/${userId}/threads`);
+  create.searchParams.set("media_type", "VIDEO");
+  create.searchParams.set("video_url", videoUrl);
+  if (text) create.searchParams.set("text", text);
+  if (replyToId) create.searchParams.set("reply_to_id", replyToId);
+  create.searchParams.set("access_token", token);
+  const c = await thFetch<{ id: string }>(create.toString(), { method: "POST" });
+  await thWaitFinished(token, c.id, 60, 5000);
   return thPublishContainer(token, userId, c.id);
 }
 

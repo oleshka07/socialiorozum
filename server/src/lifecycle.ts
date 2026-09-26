@@ -6,6 +6,7 @@ import { q } from "./db.js";
 import { logEvent } from "./log.js";
 import { sweepJobs } from "./jobs.js";
 import { sweepUploadLinks } from "./uploadlink.js";
+import { sweepChunks } from "./chunks.js";
 import { env } from "./env.js";
 import { MEDIA_DIR, deleteMediaFile } from "./media.js";
 import { sendInactivityWarningEmail } from "./email.js";
@@ -45,7 +46,10 @@ async function sweepOrphanMedia(): Promise<void> {
   try { files = await readdir(MEDIA_DIR); } catch { return; }
   if (!files.length) return;
   const rows = await q<{ filename: string }>(`select filename from media_asset`);
-  const known = new Set(rows.map((r) => r.filename));
+  // зібрані рілси (post.reel_video) лежать поруч без рядка в media_asset - раніше сторож стирав їх
+  // через добу, і ▶️ на картці та публікація рілса падали на 404
+  const reels = await q<{ filename: string }>(`select reel_video as filename from post where reel_video is not null`);
+  const known = new Set([...rows, ...reels].map((r) => r.filename));
   for (const f of files) {
     if (known.has(f)) continue;
     try { const st = await stat(join(MEDIA_DIR, f)); if (Date.now() - st.mtimeMs > ORPHAN_MS) await deleteMediaFile(f); } catch { /* ignore */ }
@@ -98,6 +102,7 @@ async function tick(): Promise<void> {
   } catch { /* ignore */ }
   try { await sweepJobs(); } catch { /* ignore */ }
   try { await sweepUploadLinks(); } catch { /* ignore */ }
+  try { await sweepChunks(); } catch { /* ignore */ }   // недолиті частини великих файлів
   // 5) 🧠 памʼять контенту: наздоганяємо пости, опубліковані ДО появи дистиляції. Порційно (ліміт
   // усередині) - кожен артефакт це виклик моделі, і разовий прохід по всьому архіву коштував би
   // відчутних грошей; за кілька проходів воркера архів наздожене себе сам.

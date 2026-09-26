@@ -12,12 +12,12 @@ import { deleteMediaFile } from "./media.js";
 // в усі мережі одразу, тож межа - найвужча)
 export const MAX_SLIDES = 10;
 
-export type PostMedia = { id: string; filename: string; kind: string; source: string };
+export type PostMedia = { id: string; filename: string; kind: string; source: string; size?: number | null; duration?: number | null; width?: number | null; height?: number | null };
 
 /** Кадри поста по порядку: обкладинка першою, далі post_slide. */
 export async function postMediaList(postId: string): Promise<PostMedia[]> {
   return q<PostMedia>(
-    `select m.id, m.filename, m.kind, m.source from (
+    `select m.id, m.filename, m.kind, m.source, m.size, m.duration, m.width, m.height from (
         select media_id, 0 as pos from post where id=$1 and media_id is not null
         union all select media_id, pos from post_slide where post_id=$1
      ) x join media_asset m on m.id = x.media_id
@@ -82,17 +82,25 @@ export async function setPostMediaOrder(ws: string, postId: string, ids: string[
   const byId = new Map(found.map((m) => [m.id, m]));
   for (const id of uniq) {
     const m = byId.get(id);
-    if (!m) throw new SlideError("Фото не знайдено в медіатеці цього кабінету.");
-    if (m.kind !== "image") throw new SlideError("У каруселі - лише фото (відео тут не підтримується).");
+    if (!m) throw new SlideError("Файл не знайдено в медіатеці цього кабінету.");
+    if (m.kind !== "image" && m.kind !== "video") throw new SlideError("Підтримуються лише фото й відео.");
   }
+  // 🎬 відео - окремий пост (Reels, відео у Facebook, Threads, Telegram, LinkedIn): поруч із ним фото
+  // не буває - Facebook-галерея й LinkedIn відео не беруть, а мережі з мішаною каруселлю - не всі
+  if (uniq.some((id) => byId.get(id)!.kind === "video") && uniq.length > 1)
+    throw new SlideError("Відео публікується окремим постом: у каруселі поки лише фото. Прибери відео або фото.");
   const prev = await one<{ media_id: string | null; image_base: string | null }>(`select media_id, image_base from post where id=$1`, [postId]);
   if (!prev) throw new SlideError("пост не знайдено");
   const before = await postMediaList(postId);
   const cover = uniq[0] || null;
   if (cover !== prev.media_id) {
     if (opts?.keepBase) await q(`update post set media_id=$2 where id=$1`, [postId, cover]);
-    // нова обкладинка - новий «чистий» кадр під текст: база = вона сама, старий напис уже не про неї
-    else await q(`update post set media_id=$2, image_base=$3, headline=null where id=$1`, [postId, cover, cover ? byId.get(cover)!.filename : null]);
+    // нова обкладинка - новий «чистий» кадр під текст: база = вона сама, старий напис уже не про неї.
+    // На відео текст не накладається - бази нема.
+    else {
+      const c = cover ? byId.get(cover)! : null;
+      await q(`update post set media_id=$2, image_base=$3, headline=null where id=$1`, [postId, cover, c && c.kind === "image" ? c.filename : null]);
+    }
   }
   await q(`delete from post_slide where post_id=$1`, [postId]);
   for (let i = 1; i < uniq.length; i++)
@@ -102,6 +110,14 @@ export async function setPostMediaOrder(ws: string, postId: string, ids: string[
   if (cover !== prev.media_id && prev.image_base && !opts?.keepBase) gone.push({ filename: prev.image_base });
   await dropUnusedDerived(ws, gone);
   return postMediaList(postId);
+}
+
+/** 🎬 Поставити посту відео (замість усіх фото/кадрів). */
+export async function setPostVideo(ws: string, postId: string, mediaId: string): Promise<PostMedia[]> {
+  const m = await one<{ kind: string }>(`select kind from media_asset where id=$1 and workspace_id=$2`, [mediaId, ws]);
+  if (!m) throw new SlideError("Відео не знайдено в медіатеці цього кабінету.");
+  if (m.kind !== "video") throw new SlideError("Це не відео - фото додаються як обкладинка чи кадри каруселі.");
+  return setPostMediaOrder(ws, postId, [mediaId]);
 }
 
 /** Додати кадри в кінець (обкладинки нема - перший стає нею). */

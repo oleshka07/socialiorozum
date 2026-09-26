@@ -402,7 +402,9 @@
   .slide-th .sm{display:flex;justify-content:space-between;margin-top:3px}
   .slide-th .sm button{border:1px solid var(--line2);background:transparent;border-radius:6px;font-size:11px;padding:1px 8px;cursor:pointer;color:var(--ink2)}
   .slide-th .sm button:disabled{opacity:.3;cursor:default}
-  .slide-add{width:78px;height:98px;border:1.5px dashed var(--line2);border-radius:9px;background:transparent;color:var(--muted);font-size:12px;font-weight:700;cursor:pointer;line-height:1.3}
+  .pv-video{position:relative;background:#000}.pv-video video{width:100%;display:block;max-height:440px;background:#000}.pv-video.reel video{aspect-ratio:9/16;object-fit:cover;max-height:520px}
+  .vbadge{position:absolute;left:4px;bottom:4px;background:rgba(0,0,0,.62);color:#fff;font-size:10.5px;font-weight:700;border-radius:6px;padding:1px 6px;pointer-events:none}
+.slide-add{width:78px;height:98px;border:1.5px dashed var(--line2);border-radius:9px;background:transparent;color:var(--muted);font-size:12px;font-weight:700;cursor:pointer;line-height:1.3}
   .slide-add:hover{border-color:var(--brand);color:var(--brand)}
   .slide-pick{position:relative;cursor:pointer}
   .slide-pick img{height:84px;border-radius:8px;display:block;background:var(--surface2);border:2px solid transparent}
@@ -1092,7 +1094,7 @@
           <div class="panel" style="margin:0">
             <div class="ph">🖼️ Медіа-бібліотека</div>
             <div class="hint">Фото для постів. Можна завантажити одразу пачкою: Claude у конекторі бачить їх і сам підбирає до постів. А в Claude Code чи Cowork можна просто сказати «залий фото з папки …» - він зробить це сам, повтори не задвоюються.</div>
-            <div class="btnrow"><input type="file" id="mediaFile" accept="image/*" multiple style="font-size:13px"><button class="primary" id="mediaUpload">Завантажити</button><span id="mediaMsg" style="font-size:12px;color:var(--muted)"></span></div>
+            <div class="btnrow"><input type="file" id="mediaFile" accept="image/*,video/*" multiple style="font-size:13px"><button class="primary" id="mediaUpload">Завантажити</button><span id="mediaMsg" style="font-size:12px;color:var(--muted)"></span></div>
             <div id="mediaGrid" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"></div>
           </div>
           <div class="panel" style="margin:0">

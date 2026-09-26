@@ -31,7 +31,8 @@ import { logEvent } from "./log.js";
 import { startAutopost } from "./autopost.js";
 import { startRssPoller, pullFeed } from "./rss-poller.js";
 import { resolveSource } from "./rss-resolver.js";
-import { MEDIA_DIR, saveMedia, deleteMediaFile, convertAllHeif, getThumb, sniffKind } from "./media.js";
+import { MEDIA_DIR, saveMedia, saveMediaFile, deleteMediaFile, convertAllHeif, fixLegacyVideos, getThumb, sniffKind } from "./media.js";
+import { putChunk, ChunkError, CHUNK_MAX, headerFileName } from "./chunks.js";
 import { normalizeMeeting, saveMeeting } from "./meetings.js";
 import { spendStatus, SpendCapError, CAPS } from "./spend.js";
 import { spreadTimes, topicAngles } from "./textkind.js";
@@ -56,9 +57,9 @@ import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUserna
 import { chat } from "./openrouter.js";
 import { handleBody, wantsSse, sseEncode, resolveToken, mcpTokenFor, issueMcpToken, revokeMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
 import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember, deleteBrand, workspaceTitle } from "./workspaces.js";
-import { postMediaList, mediaCounts, setPostMediaOrder, removePostMedia, promoteIfCoverless, healCoverless, SlideError, MAX_SLIDES } from "./slides.js";
+import { postMediaList, mediaCounts, setPostMediaOrder, setPostVideo, removePostMedia, promoteIfCoverless, healCoverless, SlideError, MAX_SLIDES } from "./slides.js";
 import { renderCarousel, CAROUSEL_THEMES } from "./carousel.js";
-import { uploadLinkState, takeUploadSlot, markUploaded, refundUploadSlot, uploadPageHtml, uploadResultText, UPLOAD_FILE_MAX, UPLOAD_TEXT, type UploadResult } from "./uploadlink.js";
+import { uploadLinkState, takeUploadSlot, markUploaded, refundUploadSlot, uploadPageHtml, uploadResultText, uploadScript, uploadUrl, UPLOAD_FILE_MAX, UPLOAD_TEXT, type UploadResult } from "./uploadlink.js";
 import { CLI_MODELS, cliAllowedFor, cliHealth, forgetCliAllowed, cliCooldown } from "./claudecli.js";
 import { sttChoice, sttAvailable } from "./stt.js";
 import { oauthWhy, oauthFailQuery } from "./oauthwhy.js";
@@ -106,6 +107,10 @@ app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body,
   if (!body) return done(null, {});
   try { done(null, JSON.parse(body as string)); } catch (e) { done(e as Error, undefined); }
 });
+
+// ⬆ шматок великого файлу (заливка частинами) - сирі байти, а не multipart: curl шле його як
+// --data-binary, браузер - Blob-зрізом файлу. Ліміт - один шматок, а не весь файл.
+app.addContentTypeParser("application/octet-stream", { parseAs: "buffer", bodyLimit: CHUNK_MAX + 64 * 1024 }, (_req, body, done) => done(null, body));
 
 // HTML-сторінки не кешуємо браузером - щоб після деплою одразу бачити свіжий app.html
 app.addHook("onSend", async (req: any, reply, payload) => {
@@ -798,10 +803,44 @@ app.post("/api/media", async (req: any, reply) => {
   return { ok: true, saved, failed };
 });
 
+// ⬆ Заливка частинами: відео з телефона на 100-500 МБ одним запитом крізь nginx не пролазить (20 МБ
+// на запит), тож кабінет ріже файл на шматки й шле по черзі. Стан - на диску (src/chunks.ts), тож
+// деплой посеред заливки нічого не губить: сервер каже, з якого байта продовжити.
+function chunkArgs(req: any) {
+  const qy = req.query || {};
+  return {
+    uid: String(qy.uid || ""), size: Number(qy.size), offset: Number(qy.offset ?? 0),
+    name: headerFileName(req.headers["x-file-name"]) || headerFileName(qy.name),
+    body: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0),
+  };
+}
+app.put("/api/media/chunk", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const source = String(req.query?.source || "") === "broll" ? "broll" : "upload";
+  const a = chunkArgs(req);
+  try {
+    const r = await putChunk(`ws:${ws}:${req.user.id}`, a.uid, a.name, a.size, a.offset, a.body,
+      async (path) => {
+        const m = await saveMediaFile(ws, path, { name: a.name, source, dedupe: true });
+        if (source === "broll" && m.kind !== "video") {
+          if (!m.existed) { await q(`delete from media_asset where id=$1`, [m.id]); await deleteMediaFile(m.filename); }
+          throw new Error("для b-roll потрібне відео (mp4/mov)");
+        }
+        return m;
+      });
+    if (!r.done) return { ok: true, done: false, received: r.received, size: r.size };
+    const m = r.result;
+    return { ok: true, done: true, received: r.received, size: r.size, saved: { id: m.id, kind: m.kind, url: `/media/${m.filename}`, filename: m.filename, dup: !!m.existed } };
+  } catch (e: any) {
+    if (e instanceof ChunkError) return reply.code(e.status).send({ error: e.message, received: e.received ?? null });
+    return reply.code(400).send({ error: e.message });
+  }
+});
+
 // технічні копії (ig-safe: JPEG-версія для Instagram API) в бібліотеці не показуємо -
 // вони дублювали кожне опубліковане фото і засмічували медіатеку
 app.get("/api/media", async (req: any) =>
-  q(`select id, kind, mime, original_name, filename, size, source, created_at from media_asset
+  q(`select id, kind, mime, original_name, filename, size, source, created_at, duration, width, height from media_asset
      where workspace_id=$1 and source not in ('ig-safe','ai-base','slide') order by created_at desc limit 200`, [req.user.workspace_id]));
 
 app.delete("/api/media/:id", async (req: any, reply) => {
@@ -883,12 +922,14 @@ app.get("/api/posts/:postId/full", async (req: any, reply) => {
      left join media_asset ma on ma.id=p.media_id
      where p.id=$1 and s.workspace_id=$2`, [req.params.postId, req.user.workspace_id]);
   if (!p) return reply.code(404).send({ error: "пост не знайдено" });
-  // 🖼 кадри поста (обкладинка першою) - для смужки кадрів і прев'ю каруселі
-  return { ...p, media: (await postMediaList(p.id)).map((m) => ({ id: m.id, filename: m.filename, kind: m.kind })) };
+  // 🖼 кадри поста (обкладинка першою) - для смужки кадрів і прев'ю каруселі; 🎬 відео - з тривалістю
+  return { ...p, media: (await postMediaList(p.id)).map(mediaOut) };
 });
 
 // ---- 🖼 КАРУСЕЛЬ: кадри поста ----
-const slidesOut = async (postId: string) => ({ ok: true, media: (await postMediaList(postId)).map((m) => ({ id: m.id, filename: m.filename, kind: m.kind })) });
+const mediaOut = (m: { id: string; filename: string; kind: string; duration?: number | null; width?: number | null; height?: number | null; size?: number | null }) =>
+  ({ id: m.id, filename: m.filename, kind: m.kind, duration: m.duration ?? null, width: m.width ?? null, height: m.height ?? null, size: m.size ?? null });
+const slidesOut = async (postId: string) => ({ ok: true, media: (await postMediaList(postId)).map(mediaOut) });
 const slideFail = (reply: any, e: any) => reply.code(e instanceof SlideError ? 400 : 500).send({ error: e?.message || "не вдалося" });
 // додати кадр(и) з медіатеки в кінець (кроп-копія під пропорцію каруселі, оригінал лишається)
 app.post("/api/posts/:postId/slides", async (req: any, reply) => {
@@ -918,6 +959,18 @@ app.delete("/api/posts/:postId/slides/:mediaId", async (req: any, reply) => {
   if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
   try { await removePostMedia(ws, req.params.postId, String(req.params.mediaId)); return await slidesOut(req.params.postId); }
   catch (e: any) { return slideFail(reply, e); }
+});
+// 🎬 відео поста: замінює всі фото/кадри (відео завжди окремим постом); mediaId=null - прибрати
+app.put("/api/posts/:postId/video", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  const id = String(req.body?.mediaId || "");
+  try {
+    if (!id) { await setPostMediaOrder(ws, req.params.postId, []); return await slidesOut(req.params.postId); }
+    if (!isUuid(id)) return reply.code(400).send({ error: "обери відео" });
+    await setPostVideo(ws, req.params.postId, id);
+    return await slidesOut(req.params.postId);
+  } catch (e: any) { return slideFail(reply, e); }
 });
 // зібрати кадри зі сценарію «Слайд N: …» (sharp, без моделі - безкоштовно)
 app.post("/api/posts/:postId/carousel", async (req: any, reply) => {
@@ -2869,7 +2922,7 @@ app.get("/api/bank", async (req: any) => {
 // усі фінальні пости воркспейсу (Студія/Інбокс - глобальний список, НЕ привʼязаний до активного джерела)
 // + sent: у які мережі пост УЖЕ опубліковано (іконки на картці + фільтр «Опубліковані»)
 app.get("/api/posts/studio", async (req: any) => {
-  const rows = await q<any>(`select p.id, p.content, p.review, p.channels, p.rubric, p.intent, p.reel_video, p.format, p.qa, src.origin as source_origin, ma.filename as media_filename, p.created_at, src.title as source_title
+  const rows = await q<any>(`select p.id, p.content, p.review, p.channels, p.rubric, p.intent, p.reel_video, p.format, p.qa, src.origin as source_origin, ma.filename as media_filename, ma.kind as media_kind, ma.duration as media_duration, p.created_at, src.title as source_title
             from post p join pipeline_run r on r.id=p.run_id join source src on src.id=r.source_id
             left join media_asset ma on ma.id=p.media_id
             where src.workspace_id=$1 and p.stage='final' and (p.review is null or p.review <> 'archived')
@@ -3560,7 +3613,7 @@ app.post("/mcp/upload/:token", async (req: any, reply) => {
         const buf = await part.toBuffer();
         const kind = sniffKind(buf);
         if (!kind) throw new Error(UPLOAD_TEXT.notImage);
-        if (kind.kind !== "image") throw new Error(UPLOAD_TEXT.video);
+        // відео до 20 МБ проходить і так; більші скрипт шле частинами на /chunk
         const m = await saveMedia(st.ws, { buffer: buf, mime: part.mimetype || "application/octet-stream", name, source: "upload", dedupe: true });
         // той самий файл удруге місця не зʼїдає: у медіатеці нічого не додалось
         if (m.existed) await refundUploadSlot(token); else await markUploaded(token);
@@ -3578,6 +3631,63 @@ app.post("/mcp/upload/:token", async (req: any, reply) => {
   if (!r.saved.length && !r.failed.length) r.failed.push({ name: "", error: 'файл не надійшов - шли його полем file: curl -F "file=@фото.jpg"' });
   r.left = (await one<{ n: number }>(`select files_left as n from upload_link where token=$1`, [token]))?.n ?? null;
   return send(r.saved.length ? 200 : 400, r);
+});
+
+// ⬆ той самий приймач, але частинами: відео на сотні МБ одним запитом крізь nginx не пролазить.
+// Протокол для curl: тіло - сирі байти шматка, ?uid=&size=&offset=, імʼя файлу в X-File-Name.
+// Відповідь - рядок, який читає скрипт (і Claude): «+ отримано/розмір» - шли далі; «! N» - продовжуй
+// з байта N; «✓ …» / «= …» - файл у медіатеці; «✗ …» - відмова з причиною.
+app.post("/mcp/upload/:token/chunk", async (req: any, reply) => {
+  reply.header("Cache-Control", "no-store");
+  const asJson = /application\/json/i.test(String(req.headers.accept || ""));
+  const out = (code: number, obj: Record<string, unknown>, text: string) =>
+    asJson ? reply.code(code).send(obj) : reply.code(code).type("text/plain; charset=utf-8").send(text + "\n");
+  if (rateLimited("uplc:" + req.ip, 1200)) return out(429, { error: "забагато запитів - зачекай хвилину" }, "✗ забагато запитів - зачекай хвилину");
+  const token = String(req.params.token || "");
+  const st = await uploadLinkState(token);
+  if (!st) return out(404, { error: UPLOAD_TEXT.invalid }, "✗ " + UPLOAD_TEXT.invalid);
+  if (st === "expired") return out(410, { error: UPLOAD_TEXT.expired }, "✗ " + UPLOAD_TEXT.expired);
+  const a = chunkArgs(req);
+  const nm = a.name || "файл";
+  // ліміти перевіряємо на ПЕРШОМУ шматку: інакше 500 МБ тяглися б даремно, щоб у кінці почути «ні»
+  if (a.offset === 0) {
+    const lk = await one<{ files_left: number; bytes_left: string }>(`select files_left, bytes_left from upload_link where token=$1`, [token]);
+    if (!lk || lk.files_left <= 0) return out(400, { error: UPLOAD_TEXT.noSlots }, `✗ ${nm}: ${UPLOAD_TEXT.noSlots}`);
+    if (Number(lk.bytes_left) < a.size) return out(400, { error: UPLOAD_TEXT.noBytes }, `✗ ${nm}: ${UPLOAD_TEXT.noBytes}`);
+  }
+  try {
+    const r = await putChunk(`link:${token}`, a.uid, a.name, a.size, a.offset, a.body, async (path) => {
+      if (!(await takeUploadSlot(token, a.size))) throw new Error(UPLOAD_TEXT.noSlots);
+      try {
+        const m = await saveMediaFile(st.ws, path, { name: a.name, source: "upload", dedupe: true });
+        // той самий файл удруге місця не зʼїдає: у медіатеці нічого не додалось
+        if (m.existed) await refundUploadSlot(token, a.size); else await markUploaded(token);
+        return m;
+      } catch (e) { await refundUploadSlot(token, a.size); throw e; }
+    });
+    if (!r.done) return out(200, { ok: true, done: false, received: r.received, size: r.size }, `+ ${r.received}/${r.size} ${nm}`);
+    const m = r.result;
+    const left = (await one<{ n: number }>(`select files_left as n from upload_link where token=$1`, [token]))?.n ?? null;
+    const id = "#" + m.id.slice(0, 8);
+    const what = m.kind === "video" ? " (відео)" : "";
+    return out(200, { ok: true, done: true, saved: { id, name: nm, dup: !!m.existed, kind: m.kind }, left },
+      (m.existed ? `= ${nm} уже в медіатеці → ${id}` : `✓ ${nm} → ${id}${what}`) + (left !== null ? ` · лишилось місць: ${left}` : ""));
+  } catch (e: any) {
+    if (e instanceof ChunkError) {
+      if (e.status === 409) return out(409, { error: e.message, received: e.received ?? 0 }, `! ${e.received ?? 0} ${e.message}`);
+      return out(e.status, { error: e.message }, `✗ ${nm}: ${e.message}`);
+    }
+    return out(400, { error: e.message }, `✗ ${nm}: ${e.message}`);
+  }
+});
+
+// скрипт «залий цю папку» (фото й відео, великі - частинами): curl -fsS …/sh -o f.sh && sh f.sh папка
+app.get("/mcp/upload/:token/sh", async (req: any, reply) => {
+  reply.header("Cache-Control", "no-store").header("X-Robots-Tag", "noindex");
+  const st = await uploadLinkState(req.params.token);
+  if (!st || st === "expired") return reply.code(st ? 410 : 404).type("text/plain; charset=utf-8")
+    .send(`echo '✗ ${st ? UPLOAD_TEXT.expired : UPLOAD_TEXT.invalid}' >&2; exit 1\n`);
+  return reply.type("text/x-shellscript; charset=utf-8").send(uploadScript(uploadUrl(String(req.params.token))));
 });
 
 // ---- керування адресою з кабінету (це вже звичайні /api/ роути під кукі-сесією) ----
@@ -3727,6 +3837,31 @@ app.post("/api/tg/post/:postId/media", async (req: any, reply) => {
     await q(`update post set media_id=$2 where id=$1`, [id, m.id]);
     return { ok: true, filename: m.filename, media: (await postMediaList(id)).map((x) => x.filename) };
   } catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+
+// 🎬 відео з телефона - частинами (сотні МБ крізь nginx одним запитом не пролазять), той самий
+// приймач, що й у кабінеті; потім /video ставить його посту
+app.put("/api/tg/chunk", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const a = chunkArgs(req);
+  try {
+    const r = await putChunk(`tg:${u.ws}:${u.tgId}`, a.uid, a.name, a.size, a.offset, a.body,
+      (path) => saveMediaFile(u.ws, path, { name: a.name, source: "upload", dedupe: true }));
+    if (!r.done) return { ok: true, done: false, received: r.received, size: r.size };
+    const m = r.result;
+    return { ok: true, done: true, received: r.received, size: r.size, saved: { id: m.id, kind: m.kind, filename: m.filename, dup: !!m.existed } };
+  } catch (e: any) {
+    if (e instanceof ChunkError) return reply.code(e.status).send({ error: e.message, received: e.received ?? null });
+    return reply.code(400).send({ error: e.message });
+  }
+});
+app.post("/api/tg/post/:postId/video", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const id = await tgOwnPost(u.ws, req.params.postId);
+  if (!id) return reply.code(404).send({ error: "пост не знайдено" });
+  try { await setPostVideo(u.ws, id, String(req.body?.mediaId || "")); }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
+  return { ok: true, media: (await postMediaList(id)).map((x) => x.filename) };
 });
 
 // 🎨 AI-зображення: та сама точка, що й у кабінеті (стиль бренду, збереження бази під оверлей)
@@ -3915,4 +4050,6 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
   initTelegramBot();
   // одноразово полагодити залишкові iPhone HEIF -> JPEG (у фоні; ідемпотентно)
   convertAllHeif().then((n) => { if (n) app.log.info(`HEIF→JPEG конвертовано: ${n}`); }).catch((e: any) => app.log.error("convertAllHeif: " + e.message));
+  // відео: «.quick» → «.mov» і тривалість/розмір кадру для завантажених раніше (у фоні; ідемпотентно)
+  fixLegacyVideos().then((n) => { if (n) app.log.info(`відео .quick → .mov: ${n}`); }).catch((e: any) => app.log.error("fixLegacyVideos: " + e.message));
 });

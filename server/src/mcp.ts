@@ -30,7 +30,7 @@ import { publishPostToChannels, alreadySentNetworks } from "./publisher.js";
 import { generatePostsOnePass, normFormat, GOAL_LABELS, CHANNEL_LIMITS } from "./pipeline.js";
 import { logEvent } from "./log.js";
 import { generateImageForPost, imageProviders, stockPhotoOptions, attachStockPhoto, attachCroppedImage, appendCroppedSlide } from "./images.js";
-import { postMediaList, setPostMediaOrder, MAX_SLIDES, SlideError } from "./slides.js";
+import { postMediaList, setPostMediaOrder, setPostVideo, MAX_SLIDES, SlideError } from "./slides.js";
 import { renderCarousel, CAROUSEL_THEMES } from "./carousel.js";
 import { getThumb } from "./media.js";
 import sharp from "sharp";
@@ -366,7 +366,7 @@ async function smallThumb(filename: string): Promise<ToolImage | null> {
 export const OWN_MEDIA = ["upload", "gdrive", "diary", "bot"];
 export const GEN_MEDIA = ["ai", "pexels"];
 const MEDIA_PAGE = 12;
-const MEDIA_SRC: Record<string, string> = { upload: "завантажено", gdrive: "Google Drive", diary: "щоденник", bot: "з бота", ai: "AI", pexels: "сток" };
+const MEDIA_SRC: Record<string, string> = { upload: "завантажено", gdrive: "Google Drive", diary: "щоденник", bot: "з бота", ai: "AI", pexels: "сток", broll: "b-roll" };
 // Де фото вже стоїть: напряму (post.media_id) або через кроп-копію під формат поста, яку
 // attachCroppedImage позначає external_id = id оригіналу. Кропи, зроблені до цієї позначки,
 // відстежити нема як - такі фото просто виглядають вільними.
@@ -384,17 +384,27 @@ export const usedList = (usedIn: string | null | undefined): string =>
   String(usedIn || "").split(",").filter(Boolean).map((x) => "#" + x).join(", ");
 
 // «· є фото» / «· карусель, 5 кадрів» - щоб модель бачила, що в пості вже стоїть
-export const mediaLine = (media: Array<{ id: string }>): string =>
-  !media.length ? "" : media.length === 1 ? " · є фото" : ` · карусель, ${media.length} кадрів`;
-// id фото з медіатеки: короткий #a1b2c3d4 або повний, лише свій кабінет і лише зображення
-async function libraryImageId(ws: string, raw: unknown): Promise<string> {
+export const fmtDur = (sec: unknown): string => {
+  const n = Math.round(Number(sec) || 0);
+  return n ? `${Math.floor(n / 60)}:${String(n % 60).padStart(2, "0")}` : "";
+};
+export const mediaLine = (media: Array<{ id: string; kind?: string; duration?: number | null }>): string =>
+  !media.length ? "" : media[0].kind === "video" ? ` · відео${fmtDur(media[0].duration) ? " " + fmtDur(media[0].duration) : ""}`
+    : media.length === 1 ? " · є фото" : ` · карусель, ${media.length} кадрів`;
+// id файлу з медіатеки: короткий #a1b2c3d4 або повний, лише свій кабінет
+async function libraryMediaId(ws: string, raw: unknown): Promise<{ id: string; kind: string }> {
   const pat = idPattern(raw);
-  if (!pat) throw new ToolError("Вкажи id фото з list_media (#a1b2c3d4).");
+  if (!pat) throw new ToolError("Вкажи id з list_media (#a1b2c3d4).");
   const rows = await q<{ id: string; kind: string }>(`select id, kind from media_asset where workspace_id=$1 and id::text like $2 limit 2`, [ws, pat + "%"]);
-  if (!rows.length) throw new ToolError(`Фото ${short(pat)} у медіатеці цього кабінету немає. Візьми id зі списку list_media.`);
-  if (rows.length > 1) throw new ToolError(`На «${pat}» починається кілька фото - дай довший id.`);
-  if (rows[0].kind !== "image") throw new ToolError("Це відео, а не фото - до поста тут прикріплюються лише зображення.");
-  return rows[0].id;
+  if (!rows.length) throw new ToolError(`Файлу ${short(pat)} у медіатеці цього кабінету немає. Візьми id зі списку list_media.`);
+  if (rows.length > 1) throw new ToolError(`На «${pat}» починається кілька файлів - дай довший id.`);
+  return rows[0];
+}
+// лише зображення (кадри каруселі, стоп для відео тут, а не в сирій помилці БД)
+async function libraryImageId(ws: string, raw: unknown): Promise<string> {
+  const m = await libraryMediaId(ws, raw);
+  if (m.kind !== "image") throw new ToolError("Це відео, а не фото. Відео прикріплюється саме (attach_media з одним id) - поруч із ним фото не буває.");
+  return m.id;
 }
 
 const ASPECTS = ["4:5", "1:1", "16:9"];
@@ -739,27 +749,34 @@ export const TOOLS: ToolDef[] = [
   {
     name: "list_media",
     title: "Медіатека кабінету",
-    description: "БЕЗКОШТОВНО: власні фото автора з медіатеки кабінету (завантажені в кабінет, із Google Drive, надіслані боту) - з мініатюрами, щоб ти обирав очима. Позначено, в яких постах фото вже стоїть. Обране прикріпи через attach_media. Власне фото автора майже завжди краще за сток і генерацію - дивись сюди першим. По 12 на сторінку, новіші перші.",
+    description: "БЕЗКОШТОВНО: власні фото (або з kind: \"video\" - відео) автора з медіатеки кабінету (завантажені в кабінет, із Google Drive, надіслані боту) - з мініатюрами, щоб ти обирав очима; у відео мініатюра - кадр із ролика, плюс тривалість і розмір. Позначено, в яких постах файл уже стоїть. Обране прикріпи через attach_media. Власне фото чи відео автора майже завжди краще за сток і генерацію - дивись сюди першим. По 12 на сторінку, новіші перші.",
     properties: {
+      kind: { type: "string", enum: ["image", "video"], description: "image (типово) - фото; video - відео (Reels, відео-пости)." },
       unused_only: { type: "boolean", description: "true - лише фото, яких ще немає в жодному пості (щоб не повторюватись)." },
       include_generated: { type: "boolean", description: "true - показати й згенеровані AI та стокові зображення, не лише власні фото автора." },
       page: N("Сторінка (типово 1).", { minimum: 1 }),
     },
     readOnly: true,
     run: async (ws, a) => {
-      const sources = a.include_generated === true ? [...OWN_MEDIA, ...GEN_MEDIA] : OWN_MEDIA;
+      const video = a.kind === "video";
+      // власні відео автора - це й b-roll для рілсів (завантажені ним самим)
+      const sources = video ? [...OWN_MEDIA, "broll"] : a.include_generated === true ? [...OWN_MEDIA, ...GEN_MEDIA] : OWN_MEDIA;
       const unused = a.unused_only === true;
-      const where = `a.workspace_id=$1 and a.kind='image' and a.source = any($2::text[])${unused ? ` and ${USED_IN} is null` : ""}`;
+      const where = `a.workspace_id=$1 and a.kind='${video ? "video" : "image"}' and a.source = any($2::text[])${unused ? ` and ${USED_IN} is null` : ""}`;
+      const noun = video ? "відео" : "фото";
       const total = (await one<{ n: number }>(`select count(*)::int as n from media_asset a where ${where}`, [ws, sources]))?.n || 0;
       if (!total) {
+        if (video) return unused
+          ? "Вільних відео в медіатеці немає: усі вже стоять у постах. Нові - media_upload_link (заллє папку з комп'ютера) або кабінет: Налаштування → Джерела → Медіа-бібліотека."
+          : "Відео в медіатеці ще немає. Залити з комп'ютера - media_upload_link (великі файли йдуть частинами), або автор завантажить у кабінеті: Налаштування → Джерела → Медіа-бібліотека.";
         return unused
           ? "Вільних фото в медіатеці немає: усі вже стоять у постах. Можна повторити фото (без unused_only), взяти сток (find_stock_photos) або попросити автора завантажити нові: Налаштування → Джерела → Медіа-бібліотека."
           : "Медіатека порожня. Автор може завантажити фото в кабінеті (Налаштування → Джерела → Медіа-бібліотека, можна одразу пачкою) або підключити там же папку Google Drive. Поки що - сток (find_stock_photos).";
       }
       const pages = Math.ceil(total / MEDIA_PAGE);
       const page = Math.min(int(a.page, 1, 1, 100000), pages);
-      const rows = await q<{ id: string; original_name: string | null; filename: string; source: string; created_at: string; used_in: string | null }>(
-        `select a.id, a.original_name, a.filename, a.source, a.created_at, ${USED_IN} as used_in
+      const rows = await q<{ id: string; original_name: string | null; filename: string; source: string; created_at: string; used_in: string | null; duration: number | null; width: number | null; height: number | null; size: number | null }>(
+        `select a.id, a.original_name, a.filename, a.source, a.created_at, ${USED_IN} as used_in, a.duration, a.width, a.height, a.size
            from media_asset a where ${where} order by a.created_at desc limit ${MEDIA_PAGE} offset $3`,
         [ws, sources, (page - 1) * MEDIA_PAGE]);
       const tz = await wsTz(ws);
@@ -768,18 +785,22 @@ export const TOOLS: ToolDef[] = [
       // читається) нумеруємо окремо, а не «пропускаємо», інакше модель прикріпила б не те фото
       const shown = rows.map((r, i) => ({ r, t: thumbs[i] })).filter((x) => x.t);
       const broken = rows.filter((_, i) => !thumbs[i]);
+      const vmeta = (r: typeof rows[number]) => !video ? "" :
+        [fmtDur(r.duration), r.width && r.height ? `${r.width}×${r.height}${r.height > r.width ? " вертикальне" : ""}` : "", r.size ? `${Math.round(r.size / 1048576)} МБ` : ""]
+          .filter(Boolean).map((x) => ` · ${x}`).join("");
       const line = (r: typeof rows[number], n: number) =>
-        `${n}. ${short(r.id)} · ${fmtWhen(r.created_at, tz)} · ${MEDIA_SRC[r.source] || r.source}` +
+        `${n}. ${short(r.id)} · ${fmtWhen(r.created_at, tz)} · ${MEDIA_SRC[r.source] || r.source}` + vmeta(r) +
         (r.original_name ? ` · ${oneLine(r.original_name, 40)}` : "") +
         (r.used_in ? ` · ✓ уже в пості ${usedList(r.used_in)}` : "");
       return {
         text: [
-          `Медіатека: ${total} фото${unused ? " без поста" : ""} · сторінка ${page} з ${pages}.`,
+          `Медіатека: ${total} ${noun}${unused ? " без поста" : ""} · сторінка ${page} з ${pages}.`,
           ...shown.map((x, i) => line(x.r, i + 1)),
           broken.length ? `Без мініатюри (файл не читається): ${broken.map((r) => short(r.id)).join(", ")}.` : "",
           shown.length ? `Мініатюри нижче, по черзі: ${shown.map((_, i) => i + 1).join(", ")}.` : "",
           page < pages ? `Далі - page: ${page + 1}.` : "",
-          "Обране прикріпи через attach_media (id поста + id фото).",
+          video ? "Обране відео прикріпи через attach_media (id поста + один id відео): Instagram - Reels, Facebook - відео, Threads, Telegram (до 50 МБ), LinkedIn."
+            : "Обране прикріпи через attach_media (id поста + id фото).",
         ].filter(Boolean).join("\n"),
         images: shown.map((x) => x.t as ToolImage),
       };
@@ -787,8 +808,8 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "attach_media",
-    title: "Прикріпити фото з медіатеки (одне чи карусель)",
-    description: `БЕЗКОШТОВНО: прикріпити до поста фото з медіатеки кабінету (id з list_media). Кілька id масивом = КАРУСЕЛЬ у тому ж порядку (перше - обкладинка), до ${MAX_SLIDES} кадрів: Instagram і Threads отримають карусель, Facebook - галерею, Telegram - альбом, LinkedIn - кілька фото. Кожне фото обрізається під формат (типово 4:5; кадри каруселі - в одній пропорції), оригінали в медіатеці лишаються. Без append фото ЗАМІНЮЮТЬ наявні, з append: true - додаються в кінець. Переставити чи прибрати кадри - edit_post_media. У відповіді - мініатюри того, що вийшло.`,
+    title: "Прикріпити фото чи відео з медіатеки (одне, карусель або відео)",
+    description: `БЕЗКОШТОВНО: прикріпити до поста фото чи відео з медіатеки кабінету (id з list_media). Кілька id фото масивом = КАРУСЕЛЬ у тому ж порядку (перше - обкладинка), до ${MAX_SLIDES} кадрів: Instagram і Threads отримають карусель, Facebook - галерею, Telegram - альбом, LinkedIn - кілька фото. Кожне фото обрізається під формат (типово 4:5; кадри каруселі - в одній пропорції), оригінали в медіатеці лишаються. ВІДЕО - один id (list_media з kind: "video"): воно замінює всі фото поста й публікується як Reels в Instagram, відео у Facebook, Threads, Telegram (до 50 МБ) і LinkedIn; фото поруч із відео не буває. Без append медіа ЗАМІНЮЄ наявне, з append: true фото додаються в кінець. Переставити чи прибрати кадри - edit_post_media. У відповіді - мініатюри того, що вийшло.`,
     properties: {
       id: S("Id поста."),
       // масив, але рядок теж приймаємо: чати, відкриті до каруселей, памʼятають стару схему (один id)
@@ -802,8 +823,31 @@ export const TOOLS: ToolDef[] = [
       const raw = Array.isArray(a.media) ? a.media : [a.media];
       if (!raw.length) throw new ToolError("Вкажи id фото з list_media (#a1b2c3d4).");
       if (raw.length > MAX_SLIDES) throw new ToolError(`У каруселі до ${MAX_SLIDES} кадрів - передай не більше.`);
-      const ids: string[] = [];
-      for (const r of raw) ids.push(await libraryImageId(ws, r));
+      // 🎬 відео: одне й саме - замінює всі фото поста (без кропу: відео не ріжемо)
+      const found = [];
+      for (const r of raw) found.push(await libraryMediaId(ws, r));
+      if (found.some((m) => m.kind === "video")) {
+        if (found.length > 1 || a.append === true)
+          throw new ToolError("Відео публікується окремим постом: передай рівно один id відео без append (фото поруч із відео не буває).");
+        try { await setPostVideo(ws, p.id, found[0].id); }
+        catch (e: any) { if (e instanceof SlideError) throw new ToolError(e.message); throw e; }
+        const v = (await postMediaList(p.id))[0];
+        const used = (await one<{ u: string | null }>(`select ${USED_IN} as u from media_asset a where a.id=$1`, [v.id]))?.u;
+        const others = usedList(used).split(", ").filter((x) => x && x !== short(p.id));
+        const meta = [fmtDur(v.duration), v.width && v.height ? `${v.width}×${v.height}` : "", v.size ? `${Math.round(Number(v.size) / 1048576)} МБ` : ""].filter(Boolean).join(", ");
+        const warn: string[] = [];
+        if (Number(v.size) > 50 * 1048576) warn.push("Telegram бот не надішле відео понад 50 МБ - зніми Telegram із поста або стисни відео");
+        if (Number(v.duration) > 300) warn.push("Threads приймає відео до 5 хв");
+        if (v.width && v.height && v.width > v.height) warn.push("горизонтальне - у Reels покажеться з полями (найкраще 9:16)");
+        const thumb = await smallThumb(v.filename);
+        return {
+          text: `${short(p.id)}: відео ${short(v.id)} прикріплено${meta ? ` (${meta})` : ""} - Instagram: Reels, Facebook: відео, Threads, Telegram, LinkedIn; текст поста - підпис.` +
+            (warn.length ? ` ⚠️ ${warn.join("; ")}.` : "") +
+            (others.length ? ` Це відео вже стоїть у ${others.join(", ")}.` : "") + (thumb ? " Кадр із відео - нижче." : ""),
+          images: thumb ? [thumb] : [],
+        };
+      }
+      const ids = found.map((m) => m.id);
       const append = a.append === true;
       const before = await postMediaList(p.id);
       if (append && before.length + ids.length > MAX_SLIDES)
@@ -908,8 +952,8 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "media_upload_link",
-    title: "Залити фото з комп'ютера в медіатеку",
-    description: "Разове посилання, щоб залити фото з комп'ютера автора в медіатеку кабінету, МИНАЮЧИ чат. Є термінал (Claude Code, Cowork) - запусти готову команду з відповіді на папку з фото: файли підуть із диска прямо на сервер, у твій контекст не потрапить жоден байт, тож відкривати фото перед заливкою не треба. Терміналу нема - віддай посилання людині: у браузері воно відкриває сторінку, куди фото просто перетягуються. Посилання лише ДОДАЄ фото в цей кабінет (нічого не читає), діє обмежений час і до 200 фото; повтор тієї самої папки копій не плодить. Після заливки - list_media з unused_only: true.",
+    title: "Залити фото й відео з комп'ютера в медіатеку",
+    description: "Разове посилання, щоб залити фото й ВІДЕО з комп'ютера автора в медіатеку кабінету, МИНАЮЧИ чат. Є термінал (Claude Code, Cowork) - запусти готову команду з відповіді на папку: файли підуть із диска прямо на сервер (великі відео - частинами), у твій контекст не потрапить жоден байт, тож відкривати файли перед заливкою не треба. Терміналу нема - віддай посилання людині: у браузері воно відкриває сторінку, куди фото й відео просто перетягуються. Посилання лише ДОДАЄ файли в цей кабінет (нічого не читає), діє обмежений час, до 200 файлів і 5 ГБ; повтор тієї самої папки копій не плодить. Після заливки - list_media з unused_only: true (для відео - kind: \"video\").",
     properties: {
       minutes: N("Скільки хвилин діє посилання: 5-180, типово 60.", { minimum: 5, maximum: 180 }),
     },
@@ -919,20 +963,20 @@ export const TOOLS: ToolDef[] = [
       const url = uploadUrl(token);
       const cmd = uploadCommands(url);
       const title = await workspaceTitle(ws);
-      await logEvent("info", "mcp", `посилання на заливку фото в «${title}» на ${minutes} хв`, null);
+      await logEvent("info", "mcp", `посилання на заливку фото й відео в «${title}» на ${minutes} хв`, null);
       return [
-        `📤 Посилання для заливки фото в медіатеку «${title}» - діє до ${fmtWhen(expiresAt, await wsTz(ws))}, до ${UPLOAD_MAX_FILES} фото:`,
+        `📤 Посилання для заливки фото й відео в медіатеку «${title}» - діє до ${fmtWhen(expiresAt, await wsTz(ws))}, до ${UPLOAD_MAX_FILES} файлів:`,
         url,
         "",
         "Є термінал - залий папку однією командою (підстав справжній шлях):",
-        "macOS / Linux / Git Bash:",
+        "macOS / Linux / Git Bash / Cowork:",
         cmd.unix,
-        "Windows PowerShell:",
+        "Команда завантажує короткий скрипт (його можна прочитати: він лише читає файли з указаної папки й шле їх на це посилання) і запускає його. Фото й відео будь-якого розміру до 500 МБ - великі йдуть частинами по 15 МБ, обрив шматка повторюється сам. На кожен файл - рядок: ✓ збережено, = уже було в медіатеці, ✗ причина.",
+        "Windows PowerShell (лише фото до 20 МБ; відео - через Git Bash командою вище або сторінкою):",
         cmd.windows,
-        "Без -maxdepth 1 піде й з підпапками. На кожен файл - рядок: ✓ збережено, = уже було в медіатеці, ✗ причина.",
         "",
-        "Терміналу нема - дай посилання людині: у браузері воно відкриває сторінку, куди фото просто перетягуються.",
-        "Лише фото (JPG, PNG, WebP, HEIC) до 20 МБ. Далі: list_media з unused_only: true → attach_media.",
+        "Терміналу нема - дай посилання людині: у браузері воно відкриває сторінку, куди фото й відео просто перетягуються.",
+        "Фото: JPG, PNG, WebP, HEIC. Відео: MP4, MOV, WebM. Далі: list_media (unused_only: true; для відео kind: \"video\") → attach_media.",
       ].join("\n");
     },
   },
@@ -1223,6 +1267,7 @@ export const SERVER_INSTRUCTIONS = [
   "generate_posts викликай лише коли тебе прямо просять «згенеруй силами socialio» - він витрачає AI-кредити кабінету.",
   "Зображення: спершу медіатека кабінету (list_media → attach_media) - власні фото автора, вони найкращі й безкоштовні (фото лежать у автора на комп'ютері, а в тебе є термінал - media_upload_link дасть команду, що заллє папку в медіатеку без проходу через чат); далі сток - find_stock_photos з конкретним англійським query і attach_stock_photo, теж безкоштовно; generate_image платний (крім provider cloudflare - безкоштовний денний ліміт ~100 зображень, якщо його підключено), бери його, коли ні медіатека, ні сток не підходять або коли людина просить саме генерацію.",
   `Карусель: кілька фото в одному пості (до ${MAX_SLIDES}) - attach_media масивом id або append: true у attach_media / attach_stock_photo / generate_image; кадри-картинки зі сценарію «Слайд 1: …» малює render_carousel (безкоштовно), і тоді текст поста - це короткий підпис під каруселлю, не сценарій.`,
+  "Відео: власні відео автора - list_media з kind: \"video\" → attach_media з одним id; публікується як Reels в Instagram, відео у Facebook, Threads, Telegram (до 50 МБ) і LinkedIn, а текст поста - підпис. Відео з комп'ютера заливає та сама media_upload_link (великі файли - частинами).",
   "Якщо кабінетів кілька (list_workspaces), спершу переконайся, що активний саме той бренд: перемкни switch_workspace або передай workspace у виклику. Кожна відповідь називає кабінет у першому рядку - звіряйся з ним перед публікацією.",
   "Факти не вигадуй: бери їх з list_materials / get_material або питай автора.",
   "Перед публікацією показуй текст людині - опублікований пост відкликати не можна.",

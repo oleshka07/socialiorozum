@@ -318,11 +318,12 @@ function drawEditor() {
     + '<textarea id="et">' + esc(p.content || '') + '</textarea>'
     + '<div class="acts">'
     + '<button id="aPhoto">🖼 ' + (p.filename ? 'Обкладинка' : 'Фото') + '</button>'
-    + (p.filename && (p.media || []).length < 10 ? '<button id="aMore">＋ Ще фото</button>' : '')
+    + (p.filename && !isVid(p) && (p.media || []).length < 10 ? '<button id="aMore">＋ Ще фото</button>' : '')
+    + '<button id="aVid">🎬 Відео</button>'
     + '<button id="aAi">🎨 AI-фото</button>'
     + '<button id="aRw">🤖 Переписати</button>'
     + '</div>'
-    + (p.filename ? '<button class="go ghost" id="aDelPic">🗑 ' + ((p.media || []).length > 1 ? 'Прибрати всі фото' : 'Прибрати фото') + '</button>' : '')
+    + (p.filename ? '<button class="go ghost" id="aDelPic">🗑 ' + (isVid(p) ? 'Прибрати відео' : (p.media || []).length > 1 ? 'Прибрати всі фото' : 'Прибрати фото') + '</button>' : '')
     + '<div class="nets" id="enets">' + netBtns + '</div>'
     + (p.scheduled_at ? '<div class="meta"><span class="pill warn">🗓 ' + fmtWhen(p.scheduled_at) + '</span>'
         + '<button class="back" id="aUnsched">скасувати</button></div>' : '')
@@ -335,6 +336,7 @@ function drawEditor() {
         + '<button class="go danger" id="aDel">🗑 Видалити</button>')
     + '<input type="file" id="ef" accept="image/*" style="display:none">'
     + '<input type="file" id="efm" accept="image/*" multiple style="display:none">'
+    + '<input type="file" id="efv" accept="video/*" style="display:none">'
     + '</div>';
 
   $('bk').onclick = () => saveText().then(() => closeEditor(true));
@@ -349,6 +351,8 @@ function drawEditor() {
   $('ef').onchange = uploadPhoto;
   if ($('aMore')) $('aMore').onclick = () => $('efm').click();
   $('efm').onchange = uploadMore;
+  $('aVid').onclick = () => { if (cur.filename && !isVid(cur) && !confirm('Відео замінить фото поста. Продовжити?')) return; $('efv').click(); };
+  $('efv').onchange = uploadVideo;
   $('aAi').onclick = genImage;
   $('aRw').onclick = aiRewrite;
   if ($('aDelPic')) $('aDelPic').onclick = async () => {
@@ -406,10 +410,47 @@ async function uploadMore(e) {
   } catch (err) { $('em').textContent = '⚠️ ' + err.message; }
 }
 
-// одне фото - велике прев'ю; кілька - стрічка кадрів з позначкою каруселі
+// 🎬 відео з телефона: частинами по 8 МБ (відео - сотні МБ, а сервер за раз приймає до 20),
+// обрив шматка - повтор, сервер сам каже, з якого байта продовжити
+const VID_RX = /\.(mp4|mov|m4v|webm|quick)$/i;
+function isVid(p) { const m = p.media && p.media.length ? p.media : (p.filename ? [p.filename] : []); return m.length === 1 && VID_RX.test(m[0]); }
+async function sendChunks(file, onPct) {
+  const CH = 8 * 1024 * 1024, uid = 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  let off = 0, tries = 0;
+  for (;;) {
+    let r = null, j = {};
+    try {
+      r = await fetch('/api/tg/chunk?uid=' + uid + '&size=' + file.size + '&offset=' + off, { method: 'PUT', body: file.slice(off, Math.min(off + CH, file.size)),
+        headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name || 'video.mp4'), 'X-TG-Init-Data': INIT } });
+      j = await r.json().catch(() => ({}));
+    } catch (e) { if (++tries >= 5) throw new Error('немає звʼязку з сервером'); await new Promise((x) => setTimeout(x, 3000)); continue; }
+    if (r.ok && j.done) return j.saved;
+    if (r.ok && typeof j.received === 'number') { off = j.received; tries = 0; onPct(Math.floor(off * 100 / file.size)); continue; }
+    if (r.status === 409 && typeof j.received === 'number') { off = j.received; if (++tries >= 5) throw new Error(j.error || 'не вдалось'); continue; }
+    if (r.status === 429 || r.status >= 500) { if (++tries >= 5) throw new Error(j.error || ('HTTP ' + r.status)); await new Promise((x) => setTimeout(x, 3000)); continue; }
+    throw new Error(j.error || ('HTTP ' + r.status));
+  }
+}
+async function uploadVideo(e) {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  $('em').textContent = '🎬 Завантажую відео… 0%';
+  try {
+    const sv = await sendChunks(f, (p) => { $('em').textContent = '🎬 Завантажую відео… ' + p + '%'; });
+    if (!sv || sv.kind !== 'video') throw new Error('це не відео - приймаємо MP4, MOV, WebM');
+    const r = await api('/post/' + cur.id + '/video', { method: 'POST', body: JSON.stringify({ mediaId: sv.id }) });
+    cur.media = r.media || []; cur.filename = cur.media[0] || null; haptic('success'); drawEditor();
+    $('em').textContent = '🎬 Відео в пості: Instagram - Reels, Facebook, Threads, Telegram (до 50 МБ), LinkedIn';
+  } catch (err) { $('em').textContent = '⚠️ ' + err.message; }
+}
+
+// одне фото - велике прев'ю; кілька - стрічка кадрів з позначкою каруселі; відео - плеєр
 function mediaBlock(p) {
   const m = p.media && p.media.length ? p.media : (p.filename ? [p.filename] : []);
   if (!m.length) return '';
+  if (isVid(p)) return '<video class="thumb" src="/media/' + esc(m[0]) + '" poster="/thumb/' + esc(m[0]) + '" controls playsinline preload="none"></video>'
+    + '<div class="meta"><span class="pill ok">🎬 відео</span></div>';
   if (m.length === 1) return '<img class="thumb" src="/media/' + esc(m[0]) + '" alt="">';
   return '<div class="meta" style="margin-top:10px"><span class="pill ok">🖼 карусель · ' + m.length + ' кадрів</span></div>'
     + '<div style="display:flex;gap:6px;overflow-x:auto;margin:8px 0">' + m.map((f) => '<img class="thumb sm" src="/thumb/' + esc(f) + '" alt="">').join('') + '</div>';

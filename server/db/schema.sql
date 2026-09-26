@@ -327,6 +327,11 @@ create table if not exists media_asset (
   created_at    timestamptz not null default now()
 );
 create index if not exists idx_media_ws on media_asset(workspace_id, created_at desc);
+-- 🎬 відео: тривалість (с) і розмір кадру так, як воно показується (поворот телефона враховано) -
+-- для перевірки лімітів мереж (Reels, Threads, Telegram) і для прев'ю
+alter table media_asset add column if not exists duration real;
+alter table media_asset add column if not exists width int;
+alter table media_asset add column if not exists height int;
 alter table post add column if not exists media_id uuid references media_asset(id) on delete set null;
 alter table post add column if not exists channels jsonb;   -- {telegram:{on,text}, instagram:{...}, ...} для композера
 alter table post add column if not exists rubric text;      -- тег-рубрика (штампується при генерації; фільтри Студії/календаря)
@@ -757,6 +762,8 @@ create table if not exists upload_link (
   uploaded     int not null default 0,
   created_at   timestamptz not null default now()
 );
+-- байтовий бюджет посилання: відео по 500 МБ інакше дозволили б одним посиланням (200 файлів) забити диск
+alter table upload_link add column if not exists bytes_left bigint not null default 5368709120;
 create index if not exists idx_upload_link_exp on upload_link(expires_at);
 
 -- 🖼 Карусель: пост із кількома кадрами. Обкладинка лишається в post.media_id (її вже знають

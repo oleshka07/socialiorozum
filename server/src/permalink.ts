@@ -33,6 +33,13 @@ export function fbLink(externalId: string | null): string {
   return `https://www.facebook.com/${id}`;
 }
 
+// Facebook-відео: API вертає id відео (без id сторінки), а watch-адреса відкриває його напряму
+export function fbVideoLink(videoId: string | null): string {
+  const id = String(videoId || "").trim();
+  if (!/^\d+$/.test(id)) return "";
+  return `https://www.facebook.com/watch/?v=${id}`;
+}
+
 // LinkedIn: x-restli-id повертає URN (urn:li:share:… або urn:li:ugcPost:…).
 export function liLink(urn: string | null): string {
   const u = String(urn || "").trim();

@@ -1583,7 +1583,10 @@ function renderStudio(){
     const qaHtml=qaBad.length?'<div style="display:flex;gap:5px;flex-wrap:wrap;padding:0 14px 4px">'+qaBad.map(b=>'<span class="ptag qabadge" data-qa="'+b[0]+'" style="cursor:pointer;color:var(--amber);border-color:var(--amber)">'+b[1]+'</span>').join('')+'</div>':'';
     return '<div class="pcard'+(ap?' appr':'')+(sel?' selc':'')+'" data-post="'+p.id+'">'
       +'<div class="pcard-h"><input type="checkbox" class="psel" '+(sel?'checked':'')+' title="Обрати для масових дій">'+dots+'<span class="statuspill '+sp[1]+'" style="margin-left:auto">'+sp[0]+'</span></div>'
-      +(p.media_filename?'<div class="pcard-img" data-a="image" style="cursor:pointer" title="Редагувати зображення"><img loading="lazy" src="/thumb/'+esc(p.media_filename)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(p.media_filename)+'\'">'+(p.media_count>1?'<span class="pcard-cnt" title="Карусель: '+p.media_count+' кадрів">🖼 '+p.media_count+'</span>':'')+'</div>':'')
+      +(p.media_filename?(p.media_kind==='video'
+        // 🎬 відео-пост: кадр із ролика + тривалість; клік - у композер (текст на відео не накладається)
+        ?'<div class="pcard-img" data-a="composer" style="cursor:pointer" title="Відео-пост: відкрити в композері"><img loading="lazy" src="/thumb/'+esc(p.media_filename)+'" onerror="this.style.opacity=.25"><span class="pcard-cnt" title="Відео">▶ '+(fmtDur(p.media_duration)||'відео')+'</span></div>'
+        :'<div class="pcard-img" data-a="image" style="cursor:pointer" title="Редагувати зображення"><img loading="lazy" src="/thumb/'+esc(p.media_filename)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(p.media_filename)+'\'">'+(p.media_count>1?'<span class="pcard-cnt" title="Карусель: '+p.media_count+' кадрів">🖼 '+p.media_count+'</span>':'')+'</div>'):'')
       +'<div class="pcard-text pcontent" contenteditable="true">'+esc(p.content)+'</div>'
       +(tags?'<div style="display:flex;gap:5px;flex-wrap:wrap;padding:0 14px 4px">'+tags+'</div>':'')
       +qaHtml
@@ -1850,6 +1853,27 @@ function pickSlides(room){ return new Promise(async resolve=>{
     if(r.failed.length) flash(uploadReport(r));
     done(ids); };
 }); }
+// 🎬 вибір відео для поста: з медіатеки (кадр + тривалість) або з компʼютера - частинами, з відсотками
+// (відео з телефона - сотні МБ, а nginx пропускає до 20 МБ за запит). Повертає id у медіатеці.
+function pickVideo(){ return new Promise(async resolve=>{
+  let lib=[]; try{ lib=(await api('/media')).filter(m=>m.kind==='video'); }catch(e){ flash('Не вдалося завантажити медіатеку'); resolve(null); return; }
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='96';
+  ov.innerHTML='<div class="modal-card" style="max-width:660px;padding:20px"><b>🎬 Відео для поста</b> <span style="font-size:12px;color:var(--muted)">Instagram - Reels, Facebook - відео, Threads, Telegram (до 50 МБ), LinkedIn</span>'
+    +'<div style="margin:10px 0"><label class="dashbtn" style="cursor:pointer">⬆ Завантажити з компʼютера<input type="file" id="pvFile" accept="video/*" style="display:none"></label> <span id="pvMsg" style="font-size:12px;color:var(--muted)"></span></div>'
+    +'<div id="pvGrid" style="display:flex;flex-wrap:wrap;gap:8px;max-height:52vh;overflow:auto">'+(lib.length?lib.map(m=>'<div class="slide-pick" data-id="'+m.id+'"><img loading="lazy" src="/thumb/'+esc(m.filename)+'" onerror="this.style.opacity=.3"><span class="vbadge">▶ '+(fmtDur(m.duration)||'відео')+'</span></div>').join(''):'<div class="empty">Відео в медіатеці ще нема - завантаж кнопкою вище.</div>')+'</div>'
+    +'<div class="btnrow"><button class="ghost" id="pvClose">Скасувати</button></div></div>';
+  document.body.appendChild(ov);
+  const done=(v)=>{ ov.remove(); resolve(v); };
+  ov.addEventListener('click',e=>{ if(e.target===ov) done(null); });
+  ov.querySelector('#pvClose').onclick=()=>done(null);
+  ov.querySelectorAll('.slide-pick').forEach(el=>el.onclick=()=>done(el.dataset.id));
+  ov.querySelector('#pvFile').onchange=async(e)=>{ const f=(e.target.files||[])[0]; if(!f) return;
+    const m=ov.querySelector('#pvMsg'); m.style.color='var(--muted)'; m.textContent='завантаження… 0%';
+    try{ const sv=await uploadChunked(f,'/api/media',(pc)=>{ m.textContent='завантаження… '+pc+'%'; });
+      if(!sv||sv.kind!=='video') throw new Error('це не відео - тут приймаємо MP4, MOV, WebM');
+      done(sv.id); }
+    catch(err){ m.style.color='var(--danger)'; m.textContent='⚠ '+err.message; } };
+}); }
 // ---------- композер: опублікувати / запланувати ----------
 // ---------- КОМПОЗЕР: повноекранна панель (ліворуч редактор, праворуч мобільне прев'ю) ----------
 const NETLIM={telegram:1024,threads:500,instagram:2200,facebook:2000,linkedin:3000};
@@ -1950,7 +1974,7 @@ async function openComposer(postId, opts){
         +'<div style="font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint);margin-top:12px">🤖 ПОМІЧНИКИ ТЕКСТУ</div>'
         +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="dashbtn" id="cmpRewrite" title="Перепише текст; можна вказати, що саме змінити">✍ Переписати</button><button class="dashbtn" id="cmpHook" title="3 варіанти сильнішого відкриття з кульмінації">🪝 Гачок</button><button class="dashbtn" id="cmpAudit" title="Знайти і точково прибрати сліди AI">🔍 AI-сліди</button><button class="dashbtn" id="cmpHash" title="5-8 релевантних хештегів у кінець тексту"># Хештеги</button></div>'
         +'<div style="font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint);margin-top:14px">🖼 МЕДІА</div>'
-        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="dashbtn" id="cmpPhoto" title="Обкладинка: з галереї, з компʼютера, зі стоку чи AI-генерація, текст на фото">🎨 Обкладинка</button><button class="dashbtn" id="cmpAddSlides" title="Кілька фото в одному пості: Instagram і Threads - карусель, Facebook - галерея, Telegram - альбом">＋ Кадри каруселі</button></div>'
+        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="dashbtn" id="cmpPhoto" title="Обкладинка: з галереї, з компʼютера, зі стоку чи AI-генерація, текст на фото">🎨 Обкладинка</button><button class="dashbtn" id="cmpAddSlides" title="Кілька фото в одному пості: Instagram і Threads - карусель, Facebook - галерея, Telegram - альбом">＋ Кадри каруселі</button><button class="dashbtn" id="cmpVideo" title="Власне відео: Instagram - Reels, Facebook - відео Сторінки, Threads, Telegram, LinkedIn">🎬 Відео</button></div>'
         +'<div id="cmpMediaWrap" style="margin-top:10px"></div>'
         +'<div id="cmpCarWrap" style="display:none;margin-top:12px;padding:10px 12px;border:1px dashed var(--line);border-radius:10px">'
           +'<div style="font-size:12px;font-weight:700;margin-bottom:4px">🎠 Сценарій слайдів</div>'
@@ -2026,7 +2050,7 @@ async function openComposer(postId, opts){
       const lockOff=sent||dimmed||(!conn&&!on);
       const chip='<button class="netchip'+(on&&!dimmed?' on':'')+(on&&!conn?' warn':'')+'" data-net="'+k+'"'+(lockOff?' disabled':'')+' style="'+(dimmed?'opacity:.35':'')+'" title="'+(sent?'вже опубліковано':(dimmed?'у режимі гілки пост їде лише в Threads (вимкни 🧵, щоб обрати інші мережі)':(conn?'':(on?'мережа не підключена - клік, щоб зняти її з поста':'не підключено'))))+'">'+(sent?'✓ ':'')+(on&&!conn?'⚠ ':'')+n[1]+'</button>';
       return '<span class="netgrp">'+chip+seg+rev+'</span>'; }).join('');
-    box.querySelectorAll('.netchip').forEach(b=>{ if(b.disabled) return; b.onclick=()=>{ const k=b.dataset.net; C[k]=C[k]||{text:''}; C[k].on=!C[k].on; renderChips(); renderPrev(); }; });
+    box.querySelectorAll('.netchip').forEach(b=>{ if(b.disabled) return; b.onclick=()=>{ const k=b.dataset.net; C[k]=C[k]||{text:''}; C[k].on=!C[k].on; renderChips(); renderPrev(); if(isVideo()) renderMedia(); }; });
     box.querySelectorAll('[data-adapt]').forEach(b=>{ if(b.disabled) return; b.onclick=()=>adaptOne(b.dataset.adapt,b); });
     box.querySelectorAll('[data-revert]').forEach(b=>{ b.onclick=()=>{ const k=b.dataset.revert; if(C[k]) C[k].text=''; C.manual_adapt=true; renderChips(); renderPrev(); setMsg('вернув твій текст для '+netName(k)+' ✓','var(--brand)'); }; });
     // 🧵 режим «Гілкою»: серія повʼязаних постів (root-гачок + відповіді) з ПОВНОГО тексту
@@ -2045,8 +2069,24 @@ async function openComposer(postId, opts){
   // 🖼 смужка кадрів: обкладинка першою, ✕ прибрати, ‹ › переставити, «＋» додати ще
   function setMedia(list){ media=(list||[]).filter(m=>m&&m.filename); mediaFilename=media.length?media[0].filename:null; }
   async function reorderMedia(ids){ try{ const r=await api('/posts/'+postId+'/slides',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})}); setMedia(r.media); renderMedia(); renderPrev(); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } }
+  // 🎬 відео-пост: відео завжди саме (без фото поруч)
+  function isVideo(){ return media.length===1&&media[0].kind==='video'; }
+  // межі мереж для відео - показуємо ДО публікації, для тих мереж, що обрані на пості
+  function videoWarn(v){ const on=(k)=>C[k]&&C[k].on&&!sentSet.has(k); const w=[]; const mb=v.size?Math.round(v.size/1048576):0, d=Number(v.duration)||0;
+    if(on('telegram')&&v.size>50*1048576) w.push('Telegram не прийме відео понад 50 МБ (це '+mb+' МБ) - стисни його або зніми Telegram');
+    if(on('threads')&&d>300) w.push('Threads приймає відео до 5 хв');
+    if(on('instagram')&&d&&(d<3||d>900)) w.push('Instagram Reels - від 3 с до 15 хв');
+    if(on('linkedin')&&d&&(d<3||d>1800)) w.push('LinkedIn - від 3 с до 30 хв');
+    if(on('instagram')&&v.width&&v.height&&v.width>v.height) w.push('горизонтальне відео в Reels покажеться з полями - найкраще 9:16');
+    return w.join(' · '); }
   function renderMedia(){ const box=ov.querySelector('#cmpMediaWrap'); const n=media.length;
-    if(!n){ box.innerHTML='<div style="font-size:12px;color:var(--muted)">Фото ще нема - «🎨 Обкладинка» або «＋ Кадри каруселі».</div>'; renderCarBlock(); return; }
+    if(!n){ box.innerHTML='<div style="font-size:12px;color:var(--muted)">Медіа ще нема - «🎨 Обкладинка», «＋ Кадри каруселі» або «🎬 Відео».</div>'; renderCarBlock(); return; }
+    if(isVideo()){ const v=media[0], warn=videoWarn(v);
+      box.innerHTML='<div class="slides-strip"><div class="slide-th"><img src="/thumb/'+esc(v.filename)+'" onerror="this.style.opacity=.25"><span class="sn">▶ '+(fmtDur(v.duration)||'відео')+'</span><button class="sx" id="cmpVidRm" title="Прибрати відео">✕</button></div></div>'
+        +'<div style="font-size:11.5px;color:var(--muted);margin-top:6px">🎬 Відео'+(v.size?' · '+Math.round(v.size/1048576)+' МБ':'')+(v.width&&v.height?' · '+v.width+'×'+v.height:'')+'. Instagram - Reels, Facebook - відео Сторінки, Threads, Telegram, LinkedIn; текст поста - підпис.</div>'
+        +(warn?'<div id="cmpVidWarn" style="font-size:11.5px;color:var(--danger);margin-top:4px">⚠ '+esc(warn)+'</div>':'');
+      box.querySelector('#cmpVidRm').onclick=async(e)=>{ e.target.disabled=true; try{ const r=await api('/posts/'+postId+'/video',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:null})}); setMedia(r.media); renderMedia(); renderPrev(); setMsg('відео прибрано'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); e.target.disabled=false; } };
+      renderCarBlock(); return; }
     box.innerHTML='<div class="slides-strip">'+media.map((m,i)=>'<div class="slide-th"><img src="/thumb/'+esc(m.filename)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(m.filename)+'\'"><span class="sn">'+(i===0?'обкл.':(i+1))+'</span><button class="sx" data-rm="'+m.id+'" title="Прибрати кадр">✕</button>'
         +(n>1?'<div class="sm"><button data-mv="'+i+'" data-d="-1"'+(i===0?' disabled':'')+' title="Раніше">‹</button><button data-mv="'+i+'" data-d="1"'+(i===n-1?' disabled':'')+' title="Пізніше">›</button></div>':'')+'</div>').join('')
       +(n<10?'<button class="slide-add" id="cmpAddMore" title="Додати кадри">＋<br>кадр</button>':'')+'</div>'
@@ -2056,7 +2096,8 @@ async function openComposer(postId, opts){
     const more=box.querySelector('#cmpAddMore'); if(more) more.onclick=addSlides;
     renderCarBlock(); }
   // ＋ кадри: з медіатеки (кілька, у порядку кліків) або одразу з компʼютера пачкою
-  async function addSlides(){ const room=10-media.length; if(room<=0){ setMsg('у каруселі вже 10 кадрів - більше Instagram і Telegram не приймають','var(--danger)'); return; }
+  async function addSlides(){ if(isVideo()){ setMsg('⚠ Відео публікується окремим постом. Щоб зробити карусель, спершу прибери відео (✕).','var(--danger)'); return; }
+    const room=10-media.length; if(room<=0){ setMsg('у каруселі вже 10 кадрів - більше Instagram і Telegram не приймають','var(--danger)'); return; }
     const ids=await pickSlides(room); if(!ids||!ids.length) return;
     setMsg('🖼 додаю кадри…'); try{ const r=await api('/posts/'+postId+'/slides',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaIds:ids})}); setMedia(r.media); renderMedia(); renderPrev(); setMsg(media.length>1?('карусель: '+media.length+' кадрів ✓'):'фото додано ✓','var(--brand)'); }
     catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } }
@@ -2072,7 +2113,9 @@ async function openComposer(postId, opts){
     return esc(cut).replace(/\s+$/,'')+'… <span class="pv-more" data-more="'+k+'">'+NETMORE[k]+'</span>'; };
   // кадри в прев'ю так, як їх показує сама мережа
   function pvMedia(k){ const files=media.map(m=>m.filename); const n=files.length;
-    if(!n) return ''; if(n===1) return '<img src="/media/'+esc(files[0])+'" style="width:100%;display:block">';
+    if(!n) return '';
+    // 🎬 відео так, як його покаже мережа: Instagram - вертикальний Reels, решта - плеєр у стрічці
+    if(isVideo()) return '<div class="pv-video'+(k==='instagram'?' reel':'')+'"><video src="/media/'+esc(files[0])+'" poster="/thumb/'+esc(files[0])+'" controls muted playsinline preload="none"></video>'+(k==='instagram'?'<span class="pv-cnt">Reels</span>':'')+'</div>'; if(n===1) return '<img src="/media/'+esc(files[0])+'" style="width:100%;display:block">';
     if(k==='instagram'){ const i=Math.min(pvIdx.instagram||0,n-1);
       return '<div class="pv-car"><img src="/media/'+esc(files[i])+'"><span class="pv-cnt">'+(i+1)+'/'+n+'</span>'+(i>0?'<button class="pv-nav pv-prev" data-nav="-1">‹</button>':'')+(i<n-1?'<button class="pv-nav pv-next" data-nav="1">›</button>':'')+'</div>'
         +'<div class="pv-dots">'+files.map((_,j)=>'<i'+(j===i?' class="on"':'')+'></i>').join('')+'</div>'; }
@@ -2089,7 +2132,7 @@ async function openComposer(postId, opts){
       const empty='<span style="color:var(--muted)">порожньо</span>';
       let body;
       if(k==='instagram') body=head+img+'<div class="ig-acts">♡ 💬 ↗<span class="sp"></span>🔖</div><div class="phone-b"><span class="phone-user">ваш_профіль</span> <span class="phone-txt" style="display:inline">'+(t?pvCap(k,t):empty)+'</span></div>';
-      else if(k==='telegram') body=head+img+'<div class="phone-b"><div class="phone-txt">'+(t?esc(t):empty)+'</div></div>'+((over&&mediaFilename)?'<div class="pv-note">довгий підпис Telegram надішле окремим повідомленням під '+(media.length>1?'альбомом':'фото')+'</div>':'');
+      else if(k==='telegram') body=head+img+'<div class="phone-b"><div class="phone-txt">'+(t?esc(t):empty)+'</div></div>'+((over&&mediaFilename)?'<div class="pv-note">довгий підпис Telegram надішле окремим повідомленням під '+(isVideo()?'відео':media.length>1?'альбомом':'фото')+'</div>':'');
       else if(k==='threads'&&C.threads&&C.threads.thread){
         // 🧵 прев'ю гілки як у Threads: аватар + вертикальна лінія + частини-відповіді
         // (тут детермінована розбивка по абзацах; при публікації AI переріже точніше, з гачком у root)
@@ -2145,8 +2188,16 @@ async function openComposer(postId, opts){
       setMsg((rr.remaining&&rr.remaining.length)?('прибрано; лишилось слідів: '+rr.remaining.length+' (запусти ще раз)'):'сліди прибрано, текст чистий ✓','var(--brand)');
     }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ b.disabled=false; aiDone(); } };
   // обкладинку міняє фото-редактор: перечитуємо список кадрів (кадри каруселі лишаються на місці)
-  ov.querySelector('#cmpPhoto').onclick=()=>openPhotoTool(postId, full.image_prompt||'', async()=>{ try{ const f2=await api('/posts/'+postId+'/full'); setMedia(f2.media); }catch(_){ } renderMedia(); renderPrev(); });
+  ov.querySelector('#cmpPhoto').onclick=()=>{ if(isVideo()&&!confirm('У пості відео. Замінити його фото?')) return;
+    openPhotoTool(postId, full.image_prompt||'', async()=>{ try{ const f2=await api('/posts/'+postId+'/full'); setMedia(f2.media); }catch(_){ } renderMedia(); renderPrev(); }); };
   ov.querySelector('#cmpAddSlides').onclick=addSlides;
+  ov.querySelector('#cmpVideo').onclick=async()=>{
+    if(media.length&&!isVideo()&&!confirm('Відео замінить фото поста ('+media.length+'). Відео публікується окремим постом, без фото поруч. Продовжити?')) return;
+    const id=await pickVideo(); if(!id) return;
+    setMsg('🎬 ставлю відео…');
+    try{ const r=await api('/posts/'+postId+'/video',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:id})});
+      setMedia(r.media); renderMedia(); renderPrev(); setMsg('🎬 відео в пості ✓','var(--brand)'); }
+    catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } };
   const slTxt=ov.querySelector('#cmpSlidesTxt'); slTxt.value=slidesText; slTxt.addEventListener('input',()=>{ slidesText=slTxt.value; });
   const fmtSel=ov.querySelector('#cmpFormat'); if(fmtSel) fmtSel.addEventListener('change',renderCarBlock);
   ov.querySelector('#cmpCarBuild').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('🎨 збираю слайди…');
@@ -2762,7 +2813,7 @@ async function loadBroll(){
 }
 if($('brollUpload')) $('brollUpload').onclick=async()=>{ const inp=$('brollFile'), msg=$('brollMsg'); const files=inp&&inp.files; if(!files||!files.length){ msg.textContent='обери відео-файли'; return; }
   msg.textContent='завантаження…';
-  const r=await uploadInBatches(files,'/api/media?source=broll',(done,total)=>{ msg.textContent='завантаження… '+done+' з '+total; });
+  const r=await uploadInBatches(files,'/api/media?source=broll',(d,t,p)=>{ msg.textContent=upMsg(d,t,p); });
   msg.textContent=r.failed.length?uploadReport(r):'✓ додано '+r.saved.length; inp.value=''; loadBroll(); };
 async function loadMeta(){
   try{ const c=await api('/integrations/meta'); const st=$('mtStatus'), conn=$('mtConnect'), dis=$('mtDisconnect'), stats=$('mtStats'); if(!st) return;
@@ -2988,7 +3039,8 @@ async function loadMedia(){
       +'</div>';
     o.innerHTML=bar+m.map(x=>{ const on=sel&&sel.has(x.id);
       return '<div style="position:relative;cursor:'+(sel?'pointer':'default')+'" data-id="'+x.id+'">'
-        +(x.kind==='video'?'<video src="/media/'+esc(x.filename)+'" style="height:90px;border-radius:8px'+(on?';outline:3px solid var(--brand)':'')+'"></video>':'<img loading="lazy" src="/thumb/'+esc(x.filename)+'" onerror="this.style.opacity=.3" style="height:90px;border-radius:8px;background:var(--surface2)'+(on?';outline:3px solid var(--brand)':'')+'">')
+        +'<img loading="lazy" src="/thumb/'+esc(x.filename)+'" onerror="this.style.opacity=.3" style="height:90px;min-width:60px;border-radius:8px;background:var(--surface2)'+(on?';outline:3px solid var(--brand)':'')+'">'
+        +(x.kind==='video'?'<span class="vbadge">▶ '+fmtDur(x.duration)+'</span>':'')
         +(sel?'<span style="position:absolute;top:4px;left:4px;width:20px;height:20px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;background:'+(on?'var(--brand)':'rgba(0,0,0,.55)')+';color:#fff">'+(on?'✓':'')+'</span>'
              :'<button class="mediaDel" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;padding:1px 6px">✕</button>')
         +'</div>'; }).join('');
@@ -3011,21 +3063,52 @@ async function loadMedia(){
 // limit»; а порція в 40 МБ цілком відбивалась nginx-ом (413) - 10 фото з телефона по 4 МБ не
 // заливались жодне. Файл, більший за порцію, іде сам.
 const UPLOAD_BATCH_BYTES=18*1024*1024;
+// ⬆ Відео й файли, більші за порцію, - ЧАСТИНАМИ по 8 МБ: відео з телефона важить сотні МБ, а nginx
+// пропускає до 20 МБ за запит. Сервер тримає зібране на диску, тож обрив шматка - це повтор, а не
+// «почни з нуля»: сервер сам каже, з якого байта продовжити (received).
+const CHUNK_BYTES=8*1024*1024;
+// тривалість відео «0:42» / «12:05»; невідома - порожньо
+function fmtDur(sec){ const n=Math.round(Number(sec)||0); if(!n) return ''; return Math.floor(n/60)+':'+String(n%60).padStart(2,'0'); }
+async function uploadChunked(file, url, onPct){
+  const uid='c'+Date.now().toString(36)+Math.random().toString(36).slice(2,10);
+  const base=url.replace('/api/media','/api/media/chunk'), sep=base.includes('?')?'&':'?';
+  let off=0, tries=0;
+  for(;;){
+    let r=null, j={};
+    try{ r=await fetch(base+sep+'uid='+uid+'&size='+file.size+'&offset='+off,{method:'PUT',credentials:'same-origin',body:file.slice(off,Math.min(off+CHUNK_BYTES,file.size)),
+           headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(file.name)}});
+         j=await r.json().catch(()=>({})); }
+    catch(e){ if(++tries>=5) throw new Error('немає звʼязку з сервером'); await new Promise(x=>setTimeout(x,3000)); continue; }
+    if(r.ok&&j.done) return j.saved;
+    if(r.ok&&typeof j.received==='number'){ off=j.received; tries=0; if(onPct) onPct(Math.floor(off*100/file.size)); continue; }
+    if(r.status===409&&typeof j.received==='number'){ off=j.received; if(++tries>=5) throw new Error(j.error||'не вдалось'); continue; }
+    if(r.status===429||r.status>=500){ if(++tries>=5) throw new Error(j.error||('HTTP '+r.status)); await new Promise(x=>setTimeout(x,3000)); continue; }
+    throw new Error(j.error||('HTTP '+r.status));
+  }
+}
 async function uploadInBatches(files, url, onProgress){
-  const list=[...files], batches=[]; let cur=[], bytes=0;
+  const all=[...files];
+  const isBig=(f)=>f.size>UPLOAD_BATCH_BYTES||/^video\//.test(f.type||'')||/\.(mov|mp4|m4v|webm)$/i.test(f.name||'');
+  const list=all.filter(f=>!isBig(f)), big=all.filter(isBig), batches=[]; let cur=[], bytes=0;
   for(const f of list){ if(cur.length&&(cur.length>=10||bytes+f.size>UPLOAD_BATCH_BYTES)){ batches.push(cur); cur=[]; bytes=0; } cur.push(f); bytes+=f.size; }
   if(cur.length) batches.push(cur);
   const saved=[], failed=[];
+  for(const f of big){
+    if(onProgress) onProgress(saved.length+failed.length, all.length, 0);
+    try{ saved.push(await uploadChunked(f,url,(p)=>{ if(onProgress) onProgress(saved.length+failed.length, all.length, p); })); }
+    catch(e){ failed.push({name:f.name,error:e.message}); }
+  }
   for(const b of batches){
-    if(onProgress) onProgress(saved.length+failed.length, list.length);
+    if(onProgress) onProgress(saved.length+failed.length, all.length);
     const fd=new FormData(); b.forEach(f=>fd.append('file',f));
     try{ const r=await fetch(url,{method:'POST',body:fd,credentials:'same-origin'}); const j=await r.json().catch(()=>({}));
       if(!r.ok) throw new Error(j.error||(r.status===413?'завеликий файл: сервер приймає до 20 МБ за раз':'HTTP '+r.status));
       saved.push(...(j.saved||[])); failed.push(...(j.failed||[]));
     }catch(e){ b.forEach(f=>failed.push({name:f.name,error:e.message})); }   // порція впала цілком - позначаємо кожен її файл
   }
-  return {saved, failed, total:list.length};
+  return {saved, failed, total:all.length};
 }
+function upMsg(d,t,p){ return 'завантаження… '+d+' з '+t+(p!=null?' · '+p+'%':''); }
 // dup - той самий файл уже лежав у медіатеці: сервер не робить копію, а віддає наявний
 function uploadReport(r){ const dup=r.saved.filter(x=>x.dup).length, dupTxt=dup?' (з них '+dup+' уже були в медіатеці)':'';
   return r.failed.length
@@ -3034,7 +3117,7 @@ function uploadReport(r){ const dup=r.saved.filter(x=>x.dup).length, dupTxt=dup?
 $('mediaUpload').onclick=async()=>{
   const f=$('mediaFile').files; const m=$('mediaMsg'); if(!f||!f.length){ m.style.color='var(--danger)'; m.textContent='Обери файл(и)'; return; }
   m.style.color='var(--muted)'; m.textContent='завантаження…';
-  const r=await uploadInBatches(f,'/api/media',(done,total)=>{ m.textContent='завантаження… '+done+' з '+total; });
+  const r=await uploadInBatches(f,'/api/media',(d,t,p)=>{ m.textContent=upMsg(d,t,p); });
   $('mediaFile').value=''; m.style.color=r.failed.length?'var(--danger)':'var(--brand)'; m.textContent=uploadReport(r);
   await loadMedia();
 };

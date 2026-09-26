@@ -464,6 +464,20 @@ function albumPhoto(ws: string, chatId: string, msg: any, token: string, postId?
 async function composeReply(ws: string, chatId: string, msg: any, st: { postId: string | null; await: string | null }, token: string): Promise<boolean> {
   const text = String(msg.text || "").trim();
   if (st.await === "photo") {
+    // 🎬 відео (або відео файлом-документом) - стає відео поста замість фото
+    const vid = msg.video || (msg.document && /^video\//.test(String(msg.document.mime_type || "")) ? msg.document : null);
+    if (vid) {
+      if ((vid.file_size || 0) > 19.5 * 1024 * 1024) {
+        await tg.sendMessage(token, chatId, "⚠️ Telegram не віддає ботам файли понад 20 МБ. Відкрий «🚀 Кабінет» (Mini App) і натисни «🎬 Відео» в пості - там великі файли вантажаться частинами.");
+        return true;
+      }
+      try {
+        const f = await tg.getFileBuffer(token, vid.file_id);
+        await cmp.attachVideo(ws, st.postId!, f.buffer, vid.file_name || "video.mp4");
+      } catch (e: any) { await tg.sendMessage(token, chatId, "⚠️ " + String(e.message).slice(0, 200)); return true; }
+      await openCompose(ws, chatId, st.postId!, token);
+      return true;
+    }
     const ph = msg.photo?.length ? msg.photo[msg.photo.length - 1] : null;
     if (!ph) return false;                       // прислали не фото - хай іде звичайним шляхом
     // альбом у відповідь на «Фото чи альбом» → карусель (див. albumPhoto)
@@ -507,7 +521,7 @@ async function composeCallback(ws: string, chatId: string, data: string, cbq: an
   switch (head) {
     case "cc":  await tg.answerCallbackQuery(token, cbq.id); await openCompose(ws, chatId, postId, token); return true;
     case "cn":  await cmp.toggleNet(ws, postId, arg); await tg.answerCallbackQuery(token, cbq.id); await openCompose(ws, chatId, postId, token); return true;
-    case "cp":  await cmp.expect(ws, postId, "photo", chatId); await tg.answerCallbackQuery(token, cbq.id, "Надішли фото"); await tg.sendMessage(token, chatId, "🖼 Надішли фото наступним повідомленням. Кілька фото альбомом - вийде карусель (до 10)."); return true;
+    case "cp":  await cmp.expect(ws, postId, "photo", chatId); await tg.answerCallbackQuery(token, cbq.id, "Надішли фото чи відео"); await tg.sendMessage(token, chatId, "🖼 Надішли фото чи відео наступним повідомленням. Кілька фото альбомом - вийде карусель (до 10). Відео - до 20 МБ (межа Telegram для ботів); більші - через «🚀 Кабінет»."); return true;
     case "ce":  await cmp.expect(ws, postId, "text", chatId);  await tg.answerCallbackQuery(token, cbq.id, "Надішли новий текст"); await tg.sendMessage(token, chatId, "✍ Надішли новий текст поста."); return true;
     case "cr":  await cmp.expect(ws, postId, "rewrite", chatId); await tg.answerCallbackQuery(token, cbq.id); await tg.sendMessage(token, chatId, "🤖 Що саме змінити? Напиши побажання (або «-», щоб просто переписати іншими словами)."); return true;
     case "ca":  await tg.answerCallbackQuery(token, cbq.id, await cmp.toggleApprove(ws, postId)); await openCompose(ws, chatId, postId, token); return true;

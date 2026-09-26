@@ -11,7 +11,7 @@ import { q, one } from "./db.js";
 import * as tg from "./telegram.js";
 import { getSetting, setSetting } from "./settings.js";
 import { saveMedia } from "./media.js";
-import { postMediaList, setPostMediaOrder, MAX_SLIDES } from "./slides.js";
+import { postMediaList, setPostMediaOrder, setPostVideo, MAX_SLIDES } from "./slides.js";
 import { appendCroppedSlide } from "./images.js";
 import { publishPostToChannels } from "./publisher.js";
 import { rewritePost } from "./pipeline.js";
@@ -114,9 +114,11 @@ export async function composeCard(ws: string, postId: string): Promise<{ text: s
   const when = slot ? new Intl.DateTimeFormat("uk-UA", { timeZone: tz, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(slot.scheduled_at)) : "";
 
   const body = p.content.length > 600 ? p.content.slice(0, 600) + "…" : p.content;
-  const frames = (await postMediaList(postId)).length;
+  const list = await postMediaList(postId);
+  const frames = list.length, isVideo = list[0]?.kind === "video";
   const text = `📝 <b>${p.review === "approved" ? "Затверджено" : "Чернетка"}</b>\n\n${esc(body)}\n\n`
-    + `🖼 Фото: ${frames > 1 ? `карусель, ${frames} кадрів` : p.filename ? "є" : "нема"}\n`
+    + (isVideo ? `🎬 Відео${list[0].duration ? ` ${Math.floor(Number(list[0].duration) / 60)}:${String(Math.round(Number(list[0].duration)) % 60).padStart(2, "0")}` : ""}\n`
+      : `🖼 Фото: ${frames > 1 ? `карусель, ${frames} кадрів` : p.filename ? "є" : "нема"}\n`)
     + `📢 Канали: ${chosen.length ? chosen.map(niceNet).join(", ") : "не обрано"}`
     + (when ? `\n🗓 Заплановано: ${when}` : "");
 
@@ -128,7 +130,7 @@ export async function composeCard(ws: string, postId: string): Promise<{ text: s
     })));
   }
   // альбом, надісланий у відповідь на «Додати фото», стає каруселлю (перше фото - обкладинка)
-  rows.push([{ text: p.filename ? "🖼 Змінити фото" : "🖼 Фото чи альбом", data: `cp:${postId}` },
+  rows.push([{ text: isVideo ? "🎬 Змінити відео" : p.filename ? "🖼 Змінити фото" : "🖼 Фото, альбом чи відео", data: `cp:${postId}` },
              { text: "✍ Текст", data: `ce:${postId}` }]);
   rows.push([{ text: "🤖 Переписати (AI)", data: `cr:${postId}` },
              { text: p.review === "approved" ? "↩ У чернетки" : "✅ Затвердити", data: `ca:${postId}` }]);
@@ -174,6 +176,13 @@ export async function setAlbumCover(ws: string, postId: string, buffer: Buffer):
   const m = await saveMedia(ws, { buffer, mime: "image/jpeg", name: "tg-post.jpg", source: "bot" });
   await setPostMediaOrder(ws, postId, []);
   await appendCroppedSlide(ws, postId, m.id, "4:5");
+}
+
+// 🎬 відео, надіслане боту: замінює фото поста (відео публікується окремим постом)
+export async function attachVideo(ws: string, postId: string, buffer: Buffer, name: string): Promise<void> {
+  const m = await saveMedia(ws, { buffer, mime: "video/mp4", name, source: "bot", dedupe: true });
+  if (m.kind !== "video") throw new Error("це не відео - приймаю MP4, MOV, WebM");
+  await setPostVideo(ws, postId, m.id);
 }
 
 // 🖼 кадр каруселі з альбому: у кінець, у пропорції обкладинки (до 10 кадрів - решту відкидаємо)

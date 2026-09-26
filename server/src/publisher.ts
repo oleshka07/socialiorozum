@@ -1,7 +1,7 @@
 // Спільна публікація поста в усі обрані мережі (composer «Опублікувати» + плановий автопостер).
 import { q, one } from "./db.js";
 import { env } from "./env.js";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
@@ -13,7 +13,7 @@ import { MEDIA_DIR } from "./media.js";
 import { ensureIgSafeImage } from "./images.js";
 import { adaptForChannels, reelCaption, threadsSplit } from "./pipeline.js";
 import { getSetting } from "./settings.js";
-import { tgLink, fbLink, liLink } from "./permalink.js";
+import { tgLink, fbLink, fbVideoLink, liLink } from "./permalink.js";
 import { logEvent } from "./log.js";
 import { startJob } from "./jobs.js";
 import { ensurePostDigest } from "./memory.js";
@@ -77,9 +77,31 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
   if (!post) throw new Error("пост не знайдено");
   // 🖼 кадри поста: обкладинка + кадри каруселі. Один кадр - звичайний фото-пост, 2+ - карусель
   // (Instagram/Threads - CAROUSEL, Facebook - галерея, Telegram - альбом, LinkedIn - multiImage).
-  const images = (await postMediaList(postId)).filter((m) => m.kind === "image").map((m) => m.filename);
+  const mediaList = await postMediaList(postId);
+  // 🎬 відео-пост: відео стоїть обкладинкою і завжди саме (див. setPostMediaOrder). Instagram -
+  // Reels, Facebook - відео Сторінки, Threads - VIDEO, Telegram - sendVideo, LinkedIn - Videos API.
+  const video = mediaList[0]?.kind === "video" ? mediaList[0] : null;
+  const images = video ? [] : mediaList.filter((m) => m.kind === "image").map((m) => m.filename);
   const imageUrls = images.map((f) => `${env.appBaseUrl}/media/${f}`);
   const carousel = images.length >= 2;
+  const videoUrl = video ? `${env.appBaseUrl}/media/${video.filename}` : "";
+  const videoPath = video ? join(MEDIA_DIR, video.filename) : "";
+  let videoSize = video ? Number(video.size) || 0 : 0;
+  if (video && !videoSize) { try { videoSize = (await stat(videoPath)).size; } catch { /* файлу нема - впаде нижче людською помилкою */ } }
+  const vDur = video ? Number(video.duration) || 0 : 0;
+  // межі мереж для відео - перевіряємо ДО виклику мережі: інакше людина бачить сиру помилку API
+  // через кілька хвилин обробки, а не зрозумілу причину одразу
+  const videoLimit = (net: string): string | null => {
+    if (!video) return null;
+    if (!videoSize) return "файл відео не знайдено на сервері - прикріпи відео заново";
+    const mb = Math.round(videoSize / 1024 / 1024);
+    if (net === "telegram" && videoSize > tg.TG_VIDEO_MAX) return `Telegram приймає від ботів відео до 50 МБ, а це ${mb} МБ - стисни відео або зніми Telegram із цього поста`;
+    if (!vDur) return null; // тривалість не виміряли - хай вирішує сама мережа
+    if (net === "instagram" && (vDur < 3 || vDur > 900)) return "Instagram Reels приймає відео від 3 с до 15 хв";
+    if (net === "threads" && vDur > 300) return "Threads приймає відео до 5 хв - вріж відео або зніми Threads із цього поста";
+    if (net === "linkedin" && (vDur < 3 || vDur > 1800)) return "LinkedIn приймає відео від 3 с до 30 хв";
+    return null;
+  };
   const ch = post.channels || {};
   const enabled = Object.keys(ch).filter((k) => ch[k] && ch[k].on)
     .filter((k) => !onlyNets || onlyNets.includes(k));
@@ -134,7 +156,14 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
           if (!reserved) continue;
           try {
             let r: { message_id: number };
-            if (carousel) {
+            const vErr = videoLimit("telegram");
+            if (vErr) throw new Error(vErr);
+            if (video) {
+              // за адресою Telegram тягне лише до 20 МБ; більше (до 50) - надсилаємо файл самі
+              const src = videoSize <= tg.TG_VIDEO_URL_MAX ? { url: videoUrl } : { file: await readFile(videoPath), name: video.filename };
+              r = await tg.sendVideo(tgc.bot_token, chat, src, cap.length <= 1024 ? cap : "", video);
+              if (cap.length > 1024) await tg.sendMessage(tgc.bot_token, chat, cap);
+            } else if (carousel) {
               // альбом: підпис на першому кадрі; довший за 1024 - окремим повідомленням під альбомом
               const msgs = await tg.sendMediaGroup(tgc.bot_token, chat, imageUrls, cap.length <= 1024 ? cap : "");
               r = msgs[0];
@@ -165,6 +194,7 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
         if (!any) throw new Error("Не вказано канал/групу");
       } else if (k === "threads") {
         if (!thTok) throw new Error("Threads не підключено");
+        const thErr = videoLimit("threads"); if (thErr) throw new Error(thErr);
         // 🧵 стратегія Threads (settings_block.threads_strategy): гілка для довгих + відкладена CTA-гілка
         const strat = await getSetting<any>(ws, "threads_strategy", {});
         const perPost = ch[k] || {};
@@ -180,7 +210,9 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
             // гілка пакує ПОВНИЙ майстер-текст (а не скорочену 500-символьну версію) - у цьому її сенс
             const parts = await threadsSplit(ws, post.content, perPost.number !== false);
             // карусель - у першому пості гілки (root), відповіді лишаються текстовими
-            const first = carousel
+            const first = video
+              ? await threads.publishVideo(thTok.token, thTok.userId, parts[0], videoUrl)
+              : carousel
               ? await threads.publishCarousel(thTok.token, thTok.userId, parts[0], imageUrls)
               : await threads.publish(thTok.token, thTok.userId, parts[0], imageUrl || undefined);
             rootId = first.mediaId;
@@ -200,7 +232,9 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
               }
             }
           } else {
-            const r = carousel
+            const r = video
+              ? await threads.publishVideo(thTok.token, thTok.userId, textOf(k), videoUrl)
+              : carousel
               ? await threads.publishCarousel(thTok.token, thTok.userId, textOf(k), imageUrls)
               : await threads.publish(thTok.token, thTok.userId, textOf(k), imageUrl || undefined);
             rootId = r.mediaId;
@@ -235,16 +269,23 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
           `insert into meta_publish(post_id,channel,status) values($1,'facebook','sending') on conflict (post_id,channel) do nothing returning id`, [postId]);
         if (!reserved) { results.push({ channel: k, status: "skipped" }); continue; }
         try {
-          const r = carousel ? await meta.publishMultiPhotoToPage(mt.page_id, mt.page_token, textOf(k), imageUrls)
-            : imageUrl ? await meta.publishPhotoToPage(mt.page_id, mt.page_token, textOf(k), imageUrl)
-            : await meta.publishToPage(mt.page_id, mt.page_token, textOf(k));
-          const fbId = (r as any).post_id || r.id;
-          // id FB-поста вже містить id сторінки, тож лінк збирається без додаткового запиту
-          await q(`update meta_publish set external_id=$2, status='sent', permalink=nullif($3,'') where id=$1`, [reserved.id, fbId, fbLink(fbId)]);
+          if (video) {
+            // відео Сторінки: Meta сама тягне файл за адресою; вертає id відео (без id сторінки)
+            const rv = await meta.publishVideoToPage(mt.page_id, mt.page_token, textOf(k), videoUrl);
+            await q(`update meta_publish set external_id=$2, status='sent', permalink=nullif($3,'') where id=$1`, [reserved.id, rv.id, fbVideoLink(rv.id)]);
+          } else {
+            const r = carousel ? await meta.publishMultiPhotoToPage(mt.page_id, mt.page_token, textOf(k), imageUrls)
+              : imageUrl ? await meta.publishPhotoToPage(mt.page_id, mt.page_token, textOf(k), imageUrl)
+              : await meta.publishToPage(mt.page_id, mt.page_token, textOf(k));
+            const fbId = (r as any).post_id || r.id;
+            // id FB-поста вже містить id сторінки, тож лінк збирається без додаткового запиту
+            await q(`update meta_publish set external_id=$2, status='sent', permalink=nullif($3,'') where id=$1`, [reserved.id, fbId, fbLink(fbId)]);
+          }
         } catch (e: any) { await q(`delete from meta_publish where id=$1`, [reserved.id]); throw e; }
       } else if (k === "instagram") {
         if (!mt?.ig_user_id || !mt.page_token) throw new Error("Instagram не підключено");
-        if (!images.length) throw new Error("Instagram потребує фото");
+        if (!images.length && !video) throw new Error("Instagram потребує фото або відео");
+        const igErr = videoLimit("instagram"); if (igErr) throw new Error(igErr);
         if (mt.token_expires_at && new Date(mt.token_expires_at).getTime() < Date.now())
           throw new Error("Токен Meta (Facebook/Instagram) протух - перепідключи у Налаштування → Канали");
         const reserved = await one<{ id: string }>(
@@ -256,7 +297,9 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
           const safe: string[] = [];
           for (const f of images) safe.push(await ensureIgSafeImage(ws, f));
           const safeUrls = safe.map((f) => `${env.appBaseUrl}/media/${f}`);
-          const r = carousel
+          const r = video
+            ? await meta.publishReelToInstagram(mt.ig_user_id, mt.page_token, videoUrl, textOf(k))
+            : carousel
             ? await meta.publishCarouselToInstagram(mt.ig_user_id, mt.page_token, safeUrls, textOf(k))
             : await meta.publishToInstagram(mt.ig_user_id, mt.page_token, safeUrls[0], textOf(k));
           await q(`update meta_publish set external_id=$2, status='sent' where id=$1`, [reserved.id, r.mediaId]);
@@ -268,6 +311,7 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
         } catch (e: any) { await q(`delete from meta_publish where id=$1`, [reserved.id]); throw e; }
       } else if (k === "linkedin") {
         if (!li?.access_token || !li.member_urn) throw new Error("LinkedIn не підключено");
+        const liErr = videoLimit("linkedin"); if (liErr) throw new Error(liErr);
         if (li.token_expires_at && new Date(li.token_expires_at).getTime() < Date.now())
           throw new Error("Токен LinkedIn протух (живе 60 днів) - перепідключи у Налаштування → Канали");
         const reserved = await one<{ id: string }>(
@@ -277,7 +321,7 @@ export async function publishPostToChannels(ws: string, postId: string, onlyNets
           // зображення LinkedIn приймає лише через власний upload (не за URL) - читаємо локальні файли
           const bufs: Buffer[] = [];
           for (const f of images) { try { bufs.push(await readFile(join(MEDIA_DIR, f))); } catch { /* файл зник - без нього */ } }
-          const r = await linkedin.publish(li.access_token, li.member_urn, textOf(k), bufs);
+          const r = await linkedin.publish(li.access_token, li.member_urn, textOf(k), bufs, video ? { path: videoPath, size: videoSize } : undefined);
           // URN поста → лінк збирається детерміновано, без додаткового запиту
           await q(`update linkedin_publish set external_id=$2, status='sent', permalink=nullif($3,'') where id=$1`,
             [reserved.id, r.postId || null, liLink(r.postId || null)]);
@@ -330,15 +374,19 @@ async function freshToken(
 }
 
 export async function publishReelToChannels(ws: string, postId: string, nets: string[]): Promise<PubResult[]> {
-  const post = await one<{ content: string; channels: any; reel_video: string | null }>(
-    `select p.content, p.channels, p.reel_video from post p
-       join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+  const post = await one<{ content: string; channels: any; reel_video: string | null; own_video: string | null }>(
+    `select p.content, p.channels, p.reel_video, (select m.filename from media_asset m where m.id=p.media_id and m.kind='video') as own_video
+       from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
   if (!post) throw new Error("пост не знайдено");
+  // зібраний рілс, а якщо його нема - власне відео поста (те саме відео піде в YouTube Shorts / TikTok)
+  const ownVideo = !post.reel_video && !!post.own_video;
+  post.reel_video = post.reel_video || post.own_video;
   if (!post.reel_video) throw new Error("рілс ще не зібрано - спершу 🎞 на картці сценарію");
   const ch = post.channels || {};
-  // підпис до відео генеруємо один раз і кешуємо на пості (channels.reel_caption)
-  let caption: string = String(ch.reel_caption || "").trim();
+  // підпис до відео генеруємо один раз і кешуємо на пості (channels.reel_caption); у власного відео
+  // підпис - сам текст поста (це не сценарій, переписувати його моделлю нема чого)
+  let caption: string = String(ch.reel_caption || "").trim() || (ownVideo ? post.content.trim().slice(0, 2200) : "");
   if (!caption) {
     try {
       caption = await reelCaption(ws, post.content);

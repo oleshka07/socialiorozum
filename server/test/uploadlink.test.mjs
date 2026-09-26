@@ -1,8 +1,9 @@
 // 📤 Разове посилання на заливку фото з комп'ютера (інструмент конектора media_upload_link).
 //
-// Що тут стережемо: (1) гард формату токена ДО запиту в БД; (2) команду, яку Claude запустить у
-// терміналі людини: вона мусить працювати і в bash, і в zsh (глоб *.{jpg,png} у zsh валить УСЮ
-// команду, якщо хоч одного розширення в папці нема), і не ламатись на комі в імені файлу;
+// Що тут стережемо: (1) гард формату токена ДО запиту в БД; (2) скрипт, який Claude запустить у
+// терміналі людини: він мусить працювати в bash, dash і zsh (глоб *.{jpg,png} у zsh валить УСЮ
+// команду, якщо хоч одного розширення в папці нема), не ламатись на комі в імені файлу, різати
+// великі файли на шматки й сам переживати обрив зʼєднання;
 // (3) відповідь приймача - рядок на файл, бо саме це Claude читає в терміналі; (4) сторінку для
 // людини, куди назва кабінету потрапляє з бази - екранування обовʼязкове.
 import { test } from "node:test";
@@ -12,8 +13,9 @@ import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, chmodSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  isUploadToken, clampMinutes, uploadCommands, uploadResultText, uploadPageHtml, UPLOAD_TEXT, UPLOAD_FILE_MAX,
+  isUploadToken, clampMinutes, uploadCommands, uploadScript, uploadResultText, uploadPageHtml, UPLOAD_TEXT, UPLOAD_CHUNK,
 } from "../dist/uploadlink.js";
+import { randomBytes } from "node:crypto";
 
 const URL = "https://beta.socialio.rozum.one/mcp/upload/" + "ab".repeat(24);
 
@@ -35,39 +37,74 @@ test("строк дії: 5-180 хвилин, сміття - година", () =>
   assert.equal(clampMinutes("abc"), 60);
 });
 
-test("команда для папки: find замість глоба, лише фото, адреса не виривається з лапок", () => {
+test("команда для папки: скачати скрипт і запустити через sh, адреса не виривається з лапок", () => {
   const c = uploadCommands(URL);
-  assert.match(c.unix, /^find "\/шлях\/до\/папки" -maxdepth 1 -type f /);
-  assert.doesNotMatch(c.unix, /\*\.\{/, "глоб із дужками валить zsh на папці без якогось розширення");
-  for (const ext of ["jpg", "jpeg", "png", "webp", "heic"]) assert.ok(c.unix.includes(`-iname '*.${ext}'`), ext);
-  assert.ok(c.unix.includes(`"${URL}"`));
+  assert.equal(c.unix, `curl -fsS "${URL}/sh" -o socialio-upload.sh && sh socialio-upload.sh "/шлях/до/папки"`);
+  assert.doesNotMatch(c.unix, /\|\s*(ba)?sh/, "не curl | sh: скрипт спершу лягає файлом - його можна прочитати");
   assert.ok(c.windows.includes(`"${URL}"`) && c.windows.includes("curl.exe"));
   // навіть зіпсована адреса не додає в команду жодної лапки
   const bad = uploadCommands('https://x/mcp/upload/abc"; rm -rf ~; echo "');
   assert.equal((bad.unix.match(/"/g) || []).length, (c.unix.match(/"/g) || []).length);
+  assert.doesNotMatch(uploadScript('https://x/mcp/upload/abc\'; rm -rf ~; echo \''), /rm -rf/, "адреса в скрипті - лише безпечні символи");
 });
 
-test("команда справді заливає папку: bash, sh і zsh, кома в імені, відео й текст пропущено", (t) => {
-  // curl підміняємо записом аргументів: перевіряємо саме те, що побачить справжній curl
+// Підроблений curl, що говорить протоколом /chunk: дописує шматок у файл за uid, відповідає «+ N/S»
+// або «✓ …», і вміє раз «обірвати» зʼєднання (000) та раз сказати «! N» (продовжуй з байта N) -
+// так перевіряється, що скрипт сам повторює й продовжує, а зібраний файл байт-у-байт той самий.
+const FAKE_CURL = `#!/usr/bin/env node
+const fs = require("fs"), path = require("path");
+const args = process.argv.slice(2);
+const url = args.find((a) => /^https?:/.test(a));
+
+const name = (args.find((a) => a.startsWith("X-File-Name: ")) || "").slice(13);
+const u = new URL(url);
+const uid = u.searchParams.get("uid"), size = +u.searchParams.get("size"), off = +u.searchParams.get("offset");
+const dir = process.env.RECV;
+const body = fs.readFileSync(0);
+const f = path.join(dir, uid);
+const have = fs.existsSync(f) ? fs.statSync(f).size : 0;
+fs.appendFileSync(path.join(dir, "calls.log"), uid + " " + off + " " + body.length + " " + name + "\\n");
+const flag = path.join(dir, "flag-" + uid);
+// другий шматок першого великого файлу: спершу «обрив», потім «! N» - обидва скрипт мусить пережити
+if (off > 0 && name === "big.mp4" && !fs.existsSync(flag + "-000")) { fs.writeFileSync(flag + "-000", ""); process.stdout.write("curl: (56) Recv failure\\n000"); process.exit(0); }
+if (off > 0 && name === "big.mp4" && !fs.existsSync(flag + "-409")) { fs.writeFileSync(flag + "-409", ""); process.stdout.write("! " + have + " бракує даних\\n409"); process.exit(0); }
+if (off !== have) { process.stdout.write("! " + have + " бракує даних\\n409"); process.exit(0); }
+fs.appendFileSync(f, body);
+const got = have + body.length;
+process.stdout.write((got < size ? "+ " + got + "/" + size + " " + name : "✓ " + name + " → #" + uid.slice(-8)) + "\\n200");
+`;
+
+test("скрипт справді заливає папку: bash, dash і zsh, великий файл частинами з обривом, кома в імені", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "upl-"));
   const bin = join(dir, "bin"); mkdirSync(bin);
-  const log = join(dir, "calls.log");
-  writeFileSync(join(bin, "curl"), `#!/bin/sh\nfor a in "$@"; do printf '%s\\n' "$a"; done >> "${log}"\necho '--' >> "${log}"\n`);
-  chmodSync(join(bin, "curl"), 0o755);
-  const photos = join(dir, "фото з відпустки"); mkdirSync(photos);
-  for (const f of ["IMG_1.JPG", "море, Одеса.jpeg", "screen.png", "iphone.HEIC", "clip.mp4", "notes.txt"]) writeFileSync(join(photos, f), "x");
-  mkdirSync(join(photos, "sub")); writeFileSync(join(photos, "sub", "deep.jpg"), "x");
-  const cmd = uploadCommands(URL).unix.replace("/шлях/до/папки", photos);
-  for (const shell of ["bash", "sh", "zsh"]) {
-    writeFileSync(log, "");
-    try { execFileSync(shell, ["-c", cmd], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } }); }
+  writeFileSync(join(bin, "curl"), FAKE_CURL); chmodSync(join(bin, "curl"), 0o755);
+  writeFileSync(join(bin, "sleep"), "#!/bin/sh\nexit 0\n"); chmodSync(join(bin, "sleep"), 0o755); // без справжніх пауз між повторами
+  const media = join(dir, "фото з відпустки"); mkdirSync(media);
+  const big = randomBytes(UPLOAD_CHUNK * 2 + 12345);             // 3 шматки, останній неповний
+  writeFileSync(join(media, "big.mp4"), big);
+  const small = { "IMG_1.JPG": "jpg-bytes", "море, Одеса.jpeg": "comma", "iphone.HEIC": "heic", "clip.MOV": "mov" };
+  for (const [n, c] of Object.entries(small)) writeFileSync(join(media, n), c);
+  writeFileSync(join(media, "notes.txt"), "не медіа"); mkdirSync(join(media, "sub")); writeFileSync(join(media, "sub", "deep.jpg"), "x");
+  const script = join(dir, "socialio-upload.sh");
+  writeFileSync(script, uploadScript(URL));
+  for (const shell of ["bash", "dash", "zsh"]) {
+    const recv = join(dir, "recv-" + shell); mkdirSync(recv);
+    let out = "";
+    try { out = execFileSync(shell, [script, media], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, RECV: recv }, encoding: "utf8" }); }
     catch (e) { if (e.code === "ENOENT") { t.diagnostic(`${shell} недоступний`); continue; } throw e; }
-    const calls = readFileSync(log, "utf8").split("--\n").filter(Boolean);
-    const files = calls.map((c) => c.split("\n").find((l) => l.startsWith("file=@"))).sort();
-    assert.deepEqual(files, [
-      `file=@"${photos}/IMG_1.JPG"`, `file=@"${photos}/iphone.HEIC"`, `file=@"${photos}/screen.png"`, `file=@"${photos}/море, Одеса.jpeg"`,
-    ].sort(), `${shell}: мають піти рівно 4 фото з кореня папки, кома - в лапках`);
-    assert.ok(calls.every((c) => c.includes(URL)), `${shell}: кожен виклик - на наше посилання`);
+    const calls = readFileSync(join(recv, "calls.log"), "utf8").trim().split("\n").map((l) => l.split(" "));
+    const names = [...new Set(calls.map((c) => c.slice(3).join(" ")))].sort();
+    assert.deepEqual(names, ["IMG_1.JPG", "big.mp4", "clip.MOV", "iphone.HEIC", "море, Одеса.jpeg"].sort(), `${shell}: 5 медіа з кореня, без txt і підпапки`);
+    const bigUid = calls.find((c) => c[3] === "big.mp4")[0];
+    assert.ok(readFileSync(join(recv, bigUid)).equals(big), `${shell}: великий файл зібрано байт-у-байт, попри обрив і «продовжуй з N»`);
+    assert.ok(Math.max(...calls.map((c) => +c[2])) <= UPLOAD_CHUNK, `${shell}: жоден шматок не більший за ${UPLOAD_CHUNK}`);
+    for (const [n, c] of Object.entries(small)) {
+      const uid = calls.find((x) => x.slice(3).join(" ") === n)[0];
+      assert.equal(readFileSync(join(recv, uid), "utf8"), c, `${shell}: ${n} цілий`);
+    }
+    assert.match(out, /✓ big\.mp4 → #/, `${shell}: рядок результату для кожного файлу`);
+    assert.match(out, /✓ море, Одеса\.jpeg → #/);
+    assert.match(out, /^Готово/m);
   }
 });
 
@@ -84,7 +121,8 @@ test("сторінка: назва кабінету екранована, про
   const ok = uploadPageHtml({ state: "ok", cabinet: '<img src=x onerror=alert(1)>"', until: "26.09, 18:00", left: 200 });
   assert.ok(!ok.includes("<img src=x"), "назва кабінету приходить з бази - тільки екранованою");
   assert.ok(ok.includes("&lt;img src=x onerror=alert(1)&gt;&quot;"));
-  assert.ok(ok.includes(`MAX=${UPLOAD_FILE_MAX}`) && ok.includes("Accept:'application/json'"));
+  assert.ok(ok.includes("/chunk?uid=") && ok.includes("Accept:'application/json'"), "сторінка шле файли частинами");
+  assert.ok(ok.includes('accept="image/*,video/*"'), "і фото, і відео");
   const gone = uploadPageHtml({ state: "expired" });
   assert.ok(gone.includes("протухло") && !gone.includes('id="dz"'));
   assert.ok(!uploadPageHtml({ state: "invalid" }).includes('type="file"'));
