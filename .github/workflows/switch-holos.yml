@@ -1,0 +1,86 @@
+name: switch-holos
+
+# РАЗОВЕ перемикання ПРОДУ на нову адресу holos.rozum.one (запуск: push у гілку switch-holos).
+# Запускати ЛИШЕ після: (1) Holos уже на проді (промоушн beta → main), (2) нові адреси повернення
+# додано в Meta, Threads, LinkedIn і Google, (3) явне «так» власника. Кроки:
+#   1) vhost holos.rozum.one → той самий застосунок, що й socialio.rozum.one (копія конфігу socialio
+#      з іншою назвою; сертифікат holos уже є), старий конфіг - у резервну копію;
+#   2) APP_BASE_URL у .env проду → https://holos.rozum.one (.env - у резервну копію);
+#   3) перезапуск застосунку, перевірка обох адрес.
+# socialio.rozum.one не вимикається: сторінки звідти застосунок сам перекидає на holos (301), а вебхуки,
+# конектори Claude, медіа й Mini App працюють як і раніше. Відкат - команди в кінці логу.
+
+on:
+  push:
+    branches: [switch-holos]
+
+jobs:
+  switch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Switch prod to holos.rozum.one
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            set -e
+            PROD_DIR="${{ secrets.APP_DIR }}"
+            SUDO=""; [ "$(id -u)" != "0" ] && SUDO="sudo -n"
+            STAMP=$(date +%Y%m%d-%H%M%S)
+            BK=/root/holos-switch-$STAMP
+            $SUDO mkdir -p "$BK"
+
+            echo "== 0/3: передумови =="
+            test -f "$PROD_DIR/server/src/brand.ts" || { echo "На проді ще старий код без Holos - спершу промоушн beta → main."; exit 1; }
+            SOC=$(readlink -f /etc/nginx/sites-enabled/socialio.rozum.one.conf)
+            HOL=$(readlink -f /etc/nginx/sites-enabled/holos.rozum.one.conf)
+            test -f "$SOC" || { echo "Нема конфігу nginx для socialio.rozum.one"; exit 1; }
+            $SUDO test -f /etc/letsencrypt/live/holos.rozum.one/fullchain.pem || { echo "Нема сертифіката holos.rozum.one"; exit 1; }
+            grep -q "proxy_set_header Host" "$SOC" || echo "УВАГА: конфіг socialio не передає Host - редірект зі старої адреси не спрацює (сайт при цьому працює)"
+
+            echo "== 1/3: nginx - holos.rozum.one → застосунок проду =="
+            if [ -f "$HOL" ]; then $SUDO cp -a "$HOL" "$BK/holos.rozum.one.conf.old"; fi
+            $SUDO cp -a "$SOC" "$BK/socialio.rozum.one.conf"
+            TARGET=${HOL:-/etc/nginx/sites-available/holos.rozum.one.conf}
+            sed 's/socialio\.rozum\.one/holos.rozum.one/g' "$SOC" | $SUDO tee "$TARGET" >/dev/null
+            $SUDO ln -sf "$TARGET" /etc/nginx/sites-enabled/holos.rozum.one.conf
+            if ! $SUDO nginx -t; then
+              echo "nginx -t не пройшов - повертаю старий конфіг holos"
+              [ -f "$BK/holos.rozum.one.conf.old" ] && $SUDO cp -a "$BK/holos.rozum.one.conf.old" "$TARGET"
+              exit 1
+            fi
+            $SUDO systemctl reload nginx
+            echo "nginx: OK"
+
+            echo "== 2/3: APP_BASE_URL проду → https://holos.rozum.one =="
+            ENVF="$PROD_DIR/server/.env"
+            $SUDO cp -a "$ENVF" "$BK/.env"
+            $SUDO chmod 600 "$BK/.env"
+            if grep -q '^APP_BASE_URL=' "$ENVF"; then
+              $SUDO sed -i -E 's|^APP_BASE_URL=.*|APP_BASE_URL=https://holos.rozum.one|' "$ENVF"
+            else
+              echo 'APP_BASE_URL=https://holos.rozum.one' | $SUDO tee -a "$ENVF" >/dev/null
+            fi
+            grep '^APP_BASE_URL=' "$ENVF"
+
+            echo "== 3/3: перезапуск і перевірка =="
+            cd "$PROD_DIR/server"
+            docker compose up -d --force-recreate --no-deps app
+            ok=""
+            for i in $(seq 1 30); do
+              if curl -fsS 127.0.0.1:8080/health >/dev/null 2>&1; then ok=1; break; fi
+              sleep 2
+            done
+            [ -n "$ok" ] || { echo "health: FAIL"; docker compose logs --tail=40 app; exit 1; }
+            echo "health: OK"
+            echo "https://holos.rozum.one/    -> $(curl -sS -m 10 -o /dev/null -w '%{http_code}' https://holos.rozum.one/)"
+            echo "https://holos.rozum.one/app -> $(curl -sS -m 10 -o /dev/null -w '%{http_code}' https://holos.rozum.one/app)"
+            echo "https://socialio.rozum.one/app -> $(curl -sS -m 10 -o /dev/null -w '%{http_code} %{redirect_url}' https://socialio.rozum.one/app)"
+            echo "socialio /health (без редіректу) -> $(curl -sS -m 10 -o /dev/null -w '%{http_code}' https://socialio.rozum.one/health)"
+            docker compose logs --tail=15 app | grep -i "tgbot" || true
+            echo
+            echo "Резервні копії: $BK"
+            echo "ВІДКАТ: sudo cp -a $BK/.env $ENVF && sudo cp -a $BK/holos.rozum.one.conf.old $TARGET && sudo nginx -t && sudo systemctl reload nginx && cd $PROD_DIR/server && docker compose up -d --force-recreate --no-deps app"

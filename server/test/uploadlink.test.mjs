@@ -39,7 +39,7 @@ test("строк дії: 5-180 хвилин, сміття - година", () =>
 
 test("команда для папки: скачати скрипт і запустити через sh, адреса не виривається з лапок", () => {
   const c = uploadCommands(URL);
-  assert.equal(c.unix, `curl -fsS "${URL}/sh" -o socialio-upload.sh && sh socialio-upload.sh "/шлях/до/папки"`);
+  assert.equal(c.unix, `curl -fsS "${URL}/sh" -o holos-upload.sh && sh holos-upload.sh "/шлях/до/папки"`);
   assert.doesNotMatch(c.unix, /\|\s*(ba)?sh/, "не curl | sh: скрипт спершу лягає файлом - його можна прочитати");
   assert.ok(c.windows.includes(`"${URL}"`) && c.windows.includes("curl.exe"));
   // навіть зіпсована адреса не додає в команду жодної лапки
@@ -85,7 +85,7 @@ test("скрипт справді заливає папку: bash, dash і zsh, 
   const small = { "IMG_1.JPG": "jpg-bytes", "море, Одеса.jpeg": "comma", "iphone.HEIC": "heic", "clip.MOV": "mov" };
   for (const [n, c] of Object.entries(small)) writeFileSync(join(media, n), c);
   writeFileSync(join(media, "notes.txt"), "не медіа"); mkdirSync(join(media, "sub")); writeFileSync(join(media, "sub", "deep.jpg"), "x");
-  const script = join(dir, "socialio-upload.sh");
+  const script = join(dir, "holos-upload.sh");
   writeFileSync(script, uploadScript(URL));
   for (const shell of ["bash", "dash", "zsh"]) {
     const recv = join(dir, "recv-" + shell); mkdirSync(recv);

@@ -76,7 +76,7 @@ async function azureTts(text: string, dest: string): Promise<void> {
       "Ocp-Apim-Subscription-Key": env.azure.speechKey,
       "Content-Type": "application/ssml+xml",
       "X-Microsoft-OutputFormat": "audio-24khz-96kbitrate-mono-mp3",
-      "User-Agent": "socialio-reels",
+      "User-Agent": "Holos-reels",
     },
     body: ssml,
   });

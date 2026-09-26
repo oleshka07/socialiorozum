@@ -1488,7 +1488,7 @@ const run = async () => {
     const txt = readFileSync(await dl.path(), "utf8");
     const lines = txt.replace(/^﻿/, "").split("\r\n");
     const total = await page.evaluate(() => AnData.posts.length);
-    const ok = txt.startsWith("﻿") && dl.suggestedFilename().startsWith("socialio-") && lines[0].startsWith('"Дата";"Мережа";"Пост"') && lines.length - 1 === total;
+    const ok = txt.startsWith("﻿") && dl.suggestedFilename().startsWith("holos-") && lines[0].startsWith('"Дата";"Мережа";"Пост"') && lines.length - 1 === total;
     if (!ok) console.log("   ↳ analyticsCsv:", JSON.stringify({ name: dl.suggestedFilename(), head: lines[0], n: lines.length, total }));
     return ok;
   });

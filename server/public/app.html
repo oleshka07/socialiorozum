@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>socialio - кабінет</title>
+<title>Holos - кабінет</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -640,7 +640,7 @@ html.review-on #owl{display:none!important}
   <header class="topnav">
     <div style="display:flex;align-items:center;gap:9px;flex:none">
       <div class="logo"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14c4-7 12-7 16 0"></path><path d="M4 19c4-7 12-7 16 0"></path><path d="M9 6.5l3-3 3 3"></path></svg></div>
-      <div class="wordmark">socialio</div>
+      <div class="wordmark">Holos</div>
     </div>
     <nav class="topnav-tabs">
       <div class="navitem active" data-view="today"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"></path></svg><span class="lbl">Сьогодні</span></div>
@@ -1224,7 +1224,7 @@ html.review-on #owl{display:none!important}
           </div>
           <div class="panel" style="margin:0">
             <div class="ph">📁 Google Drive</div>
-            <div class="hint">Познач свою папку з фото - нові знімки самі підтягуються в медіатеку socialio. Доступ лише до обраної папки.</div>
+            <div class="hint">Познач свою папку з фото - нові знімки самі підтягуються в медіатеку Holos. Доступ лише до обраної папки.</div>
             <div class="btnrow"><span id="gdStatus" style="font-size:13px;color:var(--muted)">…</span></div>
             <div class="btnrow"><a id="gdConnect" class="btn primary" href="/api/integrations/gdrive/connect" onclick="return connectPopup('/api/integrations/gdrive/connect')" style="display:none">🔗 Підключити</a><button class="ghost" id="gdDisconnect" style="display:none">Відключити</button></div>
             <div id="gdFolderBox" style="display:none;margin-top:10px">
@@ -1326,7 +1326,7 @@ html.review-on #owl{display:none!important}
         </div>
         <div class="panel">
           <div class="ph">🔌 Підключення до Claude (MCP)</div>
-          <div class="hint">Дай своєму Claude (підписка Pro/Max: claude.ai, застосунок або Claude Code) руки в кабінеті: він прочитає голос бренду, напише пост САМ у чаті, збереже його сюди, опублікує чи поставить у календар. Жодних API-ключів - і текст, написаний у чаті, не витрачає AI-кредити socialio. Якщо кабінетів кілька, конектор бачить усі: у чаті достатньо сказати «перемкнись на <бренд>». Активний кабінет у Claude свій - перемикач у меню аватара його не рухає.</div>
+          <div class="hint">Дай своєму Claude (підписка Pro/Max: claude.ai, застосунок або Claude Code) руки в кабінеті: він прочитає голос бренду, напише пост САМ у чаті, збереже його сюди, опублікує чи поставить у календар. Жодних API-ключів - і текст, написаний у чаті, не витрачає AI-кредити Holos. Якщо кабінетів кілька, конектор бачить усі: у чаті достатньо сказати «перемкнись на <бренд>». Активний кабінет у Claude свій - перемикач у меню аватара його не рухає.</div>
           <div class="fld" style="margin-top:10px"><label class="fl">Твоя адреса конектора - це як пароль, нікому не давай</label><div style="display:flex;gap:8px"><input class="txt" id="mcpUrl" readonly placeholder="(ще не створена)" style="font-size:12px"><button class="ghost" type="button" id="mcpCopy">Копіювати</button></div></div>
           <div class="btnrow" style="margin-top:8px;flex-wrap:wrap"><button class="primary" id="mcpCreate">Створити адресу</button><button class="ghost" type="button" id="mcpHow">📖 Як підключити</button><button class="ghost" type="button" id="mcpRevoke" style="display:none">Відключити</button><span id="mcpMsg" style="font-size:12px;color:var(--muted)"></span></div>
         </div>

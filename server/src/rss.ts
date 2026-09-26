@@ -68,7 +68,7 @@ export async function fetchFeedRaw(url: string): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
   try {
-    const res = await publicFetch(url, { headers: { "User-Agent": "socialio/1.0 RSS Fetcher" }, signal: controller.signal });
+    const res = await publicFetch(url, { headers: { "User-Agent": "Holos/1.0 RSS Fetcher" }, signal: controller.signal });
     if (!res.ok) throw new Error(`RSS HTTP ${res.status}`);
     return await readLimited(res, 5 * 1024 * 1024);
   } catch (e: any) {

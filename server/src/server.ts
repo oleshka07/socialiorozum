@@ -51,6 +51,7 @@ import { startDiary } from "./diary.js";
 import { startThreadsAuto } from "./threads-auto.js";
 import { startComments, commentStates, queueMissingComments, processDue as processDueComments } from "./comments.js";
 import { cleanAlt } from "./igextras.js";
+import { BRAND, legacyHosts, legacyRedirect } from "./brand.js";
 import { getSettingText } from "./settings.js";
 import { runAbTest, modelCatalog, abSpend } from "./abtest.js";
 import { contextReview, contextIssueCount, suggestFieldFix } from "./context-check.js";
@@ -145,15 +146,26 @@ function rateLimited(key: string, max: number, windowMs = 60000): boolean {
   return h.n > max;
 }
 
+// 🏷 Переїзд на нову адресу (socialio.rozum.one → APP_BASE_URL): сторінки зі старої адреси
+// перекидаються на нову, а вебхуки, конектори Claude, медіа й Mini App працюють там як і раніше -
+// на них уже посилаються зовнішні сервіси, чати й опубліковані пости. Стоїть ДО PIN-гейта беті.
+const LEGACY = legacyHosts(env.appBaseUrl, process.env.LEGACY_HOSTS);
+if (LEGACY.size) {
+  app.addHook("onRequest", async (req: any, reply) => {
+    const to = legacyRedirect({ host: req.headers.host, method: req.method, url: req.raw.url, baseUrl: env.appBaseUrl, legacy: LEGACY });
+    if (to) return reply.redirect(to, 301);
+  });
+}
+
 // ---- БЕТА: PIN-гейт (env BETA_PIN; на проді не заданий - блок неактивний). ----
 // Відкриті без PIN: /health, вебхуки (Telegram/Fireflies шлють POST без кукі) і /media/
 // (Telegram/Meta ТЯГНУТЬ картинку по URL при публікації - PIN зламав би фото-пости).
 if (env.beta.pin) {
   const PIN_COOKIE = "beta_ok";
   const pinToken = createHash("sha256").update(env.beta.pin + env.sessionSecret).digest("hex").slice(0, 32);
-  const pinPage = `<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>socialio BETA</title>
+  const pinPage = `<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${BRAND} BETA</title>
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#101014;color:#eee;font-family:system-ui,sans-serif}.c{text-align:center;padding:24px}.b{display:inline-block;background:#e67e22;color:#fff;font-weight:800;font-size:12px;padding:3px 12px;border-radius:20px;letter-spacing:.08em;margin-bottom:14px}input{font-size:22px;letter-spacing:.4em;text-align:center;width:170px;padding:10px;border-radius:12px;border:1px solid #333;background:#1a1a20;color:#fff;outline:none}button{display:block;margin:14px auto 0;padding:10px 26px;border-radius:12px;border:0;background:#7c5cff;color:#fff;font-weight:700;font-size:14px;cursor:pointer}#e{color:#ff6b6b;font-size:13px;min-height:18px;margin-top:10px}</style></head>
-<body><div class="c"><div class="b">BETA</div><h3 style="margin:0 0 16px;font-weight:600">Тестове середовище socialio</h3>
+<body><div class="c"><div class="b">BETA</div><h3 style="margin:0 0 16px;font-weight:600">Тестове середовище ${BRAND}</h3>
 <input id="p" type="password" inputmode="numeric" maxlength="8" placeholder="PIN" autofocus>
 <button onclick="go()">Увійти</button><div id="e"></div></div>
 <script>function go(){fetch('/beta-pin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin:document.getElementById('p').value})}).then(r=>{if(r.ok)location.href='/app';else document.getElementById('e').textContent='Невірний PIN';});}
@@ -374,7 +386,7 @@ app.get("/api/account/export", async (req: any, reply) => {
     q(`select ss.scheduled_at, ss.status, p.content from schedule_slot ss left join plan_item pi on pi.id=ss.plan_item_id join post p on p.id=coalesce(ss.post_id, pi.post_id) join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1`, [ws]),
     q(`select kind, mime, original_name, filename, size, created_at from media_asset where workspace_id=$1`, [ws]),
   ]);
-  reply.header("Content-Disposition", `attachment; filename="socialio-export.json"`);
+  reply.header("Content-Disposition", `attachment; filename="holos-export.json"`);
   reply.type("application/json");
   return { exported_at: new Date().toISOString(), email: req.user.email, settings, rubrics, strategy, sources, posts, schedule, media };
 });
@@ -3701,14 +3713,14 @@ function mcpCors(reply: any) {
   // браузерні клієнти MCP (інспектор) без цього просто не працюють.
   reply.header("Access-Control-Allow-Origin", "*");
   reply.header("Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS");
-  reply.header("Access-Control-Allow-Headers", "content-type, authorization, accept, mcp-session-id, mcp-protocol-version, x-socialio-token");
+  reply.header("Access-Control-Allow-Headers", "content-type, authorization, accept, mcp-session-id, mcp-protocol-version, x-holos-token, x-socialio-token");
   reply.header("Access-Control-Expose-Headers", "mcp-session-id, mcp-protocol-version");
   reply.header("Cache-Control", "no-store");
 }
 async function mcpContext(req: any) {
   const hdr = String(req.headers["authorization"] || "");
   const bearer = /^bearer\s+/i.test(hdr) ? hdr.replace(/^bearer\s+/i, "").trim() : "";
-  const token = String(req.params?.token || "") || bearer || String(req.headers["x-socialio-token"] || "") || String(req.query?.token || "");
+  const token = String(req.params?.token || "") || bearer || String(req.headers["x-holos-token"] || req.headers["x-socialio-token"] || "") || String(req.query?.token || "");
   return resolveToken(token);
 }
 const mcpPost = async (req: any, reply: any) => {
@@ -3717,7 +3729,7 @@ const mcpPost = async (req: any, reply: any) => {
     return reply.code(429).send({ jsonrpc: "2.0", id: null, error: { code: -32000, message: "Забагато запитів - зачекай хвилину" } });
   const ctx = await mcpContext(req);
   if (!ctx) {
-    reply.header("WWW-Authenticate", 'Bearer realm="socialio"');
+    reply.header("WWW-Authenticate", 'Bearer realm="holos"');
     return reply.code(401).send({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "Недійсна адреса MCP. Візьми свою в кабінеті: Інструменти → Підключення до Claude." } });
   }
   let out: any = null;
@@ -4233,8 +4245,9 @@ function appHtml(): string {
   return appHtmlCached;
 }
 app.get("/app", (_req, reply) => reply.type("text/html; charset=utf-8").send(appHtml()));
-app.get("/B", (_req, reply) => reply.sendFile("b.html"));
-app.get("/b", (_req, reply) => reply.sendFile("b.html"));
+// колишній другий варіант лендингу - посилання на нього ведуть на головну
+app.get("/B", (_req, reply) => reply.redirect("/", 301));
+app.get("/b", (_req, reply) => reply.redirect("/", 301));
 app.get("/login", (_req, reply) => reply.sendFile("auth.html"));
 app.get("/register", (_req, reply) => reply.sendFile("auth.html"));
 app.get("/forgot", (_req, reply) => reply.sendFile("auth.html"));
@@ -4265,7 +4278,7 @@ await initHookBase(); // секрети вебхуків Telegram - до пер�
 // запущена джоба могла б потрапити під цю позначку
 await markLostJobs().catch(() => {});
 app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
-  app.log.info(`socialio на ${addr}`);
+  app.log.info(`${BRAND} на ${addr}`);
   // ключі з адмінки накладаються поверх .env ПЕРШИМ ділом - до того, як воркери підуть у мережу
   refreshSecrets();
 

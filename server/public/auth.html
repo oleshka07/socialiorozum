@@ -2,7 +2,7 @@
 <html lang="uk"><head>
 <meta charset="UTF-8">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>socialio - вхід</title>
+<title>Holos - вхід</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -60,19 +60,19 @@ button:disabled{opacity:.5}
   <div class="left">
     <div class="brandrow">
       <div class="logo"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14c4-7 12-7 16 0"></path><path d="M4 19c4-7 12-7 16 0"></path><path d="M9 6.5l3-3 3 3"></path></svg></div>
-      <div class="wordmark">socialio</div>
+      <div class="wordmark">Holos</div>
     </div>
     <div class="pitch">
       <div class="eyebrow">Соцмережі без вигадування</div>
       <h2>Контент тече з того, що ти вже маєш</h2>
-      <p>Встав транскрипт, нотатку чи думку - socialio перетворить це на пачку готових постів у твоєму голосі. Ти лише переглядаєш і затверджуєш.</p>
+      <p>Встав транскрипт, нотатку чи думку - Holos перетворить це на пачку готових постів у твоєму голосі. Ти лише переглядаєш і затверджуєш.</p>
       <div class="bullets">
         <div class="bullet"><span class="bdot"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg></span> Жодної «порожньої сторінки» - ідеї вже всередині</div>
         <div class="bullet"><span class="bdot"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg></span> Твій тон голосу, очищений від AI-присмаку</div>
         <div class="bullet"><span class="bdot"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg></span> Затвердив → у календар → опубліковано</div>
       </div>
     </div>
-    <div class="foot">© 2026 socialio · by ROZUM</div>
+    <div class="foot">© 2026 Holos by Rozum</div>
   </div>
 
   <div class="right">
@@ -160,13 +160,13 @@ $('form').onsubmit=async(e)=>{
 </script>
 <script>
 // 🎬 англійський підпис для скрінкастів App Review Meta (той самий прапорець, що й у кабінеті: /app?review=en
-// або /login?review=en). Вхід у socialio - поштою й паролем; Facebook Login - пізніше, у Налаштуваннях.
+// або /login?review=en). Вхід у Holos - поштою й паролем; Facebook Login - пізніше, у Налаштуваннях.
 (function(){ try{
   const q=new URLSearchParams(location.search).get('review');
   if(q==='en') localStorage.setItem('kg_review_en','1'); if(q==='off') localStorage.removeItem('kg_review_en');
   if(localStorage.getItem('kg_review_en')!=='1') return;
   const b=document.createElement('div'); b.id='reviewBar'; b.lang='en';
-  b.innerHTML='<span class="rv-en">EN</span><span>socialio sign-in page: the user logs in to socialio with email and password (“Увійти” = Log in). Facebook Login is used later, only to connect the user\'s own Facebook Page and Instagram account in Settings → Channels.</span>';
+  b.innerHTML='<span class="rv-en">EN</span><span>Holos by Rozum sign-in page: the user logs in to Holos with email and password (“Увійти” = Log in). Facebook Login is used later, only to connect the user\'s own Facebook Page and Instagram account in Settings → Channels.</span>';
   document.body.appendChild(b); document.body.style.paddingTop=(b.offsetHeight+8)+'px';
 }catch(e){} })();
 </script>

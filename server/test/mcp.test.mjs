@@ -120,7 +120,7 @@ test("handleRpc initialize: віддаємо капабіліті, версію 
   assert.equal(r.id, 1);
   assert.equal(r.result.protocolVersion, "2025-03-26");
   assert.ok(r.result.capabilities.tools);
-  assert.equal(r.result.serverInfo.name, "socialio");
+  assert.equal(r.result.serverInfo.name, "holos");
   assert.match(r.result.instructions, /create_draft/);
 });
 

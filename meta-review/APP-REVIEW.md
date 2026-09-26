@@ -1,5 +1,7 @@
 # Meta App Review: що саме знімати і що вписувати · оновлено 26.09.2026
 
+> **Holos by Rozum (колишній socialio).** Записуємо й подаємо вже після переїзду на `holos.rozum.one`: рецензент бачить ту саму назву й адресу, що й користувачі. У застосунку Meta (App settings → Basic) Privacy Policy, Terms і Data Deletion - теж на holos.rozum.one; адреси повернення додає картка «Holos: додати адресу holos.rozum.one…».
+
 Два застосунки, дві окремі заявки:
 
 | Застосунок | App ID | Навіщо | Дозволи на ревʼю |
@@ -14,7 +16,7 @@
 ## Що змінилось проти версії від 11.07
 
 - **Англійські підписи вбудовані.** Meta вимагає англійський інтерфейс або англійські субтитри, а
-  socialio український. Відкрий кабінет посиланням **`https://socialio.rozum.one/login?review=en`**:
+  Holos український. Відкрий кабінет посиланням **`https://holos.rozum.one/login?review=en`**:
   угорі зʼявиться темна смуга англійською - що на екрані і який дозвіл тут працює (у композері,
   Каналах, Аналітиці - свій текст). Монтувати субтитри не треба. Сова-помічник у цьому режимі
   схована. Вимкнути - ✕ на смузі.
@@ -39,13 +41,13 @@
    Pulse → **Use cases** → сценарій із Facebook-Сторінкою → **Customize** → додати
    `pages_manage_engagement` і `read_insights`; сценарій з Instagram → додати
    `instagram_manage_comments`. **Save.** Без цього кнопки «💬 Дозволити коментарі» і «📈 Дозволити
-   статистику» в socialio відкриють вікно Meta з помилкою «Invalid Scopes».
+   статистику» в Holos відкриють вікно Meta з помилкою «Invalid Scopes».
 3. **Мова Facebook - англійська** (Facebook → Settings & privacy → Language) - тоді й вікно входу
    Facebook у записі буде англійською.
-4. **Тестовий акаунт socialio для рецензента** (Facebook-пароль рецензенту давати заборонено, лише
-   вхід у socialio):
-   - зареєструйся на `https://socialio.rozum.one/register` з адресою-псевдонімом
-     `o.stepeniev+metareview@swipescape.eu` (socialio такі адреси приймає, а лист підтвердження
+4. **Тестовий акаунт Holos для рецензента** (Facebook-пароль рецензенту давати заборонено, лише
+   вхід у Holos):
+   - зареєструйся на `https://holos.rozum.one/register` з адресою-псевдонімом
+     `o.stepeniev+metareview@swipescape.eu` (Holos такі адреси приймає, а лист підтвердження
      прийде в твою ж скриньку);
    - у цьому акаунті: Налаштування → Канали → Facebook + Instagram → «🔗 Підключити» → твій Facebook
      → обрати **демо-Сторінку** з привʼязаним Instagram (бізнес або автор, 3-5 постів);
@@ -58,16 +60,16 @@
 
 ## Крок 1. Чотири відео (кожне 2-4 хв, усе - у тестовому акаунті на проді)
 
-Перед кожним записом відкрий `https://socialio.rozum.one/login?review=en` - смуга англійською
+Перед кожним записом відкрий `https://holos.rozum.one/login?review=en` - смуга англійською
 зʼявиться сама. Назви кнопок нижче - як у кабінеті.
 
 ### Відео 1 - Підключення і публікація
 Дозволи: `pages_show_list`, `instagram_basic`, `pages_manage_posts`, `instagram_content_publish`
-1. Сторінка входу socialio → email і пароль тестового акаунта → «Увійти».
+1. Сторінка входу Holos → email і пароль тестового акаунта → «Увійти».
 2. Налаштування (меню аватара) → вкладка **«Канали»** → картка **«Facebook + Instagram»** →
    «Відключити» (щоб показати вхід заново) → **«🔗 Підключити»**.
 3. Вікно Facebook: увійти, **повільно прогорнути список дозволів**, обрати демо-Сторінку →
-   підтвердити. Назад у socialio: «✅ Підключено · FB: Сторінка · IG: @акаунт», **розкрити список
+   підтвердити. Назад у Holos: «✅ Підключено · FB: Сторінка · IG: @акаунт», **розкрити список
    Сторінок** (`pages_show_list`).
 4. **«✨ Голос з Instagram»** → повідомлення, що голос виведено з N постів (`instagram_basic`).
 5. «Створення» → будь-яка чернетка → **«✍ Редагувати»** → у композері лишити **Facebook** і
@@ -79,7 +81,7 @@
 1. Налаштування → «Канали» → «Facebook + Instagram» → **«💬 Дозволити коментарі»** → вікно
    Facebook, видно два нові дозволи → підтвердити → у картці «💬 Перший коментар ✓ дозволено».
 2. Нова чернетка → «✍ Редагувати» → Facebook і Instagram → у полі **«💬 Перший коментар»** написати,
-   наприклад, `More photos and prices: https://socialio.rozum.one` → праворуч у прев'ю видно коментар
+   наприклад, `More photos and prices: https://holos.rozum.one` → праворуч у прев'ю видно коментар
    під постом у кожній мережі.
 3. **«📣 Опублікувати зараз»** → під прев'ю «💬 ✓ опубліковано».
 4. «↗ Відкрити пост» → показати під постом в Instagram і на Сторінці коментар від імені акаунта.
@@ -121,7 +123,7 @@ Advanced - не чіпай.
 
 | Дозвіл | Відео | How will you use this permission (вставити як є) |
 |---|---|---|
-| `pages_show_list` | 1 | After the user logs in with Facebook, the app lists the Pages they manage so they can choose which Page (and its linked Instagram professional account) socialio publishes to. The list is shown in Settings → Channels. |
+| `pages_show_list` | 1 | After the user logs in with Facebook, the app lists the Pages they manage so they can choose which Page (and its linked Instagram professional account) Holos publishes to. The list is shown in Settings → Channels. |
 | `instagram_basic` | 1 | The app reads the connected Instagram professional account's username and the captions of the user's own recent posts: to confirm which account is connected and, when the user clicks “Voice from Instagram”, to learn the tone of voice for new posts. |
 | `pages_manage_posts` | 1 | The app publishes the user's own approved posts (text and photos or video) to the Facebook Page the user selected, immediately or at a time the user schedules. |
 | `instagram_content_publish` | 1 | The app publishes the user's own approved posts (photo, carousel or video with caption) to the user's Instagram professional account, immediately or at a scheduled time. |
@@ -143,11 +145,11 @@ Advanced - не чіпай.
 ## Інструкція для рецензента (поле Testing instructions, обидві заявки)
 
 ```
-socialio is a content studio for small businesses: the owner writes posts in their own brand
+Holos by Rozum is a content studio for small businesses: the owner writes posts in their own brand
 voice and publishes them to their own Facebook Page, Instagram and Threads accounts.
 
 Login (email + password, no Facebook account needed to log in):
-https://socialio.rozum.one/login?review=en
+https://holos.rozum.one/login?review=en
 The "?review=en" part shows English captions on every screen (the interface is in Ukrainian).
 Email: ⟨email тестового акаунта⟩
 Password: ⟨пароль тестового акаунта⟩
@@ -179,13 +181,13 @@ Threads Testers і прийняти в Threads (Налаштування → А�
 ## Що вже є (не чіпати)
 
 - Бізнес-верифікація ✅; іконка `app-icon-1024.png` у цій папці; Privacy Policy
-  `https://socialio.rozum.one/privacy`, Terms `https://socialio.rozum.one/terms`, Data Deletion
-  `https://socialio.rozum.one/data-deletion`.
+  `https://holos.rozum.one/privacy`, Terms `https://holos.rozum.one/terms`, Data Deletion
+  `https://holos.rozum.one/data-deletion`.
 - Redirect URI (Facebook Login → Settings → Valid OAuth Redirect URIs):
-  `https://socialio.rozum.one/api/integrations/meta/callback` і
+  `https://holos.rozum.one/api/integrations/meta/callback` і
   `https://beta.socialio.rozum.one/api/integrations/meta/callback`; Threads:
-  `https://socialio.rozum.one/api/integrations/threads/callback` (+ бета).
-- Базове підключення socialio просить рівно 7 дозволів (`public_profile`, `pages_show_list`,
+  `https://holos.rozum.one/api/integrations/threads/callback` (+ бета).
+- Базове підключення Holos просить рівно 7 дозволів (`public_profile`, `pages_show_list`,
   `pages_read_engagement`, `pages_manage_posts`, `instagram_basic`, `instagram_content_publish`,
   `instagram_manage_insights`); коментарі й статистику - окремими кнопками, щоб базове підключення
   не ламалось, поки нових дозволів нема в застосунку.

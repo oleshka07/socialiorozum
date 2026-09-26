@@ -77,7 +77,7 @@ export const env = {
   },
   resend: {
     apiKey: process.env.RESEND_API_KEY ?? "",
-    from: process.env.RESEND_FROM ?? "socialio <onboarding@resend.dev>",
+    from: process.env.RESEND_FROM ?? "Holos <onboarding@resend.dev>",
   },
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID ?? "",

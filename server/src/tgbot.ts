@@ -14,6 +14,7 @@ import { isDiaryPending, appendDiaryText, attachDiaryMedia, attachMediaToEntry, 
 import { cabinetPostLink } from "./permalink.js";
 import * as cmp from "./tgcompose.js";
 import { looksLikeReadyPost } from "./textkind.js";
+import { legacyHosts, isOurHookUrl } from "./brand.js";
 const postDeepLink = (postId: string) => cabinetPostLink(env.appBaseUrl, postId);
 
 let BOT_ID = 0;
@@ -84,8 +85,10 @@ export async function ownBotToken(botId: string): Promise<string | null> {
 }
 
 // Після деплою: власні боти, чий вебхук досі веде на ЦЕЙ сервіс за старою адресою (із загальним
-// секретом), переводимо на нову. Бот, що дивиться на інший інстанс (прод/бета), не чіпаємо.
+// секретом або на старому домені socialio.rozum.one після переїзду), переводимо на нову - разом із
+// кнопкою Mini App. Бот, що дивиться на інший інстанс (прод/бета), не чіпаємо.
 export async function refreshOwnBotWebhooks(): Promise<void> {
+  const legacy = legacyHosts(env.appBaseUrl, process.env.LEGACY_HOSTS);
   const rows = await q<{ bot_token: string }>(`select distinct bot_token from telegram_config where bot_token is not null`);
   for (const r of rows) {
     if (!r.bot_token || r.bot_token === env.telegram.botToken) continue;
@@ -94,9 +97,10 @@ export async function refreshOwnBotWebhooks(): Promise<void> {
       verifiedBots.set(String(me.id), r.bot_token);
       const info = await tg.getWebhookInfo(r.bot_token);
       const want = ownHookUrl(me.id);
-      if (info.url && info.url !== want && info.url.startsWith(`${env.appBaseUrl}/api/webhooks/telegram/`)) {
+      if (info.url && info.url !== want && isOurHookUrl(info.url, env.appBaseUrl, legacy)) {
         await tg.setWebhook(r.bot_token, want, hookSecret(`bot:${me.id}`));
-        console.log(`[tgbot] власний бот @${me.username || me.id}: вебхук переведено на окремий секрет`);
+        await registerMenu(r.bot_token);
+        console.log(`[tgbot] власний бот @${me.username || me.id}: вебхук переведено на ${env.appBaseUrl}`);
       }
     } catch (e: any) { await logEvent("warn", "tgbot", `власний бот: перевірка вебхука не вдалась: ${String(e.message).slice(0, 160)}`); }
   }
@@ -146,7 +150,7 @@ async function attachChannel(fromId: number, chatId: number, title: string, toke
   const row = token !== env.telegram.botToken
     ? await one<{ workspace_id: string }>(`select t.workspace_id from tg_connect t join telegram_config c on c.workspace_id=t.workspace_id and c.bot_token=$2 where t.tg_user_id=$1 order by t.created_at desc limit 1`, [fromId, token])
     : await one<{ workspace_id: string }>(`select workspace_id from tg_connect where tg_user_id=$1 order by created_at desc limit 1`, [fromId]);
-  if (!row) return "Спершу відкрий посилання підключення з кабінету socialio (кнопка «Підключити наш бот»).";
+  if (!row) return "Спершу відкрий посилання підключення з кабінету Holos (кнопка «Підключити наш бот»).";
   // перевіряємо членство ТИМ ботом, якому переслали пост (власний або спільний); id бота = префікс токена
   const botId = Number(token.split(":")[0]) || BOT_ID;
   let member: { status: string };
@@ -355,10 +359,10 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
       // окремі бази). Раніше це виглядало як «бот просто привітався» і не лишало жодного сліду.
       if (code) {
         await logEvent("warn", "tgbot", `/start із невідомим кодом ${code.slice(0, 8)}… (tg ${fromId}) - код створено на іншому інстансі або застарів`);
-        await tg.sendMessage(token, chatId, "Це посилання підключення не діє: код або застарів, або створений в іншому середовищі (бета й прод мають окремі бази). Відкрий socialio й натисни «Підключити наш бот» ще раз.");
+        await tg.sendMessage(token, chatId, "Це посилання підключення не діє: код або застарів, або створений в іншому середовищі (бета й прод мають окремі бази). Відкрий Holos і натисни «Підключити наш бот» ще раз.");
         return;
       }
-      await tg.sendMessage(token, chatId, "Привіт! Щоб під'єднати мене до твого кабінету, відкрий посилання «Підключити наш бот» у socialio.");
+      await tg.sendMessage(token, chatId, "Привіт! Щоб під'єднати мене до твого кабінету, відкрий посилання «Підключити наш бот» у Holos.");
       return;
     }
 
@@ -376,7 +380,7 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
     // кнопки постійної клавіатури приходять звичайним текстом - зводимо їх до тих самих дій
     if (text === KB_NEW || text === KB_IDEAS || text === KB_DIARY || text === KB_PLAN || text === KB_DIGEST) {
       const ws = await ownerWorkspace(fromId, token);
-      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio."); return; }
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos."); return; }
       if (text === KB_IDEAS) { await sendIdeaList(ws, chatId); return; }
       if (text === KB_DIARY) { await sendDiaryNow(ws, chatId); return; }
       if (text === KB_PLAN)  { await sendPlan(ws, chatId); return; }
@@ -389,7 +393,7 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
     // 📝 /post [текст] — написати пост прямо з телефона: текст → фото → канали → публікація
     if (text.toLowerCase().startsWith("/post")) {
       const ws = await ownerWorkspace(fromId, token);
-      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio."); return; }
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos."); return; }
       const body = text.slice(5).trim();
       if (!body) { await cmp.expect(ws, "", "text", chatId); await tg.sendMessage(token, chatId, "📝 Надішли текст поста наступним повідомленням."); return; }
       await openCompose(ws, chatId, await cmp.createBotDraft(ws, body), token);
@@ -406,7 +410,7 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
     // /idea — банк ідей
     if (text.toLowerCase().startsWith("/idea")) {
       const ws = await ownerWorkspace(fromId, token);
-      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio (кнопка «Підключити наш бот»)."); return; }
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos (кнопка «Підключити наш бот»)."); return; }
       await sendIdeaList(ws, chatId);
       return;
     }
@@ -414,7 +418,7 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
     // /plan — черга публікацій (запланувати з бота можна було й раніше, побачити чергу - ніде)
     if (text.toLowerCase().startsWith("/plan")) {
       const ws = await ownerWorkspace(fromId, token);
-      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio."); return; }
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos."); return; }
       await sendPlan(ws, chatId);
       return;
     }
@@ -422,7 +426,7 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
     // /digest — надіслати ранкове зведення негайно (перевірка)
     if (text.toLowerCase().startsWith("/digest")) {
       const ws = await ownerWorkspace(fromId, token);
-      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio."); return; }
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos."); return; }
       await sendDigestNow(ws, chatId);
       return;
     }
@@ -430,7 +434,7 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
     // /diary — питання щоденника негайно (перевірка без очікування 13:00/20:00)
     if (text.toLowerCase().startsWith("/diary")) {
       const ws = await ownerWorkspace(fromId, token);
-      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio."); return; }
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos."); return; }
       await sendDiaryNow(ws, chatId);
       return;
     }
@@ -454,7 +458,7 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
     // 🎙 голосове → Whisper → запис у щоденник (голос = завжди щоденник: надиктовані історії дня)
     if (msg.voice?.file_id) {
       const ws = await ownerWorkspace(fromId, token);
-      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio."); return; }
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos."); return; }
       try {
         const f = await tg.getFileBuffer(token, msg.voice.file_id);
         const heard = await transcribeVoice(f.buffer, "voice.ogg", ws);
@@ -470,7 +474,7 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
       : null;
     if (media) {
       const ws = await ownerWorkspace(fromId, token);
-      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio."); return; }
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos."); return; }
       if ((media.size || 0) > 19.5 * 1024 * 1024) { await tg.sendMessage(token, chatId, "⚠️ Telegram віддає ботам файли лише до 20 МБ. Закороти відео або завантаж його через застосунок (Матеріали → медіа)."); return; }
       try {
         const buf = (await tg.getFileBuffer(token, media.fileId)).buffer;
@@ -502,7 +506,7 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
     // будь-який інший текст: відповідь на відкрите питання щоденника → запис дня; інакше → ідея в Банк
     if (text && !text.startsWith("/")) {
       const ws = await ownerWorkspace(fromId, token);
-      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету socialio (кнопка «Підключити наш бот»), тоді я збережу твої ідеї."); return; }
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos (кнопка «Підключити наш бот»), тоді я збережу твої ідеї."); return; }
       if (await isDiaryPending(ws)) { await appendDiaryText(ws, chatId, text); return; }
       await captureIdea(ws, chatId, text);
       return;
@@ -667,7 +671,7 @@ async function handleCallback(cbq: any, tokenOverride?: string): Promise<void> {
   const token = tokenOverride || env.telegram.botToken;
   const fromId = cbq.from?.id; const chatId = String(cbq.message?.chat?.id ?? fromId); const data = String(cbq.data || "");
   const ws = await ownerWorkspace(fromId, token);
-  if (!ws) { await tg.answerCallbackQuery(token, cbq.id, "Спершу під'єднай кабінет socialio"); return; }
+  if (!ws) { await tg.answerCallbackQuery(token, cbq.id, "Спершу під'єднай кабінет Holos"); return; }
   try {
     if (data.startsWith("idea_raw:")) {
       const it = await one<{ text: string }>(`select text from idea_bank where id=$1 and workspace_id=$2`, [data.slice(9), ws]);

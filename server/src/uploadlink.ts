@@ -87,8 +87,8 @@ export function uploadScript(url: string): string {
   // String.raw: бекслеші (sed, find \( \), printf '\n') мусять дійти до шелу як є. Тому й «${…}»
   // шелу в скрипті нема - лише наші три підстановки
   return String.raw`#!/bin/sh
-# socialio: залити фото й відео з папки в медіатеку кабінету (разове посилання).
-# Запуск: sh socialio-upload.sh "/шлях/до/папки"   - лише файли цієї папки, без підпапок.
+# Holos: залити фото й відео з папки в медіатеку кабінету (разове посилання).
+# Запуск: sh holos-upload.sh "/шлях/до/папки"   - лише файли цієї папки, без підпапок.
 # Скрипт тільки читає файли з цієї папки й шле їх на адресу нижче. Більше нічого не робить.
 U='${u}'
 CH=${UPLOAD_CHUNK}
@@ -96,7 +96,7 @@ DIR="$1"; [ -n "$DIR" ] || DIR=.
 T="$TMPDIR"; [ -n "$T" ] || T=/tmp
 [ -d "$DIR" ] || { echo "✗ папки нема: $DIR" >&2; exit 1; }
 command -v curl >/dev/null 2>&1 || { echo "✗ потрібен curl" >&2; exit 1; }
-LIST="$T/socialio-list.$$"
+LIST="$T/holos-list.$$"
 find "$DIR" -maxdepth 1 -type f \( ${names} \) | sort > "$LIST"
 total=$(wc -l < "$LIST" | tr -d ' ')
 [ "$total" -gt 0 ] || { echo "✗ у папці нема фото чи відео (jpg png webp heic mp4 mov m4v webm)"; rm -f "$LIST"; exit 0; }
@@ -132,7 +132,7 @@ export function uploadCommands(url: string): { unix: string; windows: string } {
   const u = url.replace(/["'\\\s]/g, "");
   const exts = ["jpg", "jpeg", "png", "webp", "heic", "heif"];
   return {
-    unix: `curl -fsS "${u}/sh" -o socialio-upload.sh && sh socialio-upload.sh "/шлях/до/папки"`,
+    unix: `curl -fsS "${u}/sh" -o holos-upload.sh && sh holos-upload.sh "/шлях/до/папки"`,
     windows: `Get-ChildItem "C:\\шлях\\до\\папки\\*" -Include ${exts.map((e) => "*." + e).join(",")} | ForEach-Object { curl.exe -sS -F "file=@$($_.FullName)" "${u}" }`,
   };
 }
@@ -156,7 +156,7 @@ const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").re
 // Сторінка для людини: те саме посилання, відкрите в браузері (на комп'ютері чи телефоні), дає
 // перетягнути фото. Шле по одному файлу - сервер тоді відповідає на кожен окремо, і прогрес чесний.
 export function uploadPageHtml(p: { state: "ok" | "expired" | "invalid"; cabinet?: string; until?: string; left?: number }): string {
-  const head = `<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Фото й відео в socialio</title>
+  const head = `<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Фото й відео в Holos</title>
 <style>:root{--bg:#f7f5f0;--ink:#1d1b16;--muted:#6d665a;--line:#e3ddd0;--brand:#e67e22;--ok:#2e7d32;--bad:#c62828}
 @media (prefers-color-scheme:dark){:root{--bg:#141310;--ink:#f1ede4;--muted:#a59d8e;--line:#2c2922}}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,sans-serif}.w{max-width:560px;margin:0 auto;padding:28px 16px}
@@ -165,9 +165,9 @@ h1{font-size:20px;margin:0 0 6px}.m{color:var(--muted);font-size:14px;margin:0 0
 input{display:none}#st{margin-top:16px;font-size:15px}#ls{margin-top:8px;font-size:13px;color:var(--muted)}.ok{color:var(--ok)}.bad{color:var(--bad)}</style></head><body><div class="w">`;
   if (p.state !== "ok") {
     const msg = p.state === "expired" ? "Посилання протухло. Попроси в Claude нове - інструмент «media_upload_link»." : "Посилання недійсне.";
-    return `${head}<h1>Фото в socialio</h1><p class="m">${msg}</p></div></body></html>`;
+    return `${head}<h1>Фото в Holos</h1><p class="m">${msg}</p></div></body></html>`;
   }
-  return `${head}<h1>Фото й відео в медіатеку socialio</h1>
+  return `${head}<h1>Фото й відео в медіатеку Holos</h1>
 <p class="m">Кабінет «${escHtml(p.cabinet || "")}». Посилання діє до ${escHtml(p.until || "")}, можна ще ${p.left ?? 0} файлів.</p>
 <label class="dz" id="dz"><input type="file" id="f" accept="image/*,video/*" multiple>Перетягни фото чи відео сюди або натисни, щоб обрати</label>
 <div id="st"></div><div id="ls"></div>

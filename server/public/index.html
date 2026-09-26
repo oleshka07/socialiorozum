@@ -4,8 +4,10 @@
 <meta charset="UTF-8">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>socialio by ROZUM - контент на автопілоті, у твоєму голосі</title>
-<meta name="description" content="socialio перетворює твої дзвінки, сесії, нотатки й новини ніші на готові пости у твоєму голосі - без AI-сліду - і публікує автоматично в Telegram та Instagram.">
+<title>Holos by Rozum - твій голос у соцмережах</title>
+<meta name="description" content="Holos перетворює твої голосові, нотатки, дзвінки й новини ніші на пости у твоєму голосі - без AI-сліду - і сам публікує їх у Telegram, Instagram, Facebook, Threads і LinkedIn.">
+<meta property="og:title" content="Holos by Rozum - твій голос у соцмережах">
+<meta property="og:description" content="Пости у твоєму голосі з того, що в тебе вже є, - і публікація в усі мережі за розкладом.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -16,8 +18,9 @@
     --warn:#f5b54a; --ok:#3fd07a; --radius:16px; --maxw:1120px;
   }
   *{box-sizing:border-box;margin:0;padding:0}
-  html{scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--txt);font-family:Inter,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6;overflow-x:hidden}
+  /* світлові плями навмисно виходять за край - обрізаємо, щоб на телефоні не зʼявлявся бічний скрол (clip, а не hidden: липка шапка лишається липкою) */
+  html{scroll-behavior:smooth;overflow-x:hidden;overflow-x:clip}
+  body{background:var(--bg);color:var(--txt);font-family:Inter,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6;overflow-x:hidden;overflow-x:clip}
   a{color:inherit;text-decoration:none}
   .wrap{max-width:var(--maxw);margin:0 auto;padding:0 22px}
   section{position:relative}
@@ -117,6 +120,7 @@
   .cell .soon{font-size:11px;color:var(--warn);border:1px solid var(--warn);border-radius:20px;padding:1px 9px;display:inline-block;margin-top:8px}
   .c-2{grid-column:span 2}.c-3{grid-column:span 3}
   @media(max-width:860px){.bento{grid-template-columns:repeat(2,1fr)}.c-2,.c-3{grid-column:span 1}}
+  @media(max-width:520px){.bento{grid-template-columns:1fr}}
 
   /* compare */
   .cmp{margin-top:44px;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
@@ -164,6 +168,18 @@
   .final .card{max-width:760px;margin:0 auto;background:linear-gradient(135deg,rgba(91,140,255,.14),rgba(169,130,255,.12));border:1px solid var(--line);border-radius:24px;padding:54px 30px}
   .final h2{margin-bottom:14px}
 
+  .logo .mark svg{width:17px;height:17px}
+  /* networks */
+  .nets{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:44px}
+  @media(max-width:860px){.nets{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:520px){.nets{grid-template-columns:1fr}}
+  .net{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px}
+  .net h3{font-size:17px;margin-bottom:6px;display:flex;align-items:center;gap:9px}
+  .net h3 i{width:10px;height:10px;border-radius:50%;display:inline-block;background:var(--c)}
+  .net p{font-size:13.5px;color:var(--muted)}
+  .nets-note{text-align:center;color:var(--muted);font-size:14px;margin-top:22px}
+  .nets-note b{color:var(--txt);font-weight:600}
+
   footer{border-top:1px solid var(--line);padding:38px 0;color:var(--muted);font-size:13.5px}
   .foot-in{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px}
 
@@ -178,11 +194,11 @@
 
 <!-- NAV -->
 <nav id="nav"><div class="wrap nav-in">
-  <a class="logo" href="#"><span class="mark">◎</span> socialio <span class="by">by ROZUM</span></a>
+  <a class="logo" href="#"><span class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="#0a0c12" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14c4-7 12-7 16 0"/><path d="M4 19c4-7 12-7 16 0"/><path d="M9 6.5l3-3 3 3"/></svg></span> Holos <span class="by">by Rozum</span></a>
   <div class="nav-links">
     <a class="lnk" href="#how">Як працює</a>
-    <a class="lnk" href="#sources">Джерела</a>
-    <a class="lnk" href="#why">Чому ми</a>
+    <a class="lnk" href="#features">Можливості</a>
+    <a class="lnk" href="#networks">Мережі</a>
     <a class="lnk" href="#pricing">Ціни</a>
     <div class="nav-cta">
       <a class="lnk" href="/login">Увійти</a>
@@ -195,37 +211,37 @@
 <section class="hero">
   <div class="blob b1"></div><div class="blob b2"></div>
   <div class="wrap" style="position:relative;z-index:2">
-    <span class="eyebrow reveal">✨ AI-контент у твоєму голосі · українською</span>
-    <h1 class="reveal">Ти проводиш дзвінки й сесії. <span class="grad">socialio робить з них контент</span> - поки ти працюєш.</h1>
-    <p class="lead reveal">Транскрипти, нотатки, новини твоєї ніші, фото з Google Drive - socialio перетворює це на готові пости у <b>твоєму голосі</b>, без AI-сліду, і публікує сам у Telegram та Instagram.</p>
+    <span class="eyebrow reveal">✨ Соцмережі у твоєму голосі · українською</span>
+    <h1 class="reveal">Твій голос у всіх соцмережах&nbsp;- <span class="grad">без контент-заводу</span>.</h1>
+    <p class="lead reveal">Надиктуй думку боту в Telegram, кинь нотатку, транскрипт дзвінка чи новину ніші - Holos напише пост <b>у голосі твого бренду</b>, підбере фото, покаже, як він виглядатиме в кожній мережі, і сам опублікує за розкладом у Telegram, Instagram, Facebook, Threads і LinkedIn.</p>
     <div class="hero-cta reveal">
       <a class="btn primary lg" href="/register">Спробувати безкоштовно →</a>
       <a class="btn lg" href="#how">Подивитись, як працює</a>
     </div>
-    <div class="trust reveal">Без картки • Перший контент за 5 хвилин • Дані не передаються третім</div>
+    <div class="trust reveal">Без картки • Перший пост за 5 хвилин • Українською в ядрі</div>
 
     <!-- ANIMATED DEMO -->
     <div class="demo reveal" id="demo">
-      <div class="demo-bar"><i></i><i></i><i></i><span class="url">socialio.rozum.one</span></div>
+      <div class="demo-bar"><i></i><i></i><i></i><span class="url">holos.rozum.one</span></div>
       <div class="flow">
         <div class="col">
-          <h4>1 · Джерела</h4>
-          <div class="src" data-d="0"><span class="ic">🎙️</span> Транскрипт сесії</div>
-          <div class="src" data-d="1"><span class="ic">🏢</span> База знань компанії</div>
-          <div class="src" data-d="2"><span class="ic">📰</span> Новини ніші</div>
-          <div class="src" data-d="3"><span class="ic">🖼️</span> Фото з Google Drive</div>
+          <h4>1 · Сировина</h4>
+          <div class="src" data-d="0"><span class="ic">🎙️</span> Голосове в Telegram-бот</div>
+          <div class="src" data-d="1"><span class="ic">📝</span> Нотатка після дзвінка</div>
+          <div class="src" data-d="2"><span class="ic">📰</span> Новина твоєї ніші</div>
+          <div class="src" data-d="3"><span class="ic">🖼️</span> Фото з телефона</div>
         </div>
         <div class="col">
           <h4>2 · Ідеї + твій голос</h4>
           <div class="idea-line" data-d="4">Перфекціонізм ≠ лінь</div>
           <div class="idea-line" data-d="5">«Погана перша версія»</div>
           <div class="idea-line" data-d="6">Ранок без новин</div>
-          <div class="idea-line" data-d="7" style="color:var(--cyan)">→ tone of voice · де-AI</div>
+          <div class="idea-line" data-d="7" style="color:var(--cyan)">→ голос бренду · без AI-сліду</div>
         </div>
         <div class="col">
-          <h4>3 · Готовий пост</h4>
+          <h4>3 · Пост у мережах</h4>
           <div class="postcard" id="typed"></div>
-          <div class="tgline" data-d="x">✓ Опубліковано в Telegram о 10:00</div>
+          <div class="tgline" data-d="x">✓ Instagram · Threads · Telegram - сьогодні о 10:00</div>
         </div>
       </div>
     </div>
@@ -236,11 +252,11 @@
 <section class="sec" id="pains">
   <div class="wrap">
     <h2 class="reveal">Знайомо?</h2>
-    <p class="sub reveal">Ти експерт, а не контент-завод. Але соцмережі вимагають постити - і тут починається.</p>
+    <p class="sub reveal">Ти експерт або власник, а не контент-завод. Але соцмережі вимагають постити - і тут починається.</p>
     <div class="pains">
       <div class="pain reveal"><span class="x">😮‍💨</span><div><b>Години в ChatGPT щотижня</b><p>Вбиваєш ідеї руками, переписуєш, доводиш до свого стилю, копіюєш у кожну мережу. Знову. І знову.</p></div></div>
-      <div class="pain reveal"><span class="x">🤖</span><div><b>Пости звучать як робот</b><p>Ті самі тире, ті самі звороти. Аудиторія відчуває AI за версту - і це бʼє по довірі до тебе як експерта.</p></div></div>
-      <div class="pain reveal"><span class="x">🫥</span><div><b>«Не знаю, про що писати»</b><p>А насправді золото вже лежить у твоїх дзвінках, сесіях і нотатках. Ти просто не встигаєш його дістати.</p></div></div>
+      <div class="pain reveal"><span class="x">🤖</span><div><b>Пости звучать як робот</b><p>Ті самі тире, ті самі звороти. Аудиторія відчуває AI за версту - і це бʼє по довірі до тебе.</p></div></div>
+      <div class="pain reveal"><span class="x">🫥</span><div><b>«Не знаю, про що писати»</b><p>А насправді золото вже лежить у твоїх дзвінках, голосових і нотатках. Ти просто не встигаєш його дістати.</p></div></div>
       <div class="pain reveal"><span class="x">💸</span><div><b>SMM-ник коштує $400–600/міс</b><p>І все одно не знає твою тему так, як ти. А ти хочеш просто стабільно бути в стрічці - без цього бюджету.</p></div></div>
     </div>
   </div>
@@ -250,59 +266,82 @@
 <section class="sec" id="how" style="background:var(--bg2)">
   <div class="wrap">
     <span class="eyebrow reveal" style="display:block;width:max-content;margin:0 auto">Як працює</span>
-    <h2 class="reveal" style="margin-top:14px">Від сирого матеріалу до опублікованого поста - на автопілоті</h2>
+    <h2 class="reveal" style="margin-top:14px">Від думки до опублікованого поста - за хвилини, а не вечори</h2>
     <div class="steps">
-      <div class="step reveal"><div class="n">1</div><h3>Підключи джерела</h3><p>Транскрипти дзвінків, база знань про тебе/компанію, новини ніші, RSS, фото з Google Drive.</p></div>
-      <div class="step reveal"><div class="n">2</div><h3>AI дістає ідеї</h3><p>Система знаходить у матеріалі готові теми постів і показує їх тобі - ти лиш обираєш.</p></div>
-      <div class="step reveal"><div class="n">3</div><h3>Твій голос, без AI-сліду</h3><p>Пише у твоєму tone of voice і прибирає роботизовані ознаки. Звучить як ти, не як ChatGPT.</p></div>
-      <div class="step reveal"><div class="n">4</div><h3>Планує і постить сам</h3><p>Розкладає по календарю й автоматично публікує в Telegram (далі Instagram, Facebook, Threads).</p></div>
+      <div class="step reveal"><div class="n">1</div><h3>Розкажи про бренд</h3><p>Кілька речень про бізнес і 3-5 твоїх постів - або підключи Instagram, і Holos сам вивчить твій голос.</p></div>
+      <div class="step reveal"><div class="n">2</div><h3>Кидай сировину</h3><p>Голосове чи думка в Telegram-бот, нотатка, транскрипт дзвінка, новини ніші, фото. Holos знаходить у цьому теми постів.</p></div>
+      <div class="step reveal"><div class="n">3</div><h3>Пости у твоєму голосі</h3><p>Без AI-сліду й вигаданих фактів. Бачиш, як пост виглядатиме в кожній мережі, правиш і затверджуєш.</p></div>
+      <div class="step reveal"><div class="n">4</div><h3>План і публікація</h3><p>Контент-план на тижні вперед, розклад без дублів - і Holos публікує сам, у кожну мережу в її форматі.</p></div>
     </div>
   </div>
 </section>
 
-<!-- SOURCES BENTO -->
-<section class="sec" id="sources">
+<!-- FEATURES BENTO -->
+<section class="sec" id="features">
   <div class="wrap">
-    <h2 class="reveal">Один контент - багато джерел</h2>
-    <p class="sub reveal">socialio не прив'язаний до однієї речі. Що більше джерел - то релевантніший і «твій» контент.</p>
+    <h2 class="reveal">Усе, що робить SMM-ник,&nbsp;- в одному кабінеті</h2>
+    <p class="sub reveal">Не просто генератор тексту: від ідеї до публікації й розбору, що спрацювало.</p>
     <div class="bento">
-      <div class="cell c-3 reveal"><div class="ic">🎙️</div><h3>Транскрипти дзвінків і сесій</h3><p>Коуч-сесії, консультації, робочі та інвесторські дзвінки - у кожному вже є десяток тем для постів.</p></div>
-      <div class="cell c-3 reveal"><div class="ic">🏢</div><h3>База знань про тебе</h3><p>Заливаєш місію, історію, тексти, позиціювання компанії - і пости спираються на це, а не на вигадки AI.</p></div>
-      <div class="cell c-2 reveal"><div class="ic">📰</div><h3>Новини ніші</h3><p>Шукає актуальне у світі по твоїй темі й адаптує під твій контент.</p></div>
-      <div class="cell c-2 reveal"><div class="ic">📡</div><h3>RSS-стрічки</h3><p>Підключаєш інфоканали - система бере, опрацьовує й постить.</p></div>
-      <div class="cell c-2 reveal"><div class="ic">🖼️</div><h3>Google Drive</h3><p>Бере твій фото-контент і одразу вставляє в пости.</p></div>
-      <div class="cell c-3 reveal"><div class="ic">🎬</div><h3>Відеоконтент</h3><p>Генерація відео під короткі формати.</p><span class="soon">скоро</span></div>
-      <div class="cell c-3 reveal"><div class="ic">🧩</div><h3>Твоє джерело</h3><p>Архітектура відкрита до нових джерел - додаємо під твій кейс.</p><span class="soon">за запитом</span></div>
+      <div class="cell c-2 reveal"><div class="ic">✍️</div><h3>Твій голос, без AI-сліду</h3><p>Вчиться на твоїх постах, тримає стоп-слова й манеру, прибирає штампи. Перевірка контексту знаходить, що в налаштуваннях суперечить одне одному.</p></div>
+      <div class="cell c-2 reveal"><div class="ic">🖼️</div><h3>Каруселі до 10 кадрів</h3><p>З твоїх фото або зібрані зі сценарію: Holos сам малює слайди з текстом.</p></div>
+      <div class="cell c-2 reveal"><div class="ic">🎬</div><h3>Відео й Reels</h3><p>Своє відео - в Instagram Reels, Facebook, Threads, Telegram і LinkedIn. Великі файли з телефона заливаються частинами.</p></div>
+      <div class="cell c-2 reveal"><div class="ic">⚡</div><h3>Сторіс</h3><p>Instagram і Facebook: кадр за кадром, фото 9:16 і відео разом.</p></div>
+      <div class="cell c-2 reveal"><div class="ic">💬</div><h3>Перший коментар</h3><p>Посилання й хештеги - під пост, одразу після публікації. У LinkedIn і Facebook так охоплення не ріжеться.</p></div>
+      <div class="cell c-2 reveal"><div class="ic">📅</div><h3>План і календар</h3><p>Контент-план на тижні вперед, AI-розподіл по днях, перетягування і захист від дублів.</p></div>
+      <div class="cell c-2 reveal"><div class="ic">📈</div><h3>Аналітика, що пояснює</h3><p>Перегляди, лайки, збереження, підписники - і що працює саме в тебе: тип поста, довжина, день і час.</p></div>
+      <div class="cell c-2 reveal"><div class="ic">🤖</div><h3>Бот у Telegram</h3><p>Надиктуй думку на ходу - отримай пост. Щоденник, план і публікація просто з телефона.</p></div>
+      <div class="cell c-2 reveal"><div class="ic">🔌</div><h3>Твій Claude як помічник</h3><p>Підключи Holos до Claude (Pro або Max): він пише пости в голосі бренду й кладе їх у кабінет - без витрат на AI.</p></div>
+      <div class="cell c-2 reveal"><div class="ic">🎨</div><h3>Фото до постів</h3><p>Медіатека, сток і AI-генерація, текст на фото. Для Instagram - співавтори й опис фото.</p></div>
+      <div class="cell c-2 reveal"><div class="ic">📰</div><h3>Джерела ідей</h3><p>RSS і новини ніші, Telegram-канали, профілі Instagram і Threads, транскрипти дзвінків, Google Drive.</p></div>
+      <div class="cell c-2 reveal"><div class="ic">🏢</div><h3>Кілька брендів</h3><p>Один акаунт - кілька кабінетів зі своїм голосом і планом. Доступ колегам за поштою.</p></div>
     </div>
+  </div>
+</section>
+
+<!-- NETWORKS -->
+<section class="sec" id="networks" style="background:var(--bg2)">
+  <div class="wrap">
+    <h2 class="reveal">Публікує туди, де твоя аудиторія</h2>
+    <p class="sub reveal">Один майстер-текст - і кожна мережа отримує свою версію: довжину, формат і ліміти Holos тримає сам.</p>
+    <div class="nets">
+      <div class="net reveal" style="--c:#2AABEE"><h3><i></i>Telegram</h3><p>Канали й групи: пости, альбоми, відео, довгі тексти.</p></div>
+      <div class="net reveal" style="--c:#E1306C"><h3><i></i>Instagram</h3><p>Пости, каруселі, Reels, сторіс, співавтори, перший коментар.</p></div>
+      <div class="net reveal" style="--c:#1877F2"><h3><i></i>Facebook</h3><p>Сторінки: пости, галереї, відео, сторіс, перший коментар.</p></div>
+      <div class="net reveal" style="--c:#eef2f8"><h3><i></i>Threads</h3><p>Пости, гілки, відео, відповіді на коментарі.</p></div>
+      <div class="net reveal" style="--c:#0A66C2"><h3><i></i>LinkedIn</h3><p>Особистий профіль: пости, кілька фото, відео, перший коментар.</p></div>
+      <div class="net reveal" style="--c:#FF0033"><h3><i></i>YouTube Shorts</h3><p>Короткі відео-рілси з твоїх сценаріїв.</p></div>
+    </div>
+    <p class="nets-note reveal"><b>Скоро:</b> кілька акаунтів однієї мережі в одному бренді й сторінки компаній у LinkedIn.</p>
   </div>
 </section>
 
 <!-- WHY / COMPARE -->
-<section class="sec" id="why" style="background:var(--bg2)">
+<section class="sec" id="why">
   <div class="wrap">
     <h2 class="reveal">Чому не просто ChatGPT?</h2>
-    <p class="sub reveal">ChatGPT дає текст. socialio дає опублікований контент у твоєму голосі - без ручної роботи.</p>
+    <p class="sub reveal">ChatGPT дає текст. Holos дає опублікований контент у твоєму голосі - без ручної роботи.</p>
     <div class="cmp reveal">
-      <div class="cmp-row head"><div>Що важливо</div><div class="us">socialio</div><div class="them">ChatGPT + руки</div></div>
-      <div class="cmp-row"><div class="feat">Пише у твоєму tone of voice</div><div class="us">Так, з памʼяттю</div><div class="them">Щоразу заново</div></div>
-      <div class="cmp-row"><div class="feat">Прибирає AI-слід</div><div class="us">Окремий крок</div><div class="them">Ні</div></div>
-      <div class="cmp-row"><div class="feat">Багато джерел (дзвінки, новини, Drive)</div><div class="us">Так</div><div class="them">Копіюєш вручну</div></div>
-      <div class="cmp-row"><div class="feat">Планування + автопостинг у Telegram</div><div class="us">Так</div><div class="them">Ні</div></div>
+      <div class="cmp-row head"><div>Що важливо</div><div class="us">Holos</div><div class="them">ChatGPT + руки</div></div>
+      <div class="cmp-row"><div class="feat">Пише у твоєму голосі</div><div class="us">Так, з памʼяттю</div><div class="them">Щоразу заново</div></div>
+      <div class="cmp-row"><div class="feat">Прибирає AI-слід і не вигадує факти</div><div class="us">Так</div><div class="them">Як пощастить</div></div>
+      <div class="cmp-row"><div class="feat">Сировина: голосові, дзвінки, новини, фото</div><div class="us">Так</div><div class="them">Копіюєш вручну</div></div>
+      <div class="cmp-row"><div class="feat">Прев'ю й автопостинг у 5 мереж</div><div class="us">Так</div><div class="them">Ні</div></div>
+      <div class="cmp-row"><div class="feat">Аналітика: що працює саме в тебе</div><div class="us">Так</div><div class="them">Ні</div></div>
       <div class="cmp-row"><div class="feat">Українською, для української аудиторії</div><div class="us">В ядрі</div><div class="them">Як вийде</div></div>
     </div>
   </div>
 </section>
 
 <!-- USE CASES -->
-<section class="sec" id="cases">
+<section class="sec" id="cases" style="background:var(--bg2)">
   <div class="wrap">
     <h2 class="reveal">Для кого</h2>
-    <p class="sub reveal">Якщо ти проводиш онлайн-розмови й маєш що сказати - socialio зробить з цього контент.</p>
+    <p class="sub reveal">Якщо тобі є що сказати, але нема часу бути контент-заводом.</p>
     <div class="tabs reveal">
-      <div class="tab active" data-uc="0">Психологи</div>
-      <div class="tab" data-uc="1">Коучі</div>
-      <div class="tab" data-uc="2">Консультанти</div>
-      <div class="tab" data-uc="3">Бізнес і готелі</div>
+      <div class="tab active" data-uc="0">Експерти й коучі</div>
+      <div class="tab" data-uc="1">Психологи</div>
+      <div class="tab" data-uc="2">Бізнес і готелі</div>
+      <div class="tab" data-uc="3">Агенції</div>
     </div>
     <div class="usecase reveal" id="uc">
       <h3 id="uc-h"></h3><p id="uc-p"></p>
@@ -311,34 +350,35 @@
 </section>
 
 <!-- PRICING -->
-<section class="sec" id="pricing" style="background:var(--bg2)">
+<section class="sec" id="pricing">
   <div class="wrap">
     <h2 class="reveal">Простіше за SMM-ника. Дешевше за час, який ти втрачаєш.</h2>
     <p class="sub reveal">Ранній доступ. Ціни фіксуються для перших користувачів.</p>
     <div class="prices">
       <div class="price reveal"><h3>Тест</h3><div class="amt">0 <span>/ 7 днів</span></div><p class="muted" style="font-size:14px">Спробувати на своєму матеріалі</p>
-        <ul><li>1 джерело</li><li>До 10 постів</li><li>Telegram-публікація</li></ul>
+        <ul><li>1 бренд</li><li>До 10 постів</li><li>Публікація в підключені мережі</li></ul>
         <a class="btn" href="/register">Почати безкоштовно</a></div>
-      <div class="price featured reveal"><h3>Pro</h3><div class="amt">€29 <span>/ міс</span></div><p class="muted" style="font-size:14px">Для активного експерта</p>
-        <ul><li>Усі джерела</li><li>Tone of voice + де-AI</li><li>Календар і автопостинг</li><li>Telegram + Instagram</li></ul>
+      <div class="price featured reveal"><h3>Pro</h3><div class="amt">€29 <span>/ міс</span></div><p class="muted" style="font-size:14px">Для активного експерта чи бізнесу</p>
+        <ul><li>Усі мережі й формати: каруселі, відео, сторіс</li><li>Твій голос без AI-сліду</li><li>План, календар і автопостинг</li><li>Аналітика й перший коментар</li></ul>
         <a class="btn primary" href="/register">Спробувати Pro</a></div>
-      <div class="price reveal"><h3>Команда / бізнес</h3><div class="amt">Інд. <span></span></div><p class="muted" style="font-size:14px">Кілька брендів, готель, агенція</p>
-        <ul><li>Кілька робочих просторів</li><li>База знань компанії</li><li>Пріоритетна підтримка</li></ul>
+      <div class="price reveal"><h3>Команда / агенція</h3><div class="amt">Інд. <span></span></div><p class="muted" style="font-size:14px">Кілька брендів, готель, агенція</p>
+        <ul><li>Кілька брендів</li><li>Доступ команді</li><li>Пріоритетна підтримка</li></ul>
         <a class="btn" href="/register">Поговорити з нами</a></div>
     </div>
   </div>
 </section>
 
 <!-- FAQ -->
-<section class="sec" id="faq">
+<section class="sec" id="faq" style="background:var(--bg2)">
   <div class="wrap">
     <h2 class="reveal">Часті запитання</h2>
     <div class="faq">
-      <details class="qa reveal"><summary>А мої дзвінки й дані не витечуть? <span class="plus">+</span></summary><div class="a">Транскрипти й база знань зберігаються у твоєму просторі й не передаються третім особам для реклами чи навчання моделей. Ти контролюєш, що заливаєш, і можеш видалити будь-коли.</div></details>
-      <details class="qa reveal"><summary>Пости реально звучатимуть як я, а не як AI? <span class="plus">+</span></summary><div class="a">Так - це ядро продукту. Ти задаєш tone of voice (приклади своїх постів), а окремий крок прибирає типові AI-ознаки. Чим більше прикладів - то ближче до твого голосу.</div></details>
-      <details class="qa reveal"><summary>Які соцмережі підтримуються? <span class="plus">+</span></summary><div class="a">Старт - автопостинг у Telegram. Далі Instagram, Facebook і Threads. Контент одразу адаптується під кожен канал.</div></details>
-      <details class="qa reveal"><summary>Мені треба щось налаштовувати чи писати промпти? <span class="plus">+</span></summary><div class="a">Ні. Заливаєш джерело - отримуєш готові пости. Уся логіка прозора: за бажання можна підкоригувати кожен крок, але за замовчуванням усе працює само.</div></details>
-      <details class="qa reveal"><summary>Я не коуч - підійде для мого бізнесу? <span class="plus">+</span></summary><div class="a">Так. socialio працює з будь-яким матеріалом: робочі дзвінки, інвесторські зустрічі, новини галузі. Якщо є що сказати - буде контент.</div></details>
+      <details class="qa reveal"><summary>Це той самий socialio? <span class="plus">+</span></summary><div class="a">Так. socialio тепер називається Holos by Rozum: твій акаунт, бренди, пости й підключені мережі на місці - змінились лише назва й адреса.</div></details>
+      <details class="qa reveal"><summary>Пости реально звучатимуть як я, а не як AI? <span class="plus">+</span></summary><div class="a">Так - це ядро продукту. Ти даєш приклади своїх постів і стоп-слова, а Holos пише в твоїй манері й прибирає типові AI-ознаки. Чим більше прикладів - то ближче до твого голосу.</div></details>
+      <details class="qa reveal"><summary>Які соцмережі підтримуються? <span class="plus">+</span></summary><div class="a">Telegram (канали й групи), Instagram, Facebook (Сторінки), Threads, LinkedIn (особистий профіль) і YouTube Shorts. Кожен пост пакується під формат і ліміти мережі. Публікувати в особисті профілі й групи Facebook Meta через API не дозволяє нікому.</div></details>
+      <details class="qa reveal"><summary>А мої дані? <span class="plus">+</span></summary><div class="a">Матеріали й пости зберігаються у твоєму кабінеті, не продаються й не йдуть на рекламу. Для генерації текст надсилається AI-провайдерам, які обробляють його від нашого імені. Видалити все можна однією кнопкою в налаштуваннях.</div></details>
+      <details class="qa reveal"><summary>Мені треба щось налаштовувати чи писати промпти? <span class="plus">+</span></summary><div class="a">Ні. Розповідаєш про бренд - отримуєш готові пости. За бажання можна підкрутити кожен крок, але за замовчуванням усе працює само.</div></details>
+      <details class="qa reveal"><summary>Я не коуч - підійде для мого бізнесу? <span class="plus">+</span></summary><div class="a">Так. Holos працює з будь-яким матеріалом: робочі дзвінки, новини закладу, фото, відгуки, новини галузі. Якщо є що сказати - буде контент.</div></details>
     </div>
   </div>
 </section>
@@ -347,15 +387,15 @@
 <section class="final">
   <div class="blob b2" style="left:50%;top:0;transform:translateX(-50%)"></div>
   <div class="wrap" style="position:relative;z-index:2"><div class="card reveal">
-    <h2>Твій наступний пост уже є у твоєму останньому дзвінку</h2>
-    <p class="muted" style="max-width:520px;margin:0 auto 26px">Залий перший матеріал - і подивись, як socialio зробить із нього тиждень контенту у твоєму голосі.</p>
+    <h2>Твій наступний пост уже є - у голосовому, дзвінку чи нотатці</h2>
+    <p class="muted" style="max-width:540px;margin:0 auto 26px">Залий перший матеріал або надиктуй думку боту - і подивись, як Holos зробить із цього тиждень постів у твоєму голосі.</p>
     <a class="btn primary lg" href="/register">Спробувати безкоштовно →</a>
   </div></div>
 </section>
 
 <footer><div class="wrap foot-in">
-  <div><span class="logo" style="font-size:16px"><span class="mark" style="width:22px;height:22px;font-size:12px">◎</span> socialio <span class="by">by ROZUM</span></span></div>
-  <div>© 2026 ROZUM · socialio.rozum.one · <a href="/privacy" style="color:var(--muted)">Політика конфіденційності</a> · <a href="/terms" style="color:var(--muted)">Умови</a></div>
+  <div><span class="logo" style="font-size:16px"><span class="mark" style="width:22px;height:22px"><svg viewBox="0 0 24 24" fill="none" stroke="#0a0c12" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14c4-7 12-7 16 0"/><path d="M4 19c4-7 12-7 16 0"/><path d="M9 6.5l3-3 3 3"/></svg></span> Holos <span class="by">by Rozum</span></span></div>
+  <div>© 2026 ROZUM · holos.rozum.one · <a href="/privacy" style="color:var(--muted)">Політика конфіденційності</a> · <a href="/terms" style="color:var(--muted)">Умови</a> · <a href="/data-deletion" style="color:var(--muted)">Видалення даних</a></div>
 </div></footer>
 
 <script>
@@ -405,10 +445,10 @@ demoIO.observe(demo);
 
 // use case tabs
 const UC=[
- ["Психологи й терапевти","Із записів консультацій (знеособлено) і твоєї бази знань socialio робить дбайливі, етичні пости про твій підхід - і ти стабільно в стрічці, не порушуючи приватності клієнтів."],
- ["Коучі","Кожна сесія - це теми на тиждень. socialio дістає інсайти, пише у твоєму голосі й публікує, поки ти ведеш наступного клієнта."],
- ["Консультанти й експерти","База знань + новини галузі = пости, що показують твою експертизу. LinkedIn і Telegram наповнюються самі, на фактах, а не на воді."],
- ["Бізнес і готелі","Робочі та інвесторські дзвінки, апдейти команди, новини індустрії - усе перетворюється на контент бренду. Один акаунт - багато просторів."]
+ ["Експерти й коучі","Кожна сесія, дзвінок чи голосове на ходу - це теми на тиждень. Holos дістає з них думки, пише у твоєму голосі й публікує, поки ти ведеш наступного клієнта."],
+ ["Психологи й терапевти","Зі знеособлених нотаток і твого підходу Holos робить дбайливі, етичні пости - ти стабільно в стрічці, не торкаючись приватності клієнтів."],
+ ["Малий бізнес і готелі","Новини закладу, фото з телефона, відгуки гостей, новини галузі - усе стає постами, каруселями й сторіс у Instagram, Facebook і Telegram за розкладом."],
+ ["Агенції й команди","Кілька брендів в одному акаунті, доступ колегам за поштою, свій голос і свій план для кожного клієнта."]
 ];
 const ucH=document.getElementById('uc-h'),ucP=document.getElementById('uc-p');
 function setUC(i){ucH.textContent=UC[i][0];ucP.textContent=UC[i][1];document.querySelectorAll('.tab').forEach((t,j)=>t.classList.toggle('active',i===j));}

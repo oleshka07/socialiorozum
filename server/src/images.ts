@@ -617,7 +617,7 @@ export async function attachStockPhoto(ws: string, postId: string, url: string, 
   const timer = setTimeout(() => controller.abort(), 30000);
   let buf: Buffer;
   try {
-    const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": "Mozilla/5.0 (compatible; socialio/1.0)", Accept: "image/*" } });
+    const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": "Mozilla/5.0 (compatible; Holos/1.0)", Accept: "image/*" } });
     if (!res.ok) throw new Error(res.status === 404
       ? "Pexels не знайшов фото за цією адресою - візьми url саме з результатів пошуку стоку (find_stock_photos)"
       : `Pexels не віддав фото (HTTP ${res.status}) - спробуй інше фото або ще раз за хвилину`);

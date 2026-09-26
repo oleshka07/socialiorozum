@@ -55,7 +55,7 @@ import sharp from "sharp";
 // відповідаємо ТІЄЮ САМОЮ (так вимагає специфікація), інакше пропонуємо найновішу свою.
 export const MCP_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 export const MCP_LATEST = "2025-06-18";
-export const SERVER_INFO = { name: "socialio", title: "socialio - КонтентГров", version: "1.0.0" };
+export const SERVER_INFO = { name: "holos", title: "Holos by Rozum", version: "1.0.0" };
 
 export function negotiateVersion(requested?: unknown): string {
   const v = typeof requested === "string" ? requested : "";
@@ -608,7 +608,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "workspace_info",
     title: "Стан кабінету",
-    description: "Огляд кабінету socialio: бренд, підключені мережі, скільки чернеток, матеріалів, ідей і запланованих публікацій. Почни з цього, якщо не знаєш стану.",
+    description: "Огляд кабінету Holos: бренд, підключені мережі, скільки чернеток, матеріалів, ідей і запланованих публікацій. Почни з цього, якщо не знаєш стану.",
     properties: {},
     readOnly: true,
     run: async (ws) => {
@@ -636,7 +636,7 @@ export const TOOLS: ToolDef[] = [
       const off = NETS.filter((n) => !nets.includes(n));
       const acc = await accountNames(ws);
       return [
-        "КАБІНЕТ socialio (КонтентГров)",
+        "КАБІНЕТ Holos",
         s.marketing_context ? `Бренд і аудиторія: ${oneLine(s.marketing_context, 400)}` : "Бренд ще не заповнений (Бренд → Голос у кабінеті).",
         s.brand_thesis ? `Позиціонування: ${oneLine(s.brand_thesis, 200)}` : "",
         s.primary_goal && GOAL_LABELS[s.primary_goal] ? `Головна ціль: ${GOAL_LABELS[s.primary_goal]}` : "",
@@ -848,7 +848,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "create_draft",
     title: "Зберегти готовий пост",
-    description: "ГОЛОВНИЙ інструмент: зберегти в кабінет текст, який ти написав САМ. Нічого не переписує і не витрачає AI-кредитів socialio. Перед цим візьми brand_voice, щоб писати в голосі бренду. Одна мережа на пост - текст опублікується дослівно, тож пиши одразу під неї й тримай її ліміт (Threads 500 символів). Кілька мереж - це майстер-текст, який при публікації спакується під кожну (платний виклик). Далі пост можна опублікувати (publish_post) або запланувати (schedule_post).",
+    description: "ГОЛОВНИЙ інструмент: зберегти в кабінет текст, який ти написав САМ. Нічого не переписує і не витрачає AI-кредитів Holos. Перед цим візьми brand_voice, щоб писати в голосі бренду. Одна мережа на пост - текст опублікується дослівно, тож пиши одразу під неї й тримай її ліміт (Threads 500 символів). Кілька мереж - це майстер-текст, який при публікації спакується під кожну (платний виклик). Далі пост можна опублікувати (publish_post) або запланувати (schedule_post).",
     properties: {
       text: S("Готовий текст поста."),
       channels: NETS_ARG,
@@ -1314,8 +1314,8 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "generate_posts",
-    title: "Згенерувати пости (AI socialio)",
-    description: "Попросити ВЛАСНИЙ AI socialio написати N постів на тему. ⚠️ Витрачає AI-кредити кабінету. Якщо можеш написати текст сам - краще create_draft: результат той самий, кредити не витрачаються.",
+    title: "Згенерувати пости (AI Holos)",
+    description: "Попросити ВЛАСНИЙ AI Holos написати N постів на тему. ⚠️ Витрачає AI-кредити кабінету. Якщо можеш написати текст сам - краще create_draft: результат той самий, кредити не витрачаються.",
     properties: {
       topic: S("Про що писати."),
       count: N("Скільки постів (1-10, типово 3).", { minimum: 1, maximum: 10 }),
@@ -1579,7 +1579,7 @@ export const TOOLS: ToolDef[] = [
           await writeFile(tmp, buf);
         } else {
           let res: Response;
-          try { res = await publicFetch(url, { signal: AbortSignal.timeout(120_000), headers: { "user-agent": "socialio-media-import/1.0" } }); }
+          try { res = await publicFetch(url, { signal: AbortSignal.timeout(120_000), headers: { "user-agent": "Holos-media-import/1.0" } }); }
           catch (e: any) { throw new ToolError(`Не вдалося завантажити за посиланням: ${e.message}`); }
           if (!res.ok || !res.body) throw new ToolError(`Посилання відповіло ${res.status} - потрібне пряме публічне посилання на файл.`);
           const len = Number(res.headers.get("content-length") || 0);
@@ -1655,7 +1655,7 @@ export const TOOLS: ToolDef[] = [
       } else if (an.posts.length) lines.push("", "Цифр по постах ще нема: статистика збирається раз на добу після публікації.");
       const cost = await one<{ usd: string }>(
         `select coalesce(sum(cost),0)::text as usd from llm_usage where workspace_id=$1 and created_at > now() - ($2 || ' days')::interval`, [ws, String(days)]);
-      lines.push("", `Витрати на AI socialio за період: $${Number(cost?.usd || 0).toFixed(2)}`);
+      lines.push("", `Витрати на AI Holos за період: $${Number(cost?.usd || 0).toFixed(2)}`);
       return lines.join("\n");
     },
   },
@@ -1692,10 +1692,10 @@ export function toolSpecs(): unknown[] {
 // Підказка клієнту, ЯК користуватись кабінетом. Без неї Claude тягнеться до generate_posts (бо
 // «згенеруй» звучить знайомо) і витрачає наші кредити там, де мав би написати текст сам.
 export const SERVER_INSTRUCTIONS = [
-  "socialio (КонтентГров) - кабінет SMM-контенту власника цього конектора.",
+  "Holos (Holos by Rozum) - кабінет SMM-контенту власника цього конектора.",
   "Робочий порядок: 1) brand_voice - прочитай голос бренду; 2) напиши текст САМ у цьому голосі;",
   "3) create_draft - збережи; 4) publish_post або schedule_post. Так генерація нічого не коштує власнику.",
-  "generate_posts викликай лише коли тебе прямо просять «згенеруй силами socialio» - він витрачає AI-кредити кабінету.",
+  "generate_posts викликай лише коли тебе прямо просять «згенеруй силами Holos» - він витрачає AI-кредити кабінету.",
   "Зображення: спершу медіатека кабінету (list_media → attach_media) - власні фото автора, вони найкращі й безкоштовні (фото лежать у автора на комп'ютері, а в тебе є термінал - media_upload_link дасть команду, що заллє папку в медіатеку без проходу через чат); далі сток - find_stock_photos з конкретним англійським query і attach_stock_photo, теж безкоштовно; generate_image платний (крім provider cloudflare - безкоштовний денний ліміт ~100 зображень, якщо його підключено), бери його, коли ні медіатека, ні сток не підходять або коли людина просить саме генерацію.",
   `Карусель: кілька фото в одному пості (до ${MAX_SLIDES}) - attach_media масивом id або append: true у attach_media / attach_stock_photo / generate_image; кадри-картинки зі сценарію «Слайд 1: …» малює render_carousel (безкоштовно), і тоді текст поста - це короткий підпис під каруселлю, не сценарій.`,
   "Відео: власні відео автора - list_media з kind: \"video\" → attach_media з одним id; публікується як Reels в Instagram, відео у Facebook, Threads, Telegram (до 50 МБ) і LinkedIn, а текст поста - підпис. Відео з комп'ютера заливає та сама media_upload_link (великі файли - частинами).",

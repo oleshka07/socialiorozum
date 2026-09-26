@@ -1153,7 +1153,7 @@ function anCsv(){
   ].map((v,i)=>i===2||i===0||i===13||i===1||i===3?q(v):v).join(';')));
   const blob=new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'}); // BOM - щоб Excel прочитав кирилицю
   // імʼя файлу латиницею: кирилицю в download Chromium мовчки замінює на «download»
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='socialio-stats-'+AnData.from+'-'+AnData.to+'.csv';
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='holos-stats-'+AnData.from+'-'+AnData.to+'.csv';
   document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },500);
 }
 
@@ -3740,10 +3740,10 @@ function openMcpHow(){
     +'<ol style="font-size:13px;line-height:1.65;padding-left:18px;margin:12px 0">'
     +'<li><b>Скопіюй адресу</b> з панелі (кнопка «Копіювати»).</li>'
     +'<li>У Claude: <b>Settings → Connectors → Add custom connector</b>, встав адресу, натисни Add.</li>'
-    +'<li>У чаті увімкни конектор <b>socialio</b> (іконка інструментів під полем вводу).</li>'
+    +'<li>У чаті увімкни конектор <b>Holos</b> (іконка інструментів під полем вводу).</li>'
     +'<li>Перевір: напиши «<i>покажи мої чернетки</i>».</li>'
     +'</ol>'
-    +'<div class="fld"><label class="fl">Claude Code (у терміналі) - одна команда</label><input class="txt" readonly style="font-size:12px" value="claude mcp add --transport http socialio '+esc(url)+'"></div>'
+    +'<div class="fld"><label class="fl">Claude Code (у терміналі) - одна команда</label><input class="txt" readonly style="font-size:12px" value="claude mcp add --transport http holos '+esc(url)+'"></div>'
     +'<div class="ph" style="margin:14px 0 6px">Що просити в чаті</div>'
     +'<div style="font-size:13px;line-height:1.7">'
     +'• «<i>візьми голос мого бренду і напиши 3 пости про X, збережи чернетками</i>» - пише сам Claude, наші AI-кредити не витрачаються;<br>'
@@ -4165,14 +4165,14 @@ async function runOnbProgress(rid){
 // Тексти ФІКСОВАНІ: з адреси беремо лише код, тож чужим посиланням сюди нічого не підсунеш.
 function oauthFailText(net, why){
   const name=net==='threads'?'Threads':'Instagram/Facebook';
-  if(why==='tester') return name+' не пустив цей акаунт: застосунок socialio ще проходить перевірку Meta, і поки підключатись можуть лише запрошені тестувальники.\n\n'
-    +'Що зробити: попроси адміністратора socialio додати тебе в тестувальники, прийми запрошення '
+  if(why==='tester') return name+' не пустив цей акаунт: застосунок Holos ще проходить перевірку Meta, і поки підключатись можуть лише запрошені тестувальники.\n\n'
+    +'Що зробити: попроси адміністратора Holos додати тебе в тестувальники, прийми запрошення '
     +(net==='threads'?'в Threads (Налаштування → Акаунт → Дозволи вебсайтів → Запрошення; англ. Settings → Account → Website permissions → Invites)':'(прийде сповіщення у Facebook або на developers.facebook.com)')
     +' і підключи ще раз.';
   if(why==='denied') return 'Підключення скасовано у вікні '+name+'. Спробуй ще раз і натисни «Дозволити».';
   if(why==='session') return 'Підключення загубилось дорогою: вікно '+name+' відкрилось в іншому браузері чи вкладці, і повернення не впізнало твій кабінет. Спробуй ще раз у цьому ж браузері.';
   if(why==='retry') return 'Код підключення протух, поки вікно було відкрите. Просто спробуй ще раз.';
-  return 'Не вдалося підключити '+name+'.\n\nСпробуй ще раз. Якщо повториться - напиши адміністратору socialio: причину записано в журнал сервісу.';
+  return 'Не вдалося підключити '+name+'.\n\nСпробуй ще раз. Якщо повториться - напиши адміністратору Holos: причину записано в журнал сервісу.';
 }
 function connectPopup(url){ try{ const w=Math.min(620,screen.width||620), h=Math.min(740,screen.height||740); const x=Math.max(0,((screen.width||w)-w)/2), y=Math.max(0,((screen.height||h)-h)/2); const p=window.open(url,'oauth_connect','width='+w+',height='+h+',left='+x+',top='+y); if(!p) location.href=url; }catch(e){ location.href=url; } return false; }
 window.addEventListener('message',(ev)=>{ if(ev.origin!==location.origin) return; const d=ev.data||{}; if(!d.oauth) return;
@@ -4437,8 +4437,8 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
 // посиланням, бачить ті самі пояснення. Вимкнути - ✕ або /app?review=off.
 const REVIEW_KEY='kg_review_en';
 const REVIEW_TXT={
-  default:'socialio: a content studio for small businesses. The user writes posts in their own brand voice and publishes them to their own Facebook Page and Instagram account.',
-  today:'Home. socialio helps a small business write posts in its own voice and publish them to its own Facebook Page and Instagram account.',
+  default:'Holos by Rozum: a content studio for small businesses. The user writes posts in their own brand voice and publishes them to their own Facebook Page and Instagram account.',
+  today:'Home. Holos helps a small business write posts in its own voice and publish them to its own Facebook Page and Instagram account.',
   create:'Drafts: posts prepared for the user\'s own channels. “Редагувати” (Edit) opens the post editor, where the user reviews the text and publishes it.',
   publish:'Calendar: approved posts are scheduled here and published at the chosen time to the user\'s own Facebook Page and Instagram account (pages_manage_posts, instagram_content_publish).',
   brand:'Brand voice: learned from the captions of the user\'s own recent Instagram posts (instagram_basic), so new posts sound like the user.',
