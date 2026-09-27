@@ -7,8 +7,14 @@
 //
 // Код, а не сирий текст: людський текст під кожну причину живе в кабінеті поруч з іншими
 // текстами інтерфейсу, а в адресу не потрапляє нічого, крім короткої мітки.
-export type OauthWhy = "tester" | "denied" | "session" | "retry" | "other";
+export type OauthWhy = "redirect" | "tester" | "denied" | "session" | "retry" | "other";
 
+// Адресу повернення не додано в налаштуваннях застосунку (Valid OAuth Redirect URIs у Meta, Redirect
+// Callback URLs у Threads). Спіймано 28.09: бета переїхала на нову адресу, а Meta пише «URL Blocked»
+// і повертає це в колбек як error_message - кабінет казав «скасовано, натисни «Дозволити»», і людина
+// шукала, що вона зробила не так. Натискати ще раз марно: лагодить адмін застосунку. Мова тексту -
+// мова Facebook людини, тож ловимо й українську (дослівно з вікна Meta), й російську, й чеську.
+const REDIRECT_RX = /URL Blocked|not whitelisted|redirect[_ ]?ur[il]|Can'?t Load URL|isn'?t included in the app'?s domains|URL[- ]?адрес\S* заблок|URI перенаправлен|перенаправлен\S* не вдал|URI přesměrování/i;
 // Застосунок ще не пройшов App Review: пускає лише тих, хто має роль у ньому (адмін, розробник,
 // тестувальник). Формулювання в Meta й Threads різні, і вони їх міняють, тож ловимо за змістом.
 const TESTER_RX = /testers?\b|app review|requires the [\w.]+ permission|insufficient developer role|developer role|app (?:is )?not active|not currently accessible|isn'?t available to you/i;
@@ -21,6 +27,7 @@ const DENIED_RX = /access_denied|user denied|denied|cancel|permissions? error/i;
 //        "exchange" - повернула code, але обмін на токен (чи наступний запит) не вдався.
 export function oauthWhy(raw: unknown, stage: "provider" | "exchange" = "exchange"): OauthWhy {
   const s = String(raw ?? "");
+  if (REDIRECT_RX.test(s)) return "redirect";  // поломка налаштувань застосунку, а не вибір людини
   if (TESTER_RX.test(s)) return "tester";      // навіть якщо мережа прислала це як «відмову»
   if (RETRY_RX.test(s)) return "retry";
   if (stage === "provider" && (!s || DENIED_RX.test(s))) return "denied";

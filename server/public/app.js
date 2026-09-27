@@ -4171,6 +4171,11 @@ function oauthFailText(net, why){
     +'Що зробити: попроси адміністратора Holos додати тебе в тестувальники, прийми запрошення '
     +(net==='threads'?'в Threads (Налаштування → Акаунт → Дозволи вебсайтів → Запрошення; англ. Settings → Account → Website permissions → Invites)':'(прийде сповіщення у Facebook або на developers.facebook.com)')
     +' і підключи ще раз.';
+  // адресу цього сайту не додано в налаштуваннях застосунку Meta («URL Blocked»): лагодить адмін, а не людина -
+  // раніше тут стояло «скасовано, натисни «Дозволити»», і людина шукала власну помилку (28.09, бета на новій адресі)
+  if(why==='redirect') return (net==='threads'?'Threads не прийняв':'Meta не прийняла')+' адресу цього сайту ('+location.host+'): її ще не додано в налаштуваннях застосунку Holos у Meta. Натискати «Підключити» ще раз не допоможе - напиши адміністратору Holos.\n\n'
+    +'Для адміністратора: developers.facebook.com → застосунок → '+(net==='threads'?'Use cases → Access the Threads API → Settings → Redirect Callback URLs':'Facebook Login for Business → Settings → Valid OAuth Redirect URIs')
+    +' → додати '+location.origin+'/api/integrations/'+(net==='threads'?'threads':'meta')+'/callback';
   if(why==='denied') return 'Підключення скасовано у вікні '+name+'. Спробуй ще раз і натисни «Дозволити».';
   if(why==='session') return 'Підключення загубилось дорогою: вікно '+name+' відкрилось в іншому браузері чи вкладці, і повернення не впізнало твій кабінет. Спробуй ще раз у цьому ж браузері.';
   if(why==='retry') return 'Код підключення протух, поки вікно було відкрите. Просто спробуй ще раз.';

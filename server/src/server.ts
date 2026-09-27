@@ -2202,6 +2202,12 @@ app.post("/api/integrations/telegram/test", async (req: any, reply) => {
 
 
 // ===================== THREADS (Meta) =====================
+// Текст відмови з адреси колбека. Звичайна відмова Meta - error + error_description, а «URL Blocked»
+// (адресу повернення не додано в застосунку) приходить як error_code + error_message: до 28.09 ми його
+// не читали, колбек писав «без code», і кабінет казав людині «скасовано, натисни «Дозволити»».
+function oauthErrText(qs: any): string {
+  return String(qs?.error_description ?? qs?.error_message ?? qs?.error_reason ?? qs?.error ?? "");
+}
 const THREADS_REDIRECT = `${env.appBaseUrl}/api/integrations/threads/callback`;
 // threads_manage_replies: читання коментарів під власними постами + відповіді на них (реплай-коуч);
 // у токен потрапляє після (пере)підключення акаунта.
@@ -2246,9 +2252,9 @@ app.get("/api/integrations/threads/connect", async (req: any, reply) => {
 
 app.get("/api/integrations/threads/callback", async (req: any, reply) => {
   const code = String(req.query?.code ?? ""); const state = String(req.query?.state ?? "");
-  const oerr = String(req.query?.error_description ?? req.query?.error ?? "");
+  const oerr = oauthErrText(req.query);
   // причина їде в кабінет кодом (?why=), інакше людина бачить «не вдалося» без жодного пояснення
-  if (oerr) { await logEvent("error", "threads", `Threads відмовив: ${oerr}`, { error: req.query?.error }, req.user.id); return reply.redirect("/app?threads=error" + oauthFailQuery(oauthWhy(oerr, "provider"))); }
+  if (oerr) { await logEvent("error", "threads", `Threads відмовив: ${oerr}`, { error: req.query?.error, code: req.query?.error_code }, req.user.id); return reply.redirect("/app?threads=error" + oauthFailQuery(oauthWhy(oerr, "provider"))); }
   if (!code) { await logEvent("error", "threads", "callback без code", { keys: Object.keys(req.query || {}) }, req.user.id); return reply.redirect("/app?threads=error" + oauthFailQuery(oauthWhy("", "provider"))); }
   if (!state || state !== req.cookies?.threads_state) { await logEvent("error", "threads", `state mismatch - cookie ${req.cookies?.threads_state ? "є але != state" : "ВІДСУТНІЙ"}`, null, req.user.id); return reply.redirect("/app?threads=error&why=session"); }
   reply.clearCookie("threads_state", { path: "/" });
@@ -2464,8 +2470,8 @@ app.get("/api/integrations/meta/connect", async (req: any, reply) => {
 
 app.get("/api/integrations/meta/callback", async (req: any, reply) => {
   const code = String(req.query?.code ?? ""); const state = String(req.query?.state ?? "");
-  const oerr = String(req.query?.error_description ?? req.query?.error ?? "");
-  if (oerr) { await logEvent("error", "meta", `Meta відмовив: ${oerr}`, { error: req.query?.error }, req.user.id); return reply.redirect("/app?meta=error" + oauthFailQuery(oauthWhy(oerr, "provider"))); }
+  const oerr = oauthErrText(req.query);
+  if (oerr) { await logEvent("error", "meta", `Meta відмовив: ${oerr}`, { error: req.query?.error, code: req.query?.error_code }, req.user.id); return reply.redirect("/app?meta=error" + oauthFailQuery(oauthWhy(oerr, "provider"))); }
   if (!code) { await logEvent("error", "meta", "callback без code", { keys: Object.keys(req.query || {}) }, req.user.id); return reply.redirect("/app?meta=error" + oauthFailQuery(oauthWhy("", "provider"))); }
   if (!state || state !== req.cookies?.meta_state) { await logEvent("error", "meta", `state mismatch - cookie ${req.cookies?.meta_state ? "є але != state" : "ВІДСУТНІЙ"}`, null, req.user.id); return reply.redirect("/app?meta=error&why=session"); }
   reply.clearCookie("meta_state", { path: "/" });

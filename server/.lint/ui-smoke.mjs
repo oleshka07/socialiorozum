@@ -1652,13 +1652,19 @@ const run = async () => {
       send({ threads: "error", why: "tester" });
       send({ threads: "error", why: "other", msg: "Threads HTTP 500" });
       send({ meta: "error", why: "session" });
+      send({ meta: "error", why: "redirect" });
+      send({ threads: "error", why: "redirect" });
       await new Promise((r) => setTimeout(r, 400));
-      window.alert = was; return out;
+      window.alert = was; return out.concat([location.host, location.origin]);
     });
-    if (got.length !== 3) console.log("   ↳ oauthWhy:", JSON.stringify(got));
+    if (got.length !== 7) console.log("   ↳ oauthWhy:", JSON.stringify(got));
+    const [host, origin] = got.slice(5);
     // msg у повідомленні - спроба підсунути свій текст: він НЕ мусить потрапити у вікно
-    return got.length === 3 && got[0].includes("тестувальник") && got[0].includes("Website permissions")
-      && got[1].includes("журнал") && !got[1].includes("Threads HTTP 500") && got[2].includes("іншому браузері");
+    // «URL Blocked» (адресу не додано в застосунку Meta) - не «скасовано»: називаємо адресу й поле для адміна
+    return got.length === 7 && got[0].includes("тестувальник") && got[0].includes("Website permissions")
+      && got[1].includes("журнал") && !got[1].includes("Threads HTTP 500") && got[2].includes("іншому браузері")
+      && got[3].includes(host) && got[3].includes("Valid OAuth Redirect URIs") && got[3].includes(origin + "/api/integrations/meta/callback") && !got[3].includes("скасовано")
+      && got[4].includes("Redirect Callback URLs") && got[4].includes(origin + "/api/integrations/threads/callback");
   });
 
   await check("adminHealth", async () => {
