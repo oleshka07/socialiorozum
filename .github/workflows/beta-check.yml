@@ -1,10 +1,10 @@
 name: beta-check
 
 # Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ, нічого не змінює й не перезапускає.
-# 1) rozum-app (інший проєкт на тому ж сервері) позначений unhealthy - чому саме: налаштування
-#    перевірки здоровʼя, останні її результати, чи відповідає застосунок, хвіст логу (замасковано).
-# 2) Перед перемиканням адрес: чи передають vhost-и socialio заголовок Host (інакше редірект зі старої
-#    адреси не спрацює), як налаштовано vhost беті, чи бачить сервер DNS beta.holos.rozum.one.
+# Після переїзду на Holos (27.09): прод на holos.rozum.one, бета на beta.holos.rozum.one.
+# Перевіряємо ззовні (з самого сервера, через nginx і сертифікати): сторінки на нових адресах,
+# 301 зі старих, машинні маршрути на старих адресах БЕЗ редіректу (Telegram і Claude за 301 з POST
+# не йдуть), сертифікати, версії коду, стан контейнерів і помилки в журналі після рестарту.
 
 on:
   push:
@@ -15,46 +15,48 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: rozum-app health + vhosts (read-only)
+      - name: Holos after the move (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 3m
+          command_timeout: 4m
           script: |
             mask() { sed -E -e 's/([A-Za-z0-9._%+-]{1,3})[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+)/\1***@\2/g' \
                             -e 's/[0-9a-fA-F]{24,}/<hex>/g' -e 's/[0-9]{6,}:[A-Za-z0-9_-]{30,}/<bot-token>/g' \
                             -e 's/(eyJ[A-Za-z0-9_-]{10,})\.[A-Za-z0-9._-]+/<jwt>/g' \
                             -e 's/((key|token|secret|password|passwd|pwd)[^=:]{0,20}[=:] *)[^ ,"]+/\1<masked>/Ig'; }
+            code() { curl -sS -m 15 -o /dev/null -w '%{http_code} %{redirect_url}' "$@" 2>&1; }
+            echo "=== версії ==="
+            echo "prod HEAD $(git -C "${{ secrets.APP_DIR }}" rev-parse --short HEAD) | beta HEAD $(git -C "${{ secrets.APP_DIR }}-beta" rev-parse --short HEAD)"
+            grep '^APP_BASE_URL=' "${{ secrets.APP_DIR }}/server/.env" "${{ secrets.APP_DIR }}-beta/server/.env"
+            docker ps --filter name=socialio --format '{{.Names}}\t{{.Status}}'
+            echo "=== прод: нова адреса ==="
+            for p in /health / /app /login /privacy /terms /data-deletion /tgapp; do echo "holos.rozum.one$p -> $(code "https://holos.rozum.one$p")"; done
+            echo "назва на головній: $(curl -sS -m 15 https://holos.rozum.one/ | grep -o '<title>[^<]*' | head -1)"
+            echo "=== прод: стара адреса ==="
+            for p in / "/login?next=%2Fapp" /privacy "/api/auth/verify?token=x"; do echo "socialio.rozum.one$p -> $(code "https://socialio.rozum.one$p")"; done
+            echo "без редіректу (мають бути НЕ 301):"
+            for p in /health /tgapp /media/nonexistent.jpg /mcp/0000000000000000000000000000000000000000000000000000000000000000; do echo "  socialio.rozum.one$p -> $(code "https://socialio.rozum.one$p")"; done
+            echo "  POST socialio.rozum.one/api/webhooks/telegram/x -> $(code -X POST -H 'content-type: application/json' -d '{}' https://socialio.rozum.one/api/webhooks/telegram/x)"
+            echo "  POST socialio.rozum.one/mcp/0…0 -> $(code -X POST -H 'content-type: application/json' -d '{}' https://socialio.rozum.one/mcp/0000000000000000000000000000000000000000000000000000000000000000)"
+            echo "=== бета ==="
+            for p in /health /app; do echo "beta.holos.rozum.one$p -> $(code "https://beta.holos.rozum.one$p")"; done
+            echo "beta.socialio.rozum.one/app -> $(code https://beta.socialio.rozum.one/app)"
+            echo "beta.socialio.rozum.one/health -> $(code https://beta.socialio.rozum.one/health)"
+            echo "=== сертифікати ==="
+            for h in holos.rozum.one beta.holos.rozum.one socialio.rozum.one beta.socialio.rozum.one; do
+              echo "$h: $(echo | openssl s_client -servername $h -connect 127.0.0.1:443 2>/dev/null | openssl x509 -noout -subject -enddate 2>/dev/null | tr '\n' ' ')"
+            done
+            echo "=== nginx ==="
             SUDO=""; [ "$(id -u)" != 0 ] && SUDO="sudo -n"
-            echo "=== rozum-app: стан ==="
-            docker inspect rozum-app --format 'status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}} streak={{.State.Health.FailingStreak}}{{end}} started={{.State.StartedAt}} restarts={{.RestartCount}} image={{.Config.Image}}' 2>&1
-            echo "compose dir: $(docker inspect rozum-app --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null)  project: $(docker inspect rozum-app --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null)  service: $(docker inspect rozum-app --format '{{index .Config.Labels "com.docker.compose.service"}}' 2>/dev/null)"
-            echo "=== rozum-app: як перевіряється здоровʼя ==="
-            docker inspect rozum-app --format '{{json .Config.Healthcheck}}' 2>&1 | mask
-            echo "=== rozum-app: останні результати перевірки ==="
-            docker inspect rozum-app --format '{{range .State.Health.Log}}{{.Start}} exit={{.ExitCode}} :: {{printf "%.300s" .Output}}{{"\n"}}{{end}}' 2>&1 | tail -5 | mask
-            echo "=== rozum-app: чи відповідає ззовні контейнера (порт 3120) ==="
-            for p in / /health /api/health /healthz; do echo "127.0.0.1:3120$p -> $(curl -s -m 8 -o /dev/null -w '%{http_code}' http://127.0.0.1:3120$p)"; done
-            echo "=== rozum-app: що є в контейнері для перевірки ==="
-            docker exec rozum-app sh -c 'command -v curl || echo "curl: НЕМА"; command -v wget || echo "wget: НЕМА"; command -v node || true' 2>&1 | head -5
-            echo "=== rozum-app: хвіст логу (замасковано) ==="
-            docker logs --tail 30 rozum-app 2>&1 | cut -c1-220 | mask
-            echo "=== rozum-postgres ==="
-            docker inspect rozum-postgres --format 'status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>&1
-            echo
-            echo "=== vhost socialio (прод): Host і проксі ==="
-            SOC=$(readlink -f /etc/nginx/sites-enabled/socialio.rozum.one.conf)
-            $SUDO grep -nE "server_name|listen|proxy_pass|proxy_set_header Host|client_max_body_size|ssl_certificate |proxy_read_timeout" "$SOC"
-            echo "=== vhost beta.socialio ==="
-            BSOC=$(readlink -f /etc/nginx/sites-enabled/beta.socialio.rozum.one)
-            $SUDO grep -nE "server_name|listen|proxy_pass|proxy_set_header Host|client_max_body_size|ssl_certificate |proxy_read_timeout" "$BSOC"
-            echo "=== DNS з сервера ==="
-            getent hosts beta.holos.rozum.one holos.rozum.one || echo "не резолвиться"
-            curl -s -m 5 -4 ifconfig.me 2>/dev/null && echo " <- IP сервера"
-            echo "=== прод: версія й здоровʼя ==="
-            echo "HEAD $(git -C "${{ secrets.APP_DIR }}" rev-parse --short HEAD) | beta HEAD $(git -C "${{ secrets.APP_DIR }}-beta" rev-parse --short HEAD)"
-            curl -s -m 5 -o /dev/null -w "prod health %{http_code}\n" http://127.0.0.1:8080/health
-            curl -s -m 5 -o /dev/null -w "beta health %{http_code}\n" http://127.0.0.1:8081/health
-            ls -lh /opt/socialio-backups 2>/dev/null | grep -- "-db-" | tail -2
+            $SUDO nginx -t 2>&1 | tail -1
+            ls -l /etc/nginx/sites-enabled/ | awk '{print $9, $10, $11}' | grep -i "holos\|socialio"
+            echo "=== журнал проду після рестарту (tgbot, помилки) ==="
+            cd "${{ secrets.APP_DIR }}/server" && docker compose logs --since 10m app 2>&1 | grep -iE "tgbot|error|fail|warn" | cut -c1-220 | mask | tail -20
+            echo "=== журнал беті після рестарту ==="
+            cd "${{ secrets.APP_DIR }}-beta/server" && docker compose logs --since 10m app 2>&1 | grep -iE "tgbot|error|fail|warn" | cut -c1-220 | mask | tail -20
+            echo "=== keepalive ==="
+            head -12 /opt/socialio-keepalive.sh | grep -n "flock" || echo "keepalive без блокування"
+            cat /opt/socialio-keepalive.log 2>/dev/null
