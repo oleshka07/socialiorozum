@@ -1,10 +1,9 @@
 name: beta-check
 
 # Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ, нічого не змінює й не перезапускає.
-# Після переїзду на Holos (27.09): прод на holos.rozum.one, бета на beta.holos.rozum.one.
-# Перевіряємо ззовні (з самого сервера, через nginx і сертифікати): сторінки на нових адресах,
-# 301 зі старих, машинні маршрути на старих адресах БЕЗ редіректу (Telegram і Claude за 301 з POST
-# не йдуть), сертифікати, версії коду, стан контейнерів і помилки в журналі після рестарту.
+# 27.09: новий лендинг і вхід у бренді Holos на беті - перевіряємо ззовні (з самого сервера, через nginx):
+# сторінки за PIN беті (PIN задокументований у CLAUDE.md), robots.txt без PIN, кеш-заголовки статики,
+# статуси мереж на лендингу, стара адреса беті, журнал після рестарту.
 
 on:
   push:
@@ -15,7 +14,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Holos after the move (read-only)
+      - name: Landing on beta (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -25,44 +24,35 @@ jobs:
           script: |
             mask() { sed -E -e 's/([A-Za-z0-9._%+-]{1,3})[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+)/\1***@\2/g' \
                             -e 's/[0-9a-fA-F]{24,}/<hex>/g' -e 's/[0-9]{6,}:[A-Za-z0-9_-]{30,}/<bot-token>/g' \
-                            -e 's/(eyJ[A-Za-z0-9_-]{10,})\.[A-Za-z0-9._-]+/<jwt>/g' \
                             -e 's/((key|token|secret|password|passwd|pwd)[^=:]{0,20}[=:] *)[^ ,"]+/\1<masked>/Ig'; }
-            code() { curl -sS -m 15 -o /dev/null -w '%{http_code} %{redirect_url}' "$@" 2>&1; }
+            B=https://beta.holos.rozum.one
+            J=$(mktemp)
             echo "=== версії ==="
-            echo "prod HEAD $(git -C "${{ secrets.APP_DIR }}" rev-parse --short HEAD) | beta HEAD $(git -C "${{ secrets.APP_DIR }}-beta" rev-parse --short HEAD)"
-            grep '^APP_BASE_URL=' "${{ secrets.APP_DIR }}/server/.env" "${{ secrets.APP_DIR }}-beta/server/.env"
+            echo "beta HEAD $(git -C "${{ secrets.APP_DIR }}-beta" rev-parse --short HEAD) | prod HEAD $(git -C "${{ secrets.APP_DIR }}" rev-parse --short HEAD)"
             docker ps --filter name=socialio --format '{{.Names}}\t{{.Status}}'
-            echo "=== прод: нова адреса ==="
-            for p in /health / /app /login /privacy /terms /data-deletion /tgapp; do echo "holos.rozum.one$p -> $(code "https://holos.rozum.one$p")"; done
-            echo "назва на головній: $(curl -sS -m 15 https://holos.rozum.one/ | grep -o '<title>[^<]*' | head -1)"
-            echo "=== прод: стара адреса ==="
-            for p in / "/login?next=%2Fapp" /privacy "/api/auth/verify?token=x"; do echo "socialio.rozum.one$p -> $(code "https://socialio.rozum.one$p")"; done
-            echo "без редіректу (мають бути НЕ 301):"
-            for p in /health /tgapp /media/nonexistent.jpg /mcp/0000000000000000000000000000000000000000000000000000000000000000; do echo "  socialio.rozum.one$p -> $(code "https://socialio.rozum.one$p")"; done
-            echo "  POST socialio.rozum.one/api/webhooks/telegram/x -> $(code -X POST -H 'content-type: application/json' -d '{}' https://socialio.rozum.one/api/webhooks/telegram/x)"
-            echo "  POST socialio.rozum.one/mcp/0…0 -> $(code -X POST -H 'content-type: application/json' -d '{}' https://socialio.rozum.one/mcp/0000000000000000000000000000000000000000000000000000000000000000)"
-            echo "=== бета ==="
-            for p in /health /app; do echo "beta.holos.rozum.one$p -> $(code "https://beta.holos.rozum.one$p")"; done
-            echo "beta.socialio.rozum.one/app -> $(code https://beta.socialio.rozum.one/app)"
-            echo "beta.socialio.rozum.one/health -> $(code https://beta.socialio.rozum.one/health)"
-            echo "=== сертифікати ==="
-            for h in holos.rozum.one beta.holos.rozum.one socialio.rozum.one beta.socialio.rozum.one; do
-              echo "$h: $(echo | openssl s_client -servername $h -connect 127.0.0.1:443 2>/dev/null | openssl x509 -noout -subject -enddate 2>/dev/null | tr '\n' ' ')"
+            echo "=== без PIN ==="
+            echo "robots.txt: $(curl -sS -m 15 $B/robots.txt | tr '\n' '|')"
+            echo "головна без PIN (очікуємо сторінку PIN): $(curl -sS -m 15 $B/ | grep -o 'Тестове середовище[^<]*' | head -1)"
+            echo "стара адреса robots.txt -> $(curl -sS -m 15 -o /dev/null -w '%{http_code} %{redirect_url}' https://beta.socialio.rozum.one/robots.txt)"
+            echo "=== з PIN ==="
+            curl -sS -m 15 -c $J -o /dev/null -w 'beta-pin %{http_code}\n' -H 'content-type: application/json' -d '{"pin":"2345"}' $B/beta-pin
+            H=$(curl -sS -m 15 -b $J $B/)
+            echo "головна: $(curl -sS -m 15 -b $J -o /dev/null -w '%{http_code} %{size_download}B' $B/)"
+            echo "title: $(echo "$H" | grep -o '<title>[^<]*' | head -1)"
+            echo "canonical: $(echo "$H" | grep -o '<link rel="canonical"[^>]*>' | head -1)"
+            echo "og:image: $(echo "$H" | grep -o 'property="og:image" content="[^"]*"' | head -1)"
+            echo "невставлені токени: $(echo "$H" | grep -cE '%(BASE|ST:|SC:|NET_NOTE|FAQ_NETS)')"
+            echo "статуси мереж на лендингу:"
+            echo "$H" | grep -oE 'id="p-[a-z]+"|<span class="st st-[a-z]+">[^<]+' | paste - - | sed 's/<span class="st /  /'
+            echo "примітка: $(echo "$H" | grep -o '<p class="netnote">[^<]*' | sed 's/<p class="netnote">//')"
+            echo "sitemap: $(curl -sS -m 15 -b $J $B/sitemap.xml | grep -o '<loc>[^<]*' | sed 's/<loc>//' | tr '\n' ' ')"
+            echo "/index.html -> $(curl -sS -m 15 -b $J -o /dev/null -w '%{http_code} %{redirect_url}' $B/index.html)"
+            for p in /register /login /app; do echo "$p: $(curl -sS -m 15 -b $J $B$p | grep -oE '<title>[^<]*|noindex,nofollow' | tr '\n' ' ')"; done
+            echo "=== статика й кеш ==="
+            for p in /fonts/inter-cyrillic.woff2 /images/site/holos-source-to-post-800.webp /images/og/holos-og-1200x630.jpg /favicon.ico /favicon.svg /apple-touch-icon.png /site.webmanifest /app.js; do
+              echo "$p: $(curl -sS -m 15 -b $J -D - -o /dev/null $B$p | grep -iE '^(HTTP|content-type|cache-control)' | tr -d '\r' | tr '\n' ' ')"
             done
-            echo "=== nginx ==="
-            SUDO=""; [ "$(id -u)" != 0 ] && SUDO="sudo -n"
-            $SUDO nginx -t 2>&1 | tail -1
-            ls -l /etc/nginx/sites-enabled/ | awk '{print $9, $10, $11}' | grep -i "holos\|socialio"
-            echo "=== журнал проду після рестарту (tgbot, помилки) ==="
-            cd "${{ secrets.APP_DIR }}/server" && docker compose logs --since 10m app 2>&1 | grep -iE "tgbot|error|fail|warn" | cut -c1-220 | mask | tail -20
+            echo "gzip головної через nginx: $(curl -sS -m 15 -b $J -H 'Accept-Encoding: gzip' -D - -o /dev/null $B/ | grep -i '^content-encoding' | tr -d '\r')"
             echo "=== журнал беті після рестарту ==="
-            cd "${{ secrets.APP_DIR }}-beta/server" && docker compose logs --since 10m app 2>&1 | grep -iE "tgbot|error|fail|warn" | cut -c1-220 | mask | tail -20
-            echo "=== продовження сертифікатів (лише читання конфігів certbot) ==="
-            for h in holos.rozum.one beta.holos.rozum.one socialio.rozum.one; do
-              f=/etc/letsencrypt/renewal/$h.conf
-              if $SUDO test -f "$f"; then echo "$h: $($SUDO grep -E '^(authenticator|installer|webroot_path)|^[a-z0-9.-]+ = /' "$f" | tr '\n' ' ')"; else echo "$h: нема $f"; fi
-            done
-            systemctl list-timers 2>/dev/null | grep -i certbot || (ls /etc/cron.d 2>/dev/null | grep -i certbot) || echo "таймер certbot не знайдено"
-            echo "=== keepalive ==="
-            head -12 /opt/socialio-keepalive.sh | grep -n "flock" || echo "keepalive без блокування"
-            cat /opt/socialio-keepalive.log 2>/dev/null
+            cd "${{ secrets.APP_DIR }}-beta/server" && docker compose logs --since 15m app 2>&1 | grep -iE '"level":(40|50)|error|unhandled' | cut -c1-220 | mask | tail -15
+            rm -f $J
