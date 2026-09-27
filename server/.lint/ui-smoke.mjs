@@ -18,6 +18,8 @@ import { chromium } from "playwright-core";
 // 📈 дані для екрана Аналітики рахує СПРАВЖНІЙ модуль (dist/analytics.js), а не рукописна заглушка:
 // інакше смоук перевіряв би верстку проти форми даних, якої сервер ніколи не віддає
 import { buildAnalytics } from "../dist/analytics.js";
+// 🏠 лендинг рендерить СПРАВЖНІЙ модуль (dist/landing.js): статуси мереж підставляє сервер
+import { renderLanding } from "../dist/landing.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUB = join(HERE, "..", "public");
@@ -583,12 +585,20 @@ const server = createServer((req, res) => {
     res.end(PNG);
     return;
   }
+  // лендинг: Meta й Threads ще не схвалені - так, як на проді зараз
+  if (url.split("?")[0] === "/landing") {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(renderLanding(readFileSync(join(PUB, "index.html"), "utf8"), `http://127.0.0.1:${PORT}`, { metaAppId: "m", metaPublic: false, threadsAppId: "t", threadsPublic: false, linkedinClientId: "l", googleClientId: "g", tiktokKey: "" }));
+    return;
+  }
   const file = url === "/app" || url === "/" ? "app.html" : url === "/tgapp" ? "tgapp.html" : url.split("?")[0].replace(/^\//, "");
   const p = join(PUB, file);
   if (!existsSync(p) || !p.startsWith(PUB)) {
     res.writeHead(404).end("nope");
     return;
   }
+  const bin = { ".woff2": "font/woff2", ".webp": "image/webp", ".png": "image/png", ".jpg": "image/jpeg", ".ico": "image/x-icon" }[p.slice(p.lastIndexOf("."))];
+  if (bin) { res.writeHead(200, { "content-type": bin }); res.end(readFileSync(p)); return; }
   const ct = p.endsWith(".html") ? "text/html" : p.endsWith(".js") ? "text/javascript" : p.endsWith(".svg") ? "image/svg+xml" : "text/plain";
   res.writeHead(200, { "content-type": ct + "; charset=utf-8" });
   res.end(readFileSync(p));
@@ -2253,6 +2263,82 @@ const run = async () => {
       && inBrand.hint.includes("«Тест бренд»") && wrong.length === 1 && wrong[0].includes("введи назву бренду")
       && stillThere && brandDeleted.length === 1 && brandDeleted[0] === B && after === "none";
     if (!ok) console.log("   ↳ brandDelete:", JSON.stringify({ atHome, inBrand, wrong, stillThere, brandDeleted, after }));
+    return ok;
+  });
+
+  // ---------------------------------------------------------- 13. 🏠 лендинг (/)
+  // Шлях матеріалу в hero справді програється; вкладки мереж перемикаються й чесно кажуть «за запрошенням»;
+  // на телефоні нема бічного скролу, меню відкривається; «менше руху» - одразу фінальний кадр без анімації.
+  const land = async (vp, extra = {}) => {
+    const ctx = await browser.newContext({ viewport: vp, ...extra });
+    const lp = await ctx.newPage();
+    lp.on("pageerror", (e) => pageErrors.push("landing pageerror: " + e.message));
+    await lp.route("**/*", (route) => { const u = route.request().url(); return u.includes("127.0.0.1:" + PORT) ? route.continue() : route.abort(); });
+    await lp.goto(`http://127.0.0.1:${PORT}/landing`, { waitUntil: "domcontentloaded" });
+    return { ctx, lp };
+  };
+  await check("landingHero", async () => {
+    const { ctx, lp } = await land({ width: 1440, height: 900 });
+    // до «Опубліковано» шлях іде ~10 с; за ним стежимо по класах, а не таймером
+    await lp.waitForFunction(() => document.getElementById("hv").classList.contains("done"), undefined, { timeout: 16000 });
+    const r = await lp.evaluate(() => ({
+      h1: document.getElementById("h1").textContent,
+      rows: [...document.querySelectorAll("#hv .hv-row")].map((x) => getComputedStyle(x).opacity),
+      state: document.getElementById("hvState").textContent,
+      published: getComputedStyle(document.querySelector("#hv .r5 .t2")).display,
+      cta: document.querySelector(".hero .btn-p").getAttribute("href"),
+    }));
+    await ctx.close();
+    const ok = r.h1.includes("Holos знаходить його") && r.rows.every((o) => o === "1") && r.state === "Опубліковано" && r.published !== "none" && r.cta === "/register";
+    if (!ok) console.log("   ↳ landingHero:", JSON.stringify(r));
+    return ok;
+  });
+  await check("landingTabs", async () => {
+    const { ctx, lp } = await land({ width: 1440, height: 900 });
+    // до кліку - лише Telegram (без JS видно всі п'ять, з JS - вкладки)
+    const init = await lp.evaluate(() => [...document.querySelectorAll(".tpanel")].filter((p) => !p.hidden).map((p) => p.id).join());
+    await lp.click("#t-ig");
+    const r = await lp.evaluate(() => ({
+      shown: [...document.querySelectorAll(".tpanel")].filter((p) => !p.hidden).map((p) => p.id),
+      sel: document.querySelector("#t-ig").getAttribute("aria-selected"),
+      badge: document.querySelector("#p-ig .st").textContent + "|" + document.querySelector("#p-ig .st").className,
+      tg: document.querySelector("#p-tg .st").textContent,
+      cnt: document.querySelector("#p-ig .cnt").textContent,
+      note: document.querySelector(".netnote").textContent,
+    }));
+    await ctx.close();
+    const ok = init === "p-tg" && r.shown.join() === "p-ig" && r.sel === "true" && r.badge === "за запрошенням|st st-invite" && r.tg === "працює"
+      && /^\d+ з 2200 знаків$/.test(r.cnt) && r.note.includes("перевіряють наш застосунок");
+    if (!ok) console.log("   ↳ landingTabs:", JSON.stringify({ init, ...r }));
+    return ok;
+  });
+  await check("landingMobile", async () => {
+    const { ctx, lp } = await land({ width: 390, height: 844 }, { isMobile: true, hasTouch: true });
+    await lp.waitForTimeout(400);
+    const before = await lp.evaluate(() => {
+      const w = document.documentElement.clientWidth;
+      const out = [...document.querySelectorAll("h1, h2, h3, p, .btn, .card, .tpanel, .hv-panel, .cmp, .price")]
+        .filter((el) => { const r = el.getBoundingClientRect(); return r.width && (r.right > w + 1 || r.left < -1); })
+        .map((el) => el.tagName + "." + String(el.className).split(" ")[0]);
+      return { out, nav: getComputedStyle(document.getElementById("nav")).display };
+    });
+    await lp.click("#menu");
+    const open = await lp.evaluate(() => ({ nav: getComputedStyle(document.getElementById("nav")).display, exp: document.getElementById("menu").getAttribute("aria-expanded") }));
+    await lp.click('#nav a[href="#faq"]');
+    await lp.waitForTimeout(300);
+    const closed = await lp.evaluate(() => getComputedStyle(document.getElementById("nav")).display);
+    await ctx.close();
+    const ok = before.out.length === 0 && before.nav === "none" && open.nav === "flex" && open.exp === "true" && closed === "none";
+    if (!ok) console.log("   ↳ landingMobile:", JSON.stringify({ before, open, closed }));
+    return ok;
+  });
+  await check("landingReducedMotion", async () => {
+    const { ctx, lp } = await land({ width: 1440, height: 900 }, { reducedMotion: "reduce" });
+    await lp.waitForTimeout(600);
+    const r = await lp.evaluate(() => ({ anim: document.getElementById("hv").classList.contains("anim"), rows: [...document.querySelectorAll("#hv .hv-row")].map((x) => getComputedStyle(x).opacity), rv: [...document.querySelectorAll(".rv")].filter((e) => getComputedStyle(e).opacity !== "1").length }));
+    await ctx.close();
+    const ok = !r.anim && r.rows.every((o) => o === "1") && r.rv === 0;
+    if (!ok) console.log("   ↳ landingReducedMotion:", JSON.stringify(r));
     return ok;
   });
 

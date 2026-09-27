@@ -47,8 +47,9 @@ export function legacyHosts(baseUrl: string, raw?: string): Set<string> {
  * адресі працює як було: вебхуки Telegram/Fireflies/Vymova, конектори Claude (`/mcp/…`) і разові
  * посилання на заливку, медіа й мініатюри в уже опублікованих постах, Mini App, `/api` (вкладка,
  * відкрита до перемикання, не падає), OAuth-повернення, почате на старій адресі (state-кукі там).
+ * robots.txt і sitemap.xml теж переїжджають: пошуковик має бачити правила й карту НОВОЇ адреси.
  */
-const LEGACY_PAGES = new Set(["/", "/app", "/b", "/B", "/login", "/register", "/forgot", "/reset", "/privacy", "/terms", "/data-deletion", "/api/auth/verify"]);
+const LEGACY_PAGES = new Set(["/", "/index.html", "/app", "/b", "/B", "/login", "/register", "/forgot", "/reset", "/privacy", "/terms", "/data-deletion", "/api/auth/verify", "/robots.txt", "/sitemap.xml"]);
 
 export function legacyRedirect(o: { host?: string; method?: string; url?: string; baseUrl: string; legacy: Set<string> }): string | null {
   const host = String(o.host || "").toLowerCase().replace(/:\d+$/, "");

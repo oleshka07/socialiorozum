@@ -35,6 +35,9 @@ test("legacyRedirect: сторінки зі старої адреси - на н�
   assert.equal(r("SOCIALIO.rozum.one:443", "/login?review=en"), BASE + "/login?review=en", "регістр і порт не важать");
   assert.equal(r("socialio.rozum.one", "/api/auth/verify?token=abc"), BASE + "/api/auth/verify?token=abc", "лист підтвердження - вхід уже на новій адресі");
   assert.equal(r("socialio.rozum.one", "/privacy", "HEAD"), BASE + "/privacy");
+  // пошуковик має бачити правила й карту нової адреси, а не старої
+  assert.equal(r("socialio.rozum.one", "/robots.txt"), BASE + "/robots.txt");
+  assert.equal(r("socialio.rozum.one", "/sitemap.xml"), BASE + "/sitemap.xml");
 });
 
 test("legacyRedirect: вебхуки, конектор, медіа, Mini App і API на старій адресі - без редіректу", () => {

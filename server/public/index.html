@@ -1,461 +1,893 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="uk">
 <head>
-<meta charset="UTF-8">
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Holos by Rozum - твій голос у соцмережах</title>
-<meta name="description" content="Holos перетворює твої голосові, нотатки, дзвінки й новини ніші на пости у твоєму голосі - без AI-сліду - і сам публікує їх у Telegram, Instagram, Facebook, Threads і LinkedIn.">
-<meta property="og:title" content="Holos by Rozum - твій голос у соцмережах">
-<meta property="og:description" content="Пости у твоєму голосі з того, що в тебе вже є, - і публікація в усі мережі за розкладом.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Holos by Rozum - AI-контент менеджер у твоєму голосі</title>
+<meta name="description" content="Holos перетворює дзвінки, нотатки, голосові й твої матеріали на готові пости у твоєму голосі - від ідеї до плану й публікації.">
+<link rel="canonical" href="%BASE%/">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<meta name="theme-color" content="#190D14">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Holos by Rozum">
+<meta property="og:locale" content="uk_UA">
+<meta property="og:title" content="Holos by Rozum - твій контент уже існує">
+<meta property="og:description" content="Holos знаходить сильні думки у твоїх дзвінках, нотатках і матеріалах та перетворює їх на пости у твоєму голосі.">
+<meta property="og:url" content="%BASE%/">
+<meta property="og:image" content="%BASE%/images/og/holos-og-1200x630.jpg">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Holos by Rozum: твій контент уже існує, Holos знаходить його">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Holos by Rozum - твій контент уже існує">
+<meta name="twitter:description" content="Дзвінки, нотатки й знання стають готовими постами у твоєму голосі.">
+<meta name="twitter:image" content="%BASE%/images/og/holos-og-1200x630.jpg">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="preload" href="/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
+<script>document.documentElement.classList.add("js")</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "%BASE%/#website",
+      "url": "%BASE%/",
+      "name": "Holos by Rozum",
+      "alternateName": ["Holos"],
+      "inLanguage": "uk",
+      "publisher": { "@id": "%BASE%/#organization" }
+    },
+    {
+      "@type": "Organization",
+      "@id": "%BASE%/#organization",
+      "name": "Rozum"
+    },
+    {
+      "@type": "WebApplication",
+      "@id": "%BASE%/#app",
+      "name": "Holos by Rozum",
+      "url": "%BASE%/",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "inLanguage": "uk",
+      "description": "Holos перетворює дзвінки, нотатки, голосові й матеріали на готові пости у голосі автора, планує й публікує їх у підключені соцмережі.",
+      "publisher": { "@id": "%BASE%/#organization" },
+      "image": "%BASE%/images/og/holos-og-1200x630.jpg"
+    },
+    {
+      "@type": "WebPage",
+      "@id": "%BASE%/#webpage",
+      "url": "%BASE%/",
+      "name": "Holos by Rozum - AI-контент менеджер у твоєму голосі",
+      "description": "Holos перетворює дзвінки, нотатки, голосові й твої матеріали на готові пости у твоєму голосі - від ідеї до плану й публікації.",
+      "isPartOf": { "@id": "%BASE%/#website" },
+      "about": { "@id": "%BASE%/#app" },
+      "primaryImageOfPage": { "@type": "ImageObject", "url": "%BASE%/images/og/holos-og-1200x630.jpg", "width": 1200, "height": 630 },
+      "inLanguage": "uk"
+    }
+  ]
+}
+</script>
 <style>
-  :root{
-    --bg:#0a0c12; --bg2:#0e1119; --panel:#12161f; --panel2:#171c27; --line:#232a38;
-    --txt:#eef2f8; --muted:#9aa6b8; --accent:#5b8cff; --cyan:#5be3c2; --violet:#a982ff;
-    --warn:#f5b54a; --ok:#3fd07a; --radius:16px; --maxw:1120px;
-  }
-  *{box-sizing:border-box;margin:0;padding:0}
-  /* світлові плями навмисно виходять за край - обрізаємо, щоб на телефоні не зʼявлявся бічний скрол (clip, а не hidden: липка шапка лишається липкою) */
-  html{scroll-behavior:smooth;overflow-x:hidden;overflow-x:clip}
-  body{background:var(--bg);color:var(--txt);font-family:Inter,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6;overflow-x:hidden;overflow-x:clip}
-  a{color:inherit;text-decoration:none}
-  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 22px}
-  section{position:relative}
-  h1,h2,h3{line-height:1.12;letter-spacing:-.02em;font-weight:800}
-  h2{font-size:clamp(26px,4vw,42px)}
-  .muted{color:var(--muted)}
-  .grad{background:linear-gradient(100deg,var(--accent),var(--cyan) 55%,var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent}
-  .btn{display:inline-flex;align-items:center;gap:8px;border-radius:12px;padding:13px 22px;font-weight:700;font-size:15px;border:1px solid var(--line);background:var(--panel2);color:var(--txt);cursor:pointer;transition:.18s;white-space:nowrap}
-  .btn:hover{transform:translateY(-1px);border-color:var(--accent)}
-  .btn.primary{background:linear-gradient(100deg,var(--accent),var(--violet));border:none;color:#0a0c12;box-shadow:0 8px 30px -8px rgba(91,140,255,.6)}
-  .btn.primary:hover{box-shadow:0 12px 40px -8px rgba(91,140,255,.8)}
-  .btn.lg{padding:16px 30px;font-size:16px}
-  .eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--cyan);background:rgba(91,227,194,.08);border:1px solid rgba(91,227,194,.25);padding:6px 14px;border-radius:30px}
-
-  /* glow blobs */
-  .blob{position:absolute;border-radius:50%;filter:blur(90px);opacity:.5;z-index:0;pointer-events:none}
-  .blob.b1{width:480px;height:480px;background:radial-gradient(circle,rgba(91,140,255,.55),transparent 70%);top:-120px;left:-80px;animation:drift 18s ease-in-out infinite}
-  .blob.b2{width:420px;height:420px;background:radial-gradient(circle,rgba(169,130,255,.45),transparent 70%);top:200px;right:-120px;animation:drift 22s ease-in-out infinite reverse}
-  @keyframes drift{0%,100%{transform:translate(0,0)}50%{transform:translate(40px,50px)}}
-
-  /* nav */
-  nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(12px);background:rgba(10,12,18,.72);border-bottom:1px solid transparent;transition:.3s}
-  nav.scrolled{border-bottom:1px solid var(--line);background:rgba(10,12,18,.9)}
-  .nav-in{display:flex;align-items:center;justify-content:space-between;height:66px}
-  .logo{display:flex;align-items:center;gap:9px;font-weight:800;font-size:19px;letter-spacing:-.02em}
-  .logo .mark{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--violet));display:grid;place-items:center;font-size:15px}
-  .logo .by{font-size:11px;color:var(--muted);font-weight:600;border:1px solid var(--line);border-radius:6px;padding:2px 6px;letter-spacing:.04em}
-  .nav-links{display:flex;align-items:center;gap:26px;font-size:14px;font-weight:500}
-  .nav-links a.lnk{color:var(--muted);transition:.15s}
-  .nav-links a.lnk:hover{color:var(--txt)}
-  .nav-cta{display:flex;align-items:center;gap:12px}
-  @media(max-width:780px){.nav-links .lnk{display:none}}
-
-  /* hero */
-  .hero{padding:70px 0 40px;text-align:center}
-  .hero h1{font-size:clamp(34px,6vw,62px);max-width:880px;margin:18px auto 0}
-  .hero p.lead{font-size:clamp(16px,2.2vw,21px);color:var(--muted);max-width:660px;margin:20px auto 0}
-  .hero-cta{display:flex;gap:14px;justify-content:center;margin-top:30px;flex-wrap:wrap}
-  .trust{margin-top:18px;font-size:13px;color:var(--muted)}
-
-  /* animated product demo */
-  .demo{max-width:920px;margin:48px auto 0;background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:20px;padding:0;position:relative;overflow:hidden;box-shadow:0 40px 120px -40px rgba(91,140,255,.35)}
-  .demo-bar{display:flex;align-items:center;gap:7px;padding:13px 16px;border-bottom:1px solid var(--line)}
-  .demo-bar i{width:11px;height:11px;border-radius:50%;background:#2c3442;display:inline-block}
-  .demo-bar .url{margin-left:10px;font-size:12px;color:var(--muted)}
-  .flow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;min-height:330px}
-  @media(max-width:720px){.flow{grid-template-columns:1fr;min-height:auto}}
-  .flow .col{padding:20px;border-right:1px solid var(--line)}
-  .flow .col:last-child{border-right:none}
-  .flow h4{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:12px;font-weight:700}
-  .src{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:12.5px;margin-bottom:8px;opacity:0;transform:translateY(8px);display:flex;align-items:center;gap:8px}
-  .src.in{animation:pop .5s forwards}
-  .src .ic{font-size:15px}
-  .idea-line{font-size:12.5px;color:var(--muted);padding:7px 10px;border-left:2px solid var(--cyan);margin-bottom:7px;opacity:0;transform:translateX(-6px)}
-  .idea-line.in{animation:slidein .5s forwards}
-  .postcard{background:#0f1521;border:1px solid #233140;border-left:3px solid var(--accent);border-radius:10px;padding:12px;font-size:12.5px;min-height:120px;white-space:pre-wrap}
-  .tgline{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--cyan);margin-top:10px;opacity:0}
-  .tgline.in{animation:pop .5s forwards}
-  .cursor{display:inline-block;width:7px;height:14px;background:var(--accent);vertical-align:-2px;animation:blink .8s steps(2) infinite}
-  @keyframes blink{50%{opacity:0}}
-  @keyframes pop{to{opacity:1;transform:translateY(0)}}
-  @keyframes slidein{to{opacity:1;transform:translateX(0)}}
-
-  /* reveal */
-  .reveal{opacity:0;transform:translateY(24px);transition:.7s cubic-bezier(.2,.7,.2,1)}
-  .reveal.in{opacity:1;transform:none}
-
-  /* generic section spacing */
-  .sec{padding:88px 0}
-  .sec h2{text-align:center;max-width:760px;margin:0 auto}
-  .sec .sub{text-align:center;color:var(--muted);max-width:620px;margin:14px auto 0;font-size:17px}
-
-  /* pains */
-  .pains{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-top:44px}
-  @media(max-width:720px){.pains{grid-template-columns:1fr}}
-  .pain{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px;display:flex;gap:14px}
-  .pain .x{font-size:22px;flex-shrink:0}
-  .pain b{display:block;margin-bottom:4px}
-  .pain p{font-size:14px;color:var(--muted)}
-
-  /* steps */
-  .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:48px}
-  @media(max-width:900px){.steps{grid-template-columns:repeat(2,1fr)}}
-  @media(max-width:520px){.steps{grid-template-columns:1fr}}
-  .step{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:var(--radius);padding:24px;position:relative}
-  .step .n{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--violet));display:grid;place-items:center;font-weight:800;color:#0a0c12;margin-bottom:14px}
-  .step h3{font-size:18px;margin-bottom:6px}
-  .step p{font-size:14px;color:var(--muted)}
-
-  /* bento sources */
-  .bento{display:grid;grid-template-columns:repeat(6,1fr);gap:16px;margin-top:48px}
-  .cell{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px;transition:.2s}
-  .cell:hover{border-color:var(--accent);transform:translateY(-3px)}
-  .cell .ic{font-size:26px;margin-bottom:10px}
-  .cell h3{font-size:17px;margin-bottom:5px}
-  .cell p{font-size:13.5px;color:var(--muted)}
-  .cell .soon{font-size:11px;color:var(--warn);border:1px solid var(--warn);border-radius:20px;padding:1px 9px;display:inline-block;margin-top:8px}
-  .c-2{grid-column:span 2}.c-3{grid-column:span 3}
-  @media(max-width:860px){.bento{grid-template-columns:repeat(2,1fr)}.c-2,.c-3{grid-column:span 1}}
-  @media(max-width:520px){.bento{grid-template-columns:1fr}}
-
-  /* compare */
-  .cmp{margin-top:44px;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
-  .cmp-row{display:grid;grid-template-columns:2fr 1fr 1fr;align-items:center}
-  .cmp-row>div{padding:15px 18px;font-size:14.5px;border-bottom:1px solid var(--line)}
-  .cmp-row.head>div{background:var(--panel2);font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.04em}
-  .cmp-row .us{color:var(--cyan);font-weight:700;text-align:center}
-  .cmp-row .them{color:var(--muted);text-align:center}
-  .cmp-row:last-child>div{border-bottom:none}
-  .cmp .feat{color:var(--txt)}
-
-  /* use cases tabs */
-  .tabs{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:40px}
-  .tab{padding:10px 18px;border:1px solid var(--line);border-radius:30px;font-size:14px;font-weight:600;color:var(--muted);cursor:pointer;transition:.15s;background:var(--panel)}
-  .tab.active{color:#0a0c12;background:linear-gradient(100deg,var(--accent),var(--violet));border-color:transparent}
-  .usecase{max-width:720px;margin:26px auto 0;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:28px;text-align:center}
-  .usecase h3{font-size:20px;margin-bottom:8px}
-  .usecase p{color:var(--muted)}
-
-  /* pricing */
-  .prices{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:48px}
-  @media(max-width:820px){.prices{grid-template-columns:1fr}}
-  .price{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:28px}
-  .price.featured{border-color:var(--accent);background:linear-gradient(180deg,rgba(91,140,255,.08),var(--panel));position:relative}
-  .price.featured::before{content:"Найпопулярніше";position:absolute;top:-11px;left:24px;background:linear-gradient(100deg,var(--accent),var(--violet));color:#0a0c12;font-size:11px;font-weight:700;padding:3px 12px;border-radius:20px}
-  .price h3{font-size:18px}
-  .price .amt{font-size:38px;font-weight:800;margin:12px 0 2px}
-  .price .amt span{font-size:15px;color:var(--muted);font-weight:500}
-  .price ul{list-style:none;margin:18px 0;display:grid;gap:9px}
-  .price li{font-size:14px;color:var(--muted);display:flex;gap:9px}
-  .price li::before{content:"✓";color:var(--ok);font-weight:800}
-  .price .btn{width:100%;justify-content:center;margin-top:6px}
-
-  /* faq */
-  .faq{max-width:760px;margin:44px auto 0}
-  .qa{border:1px solid var(--line);border-radius:12px;margin-bottom:12px;background:var(--panel);overflow:hidden}
-  .qa summary{cursor:pointer;list-style:none;padding:18px 20px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
-  .qa summary::-webkit-details-marker{display:none}
-  .qa summary .plus{color:var(--accent);font-size:20px;transition:.2s}
-  .qa[open] summary .plus{transform:rotate(45deg)}
-  .qa .a{padding:0 20px 18px;color:var(--muted);font-size:14.5px}
-
-  /* final cta */
-  .final{text-align:center;padding:96px 0;position:relative}
-  .final .card{max-width:760px;margin:0 auto;background:linear-gradient(135deg,rgba(91,140,255,.14),rgba(169,130,255,.12));border:1px solid var(--line);border-radius:24px;padding:54px 30px}
-  .final h2{margin-bottom:14px}
-
-  .logo .mark svg{width:17px;height:17px}
-  /* networks */
-  .nets{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:44px}
-  @media(max-width:860px){.nets{grid-template-columns:repeat(2,1fr)}}
-  @media(max-width:520px){.nets{grid-template-columns:1fr}}
-  .net{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px}
-  .net h3{font-size:17px;margin-bottom:6px;display:flex;align-items:center;gap:9px}
-  .net h3 i{width:10px;height:10px;border-radius:50%;display:inline-block;background:var(--c)}
-  .net p{font-size:13.5px;color:var(--muted)}
-  .nets-note{text-align:center;color:var(--muted);font-size:14px;margin-top:22px}
-  .nets-note b{color:var(--txt);font-weight:600}
-
-  footer{border-top:1px solid var(--line);padding:38px 0;color:var(--muted);font-size:13.5px}
-  .foot-in{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px}
-
-  @media(prefers-reduced-motion:reduce){
-    *{animation:none!important;transition:none!important}
-    .reveal{opacity:1;transform:none}
-    .src,.idea-line,.tgline{opacity:1;transform:none}
-  }
+@font-face{font-family:Inter;font-style:normal;font-weight:400 700;font-display:swap;src:url(/fonts/inter-cyrillic.woff2) format("woff2");unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
+@font-face{font-family:Inter;font-style:normal;font-weight:400 700;font-display:swap;src:url(/fonts/inter-latin.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+/* запасний шрифт з метриками Inter - щоб текст не «стрибав», поки вантажиться справжній */
+@font-face{font-family:"Inter Fallback";src:local("Arial");ascent-override:90.44%;descent-override:22.52%;line-gap-override:0%;size-adjust:107.12%}
+:root{
+  --dk:#190D14;--dk2:#2A0B17;--wine:#7A0F3D;--berry:#B20C50;--pink:#FF2F78;--pink2:#FF6B9B;--blush:#FFB3CA;--peach:#FFB09D;
+  --cream:#FFF8F5;--ivory:#FFFDFB;--line:#F0D7DF;--ink:#190D14;--ink2:#6E5A64;
+  --on:#FFF4F7;--on2:#C9AAB7;--dline:rgba(255,179,202,.14);--dcard:rgba(255,255,255,.035);
+  --b1:#C20F57;--b2:#D9145D;--ease:cubic-bezier(.22,1,.36,1);--maxw:1180px;
+  --sh:0 20px 60px rgba(80,0,36,.12);--shp:0 14px 36px rgba(214,19,92,.28);
+}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth;overflow-x:clip}
+body{margin:0;background:var(--dk);color:var(--on);font-family:Inter,"Inter Fallback",system-ui,-apple-system,"Segoe UI",sans-serif;font-size:17px;line-height:1.6;overflow-x:clip;-webkit-font-smoothing:antialiased}
+img,svg{display:block;max-width:100%}
+a{color:inherit}
+h1,h2,h3{margin:0;font-weight:650;letter-spacing:-.028em;line-height:1.08}
+p{margin:0}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+.skip{position:absolute;left:-999px;top:8px;z-index:100;background:#fff;color:#000;padding:10px 14px;border-radius:10px}
+.skip:focus{left:12px}
+:focus-visible{outline:3px solid var(--pink2);outline-offset:3px;border-radius:6px}
+.lt :focus-visible,.lt2 :focus-visible{outline-color:var(--berry)}
+section{position:relative;scroll-margin-top:92px}
+.dk{background:var(--dk);color:var(--on)}
+.lt{background:var(--cream);color:var(--ink)}
+.lt2{background:var(--ivory);color:var(--ink)}
+.sec{padding:112px 0}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;letter-spacing:.02em;padding:6px 13px;border-radius:999px;border:1px solid var(--dline);color:#FFD3E0;background:rgba(255,47,120,.08)}
+.lt .eyebrow,.lt2 .eyebrow{color:var(--berry);border-color:var(--line);background:#fff}
+.eyebrow i{width:6px;height:6px;border-radius:50%;background:var(--pink)}
+.h2{font-size:clamp(30px,4.3vw,52px);max-width:820px}
+.lead{font-size:clamp(17px,1.6vw,20px);color:var(--on2);max-width:680px;margin-top:18px}
+.lt .lead,.lt2 .lead{color:var(--ink2)}
+.center{text-align:center;margin-left:auto;margin-right:auto}
+.pink{color:var(--pink2)}
+.lt .pink,.lt2 .pink{color:var(--berry)}
+/* кнопки */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:48px;padding:13px 22px;border-radius:14px;font-weight:600;font-size:16px;text-decoration:none;border:1px solid transparent;cursor:pointer;transition:transform .18s var(--ease),box-shadow .18s var(--ease),background-color .18s,border-color .18s;white-space:nowrap}
+.btn-p{background:linear-gradient(135deg,var(--b1),var(--b2));color:#fff;box-shadow:var(--shp)}
+.btn-p:hover{transform:translateY(-1px);box-shadow:0 18px 44px rgba(214,19,92,.38)}
+.btn-g{border-color:rgba(255,179,202,.34);color:var(--on);background:rgba(25,13,20,.55)}
+.btn-g:hover{border-color:var(--pink2);background:rgba(255,47,120,.08)}
+.lt .btn-g,.lt2 .btn-g{border-color:#E8C9D4;color:var(--ink)}
+.lt .btn-g:hover,.lt2 .btn-g:hover{border-color:var(--berry);background:#fff}
+.btn-lg{min-height:56px;padding:16px 26px;font-size:17px}
+/* шапка */
+.hdr{position:fixed;left:0;right:0;top:14px;z-index:50;padding:0 16px;transition:top .3s var(--ease)}
+.hdr-in{max-width:var(--maxw);margin:0 auto;height:62px;display:flex;align-items:center;gap:18px;padding:0 10px 0 18px;border-radius:999px;background:rgba(25,13,20,.55);border:1px solid var(--dline);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);transition:background-color .3s,box-shadow .3s,height .3s var(--ease)}
+.hdr.sc .hdr-in{background:rgba(25,13,20,.9);box-shadow:0 12px 40px rgba(0,0,0,.28);height:56px}
+.logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:#fff;flex-shrink:0}
+.logo svg{width:38px;height:29px}
+.logo b{font-size:20px;font-weight:650;letter-spacing:-.03em;line-height:1}
+.logo small{display:block;font-size:10.5px;color:var(--on2);letter-spacing:.14em;font-weight:500;margin-top:2px}
+.nav{display:flex;align-items:center;gap:4px;margin-left:auto}
+.nav a{padding:8px 12px;border-radius:999px;text-decoration:none;font-size:14.5px;color:#EBD3DC;font-weight:500}
+.nav a:hover{color:#fff;background:rgba(255,255,255,.06)}
+.hdr-cta{display:flex;align-items:center;gap:6px}
+.hdr-cta .in{padding:8px 12px;text-decoration:none;font-size:14.5px;color:#EBD3DC;font-weight:500;border-radius:999px}
+.hdr-cta .in:hover{color:#fff}
+.hdr-cta .btn{min-height:42px;padding:9px 16px;font-size:14.5px;border-radius:999px}
+.menu{display:none;width:44px;height:44px;border-radius:50%;border:1px solid var(--dline);background:transparent;color:#fff;cursor:pointer;align-items:center;justify-content:center}
+.menu span,.menu span::before,.menu span::after{display:block;width:18px;height:2px;border-radius:2px;background:currentColor;position:relative;transition:transform .2s}
+.menu span::before,.menu span::after{content:"";position:absolute;left:0}
+.menu span::before{top:-6px}.menu span::after{top:6px}
+.hdr.open .menu span{background:transparent}
+.hdr.open .menu span::before{transform:translateY(6px) rotate(45deg)}
+.hdr.open .menu span::after{transform:translateY(-6px) rotate(-45deg)}
+@media (max-width:960px){
+  .nav{display:none;position:absolute;left:16px;right:16px;top:70px;flex-direction:column;align-items:stretch;gap:2px;padding:10px;border-radius:22px;background:rgba(25,13,20,.97);border:1px solid var(--dline);box-shadow:0 20px 50px rgba(0,0,0,.4)}
+  .nav a{padding:13px 14px;font-size:16px;border-radius:14px}
+  .hdr.open .nav{display:flex}
+  .menu{display:inline-flex}
+  .hdr-cta{margin-left:auto}
+  .hdr-cta .in{display:none}
+}
+@media (max-width:560px){.xs-hide{display:none}}
+@media (max-width:420px){.hdr-cta .btn{padding:9px 13px}.logo small{display:none}}
+/* hero */
+.hero{padding:150px 0 96px;overflow:hidden;background:radial-gradient(900px 600px at 78% 30%,rgba(122,15,61,.5),transparent 65%),radial-gradient(700px 500px at 5% 0%,rgba(122,15,61,.28),transparent 60%),var(--dk)}
+.hero .wrap{max-width:1280px}
+.hero-g{display:grid;grid-template-columns:1.08fr .92fr;gap:40px;align-items:center}
+.hero h1{font-size:clamp(38px,4.9vw,64px);margin-top:22px;max-width:680px}
+.hero h1 span{display:block;background:linear-gradient(100deg,var(--pink) 10%,var(--pink2) 55%,var(--peach));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero .lead{margin-top:24px;max-width:560px}
+.cta-row{display:flex;flex-wrap:wrap;gap:12px;margin-top:34px}
+@media (max-width:560px){.cta-row .btn{width:100%;white-space:normal;text-align:center}.btn-lg{font-size:16px;padding:15px 16px}}
+.trust{margin-top:18px;font-size:14px;color:var(--on2);display:flex;flex-wrap:wrap;gap:6px 16px}
+.trust span{display:inline-flex;align-items:center;gap:7px}
+.trust span::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--pink)}
+/* hero-візуал: знак, що «слухає», і картки шляху матеріалу */
+.hv{position:relative;min-height:560px}
+.hv-rib{position:absolute;left:-2%;bottom:-6%;height:60%;width:128%;opacity:.95;pointer-events:none;z-index:0}
+.hv::before{content:"";position:absolute;left:-10%;top:10%;width:62%;height:62%;border-radius:50%;background:radial-gradient(closest-side,rgba(255,47,120,.28),rgba(255,47,120,0));pointer-events:none}
+.viz{position:absolute;left:-8%;top:21%;width:42%;height:auto;z-index:1}
+.vb{transform-box:fill-box;transform-origin:50% 50%;animation:vz 2.4s ease-in-out infinite alternate}
+.vb:nth-child(2){animation-delay:-.35s}.vb:nth-child(3){animation-delay:-.7s}.vb:nth-child(4){animation-delay:-1.05s}.vb:nth-child(5){animation-delay:-1.4s}.vb:nth-child(6){animation-delay:-1.75s}.vb:nth-child(7){animation-delay:-2.1s}
+@keyframes vz{from{transform:scaleY(.86)}to{transform:scaleY(1)}}
+.hv.listen .viz .vb{animation-duration:.46s}
+.hv.think .viz .vb{animation-duration:1s}
+.hv.ready .viz .vb{animation-duration:3.2s}
+.hv-panel{position:absolute;right:0;top:0;width:64%;min-width:300px;z-index:2;padding:16px;border-radius:26px;background:rgba(34,10,20,.97);border:1px solid rgba(255,179,202,.16);box-shadow:0 30px 80px rgba(0,0,0,.45);display:flex;flex-direction:column;gap:10px}
+.hv-state{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--on2);padding:2px 4px 6px;border-bottom:1px solid var(--dline)}
+.hv-state i{width:7px;height:7px;border-radius:50%;background:var(--pink);box-shadow:0 0 0 0 rgba(255,47,120,.6);animation:ping 1.6s infinite}
+@keyframes ping{70%{box-shadow:0 0 0 7px rgba(255,47,120,0)}100%{box-shadow:0 0 0 0 rgba(255,47,120,0)}}
+.hv-row{display:flex;gap:12px;align-items:flex-start;padding:12px;border-radius:16px;background:rgba(255,255,255,.04);border:1px solid var(--dline);transition:opacity .5s var(--ease),transform .5s var(--ease)}
+.hv-row b{display:block;font-size:14.5px;font-weight:600;line-height:1.35;color:#fff}
+.hv-row small{display:block;font-size:12.5px;color:var(--on2);margin-top:2px}
+.ic{flex-shrink:0;width:36px;height:36px;border-radius:11px;display:grid;place-items:center;background:rgba(255,47,120,.12)}
+.ic svg{width:22px;height:22px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chips i{font-style:normal;font-size:12px;padding:4px 9px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid var(--dline);color:#F3DCE5;transition:background-color .3s,border-color .3s,color .3s,opacity .4s,transform .4s var(--ease)}
+.chips i.sel{background:rgba(255,47,120,.22);border-color:rgba(255,107,155,.6);color:#fff}
+.hv-row.pick{flex-direction:column;gap:2px;border-color:rgba(255,107,155,.45);background:linear-gradient(135deg,rgba(255,47,120,.16),rgba(255,47,120,.04))}
+.hv-row.pick small{margin:0 0 2px;text-transform:uppercase;letter-spacing:.08em;font-size:10.5px;color:#FF9EBB}
+.hv-row.post{flex-direction:column;gap:8px}
+.hv-row.post .lbl{display:flex;align-items:center;gap:8px;margin:0}
+.pbar{height:4px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden}
+.pbar i{display:block;height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,var(--pink),var(--pink2))}
+.hv-row.post p{font-size:13.5px;line-height:1.5;color:#F6E4EB}
+.hv-row.post p span{transition:opacity .45s}
+.tg-dot{width:36px;height:36px;border-radius:50%;background:#2AABEE;display:grid;place-items:center;flex-shrink:0}
+.tg-dot svg{width:18px;height:18px}
+.alt .t1{display:none}
+/* анімація шляху - вмикає JS; без JS і при «менше руху» видно фінальний кадр */
+.hv.anim .hv-row{opacity:0;transform:translateY(10px)}
+.hv.anim.on1 .r1,.hv.anim.on2 .r2,.hv.anim.on3 .r3,.hv.anim.on4 .r4,.hv.anim.on5 .r5{opacity:1;transform:none}
+.hv.anim .chips i{opacity:0;transform:scale(.9)}
+.hv.anim.on2 .chips i{opacity:1;transform:none}
+.hv.anim.on2 .chips i:nth-child(2){transition-delay:.12s}.hv.anim.on2 .chips i:nth-child(3){transition-delay:.24s}.hv.anim.on2 .chips i:nth-child(4){transition-delay:.36s}
+.hv.anim .chips i.sel{background:rgba(255,255,255,.06);border-color:var(--dline);color:#F3DCE5}
+.hv.anim.on3 .chips i.sel{background:rgba(255,47,120,.22);border-color:rgba(255,107,155,.6);color:#fff}
+.hv.anim .pbar i{width:0;transition:width 1.3s cubic-bezier(.4,0,.2,1)}
+.hv.anim.on4 .pbar i{width:100%}
+.hv.anim .post p span{opacity:0}
+.hv.anim.k1 .post p .k1,.hv.anim.k2 .post p .k2,.hv.anim.k3 .post p .k3{opacity:1}
+.hv.anim .alt .t1{display:inline}.hv.anim .alt .t2{display:none}
+.hv.anim.k3 .r4 .t1,.hv.anim.done .r5 .t1{display:none}
+.hv.anim.k3 .r4 .t2,.hv.anim.done .r5 .t2{display:inline}
+.hv.anim .tg-dot{transition:transform .4s var(--ease)}
+.hv.anim.done .tg-dot{animation:pulse .9s var(--ease) 1}
+@keyframes pulse{50%{transform:scale(1.16)}}
+.hv.fade .hv-panel{opacity:0;transition:opacity .5s}
+.hv-panel{transition:opacity .5s}
+@media (max-width:1020px){
+  .hero{padding:124px 0 72px}
+  .hero-g{grid-template-columns:1fr;gap:40px}
+  .hv{min-height:0;display:flex;flex-direction:column;align-items:center}
+  .viz{position:relative;left:auto;top:auto;width:170px;margin-bottom:-6px;z-index:2}
+  .hv-panel{position:relative;width:100%;max-width:520px;min-width:0}
+  .hv-rib{bottom:auto;top:18%;height:70%}
+}
+/* секції з карточками */
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+.card{border-radius:24px;padding:26px;border:1px solid var(--line);background:var(--ivory);box-shadow:var(--sh)}
+.lt2 .card{background:#fff}
+.dk .card{background:var(--dcard);border-color:var(--dline);box-shadow:none}
+.card h3{font-size:20px;letter-spacing:-.02em}
+.card p{margin-top:8px;color:var(--ink2);font-size:16px}
+.dk .card p{color:var(--on2)}
+.num{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:11px;font-weight:650;font-size:15px;background:rgba(214,19,92,.1);color:var(--berry);margin-bottom:14px}
+.dk .num{background:rgba(255,47,120,.14);color:#FF9EBB}
+.icw{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;background:#FFEFF4;margin-bottom:16px}
+.dk .icw{background:rgba(255,47,120,.12)}
+.icw svg{width:30px;height:30px}
+@media (max-width:900px){.grid3,.grid2{grid-template-columns:1fr}.sec{padding:84px 0}}
+/* ідея */
+.idea{overflow:hidden}
+.idea-g{display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center}
+.idea .h2{font-size:clamp(30px,3.7vw,48px)}
+.idea-art{position:relative;border-radius:28px;overflow:hidden;aspect-ratio:16/10;background:#FFF1EE}
+.idea-art img{width:100%;height:100%;object-fit:cover;object-position:62% 50%}
+.idea .grid3{margin-top:56px}
+@media (max-width:900px){.idea-g{grid-template-columns:1fr}}
+/* біль */
+.pain .grid2{margin-top:48px}
+.pain .card{display:flex;gap:18px}
+.pain .icw{margin:0;flex-shrink:0}
+/* звідки береться пост - липка колонка */
+.proof-g{display:grid;grid-template-columns:.95fr 1.05fr;gap:56px;margin-top:56px;align-items:start}
+.src-card{position:sticky;top:110px;border-radius:26px;padding:28px;background:linear-gradient(160deg,rgba(255,47,120,.09),rgba(255,255,255,.02));border:1px solid var(--dline)}
+.src-lbl{display:flex;align-items:center;gap:10px;font-size:13px;color:#FF9EBB;font-weight:600;letter-spacing:.02em}
+.src-lbl .ic{width:32px;height:32px}
+.src-card blockquote{margin:18px 0 0;font-size:clamp(18px,1.7vw,21px);line-height:1.55;color:#F7E6EC;font-weight:450}
+.src-card mark{background:transparent;color:inherit;border-radius:4px;transition:background-color .5s,box-shadow .5s}
+.src-card.k1 mark,html:not(.js) .src-card mark{background:rgba(255,47,120,.22);box-shadow:0 0 0 3px rgba(255,47,120,.22)}
+.src-meta{margin-top:16px;font-size:13px;color:var(--on2)}
+.ptags{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+.ptags span{font-size:12.5px;padding:6px 11px;border-radius:999px;border:1px solid var(--dline);color:#D9BFCA;transition:all .4s}
+.ptags span.on{color:#fff;border-color:rgba(255,107,155,.6);background:rgba(255,47,120,.18)}
+.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:22px}
+.step{padding:26px;border-radius:24px;border:1px solid var(--dline);background:var(--dcard);transition:border-color .4s,background-color .4s;min-height:260px}
+.step.on{border-color:rgba(255,107,155,.45);background:rgba(255,47,120,.06)}
+.step h3{font-size:21px;margin-bottom:8px}
+.step>p{color:var(--on2)}
+.demo{margin-top:16px;border-radius:16px;padding:16px;background:rgba(0,0,0,.22);border:1px solid var(--dline);font-size:15px}
+.demo .k{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#FF9EBB;margin-bottom:6px}
+.demo p+p{margin-top:8px}
+.nets4{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.nets4 div{padding:12px;border-radius:14px;background:rgba(255,255,255,.04);border:1px solid var(--dline);font-size:14px}
+.nets4 b{display:flex;align-items:center;gap:8px;font-size:14px}
+.nets4 b i{width:9px;height:9px;border-radius:50%;background:var(--c)}
+.nets4 small{display:block;color:var(--on2);margin-top:3px;font-size:13px}
+.okline{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--dline)}
+.okline:first-child{border-top:0}
+.okline .ok{margin-left:auto;font-size:12.5px;padding:3px 9px;border-radius:999px;background:rgba(63,208,122,.14);color:#8CE8B0}
+.okline .pl{margin-left:auto;font-size:12.5px;padding:3px 9px;border-radius:999px;background:rgba(255,255,255,.07);color:#E8D2DB}
+@media (max-width:1000px){.proof-g{grid-template-columns:1fr;gap:28px}.src-card{position:relative;top:0}.step{min-height:0}}
+/* як працює */
+.how .grid2{margin-top:52px}
+.how .card{padding:0;overflow:hidden}
+.how figure{margin:0;aspect-ratio:16/9;background:var(--dk)}
+.how figure img{width:100%;height:100%;object-fit:cover}
+.how .card .tx{padding:24px 26px 28px}
+/* джерела */
+.srcs{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:52px}
+.srcs .card{padding:22px}
+.srcs h3{font-size:17.5px}
+.srcs p{font-size:15px}
+@media (max-width:1000px){.srcs{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:560px){.srcs{grid-template-columns:1fr}}
+/* голос */
+.voice-g{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:52px}
+.vcard{border-radius:24px;padding:28px}
+.vcard .k{font-size:12px;text-transform:uppercase;letter-spacing:.09em;font-weight:600}
+.vcard p{margin-top:14px;font-size:clamp(18px,1.8vw,22px);line-height:1.5}
+.vcard .tags{margin-top:18px;display:flex;flex-wrap:wrap;gap:8px}
+.vcard .tags span{font-size:13px;padding:5px 11px;border-radius:999px}
+.v-gen{background:#F1ECEE;color:#5E5359;border:1px dashed #D2C5CB}
+.v-gen .k{color:#877A80}
+.v-gen p{color:#6B6065}
+.v-gen .tags span{background:#E6DEE2;color:#6B6065}
+.v-you{background:linear-gradient(150deg,#2A0B17,#190D14);color:var(--on);box-shadow:0 26px 60px rgba(122,15,61,.28)}
+.v-you .k{color:#FF9EBB}
+.v-you .tags span{background:rgba(255,47,120,.16);color:#FFD3E0}
+.traits{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:34px}
+.traits span{font-size:14.5px;padding:8px 15px;border-radius:999px;background:#fff;border:1px solid var(--line);color:var(--ink)}
+.voice .grid3{margin-top:40px}
+.qline{margin:52px auto 0;max-width:760px;text-align:center;font-size:clamp(20px,2.2vw,27px);line-height:1.4;font-weight:550;letter-spacing:-.015em}
+.qline::before{content:"";display:block;width:48px;height:3px;border-radius:3px;margin:0 auto 22px;background:linear-gradient(90deg,var(--pink),var(--pink2))}
+@media (max-width:900px){.voice-g{grid-template-columns:1fr}}
+/* мережі */
+.ch-g{display:grid;grid-template-columns:.9fr 1.1fr;gap:44px;margin-top:52px;align-items:start}
+.ch-art{border-radius:26px;overflow:hidden;border:1px solid var(--dline);aspect-ratio:16/9;background:var(--dk)}
+.ch-art img{width:100%;height:100%;object-fit:cover}
+.fmts{margin-top:22px;display:flex;flex-wrap:wrap;gap:8px}
+.fmts span{font-size:13.5px;padding:7px 12px;border-radius:999px;border:1px solid var(--dline);color:#EAD2DB;background:rgba(255,255,255,.03)}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tabs button{font:inherit;font-size:14.5px;font-weight:500;cursor:pointer;padding:9px 14px;border-radius:999px;border:1px solid var(--dline);background:transparent;color:#E6CFD8;display:inline-flex;align-items:center;gap:8px;min-height:44px}
+.tabs button i{width:9px;height:9px;border-radius:50%;background:var(--c)}
+.tabs button[aria-selected="true"]{background:#fff;color:var(--ink);border-color:#fff}
+.tpanel{margin-top:16px;border-radius:24px;padding:22px;background:#fff;color:var(--ink);box-shadow:0 30px 70px rgba(0,0,0,.35)}
+.tpanel+.tpanel{margin-top:14px}
+.tp-h{display:flex;align-items:center;gap:12px}
+.tp-av{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--wine),var(--pink));display:grid;place-items:center;color:#fff;font-weight:650;font-size:15px;flex-shrink:0}
+.tp-h b{display:block;font-size:15px}
+.tp-h small{display:block;font-size:12.5px;color:var(--ink2)}
+.st{margin-left:auto;font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;white-space:nowrap}
+.st-live{background:#E3F6EA;color:#17663B}
+.st-invite{background:#FFF1D6;color:#7A4B00}
+.st-beta{background:#EFE7FF;color:#4A2A96}
+.st-soon{background:#F0ECEE;color:#5E5359}
+.tp-txt{margin-top:14px;white-space:pre-line;font-size:15.5px;line-height:1.55}
+.tp-f{margin-top:14px;display:flex;justify-content:space-between;gap:10px;font-size:12.5px;color:var(--ink2);border-top:1px solid #F1E4E9;padding-top:10px}
+.netnote{margin-top:16px;font-size:14px;color:var(--on2)}
+@media (max-width:1000px){.ch-g{grid-template-columns:1fr}}
+/* порівняння */
+.cmp{margin-top:48px;border-radius:26px;overflow:hidden;border:1px solid var(--line);background:#fff;box-shadow:var(--sh)}
+.cmp-r{display:grid;grid-template-columns:1fr 1fr}
+.cmp-r>div{padding:17px 24px;font-size:16px;border-top:1px solid #F3E6EB}
+.cmp-r>div:first-child{color:#6E6468}
+.cmp-r>div:last-child{background:linear-gradient(90deg,#2A0B17,#1F0D16);color:#fff;border-top-color:rgba(255,179,202,.1);display:flex;gap:10px}
+.cmp-r>div:last-child::before{content:"";flex-shrink:0;width:8px;height:8px;border-radius:50%;background:var(--pink);margin-top:9px}
+.cmp-h>div{font-size:13px!important;text-transform:uppercase;letter-spacing:.08em;font-weight:650;border-top:0!important}
+.cmp-h>div:last-child::before{display:none}
+.cmp-end{margin-top:26px;text-align:center;font-size:clamp(20px,2.2vw,26px);font-weight:600;letter-spacing:-.02em}
+@media (max-width:640px){.cmp-r>div{padding:14px 16px;font-size:15px}}
+/* для кого */
+.who-g{display:grid;grid-template-columns:repeat(6,1fr);gap:18px;margin-top:52px}
+.who-g .card{grid-column:span 2}
+.who-g .card:nth-child(4){grid-column:2/span 2}
+.who-g dl{margin:14px 0 0;font-size:15px}
+.who-g dt{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--berry);font-weight:600;margin-top:10px}
+.who-g dd{margin:3px 0 0;color:var(--ink2)}
+@media (max-width:1000px){.who-g{grid-template-columns:1fr 1fr}.who-g .card,.who-g .card:nth-child(4){grid-column:auto}}
+@media (max-width:620px){.who-g{grid-template-columns:1fr}}
+/* довіра */
+.flow{display:flex;align-items:center;justify-content:center;gap:0;margin:48px auto 0;max-width:900px}
+.flow div{flex:1;text-align:center;padding:18px 14px;border-radius:18px;border:1px solid var(--dline);background:var(--dcard);font-weight:600;font-size:15.5px}
+.flow div small{display:block;font-weight:400;color:var(--on2);font-size:13px;margin-top:4px}
+.flow svg{flex-shrink:0;width:56px;height:14px}
+.trust-g{margin-top:40px}
+.dnote{margin:34px auto 0;max-width:760px;text-align:center;color:var(--on2);font-size:15px}
+.dnote a{color:#FF9EBB}
+@media (max-width:760px){.flow{flex-direction:column}.flow svg{transform:rotate(90deg);margin:6px 0}}
+/* ціни */
+.early{display:inline-flex;align-items:center;gap:10px;margin-top:22px;padding:10px 16px;border-radius:14px;background:#fff;border:1px solid var(--line);font-size:15px;color:var(--ink)}
+.early b{color:var(--berry)}
+.prices{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:44px;align-items:stretch}
+.price{position:relative;display:flex;flex-direction:column;border-radius:26px;padding:30px;background:#fff;border:1px solid var(--line)}
+.price h3{font-size:19px}
+.price .amt{font-size:44px;font-weight:650;letter-spacing:-.03em;margin-top:14px}
+.price .amt.sm{font-size:32px;margin-top:22px}
+.price .amt span{font-size:16px;font-weight:500;color:var(--ink2);letter-spacing:0}
+.price .for{color:var(--ink2);font-size:15px;margin-top:4px}
+.price ul{list-style:none;margin:22px 0 26px;padding:0;display:grid;gap:10px;font-size:15.5px}
+.price li{display:flex;gap:10px}
+.price li::before{content:"";flex-shrink:0;width:18px;height:18px;margin-top:3px;border-radius:50%;background:#FFE3EC url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cpath d='M5 9.3l2.6 2.6L13 6.5' fill='none' stroke='%23B20C50' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/18px no-repeat}
+.price .btn{margin-top:auto;width:100%}
+.price.pro{background:linear-gradient(160deg,#2A0B17,#190D14);color:var(--on);border:0;box-shadow:0 30px 70px rgba(122,15,61,.3)}
+.price.pro::before{content:"";position:absolute;inset:0;border-radius:26px;padding:1.5px;background:linear-gradient(var(--ga,135deg),var(--pink),var(--peach),var(--wine),var(--pink));-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}
+.price.pro .for,.price.pro .amt span{color:var(--on2)}
+.price.pro li::before{background-color:rgba(255,47,120,.2);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cpath d='M5 9.3l2.6 2.6L13 6.5' fill='none' stroke='%23FF9EBB' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}
+.price .tag{position:absolute;top:-12px;left:30px;font-size:12px;font-weight:650;padding:4px 12px;border-radius:999px;background:linear-gradient(135deg,var(--b1),var(--b2));color:#fff}
+.pnote{text-align:center;color:var(--ink2);font-size:14px;margin-top:22px}
+@media (max-width:960px){.prices{grid-template-columns:1fr;max-width:520px;margin-left:auto;margin-right:auto}}
+@property --ga{syntax:"<angle>";inherits:false;initial-value:135deg}
+@media (prefers-reduced-motion:no-preference) and (min-width:961px){
+  .price.pro::before{animation:ga 8s linear infinite}
+  @keyframes ga{to{--ga:495deg}}
+}
+/* FAQ */
+.faq{max-width:820px;margin:44px auto 0}
+.qa{border-radius:18px;background:#fff;border:1px solid var(--line);margin-bottom:12px}
+.qa summary{list-style:none;cursor:pointer;padding:20px 22px;font-weight:600;font-size:17px;display:flex;gap:16px;align-items:center;justify-content:space-between;border-radius:18px}
+.qa summary::-webkit-details-marker{display:none}
+.qa summary::after{content:"";flex-shrink:0;width:26px;height:26px;border-radius:50%;background:#FFEFF4 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 26'%3E%3Cpath d='M13 8v10M8 13h10' stroke='%23B20C50' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") center/26px no-repeat;transition:transform .25s var(--ease)}
+.qa[open] summary::after{transform:rotate(45deg)}
+.qa .a{padding:0 22px 22px;color:var(--ink2);font-size:16px}
+.qa .a a{color:var(--berry)}
+/* фінал */
+.final{overflow:hidden;padding:130px 0}
+.final{background:radial-gradient(700px 480px at 80% 50%,rgba(122,15,61,.55),transparent 70%),var(--dk)}
+.fviz{position:absolute;right:max(24px,calc(50% - 560px));top:50%;width:min(380px,34vw);transform:translateY(-50%);pointer-events:none}
+.fviz .vb{animation-duration:3.6s}
+@media (max-width:900px){.fviz{position:relative;right:auto;top:auto;transform:none;width:180px;margin:0 0 28px}}
+.final .wrap{position:relative}
+.final h2{font-size:clamp(34px,4.6vw,60px);max-width:720px}
+.final .lead{max-width:560px}
+.final small{display:block;margin-top:14px;color:var(--on2);font-size:14px}
+/* підвал */
+footer{background:#120910;color:var(--on2);padding:64px 0 40px;font-size:15px}
+.ft{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:32px}
+.ft h4{margin:0 0 12px;color:#fff;font-size:14px;font-weight:600}
+.ft a{display:block;text-decoration:none;padding:4px 0;color:var(--on2)}
+.ft a.logo{display:inline-flex;padding:0;color:#fff}
+.ft a:hover{color:#fff}
+.ft p{margin-top:14px;max-width:320px}
+.copy{margin-top:48px;padding-top:22px;border-top:1px solid var(--dline);font-size:13.5px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+@media (max-width:820px){.ft{grid-template-columns:1fr 1fr}}
+/* поява при прокрутці */
+.js .rv{opacity:0;transform:translateY(18px);transition:opacity .6s var(--ease),transform .6s var(--ease)}
+.js .rv.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .js .rv{opacity:1;transform:none;transition:none}
+  .vb,.hv-state i,.price.pro::before{animation:none!important}
+  *,*::before,*::after{transition-duration:.01ms!important}
+}
 </style>
 </head>
 <body>
+<a class="skip" href="#main">Перейти до змісту</a>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="gV" x1="0" y1="1" x2="0.55" y2="0"><stop offset="0" stop-color="#B20C50"/><stop offset=".48" stop-color="#FF2F78"/><stop offset="1" stop-color="#FFD0D9"/></linearGradient>
+    <radialGradient id="gG" cx="42%" cy="28%" r="72%"><stop offset="0" stop-color="#fff" stop-opacity=".9"/><stop offset=".13" stop-color="#fff" stop-opacity=".32"/><stop offset=".7" stop-color="#fff" stop-opacity="0"/></radialGradient>
+    <linearGradient id="gR" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7A0F3D"/><stop offset=".36" stop-color="#FF2F78"/><stop offset=".72" stop-color="#FF6B9B"/><stop offset="1" stop-color="#FFB09D"/></linearGradient>
+    <symbol id="mk" viewBox="0 0 238 180"><rect x="0" y="65" width="24" height="52" rx="12" fill="url(#gV)"/><ellipse cx="10.3" cy="78" rx="6.5" ry="8.3" fill="url(#gG)"/><rect x="27" y="43" width="30" height="96" rx="15" fill="url(#gV)"/><ellipse cx="39.9" cy="67" rx="8.1" ry="15.4" fill="url(#gG)"/><rect x="62" y="18" width="36" height="146" rx="18" fill="url(#gV)"/><ellipse cx="77.5" cy="54.5" rx="9.7" ry="23.4" fill="url(#gG)"/><rect x="103" y="6" width="39" height="168" rx="19.5" fill="url(#gV)"/><ellipse cx="119.8" cy="48" rx="10.5" ry="26.9" fill="url(#gG)"/><rect x="147" y="24" width="34" height="132" rx="17" fill="url(#gV)"/><ellipse cx="161.6" cy="57" rx="9.2" ry="21.1" fill="url(#gG)"/><rect x="185" y="48" width="28" height="86" rx="14" fill="url(#gV)"/><ellipse cx="197" cy="69.5" rx="7.6" ry="13.8" fill="url(#gG)"/><rect x="216" y="67" width="22" height="48" rx="11" fill="url(#gV)"/><ellipse cx="225.5" cy="79" rx="5.9" ry="7.7" fill="url(#gG)"/></symbol>
+    <symbol id="i-calls" viewBox="0 0 64 64"><g fill="none" stroke="#FF2F78" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12v10a13 13 0 0 0 26 0V12"/><rect x="24" y="6" width="16" height="28" rx="8"/><path d="M32 35v12M25 47h14"/></g></symbol>
+    <symbol id="i-ideas" viewBox="0 0 64 64"><g fill="none" stroke="#FF2F78" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 40c-5-4-8-9-8-15a18 18 0 1 1 36 0c0 6-3 11-8 15-3 2-4 5-4 8H26c0-3-1-6-4-8z"/><path d="M26 53h12M28 58h8"/></g></symbol>
+    <symbol id="i-notes" viewBox="0 0 64 64"><g fill="none" stroke="#FF2F78" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h24a4 4 0 0 1 4 4v40a4 4 0 0 1-4 4H18a4 4 0 0 1-4-4V12a4 4 0 0 1 4-4z"/><path d="M22 20h16M22 29h16M22 38h12"/></g></symbol>
+    <symbol id="i-tone" viewBox="0 0 64 64"><g fill="none" stroke="#FF2F78" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 32h7l4-11 6 24 6-33 7 39 5-19h11"/></g></symbol>
+    <symbol id="i-cal" viewBox="0 0 64 64"><g fill="none" stroke="#FF2F78" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="13" width="48" height="43" rx="7"/><path d="M19 7v12M45 7v12M8 25h48"/><circle cx="23" cy="36" r="2"/><circle cx="33" cy="36" r="2"/><circle cx="43" cy="36" r="2"/></g></symbol>
+    <symbol id="i-publish" viewBox="0 0 64 64"><g fill="none" stroke="#FF2F78" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 30 56 10 40 55 30 37 8 30z"/><path d="M30 37 55 11"/></g></symbol>
+    <symbol id="i-know" viewBox="0 0 64 64"><g fill="none" stroke="#FF2F78" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14c7-4 14-4 22 0v38c-8-4-15-4-22 0zM54 14c-7-4-14-4-22 0v38c8-4 15-4 22 0z"/><path d="M32 14v38"/></g></symbol>
+    <symbol id="i-rss" viewBox="0 0 64 64"><g fill="none" stroke="#FF2F78" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M15 49h.01"/><path d="M14 33c9 0 17 8 17 17M14 18c18 0 32 14 32 32"/></g></symbol>
+    <symbol id="i-drive" viewBox="0 0 64 64"><g fill="none" stroke="#FF2F78" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M25 8h14l13 23-7 12H18l-7-12z"/><path d="M25 8 38 31H11M38 31l7 12"/></g></symbol>
+    <symbol id="i-chat" viewBox="0 0 64 64"><g fill="none" stroke="#FF2F78" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 14h40a5 5 0 0 1 5 5v22a5 5 0 0 1-5 5H30l-11 9v-9h-7a5 5 0 0 1-5-5V19a5 5 0 0 1 5-5z"/><path d="M21 28h22M21 36h14"/></g></symbol>
+    <symbol id="i-shield" viewBox="0 0 64 64"><g fill="none" stroke="#FF2F78" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M32 7 52 15v15c0 13-8 22-20 28C20 52 12 43 12 30V15z"/><path d="m23 32 6 6 13-14"/></g></symbol>
+    <symbol id="i-bars" viewBox="0 0 64 64"><g fill="none" stroke="#FF2F78" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 52V35h9v17M28 52V23h9v29M44 52V12h9v40"/></g></symbol>
+    <symbol id="i-tg" viewBox="0 0 24 24"><path fill="#fff" d="M20.7 4.3 3.4 11c-1.2.5-1.2 1.2-.2 1.5l4.4 1.4 1.7 5.2c.2.6.1.8.8.8.5 0 .7-.2 1-.5l2.2-2.1 4.5 3.3c.8.5 1.4.2 1.6-.8l3-14c.3-1.2-.5-1.8-1.7-1.5zM8.4 13.6l9.4-5.9c.5-.3.9-.1.5.2l-8 7.2-.3 3.4z"/></symbol>
+  </defs>
+</svg>
 
-<!-- NAV -->
-<nav id="nav"><div class="wrap nav-in">
-  <a class="logo" href="#"><span class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="#0a0c12" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14c4-7 12-7 16 0"/><path d="M4 19c4-7 12-7 16 0"/><path d="M9 6.5l3-3 3 3"/></svg></span> Holos <span class="by">by Rozum</span></a>
-  <div class="nav-links">
-    <a class="lnk" href="#how">Як працює</a>
-    <a class="lnk" href="#features">Можливості</a>
-    <a class="lnk" href="#networks">Мережі</a>
-    <a class="lnk" href="#pricing">Ціни</a>
-    <div class="nav-cta">
-      <a class="lnk" href="/login">Увійти</a>
-      <a class="btn primary" href="/register">Спробувати</a>
+<header class="hdr" id="hdr">
+  <div class="hdr-in">
+    <a class="logo" href="/" aria-label="Holos by Rozum - на головну"><svg viewBox="0 0 238 180" aria-hidden="true"><use href="#mk"/></svg><span><b>Holos</b><small>by Rozum</small></span></a>
+    <nav class="nav" id="nav" aria-label="Розділи сторінки">
+      <a href="#how">Як працює</a>
+      <a href="#sources">Джерела</a>
+      <a href="#channels">Можливості</a>
+      <a href="#pricing">Ціни</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <div class="hdr-cta">
+      <a class="in" href="/login">Увійти</a>
+      <a class="btn btn-p" href="/register">Спробувати<span class="xs-hide"> безкоштовно</span></a>
+      <button class="menu" id="menu" type="button" aria-label="Меню" aria-expanded="false" aria-controls="nav"><span></span></button>
     </div>
   </div>
-</div></nav>
+</header>
 
-<!-- HERO -->
-<section class="hero">
-  <div class="blob b1"></div><div class="blob b2"></div>
-  <div class="wrap" style="position:relative;z-index:2">
-    <span class="eyebrow reveal">✨ Соцмережі у твоєму голосі · українською</span>
-    <h1 class="reveal">Твій голос у всіх соцмережах&nbsp;- <span class="grad">без контент-заводу</span>.</h1>
-    <p class="lead reveal">Надиктуй думку боту в Telegram, кинь нотатку, транскрипт дзвінка чи новину ніші - Holos напише пост <b>у голосі твого бренду</b>, підбере фото, покаже, як він виглядатиме в кожній мережі, і сам опублікує за розкладом у Telegram, Instagram, Facebook, Threads і LinkedIn.</p>
-    <div class="hero-cta reveal">
-      <a class="btn primary lg" href="/register">Спробувати безкоштовно →</a>
-      <a class="btn lg" href="#how">Подивитись, як працює</a>
+<main id="main">
+
+<!-- 01 HERO -->
+<section class="hero dk" aria-labelledby="h1">
+  <div class="wrap hero-g">
+    <div>
+      <span class="eyebrow"><i></i>AI-контент у твоєму голосі</span>
+      <h1 id="h1">Твій контент уже існує. <span>Holos знаходить його.</span></h1>
+      <p class="lead">Дзвінки, нотатки, голосові в Telegram, новини ніші й твої матеріали стають готовими постами у твоєму голосі. Holos знаходить ідеї, пише, планує й доводить до публікації.</p>
+      <div class="cta-row">
+        <a class="btn btn-p btn-lg" href="/register">Створити перший пост безкоштовно</a>
+        <a class="btn btn-g btn-lg" href="#proof">Подивитись, як працює</a>
+      </div>
+      <div class="trust"><span>Без картки</span><span>Перший контент за 5 хвилин</span><span>Ти контролюєш джерела й публікації</span></div>
     </div>
-    <div class="trust reveal">Без картки • Перший пост за 5 хвилин • Українською в ядрі</div>
-
-    <!-- ANIMATED DEMO -->
-    <div class="demo reveal" id="demo">
-      <div class="demo-bar"><i></i><i></i><i></i><span class="url">holos.rozum.one</span></div>
-      <div class="flow">
-        <div class="col">
-          <h4>1 · Сировина</h4>
-          <div class="src" data-d="0"><span class="ic">🎙️</span> Голосове в Telegram-бот</div>
-          <div class="src" data-d="1"><span class="ic">📝</span> Нотатка після дзвінка</div>
-          <div class="src" data-d="2"><span class="ic">📰</span> Новина твоєї ніші</div>
-          <div class="src" data-d="3"><span class="ic">🖼️</span> Фото з телефона</div>
-        </div>
-        <div class="col">
-          <h4>2 · Ідеї + твій голос</h4>
-          <div class="idea-line" data-d="4">Перфекціонізм ≠ лінь</div>
-          <div class="idea-line" data-d="5">«Погана перша версія»</div>
-          <div class="idea-line" data-d="6">Ранок без новин</div>
-          <div class="idea-line" data-d="7" style="color:var(--cyan)">→ голос бренду · без AI-сліду</div>
-        </div>
-        <div class="col">
-          <h4>3 · Пост у мережах</h4>
-          <div class="postcard" id="typed"></div>
-          <div class="tgline" data-d="x">✓ Instagram · Threads · Telegram - сьогодні о 10:00</div>
-        </div>
+    <div class="hv" id="hv" role="img" aria-label="Приклад: з транскрипту дзвінка Holos знаходить 6 думок, пише пост твоїм голосом і планує його в Telegram">
+      <svg class="hv-rib" viewBox="0 0 1600 700" preserveAspectRatio="none" aria-hidden="true"><path d="M-100 560 C170 300 390 690 670 440 C930 210 1160 650 1700 180" fill="none" stroke="#5C0B2C" stroke-width="200" stroke-linecap="round" opacity=".5"/><path d="M-100 560 C170 300 390 690 670 440 C930 210 1160 650 1700 180" fill="none" stroke="url(#gR)" stroke-width="64" stroke-linecap="round"/><path d="M-90 548 C185 318 390 668 676 430 C940 222 1160 620 1680 190" fill="none" stroke="#FFD1DE" stroke-opacity=".55" stroke-width="6" stroke-linecap="round"/></svg>
+      <svg class="viz" viewBox="0 0 238 180" aria-hidden="true">
+        <g class="vb"><rect x="0" y="65" width="24" height="52" rx="12" fill="url(#gV)"/><ellipse cx="10.3" cy="78" rx="6.5" ry="8.3" fill="url(#gG)"/></g>
+        <g class="vb"><rect x="27" y="43" width="30" height="96" rx="15" fill="url(#gV)"/><ellipse cx="39.9" cy="67" rx="8.1" ry="15.4" fill="url(#gG)"/></g>
+        <g class="vb"><rect x="62" y="18" width="36" height="146" rx="18" fill="url(#gV)"/><ellipse cx="77.5" cy="54.5" rx="9.7" ry="23.4" fill="url(#gG)"/></g>
+        <g class="vb"><rect x="103" y="6" width="39" height="168" rx="19.5" fill="url(#gV)"/><ellipse cx="119.8" cy="48" rx="10.5" ry="26.9" fill="url(#gG)"/></g>
+        <g class="vb"><rect x="147" y="24" width="34" height="132" rx="17" fill="url(#gV)"/><ellipse cx="161.6" cy="57" rx="9.2" ry="21.1" fill="url(#gG)"/></g>
+        <g class="vb"><rect x="185" y="48" width="28" height="86" rx="14" fill="url(#gV)"/><ellipse cx="197" cy="69.5" rx="7.6" ry="13.8" fill="url(#gG)"/></g>
+        <g class="vb"><rect x="216" y="67" width="22" height="48" rx="11" fill="url(#gV)"/><ellipse cx="225.5" cy="79" rx="5.9" ry="7.7" fill="url(#gG)"/></g>
+      </svg>
+      <div class="hv-panel" aria-hidden="true">
+        <div class="hv-state"><i></i><span id="hvState">Holos працює з твоїм матеріалом</span></div>
+        <div class="hv-row r1"><span class="ic"><svg><use href="#i-calls"/></svg></span><div><b>Дзвінок із клієнтом · 42:18</b><small>Транскрипт отримано</small></div></div>
+        <div class="hv-row r2"><span class="ic"><svg><use href="#i-ideas"/></svg></span><div><b>Holos знайшов 6 думок</b><div class="chips"><i class="sel">Експерт і поганий контент</i><i>Страх першої версії</i><i>Клієнт не читає «воду»</i><i>+3</i></div></div></div>
+        <div class="hv-row r3 pick"><small>Обрана тема</small><b>Чому хороший експерт часто пише поганий контент</b></div>
+        <div class="hv-row r4 post alt"><small class="lbl"><span class="t1">Пишемо твоїм голосом…</span><span class="t2">Чернетка готова · твій голос</span></small><div class="pbar"><i></i></div><p><span class="k1">Хороший експерт часто пише поганий контент.</span> <span class="k2">Не через брак знань: він пише для колег, а не для клієнта.</span> <span class="k3">Пиши так, як пояснюєш на консультації.</span></p></div>
+        <div class="hv-row r5 alt"><span class="tg-dot"><svg viewBox="0 0 24 24"><use href="#i-tg"/></svg></span><div><b><span class="t1">Заплановано в Telegram</span><span class="t2">Опубліковано в Telegram ✓</span></b><small>Завтра, 10:00</small></div></div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- PAINS -->
-<section class="sec" id="pains">
+<!-- 02 CORE IDEA -->
+<section class="sec lt idea" id="idea" aria-labelledby="h-idea">
   <div class="wrap">
-    <h2 class="reveal">Знайомо?</h2>
-    <p class="sub reveal">Ти експерт або власник, а не контент-завод. Але соцмережі вимагають постити - і тут починається.</p>
-    <div class="pains">
-      <div class="pain reveal"><span class="x">😮‍💨</span><div><b>Години в ChatGPT щотижня</b><p>Вбиваєш ідеї руками, переписуєш, доводиш до свого стилю, копіюєш у кожну мережу. Знову. І знову.</p></div></div>
-      <div class="pain reveal"><span class="x">🤖</span><div><b>Пости звучать як робот</b><p>Ті самі тире, ті самі звороти. Аудиторія відчуває AI за версту - і це бʼє по довірі до тебе.</p></div></div>
-      <div class="pain reveal"><span class="x">🫥</span><div><b>«Не знаю, про що писати»</b><p>А насправді золото вже лежить у твоїх дзвінках, голосових і нотатках. Ти просто не встигаєш його дістати.</p></div></div>
-      <div class="pain reveal"><span class="x">💸</span><div><b>SMM-ник коштує $400–600/міс</b><p>І все одно не знає твою тему так, як ти. А ти хочеш просто стабільно бути в стрічці - без цього бюджету.</p></div></div>
+    <div class="idea-g">
+      <div class="rv">
+        <h2 class="h2" id="h-idea">Тобі не треба вигадувати контент. Треба перестати його втрачати.</h2>
+        <p class="lead">Найсильніші теми вже звучать у твоїх консультаціях, зустрічах, голосових і нотатках. Holos знаходить ці думки, збирає їх і перетворює на контент, поки ти займаєшся своєю роботою.</p>
+      </div>
+      <div class="idea-art rv"><img src="/images/site/holos-knowledge-stream-800.webp" srcset="/images/site/holos-knowledge-stream-800.webp 800w, /images/site/holos-knowledge-stream-1400.webp 1400w" sizes="(max-width:900px) 92vw, 520px" width="800" height="450" alt="Голосовий сигнал Holos перетворюється на ідею й готовий пост" loading="lazy" decoding="async"></div>
+    </div>
+    <div class="grid3">
+      <div class="card rv"><div class="num">1</div><h3>Ти вже це сказав</h3><p>Holos працює з твоїми справжніми матеріалами, а не вигадує позицію замість тебе.</p></div>
+      <div class="card rv"><div class="num">2</div><h3>Це звучить як ти</h3><p>Вчиться на твоїх прикладах і тримає твій голос: слова, ритм, прямоту.</p></div>
+      <div class="card rv"><div class="num">3</div><h3>Це доходить до публікації</h3><p>Не чернетка в чаті, а пост у календарі й підключених мережах.</p></div>
     </div>
   </div>
 </section>
 
-<!-- HOW -->
-<section class="sec" id="how" style="background:var(--bg2)">
+<!-- 03 PAIN -->
+<section class="sec lt2 pain" id="pain" aria-labelledby="h-pain">
   <div class="wrap">
-    <span class="eyebrow reveal" style="display:block;width:max-content;margin:0 auto">Як працює</span>
-    <h2 class="reveal" style="margin-top:14px">Від думки до опублікованого поста - за хвилини, а не вечори</h2>
-    <div class="steps">
-      <div class="step reveal"><div class="n">1</div><h3>Розкажи про бренд</h3><p>Кілька речень про бізнес і 3-5 твоїх постів - або підключи Instagram, і Holos сам вивчить твій голос.</p></div>
-      <div class="step reveal"><div class="n">2</div><h3>Кидай сировину</h3><p>Голосове чи думка в Telegram-бот, нотатка, транскрипт дзвінка, новини ніші, фото. Holos знаходить у цьому теми постів.</p></div>
-      <div class="step reveal"><div class="n">3</div><h3>Пости у твоєму голосі</h3><p>Без AI-сліду й вигаданих фактів. Бачиш, як пост виглядатиме в кожній мережі, правиш і затверджуєш.</p></div>
-      <div class="step reveal"><div class="n">4</div><h3>План і публікація</h3><p>Контент-план на тижні вперед, розклад без дублів - і Holos публікує сам, у кожну мережу в її форматі.</p></div>
+    <h2 class="h2 rv" id="h-pain">Ти експерт. Не контент-менеджер на повну ставку.</h2>
+    <p class="lead rv">Якщо контент тримається лише на вільному часі, він завжди виходитиме нерегулярно.</p>
+    <div class="grid2">
+      <div class="card rv"><span class="icw"><svg><use href="#i-notes"/></svg></span><div><h3>Години в ChatGPT</h3><p>Придумати тему, дати контекст, переписати, прибрати шаблонні фрази, скопіювати в кожну мережу. І так щоразу.</p></div></div>
+      <div class="card rv"><span class="icw"><svg><use href="#i-ideas"/></svg></span><div><h3>«Не знаю, про що писати»</h3><p>Справа рідко в нестачі тем. Вони вже лежать у твоїх дзвінках, сесіях і нотатках.</p></div></div>
+      <div class="card rv"><span class="icw"><svg><use href="#i-tone"/></svg></span><div><h3>Текст є, голосу немає</h3><p>Згенерований текст легко стає правильним, гладким і зовсім не твоїм.</p></div></div>
+      <div class="card rv"><span class="icw"><svg><use href="#i-cal"/></svg></span><div><h3>Усе закінчується на чернетці</h3><p>Навіть хороший текст треба відредагувати, підлаштувати під мережу, запланувати й опублікувати.</p></div></div>
     </div>
   </div>
 </section>
 
-<!-- FEATURES BENTO -->
-<section class="sec" id="features">
+<!-- 04 SOURCE TO POST -->
+<section class="sec dk" id="proof" aria-labelledby="h-proof">
   <div class="wrap">
-    <h2 class="reveal">Усе, що робить SMM-ник,&nbsp;- в одному кабінеті</h2>
-    <p class="sub reveal">Не просто генератор тексту: від ідеї до публікації й розбору, що спрацювало.</p>
-    <div class="bento">
-      <div class="cell c-2 reveal"><div class="ic">✍️</div><h3>Твій голос, без AI-сліду</h3><p>Вчиться на твоїх постах, тримає стоп-слова й манеру, прибирає штампи. Перевірка контексту знаходить, що в налаштуваннях суперечить одне одному.</p></div>
-      <div class="cell c-2 reveal"><div class="ic">🖼️</div><h3>Каруселі до 10 кадрів</h3><p>З твоїх фото або зібрані зі сценарію: Holos сам малює слайди з текстом.</p></div>
-      <div class="cell c-2 reveal"><div class="ic">🎬</div><h3>Відео й Reels</h3><p>Своє відео - в Instagram Reels, Facebook, Threads, Telegram і LinkedIn. Великі файли з телефона заливаються частинами.</p></div>
-      <div class="cell c-2 reveal"><div class="ic">⚡</div><h3>Сторіс</h3><p>Instagram і Facebook: кадр за кадром, фото 9:16 і відео разом.</p></div>
-      <div class="cell c-2 reveal"><div class="ic">💬</div><h3>Перший коментар</h3><p>Посилання й хештеги - під пост, одразу після публікації. У LinkedIn і Facebook так охоплення не ріжеться.</p></div>
-      <div class="cell c-2 reveal"><div class="ic">📅</div><h3>План і календар</h3><p>Контент-план на тижні вперед, AI-розподіл по днях, перетягування і захист від дублів.</p></div>
-      <div class="cell c-2 reveal"><div class="ic">📈</div><h3>Аналітика, що пояснює</h3><p>Перегляди, лайки, збереження, підписники - і що працює саме в тебе: тип поста, довжина, день і час.</p></div>
-      <div class="cell c-2 reveal"><div class="ic">🤖</div><h3>Бот у Telegram</h3><p>Надиктуй думку на ходу - отримай пост. Щоденник, план і публікація просто з телефона.</p></div>
-      <div class="cell c-2 reveal"><div class="ic">🔌</div><h3>Твій Claude як помічник</h3><p>Підключи Holos до Claude (Pro або Max): він пише пости в голосі бренду й кладе їх у кабінет - без витрат на AI.</p></div>
-      <div class="cell c-2 reveal"><div class="ic">🎨</div><h3>Фото до постів</h3><p>Медіатека, сток і AI-генерація, текст на фото. Для Instagram - співавтори й опис фото.</p></div>
-      <div class="cell c-2 reveal"><div class="ic">📰</div><h3>Джерела ідей</h3><p>RSS і новини ніші, Telegram-канали, профілі Instagram і Threads, транскрипти дзвінків, Google Drive.</p></div>
-      <div class="cell c-2 reveal"><div class="ic">🏢</div><h3>Кілька брендів</h3><p>Один акаунт - кілька кабінетів зі своїм голосом і планом. Доступ колегам за поштою.</p></div>
+    <span class="eyebrow rv"><i></i>Звідки береться пост</span>
+    <h2 class="h2 rv" id="h-proof" style="margin-top:18px">Не вигадує замість тебе. Знаходить те, що ти вже сказав.</h2>
+    <p class="lead rv">Один фрагмент консультації - і шлях, який він проходить у Holos.</p>
+    <div class="proof-g">
+      <div class="src-card" id="srcCard">
+        <div class="src-lbl"><span class="ic"><svg><use href="#i-calls"/></svg></span>Джерело · транскрипт консультації</div>
+        <blockquote>«Я часто бачу, що бізнес починає наймати продавців ще до того, як нормально сформована воронка. <mark>У результаті нова людина просто заходить у хаос і виглядає слабкою, хоча проблема взагалі не в ній.</mark>»</blockquote>
+        <p class="src-meta">Фрагмент на 3 хвилини · лишається в «Матеріалах»</p>
+        <div class="ptags"><span data-k="1">Джерело збережено</span><span data-k="3">Твій голос</span><span data-k="4">Перевірено тобою</span><span data-k="5">Заплановано</span></div>
+      </div>
+      <ol class="steps">
+        <li class="step" data-k="1"><div class="num">1</div><h3>Holos читає весь матеріал</h3><p>Транскрипт, нотатку чи голосове. І шукає місця, де є думка, а не просто розмова.</p></li>
+        <li class="step" data-k="2"><div class="num">2</div><h3>Знаходить тему</h3><p>З фрагмента виходить тема з кутом подачі, а поруч ще кілька - на наступні дні.</p>
+          <div class="demo"><div class="k">Тема</div><p><b>Чому наймати продавця до побудови воронки - дорога помилка</b></p><p style="color:var(--on2);font-size:14px">Кут: помилка, яку роблять часто</p></div></li>
+        <li class="step" data-k="3"><div class="num">3</div><h3>Пише твоїм голосом</h3><p>Спирається на твої приклади й слова з джерела. Цифр і фактів, яких не було в матеріалі, не додає.</p>
+          <div class="demo"><div class="k">Чернетка</div><p>Більше продавців не завжди означає більше продажів.</p><p>Якщо в компанії немає зрозумілої воронки, нова людина просто масштабує хаос. І виглядає слабкою, хоча проблема не в ній.</p></div></li>
+        <li class="step" data-k="4"><div class="num">4</div><h3>Пакує під кожну мережу</h3><p>Одна думка, своя довжина й подача. Ти бачиш, як пост виглядатиме в кожній мережі, і правиш, якщо треба.</p>
+          <div class="demo nets4"><div style="--c:#2AABEE"><b><i></i>Telegram</b><small>розгорнутий пост</small></div><div style="--c:#E1306C"><b><i></i>Instagram</b><small>коротко, гачок у першому рядку</small></div><div style="--c:#0A66C2"><b><i></i>LinkedIn</b><small>професійний контекст</small></div><div style="--c:#E7D9DF"><b><i></i>Threads</b><small>одна теза до 500 знаків</small></div></div></li>
+        <li class="step" data-k="5"><div class="num">5</div><h3>Ти відпускаєш - і він виходить</h3><p>Затверджений пост стає в календар і виходить у свій час. Посилання на кожну публікацію - у кабінеті.</p>
+          <div class="demo"><div class="okline"><span>Telegram · вівторок, 10:00</span><span class="ok">опубліковано</span></div><div class="okline"><span>Threads · вівторок, 18:00</span><span class="pl">заплановано</span></div></div></li>
+      </ol>
     </div>
   </div>
 </section>
 
-<!-- NETWORKS -->
-<section class="sec" id="networks" style="background:var(--bg2)">
+<!-- 05 HOW IT WORKS -->
+<section class="sec lt how" id="how" aria-labelledby="h-how">
   <div class="wrap">
-    <h2 class="reveal">Публікує туди, де твоя аудиторія</h2>
-    <p class="sub reveal">Один майстер-текст - і кожна мережа отримує свою версію: довжину, формат і ліміти Holos тримає сам.</p>
-    <div class="nets">
-      <div class="net reveal" style="--c:#2AABEE"><h3><i></i>Telegram</h3><p>Канали й групи: пости, альбоми, відео, довгі тексти.</p></div>
-      <div class="net reveal" style="--c:#E1306C"><h3><i></i>Instagram</h3><p>Пости, каруселі, Reels, сторіс, співавтори, перший коментар.</p></div>
-      <div class="net reveal" style="--c:#1877F2"><h3><i></i>Facebook</h3><p>Сторінки: пости, галереї, відео, сторіс, перший коментар.</p></div>
-      <div class="net reveal" style="--c:#eef2f8"><h3><i></i>Threads</h3><p>Пости, гілки, відео, відповіді на коментарі.</p></div>
-      <div class="net reveal" style="--c:#0A66C2"><h3><i></i>LinkedIn</h3><p>Особистий профіль: пости, кілька фото, відео, перший коментар.</p></div>
-      <div class="net reveal" style="--c:#FF0033"><h3><i></i>YouTube Shorts</h3><p>Короткі відео-рілси з твоїх сценаріїв.</p></div>
-    </div>
-    <p class="nets-note reveal"><b>Скоро:</b> кілька акаунтів однієї мережі в одному бренді й сторінки компаній у LinkedIn.</p>
-  </div>
-</section>
-
-<!-- WHY / COMPARE -->
-<section class="sec" id="why">
-  <div class="wrap">
-    <h2 class="reveal">Чому не просто ChatGPT?</h2>
-    <p class="sub reveal">ChatGPT дає текст. Holos дає опублікований контент у твоєму голосі - без ручної роботи.</p>
-    <div class="cmp reveal">
-      <div class="cmp-row head"><div>Що важливо</div><div class="us">Holos</div><div class="them">ChatGPT + руки</div></div>
-      <div class="cmp-row"><div class="feat">Пише у твоєму голосі</div><div class="us">Так, з памʼяттю</div><div class="them">Щоразу заново</div></div>
-      <div class="cmp-row"><div class="feat">Прибирає AI-слід і не вигадує факти</div><div class="us">Так</div><div class="them">Як пощастить</div></div>
-      <div class="cmp-row"><div class="feat">Сировина: голосові, дзвінки, новини, фото</div><div class="us">Так</div><div class="them">Копіюєш вручну</div></div>
-      <div class="cmp-row"><div class="feat">Прев'ю й автопостинг у 5 мереж</div><div class="us">Так</div><div class="them">Ні</div></div>
-      <div class="cmp-row"><div class="feat">Аналітика: що працює саме в тебе</div><div class="us">Так</div><div class="them">Ні</div></div>
-      <div class="cmp-row"><div class="feat">Українською, для української аудиторії</div><div class="us">В ядрі</div><div class="them">Як вийде</div></div>
+    <h2 class="h2 rv" id="h-how">Від сирого матеріалу до опублікованого поста</h2>
+    <p class="lead rv">Чотири кроки. Перший результат - за кілька хвилин після реєстрації.</p>
+    <div class="grid2">
+      <article class="card rv"><figure><img src="/images/site/holos-sources-ecosystem-700.webp" srcset="/images/site/holos-sources-ecosystem-700.webp 700w, /images/site/holos-sources-ecosystem-1200.webp 1200w" sizes="(max-width:900px) 92vw, 560px" width="700" height="525" alt="Дзвінки, нотатки, новини, RSS і відео сходяться до знака Holos" loading="lazy" decoding="async"></figure><div class="tx"><div class="num">1</div><h3>Дай Holos контекст</h3><p>Кілька речень про бренд і 3-5 твоїх постів. Далі - транскрипти дзвінків, нотатки, голосові боту, новини ніші.</p></div></article>
+      <article class="card rv"><figure><img src="/images/site/holos-source-to-post-800.webp" srcset="/images/site/holos-source-to-post-800.webp 800w, /images/site/holos-source-to-post-1400.webp 1400w" sizes="(max-width:900px) 92vw, 560px" width="800" height="450" alt="Джерела контенту проходять крізь Holos і стають готовим постом" loading="lazy" decoding="async"></figure><div class="tx"><div class="num">2</div><h3>Holos знаходить думки</h3><p>Дістає з матеріалів теми, тези й кути подачі, які вже є у твоїй роботі. Нові матеріали оцінює: що варте уваги, а що шум.</p></div></article>
+      <article class="card rv"><figure><img src="/images/site/holos-generic-to-your-voice-800.webp" srcset="/images/site/holos-generic-to-your-voice-800.webp 800w, /images/site/holos-generic-to-your-voice-1400.webp 1400w" sizes="(max-width:900px) 92vw, 560px" width="800" height="450" alt="Сірі шаблонні тексти перетворюються на яскраві пости у власному голосі" loading="lazy" decoding="async"></figure><div class="tx"><div class="num">3</div><h3>Пише твоїм голосом</h3><p>Спирається на твої приклади, стоп-слова й позицію. Прибирає штампи й не вигадує фактів.</p></div></article>
+      <article class="card rv"><figure><img src="/images/site/holos-approval-flow-800.webp" srcset="/images/site/holos-approval-flow-800.webp 800w, /images/site/holos-approval-flow-1400.webp 1400w" sizes="(max-width:900px) 92vw, 560px" width="800" height="450" alt="Матеріали проходять через Holos і твоє затвердження перед публікацією" loading="lazy" decoding="async"></figure><div class="tx"><div class="num">4</div><h3>Планує і публікує</h3><p>Контент-план, календар і публікація в підключені мережі. А потім - що спрацювало саме в тебе: тип поста, довжина, день і час.</p></div></article>
     </div>
   </div>
 </section>
 
-<!-- USE CASES -->
-<section class="sec" id="cases" style="background:var(--bg2)">
+<!-- 06 SOURCES -->
+<section class="sec dk" id="sources" aria-labelledby="h-src">
   <div class="wrap">
-    <h2 class="reveal">Для кого</h2>
-    <p class="sub reveal">Якщо тобі є що сказати, але нема часу бути контент-заводом.</p>
-    <div class="tabs reveal">
-      <div class="tab active" data-uc="0">Експерти й коучі</div>
-      <div class="tab" data-uc="1">Психологи</div>
-      <div class="tab" data-uc="2">Бізнес і готелі</div>
-      <div class="tab" data-uc="3">Агенції</div>
-    </div>
-    <div class="usecase reveal" id="uc">
-      <h3 id="uc-h"></h3><p id="uc-p"></p>
+    <h2 class="h2 rv" id="h-src">Усе, що ти знаєш, стає контекстом</h2>
+    <p class="lead rv">Holos не працює з одним промптом. Що більше живого матеріалу він отримує, то точніше розуміє твою тему, позицію й стиль.</p>
+    <div class="srcs">
+      <div class="card rv"><span class="icw"><svg><use href="#i-calls"/></svg></span><h3>Транскрипти дзвінків</h3><p>Консультації, сесії, робочі зустрічі. Приходять самі з Fireflies, Grain, MeetGeek або твого транскрибатора.</p></div>
+      <div class="card rv"><span class="icw"><svg><use href="#i-publish"/></svg></span><h3>Голосові в Telegram</h3><p>Надиктуй думку боту на ходу. Holos розшифрує її й покладе в щоденник.</p></div>
+      <div class="card rv"><span class="icw"><svg><use href="#i-notes"/></svg></span><h3>Нотатки й тексти</h3><p>Чернетки, тези, статті, записи після зустрічей. Просто встав текст.</p></div>
+      <div class="card rv"><span class="icw"><svg><use href="#i-know"/></svg></span><h3>База бренду</h3><p>Ніша, аудиторія, болі клієнтів, історія бренду й твої приклади постів.</p></div>
+      <div class="card rv"><span class="icw"><svg><use href="#i-rss"/></svg></span><h3>Новини ніші й RSS</h3><p>Google News за темою, RSS, публічні Telegram-канали й профілі Threads. З оцінкою, що варте уваги.</p></div>
+      <div class="card rv"><span class="icw"><svg><use href="#i-drive"/></svg></span><h3>Google Drive</h3><p>Фото з твоїх папок одразу в медіатеку, щоб пост вийшов із власним кадром.</p></div>
+      <div class="card rv"><span class="icw"><svg><use href="#i-ideas"/></svg></span><h3>Банк ідей</h3><p>Думки, що прийшли між справами. Кожну можна розгорнути в пост одним натиском.</p></div>
+      <div class="card rv"><span class="icw"><svg><use href="#i-chat"/></svg></span><h3>Разом із Claude</h3><p>Підключи Holos до Claude (Pro чи Max): пиши в чаті, а пости лягають у кабінет.</p></div>
     </div>
   </div>
 </section>
 
-<!-- PRICING -->
-<section class="sec" id="pricing">
+<!-- 07 VOICE -->
+<section class="sec lt voice" id="voice" aria-labelledby="h-voice">
   <div class="wrap">
-    <h2 class="reveal">Простіше за SMM-ника. Дешевше за час, який ти втрачаєш.</h2>
-    <p class="sub reveal">Ранній доступ. Ціни фіксуються для перших користувачів.</p>
+    <h2 class="h2 center rv" id="h-voice" style="text-align:center">Не «як ChatGPT». Як ти.</h2>
+    <p class="lead center rv" style="text-align:center">Holos вчиться на твоїх постах, формулюваннях і матеріалах. І тримає твою манеру в кожному пості, а не лише в першому.</p>
+    <div class="voice-g">
+      <div class="vcard v-gen rv"><div class="k">Шаблонний AI</div><p>У сучасному динамічному світі контент відіграє ключову роль. Давайте розглянемо 5 простих порад, які допоможуть вам вийти на новий рівень!</p><div class="tags"><span>загальні слова</span><span>чужий ритм</span><span>порожній заклик</span></div></div>
+      <div class="vcard v-you rv"><div class="k">Твій голос</div><p>Я довго думав, що мені бракує часу на контент. Насправді бракувало звички записувати те, що я й так щодня кажу клієнтам.</p><div class="tags"><span>твої слова</span><span>твій ритм</span><span>твоя позиція</span></div></div>
+    </div>
+    <div class="traits rv" aria-label="Що Holos бере з твоїх текстів"><span>лексика</span><span>ритм</span><span>структура</span><span>прямота</span><span>приклади</span><span>позиція</span></div>
+    <div class="grid3">
+      <div class="card rv"><h3>Твоя позиція</h3><p>Пости спираються на твої матеріали й базу бренду, а не на загальні поради з інтернету.</p></div>
+      <div class="card rv"><h3>Твоя мова</h3><p>Голос складається з твоїх прикладів, стоп-слів і звертання. Чим більше прикладів, тим точніше.</p></div>
+      <div class="card rv"><h3>Твій контроль</h3><p>Результат видно до публікації: правиш, переписуєш з підказкою або відкладаєш.</p></div>
+    </div>
+    <p class="qline rv">AI не має вигадувати тобі особистість. Він має допомагати масштабувати твою власну.</p>
+  </div>
+</section>
+
+<!-- 08 CHANNELS -->
+<section class="sec dk" id="channels" aria-labelledby="h-ch">
+  <div class="wrap">
+    <h2 class="h2 rv" id="h-ch">Одна думка. Своя подача для кожної мережі.</h2>
+    <p class="lead rv">Те, що працює в Telegram, не обовʼязково спрацює в Instagram чи LinkedIn. Holos міняє довжину, структуру й подачу під мережу, а думка й голос лишаються твоїми.</p>
+    <div class="ch-g">
+      <div class="rv">
+        <div class="ch-art"><img src="/images/site/holos-one-thought-many-formats-800.webp" srcset="/images/site/holos-one-thought-many-formats-800.webp 800w, /images/site/holos-one-thought-many-formats-1400.webp 1400w" sizes="(max-width:1000px) 92vw, 480px" width="800" height="450" alt="Одна думка в центрі розходиться на пост, відео, карусель і фото" loading="lazy" decoding="async"></div>
+        <div class="fmts" aria-label="Формати"><span>Пости й гілки</span><span>Каруселі до 10 кадрів</span><span>Reels і відео</span><span>Сторіс в Instagram і Facebook</span><span>Перший коментар</span><span>План і календар</span><span>Аналітика «що спрацювало»</span></div>
+      </div>
+      <div class="rv">
+        <div class="tabs" role="tablist" aria-label="Мережі">
+          <button type="button" role="tab" id="t-tg" aria-controls="p-tg" aria-selected="true" style="--c:#2AABEE"><i></i>Telegram</button>
+          <button type="button" role="tab" id="t-ig" aria-controls="p-ig" aria-selected="false" tabindex="-1" style="--c:#E1306C"><i></i>Instagram</button>
+          <button type="button" role="tab" id="t-fb" aria-controls="p-fb" aria-selected="false" tabindex="-1" style="--c:#1877F2"><i></i>Facebook</button>
+          <button type="button" role="tab" id="t-th" aria-controls="p-th" aria-selected="false" tabindex="-1" style="--c:#E7D9DF"><i></i>Threads</button>
+          <button type="button" role="tab" id="t-li" aria-controls="p-li" aria-selected="false" tabindex="-1" style="--c:#0A66C2"><i></i>LinkedIn</button>
+        </div>
+        <div class="tpanel" role="tabpanel" id="p-tg" aria-labelledby="t-tg" tabindex="0" data-lim="4096"><div class="tp-h"><span class="tp-av">Т</span><div><b>Telegram-канал</b><small>розгорнутий пост</small></div><span class="st %SC:telegram%">%ST:telegram%</span></div><p class="tp-txt">Більше продавців не завжди означає більше продажів.
+
+Коли в компанії немає зрозумілої воронки, нова людина просто масштабує хаос. Через місяць її вважають слабкою, хоча проблема не в ній.
+
+Що варто мати до першого найму:
+• зрозумілий шлях клієнта від заявки до оплати
+• скрипт першої розмови, який уже працював у тебе
+• цифри: скільки заявок треба на одну угоду
+
+Спершу система, потім люди.</p><div class="tp-f"><span>Пост із фото або альбомом</span><span class="cnt"></span></div></div>
+        <div class="tpanel" role="tabpanel" id="p-ig" aria-labelledby="t-ig" tabindex="0" data-lim="2200"><div class="tp-h"><span class="tp-av">І</span><div><b>Instagram</b><small>коротко, гачок у першому рядку</small></div><span class="st %SC:instagram%">%ST:instagram%</span></div><p class="tp-txt">Найняли продавця, а продажів не більшає?
+
+Без воронки нова людина масштабує хаос, а не виручку.
+
+Збережи, щоб перевірити три речі перед наймом 👇</p><div class="tp-f"><span>Карусель із 5 кадрів · хештеги в першому коментарі</span><span class="cnt"></span></div></div>
+        <div class="tpanel" role="tabpanel" id="p-fb" aria-labelledby="t-fb" tabindex="0" data-lim="2000"><div class="tp-h"><span class="tp-av">F</span><div><b>Сторінка Facebook</b><small>спокійний тон спільноти</small></div><span class="st %SC:facebook%">%ST:facebook%</span></div><p class="tp-txt">Часто бачимо одну помилку: бізнес наймає продавця раніше, ніж зʼявилась воронка.
+
+Людина заходить у хаос і виглядає слабкою, хоча проблема в системі. Розповідаємо, що побудувати до першого найму.</p><div class="tp-f"><span>Посилання - у першому коментарі</span><span class="cnt"></span></div></div>
+        <div class="tpanel" role="tabpanel" id="p-th" aria-labelledby="t-th" tabindex="0" data-lim="500"><div class="tp-h"><span class="tp-av">@</span><div><b>Threads</b><small>одна теза</small></div><span class="st %SC:threads%">%ST:threads%</span></div><p class="tp-txt">Найм продавця без воронки - спосіб масштабувати хаос, а не продажі.</p><div class="tp-f"><span>Заклик - окремою відповіддю під постом</span><span class="cnt"></span></div></div>
+        <div class="tpanel" role="tabpanel" id="p-li" aria-labelledby="t-li" tabindex="0" data-lim="3000"><div class="tp-h"><span class="tp-av">in</span><div><b>LinkedIn</b><small>професійний контекст</small></div><span class="st %SC:linkedin%">%ST:linkedin%</span></div><p class="tp-txt">Часта помилка в B2B: наймати продавця раніше, ніж побудована воронка.
+
+Нова людина потрапляє в хаос, не має на що спертися і виглядає слабкою. Хоча проблема в системі, а не в ній.
+
+Три питання до першого найму:
+1. Чи зрозумілий шлях клієнта від заявки до оплати?
+2. Чи є скрипт, який уже приводив угоди?
+3. Скільки заявок треба на одну угоду?</p><div class="tp-f"><span>Посилання - у першому коментарі</span><span class="cnt"></span></div></div>
+        <p class="netnote">%NET_NOTE%</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 09 VS CHATGPT -->
+<section class="sec lt2" id="vs" aria-labelledby="h-vs">
+  <div class="wrap">
+    <h2 class="h2 center rv" id="h-vs" style="text-align:center">ChatGPT допомагає написати. Holos будує процес.</h2>
+    <div class="cmp rv" role="table" aria-label="ChatGPT з ручною роботою проти Holos">
+      <div class="cmp-r cmp-h" role="row"><div role="columnheader">ChatGPT + ручна робота</div><div role="columnheader">Holos</div></div>
+      <div class="cmp-r" role="row"><div role="cell">Ти приносиш тему</div><div role="cell">Holos знаходить теми у твоїх матеріалах</div></div>
+      <div class="cmp-r" role="row"><div role="cell">Ти щоразу даєш контекст</div><div role="cell">Holos памʼятає бренд, голос і що вже виходило</div></div>
+      <div class="cmp-r" role="row"><div role="cell">Ти вручну доводиш стиль</div><div role="cell">Holos пише твоїм голосом і прибирає штампи</div></div>
+      <div class="cmp-r" role="row"><div role="cell">Ти копіюєш текст у кожну мережу</div><div role="cell">Holos пакує пост під кожну мережу</div></div>
+      <div class="cmp-r" role="row"><div role="cell">Ти плануєш у голові чи в таблиці</div><div role="cell">Holos веде план і календар</div></div>
+      <div class="cmp-r" role="row"><div role="cell">Ти публікуєш руками</div><div role="cell">Holos публікує в підключені мережі</div></div>
+      <div class="cmp-r" role="row"><div role="cell">Ти гадаєш, що спрацювало</div><div role="cell">Holos показує, що працює саме в тебе</div></div>
+    </div>
+    <p class="cmp-end rv">Не кращий чат. Інший процес роботи.</p>
+  </div>
+</section>
+
+<!-- 10 AUDIENCE -->
+<section class="sec lt" id="who" aria-labelledby="h-who">
+  <div class="wrap">
+    <h2 class="h2 rv" id="h-who">Для тих, кому є що сказати, але бракує часу це оформлювати</h2>
+    <div class="who-g">
+      <div class="card rv"><h3>Експерти</h3><dl><dt>Джерело</dt><dd>Консультації, голосові, нотатки</dd><dt>Результат</dt><dd>Регулярні пости без окремих вечорів на письмо</dd></dl></div>
+      <div class="card rv"><h3>Консультанти й коучі</h3><dl><dt>Джерело</dt><dd>Сесії й знеособлені нотатки</dd><dt>Результат</dt><dd>Теми тижня з кожної сесії, дбайливо до приватності клієнтів</dd></dl></div>
+      <div class="card rv"><h3>Засновники й CEO</h3><dl><dt>Джерело</dt><dd>Стратегічні розмови, зустрічі, рішення</dd><dt>Результат</dt><dd>Контент від першої особи без години на кожен пост</dd></dl></div>
+      <div class="card rv"><h3>Команди й агенції</h3><dl><dt>Джерело</dt><dd>Кілька брендів і людей</dd><dt>Результат</dt><dd>Свій голос і план для кожного бренду, доступ колегам за поштою</dd></dl></div>
+      <div class="card rv"><h3>Бізнес і заклади</h3><dl><dt>Джерело</dt><dd>Новини закладу, фото, відгуки, новини галузі</dd><dt>Результат</dt><dd>Пости, каруселі й сторіс за розкладом</dd></dl></div>
+    </div>
+  </div>
+</section>
+
+<!-- 11 TRUST -->
+<section class="sec dk" id="trust" aria-labelledby="h-trust">
+  <div class="wrap">
+    <h2 class="h2 center rv" id="h-trust" style="text-align:center">Твої думки залишаються твоїми</h2>
+    <p class="lead center rv" style="text-align:center">Holos працює з чутливим: дзвінками, нотатками, матеріалами бізнесу. Тому контроль над джерелами й публікаціями - частина продукту, а не дрібний шрифт унизу.</p>
+    <div class="flow rv" aria-label="Шлях матеріалу">
+      <div>Твоє джерело<small>ти вирішуєш, що підключати</small></div>
+      <svg viewBox="0 0 56 14" aria-hidden="true"><path d="M2 7h48m-6-5 6 5-6 5" fill="none" stroke="#FF6B9B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div>Твій кабінет Holos<small>ідеї, чернетки, план</small></div>
+      <svg viewBox="0 0 56 14" aria-hidden="true"><path d="M2 7h48m-6-5 6 5-6 5" fill="none" stroke="#FF6B9B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div>Затверджені пости<small>лише те, що ти відпустив</small></div>
+    </div>
+    <div class="grid3 trust-g">
+      <div class="card rv"><span class="icw"><svg><use href="#i-shield"/></svg></span><h3>Контроль джерел</h3><p>Ти вирішуєш, що підключати. Матеріал можна прибрати, а акаунт з усіма даними видалити в налаштуваннях.</p></div>
+      <div class="card rv"><span class="icw"><svg><use href="#i-publish"/></svg></span><h3>Контроль публікації</h3><p>Без тебе нічого не виходить: пост публікується, коли ти його затвердив і поставив у календар або натиснув «Опублікувати».</p></div>
+      <div class="card rv"><span class="icw"><svg><use href="#i-bars"/></svg></span><h3>Прозорий статус</h3><p>Видно, що опубліковано, що заплановано і що чекає на тебе. Посилання на кожен пост у мережі - в кабінеті.</p></div>
+    </div>
+    <p class="dnote rv">Для генерації текст обробляють AI-провайдери від нашого імені. Матеріали не продаються й не йдуть на рекламу. Докладно - у <a href="/privacy">Політиці конфіденційності</a>.</p>
+  </div>
+</section>
+
+<!-- 12 PRICING -->
+<section class="sec lt" id="pricing" aria-labelledby="h-price">
+  <div class="wrap">
+    <h2 class="h2 center rv" id="h-price" style="text-align:center">Почни зі свого матеріалу</h2>
+    <p class="lead center rv" style="text-align:center">Спробуй Holos на реальному дзвінку, нотатці чи голосовому й подивись, скільки контенту там уже є.</p>
+    <div class="rv" style="text-align:center"><span class="early"><b>Ранній доступ.</b> Оплату ще не підключено, тож зараз Holos безкоштовний.</span></div>
     <div class="prices">
-      <div class="price reveal"><h3>Тест</h3><div class="amt">0 <span>/ 7 днів</span></div><p class="muted" style="font-size:14px">Спробувати на своєму матеріалі</p>
-        <ul><li>1 бренд</li><li>До 10 постів</li><li>Публікація в підключені мережі</li></ul>
-        <a class="btn" href="/register">Почати безкоштовно</a></div>
-      <div class="price featured reveal"><h3>Pro</h3><div class="amt">€29 <span>/ міс</span></div><p class="muted" style="font-size:14px">Для активного експерта чи бізнесу</p>
-        <ul><li>Усі мережі й формати: каруселі, відео, сторіс</li><li>Твій голос без AI-сліду</li><li>План, календар і автопостинг</li><li>Аналітика й перший коментар</li></ul>
-        <a class="btn primary" href="/register">Спробувати Pro</a></div>
-      <div class="price reveal"><h3>Команда / агенція</h3><div class="amt">Інд. <span></span></div><p class="muted" style="font-size:14px">Кілька брендів, готель, агенція</p>
-        <ul><li>Кілька брендів</li><li>Доступ команді</li><li>Пріоритетна підтримка</li></ul>
-        <a class="btn" href="/register">Поговорити з нами</a></div>
+      <div class="price rv"><h3>Тест</h3><div class="amt">0 €</div><p class="for">Спробувати на своєму матеріалі</p>
+        <ul><li>Пости у твоєму голосі</li><li>План і календар</li><li>Публікація в підключені мережі</li></ul>
+        <a class="btn btn-g" href="/register">Створити перші пости</a></div>
+      <div class="price pro rv"><span class="tag">Для тих, хто постить щотижня</span><h3>Pro</h3><div class="amt">29 € <span>/ місяць</span></div><p class="for">Для активного експерта чи бізнесу</p>
+        <ul><li>Усі джерела й формати: каруселі, відео, сторіс</li><li>Автопублікація за розкладом</li><li>Аналітика й перший коментар</li><li>Розширений конвеєр генерації</li></ul>
+        <a class="btn btn-p" href="/register">Спробувати Pro</a></div>
+      <div class="price rv"><h3>Команда / бізнес</h3><div class="amt sm">Індивідуально</div><p class="for">Кілька брендів, команда, агенція</p>
+        <ul><li>Кілька брендів в одному акаунті</li><li>Доступ колегам за поштою</li><li>Пріоритетна підтримка</li></ul>
+        <a class="btn btn-g" href="/register">Почати з кількох брендів</a></div>
     </div>
+    <p class="pnote rv">Ціни в євро за місяць. Для перших користувачів ціни фіксуються.</p>
   </div>
 </section>
 
-<!-- FAQ -->
-<section class="sec" id="faq" style="background:var(--bg2)">
+<!-- 13 FAQ -->
+<section class="sec lt2" id="faq" aria-labelledby="h-faq">
   <div class="wrap">
-    <h2 class="reveal">Часті запитання</h2>
+    <h2 class="h2 center rv" id="h-faq" style="text-align:center">Часті запитання</h2>
     <div class="faq">
-      <details class="qa reveal"><summary>Це той самий socialio? <span class="plus">+</span></summary><div class="a">Так. socialio тепер називається Holos by Rozum: твій акаунт, бренди, пости й підключені мережі на місці - змінились лише назва й адреса.</div></details>
-      <details class="qa reveal"><summary>Пости реально звучатимуть як я, а не як AI? <span class="plus">+</span></summary><div class="a">Так - це ядро продукту. Ти даєш приклади своїх постів і стоп-слова, а Holos пише в твоїй манері й прибирає типові AI-ознаки. Чим більше прикладів - то ближче до твого голосу.</div></details>
-      <details class="qa reveal"><summary>Які соцмережі підтримуються? <span class="plus">+</span></summary><div class="a">Telegram (канали й групи), Instagram, Facebook (Сторінки), Threads, LinkedIn (особистий профіль) і YouTube Shorts. Кожен пост пакується під формат і ліміти мережі. Публікувати в особисті профілі й групи Facebook Meta через API не дозволяє нікому.</div></details>
-      <details class="qa reveal"><summary>А мої дані? <span class="plus">+</span></summary><div class="a">Матеріали й пости зберігаються у твоєму кабінеті, не продаються й не йдуть на рекламу. Для генерації текст надсилається AI-провайдерам, які обробляють його від нашого імені. Видалити все можна однією кнопкою в налаштуваннях.</div></details>
-      <details class="qa reveal"><summary>Мені треба щось налаштовувати чи писати промпти? <span class="plus">+</span></summary><div class="a">Ні. Розповідаєш про бренд - отримуєш готові пости. За бажання можна підкрутити кожен крок, але за замовчуванням усе працює само.</div></details>
-      <details class="qa reveal"><summary>Я не коуч - підійде для мого бізнесу? <span class="plus">+</span></summary><div class="a">Так. Holos працює з будь-яким матеріалом: робочі дзвінки, новини закладу, фото, відгуки, новини галузі. Якщо є що сказати - буде контент.</div></details>
+      <details class="qa"><summary>Пости реально звучатимуть як я?</summary><div class="a">Holos працює з прикладами твоїх текстів, матеріалами й налаштуваннями голосу: звертання, стоп-слова, фірмові фрази. Чим більше якісних прикладів, тим точніше він відтворює твою лексику, ритм і структуру. Перед публікацією результат можна переглянути й змінити.</div></details>
+      <details class="qa"><summary>Мені треба писати промпти?</summary><div class="a">Ні. Усе починається з джерела: дзвінка, нотатки, голосового чи кількох речень про бренд. Holos сам знаходить теми й доводить їх до готового поста. Підкрутити кожен крок можна, але не обовʼязково.</div></details>
+      <details class="qa"><summary>Які джерела можна підключити?</summary><div class="a">Транскрипти дзвінків (Fireflies, Grain, MeetGeek або власний транскрибатор), голосові й думки через Telegram-бота, тексти й нотатки, базу бренду, Google News, RSS, публічні Telegram-канали й профілі Threads, фото з Google Drive. А ще можна писати разом із Claude через конектор.</div></details>
+      <details class="qa"><summary>Які соцмережі працюють зараз?</summary><div class="a">%FAQ_NETS%</div></details>
+      <details class="qa"><summary>Holos сам публікує пости?</summary><div class="a">Лише те, що ти відпустив: затверджений пост іде в календар і виходить у свій час, або ти натискаєш «Опублікувати зараз». Без тебе в мережах нічого не зʼявляється.</div></details>
+      <details class="qa"><summary>Що відбувається з моїми даними?</summary><div class="a">Матеріали й пости зберігаються у твоєму кабінеті, не продаються й не йдуть на рекламу. Для генерації текст обробляють AI-провайдери від нашого імені. Матеріал можна прибрати, а акаунт з усіма даними видалити в налаштуваннях. Докладно - у <a href="/privacy">Політиці конфіденційності</a>.</div></details>
+      <details class="qa"><summary>Можна працювати з Holos через Claude?</summary><div class="a">Так. Підключи Holos як конектор у Claude (Pro чи Max): Claude читає голос твого бренду, пише пости в чаті й кладе їх у кабінет. Такий текст не витрачає AI-кредити Holos.</div></details>
+      <details class="qa"><summary>Це той самий socialio?</summary><div class="a">Так. socialio тепер називається Holos by Rozum: твій акаунт, бренди, пости й підключені мережі на місці - змінились лише назва й адреса.</div></details>
     </div>
   </div>
 </section>
 
-<!-- FINAL CTA -->
-<section class="final">
-  <div class="blob b2" style="left:50%;top:0;transform:translateX(-50%)"></div>
-  <div class="wrap" style="position:relative;z-index:2"><div class="card reveal">
-    <h2>Твій наступний пост уже є - у голосовому, дзвінку чи нотатці</h2>
-    <p class="muted" style="max-width:540px;margin:0 auto 26px">Залий перший матеріал або надиктуй думку боту - і подивись, як Holos зробить із цього тиждень постів у твоєму голосі.</p>
-    <a class="btn primary lg" href="/register">Спробувати безкоштовно →</a>
-  </div></div>
+<!-- 14 FINAL CTA -->
+<section class="final dk" id="start" aria-labelledby="h-final">
+  <div class="wrap">
+    <svg class="fviz" viewBox="0 0 238 180" aria-hidden="true">
+        <g class="vb"><rect x="0" y="65" width="24" height="52" rx="12" fill="url(#gV)"/><ellipse cx="10.3" cy="78" rx="6.5" ry="8.3" fill="url(#gG)"/></g>
+        <g class="vb"><rect x="27" y="43" width="30" height="96" rx="15" fill="url(#gV)"/><ellipse cx="39.9" cy="67" rx="8.1" ry="15.4" fill="url(#gG)"/></g>
+        <g class="vb"><rect x="62" y="18" width="36" height="146" rx="18" fill="url(#gV)"/><ellipse cx="77.5" cy="54.5" rx="9.7" ry="23.4" fill="url(#gG)"/></g>
+        <g class="vb"><rect x="103" y="6" width="39" height="168" rx="19.5" fill="url(#gV)"/><ellipse cx="119.8" cy="48" rx="10.5" ry="26.9" fill="url(#gG)"/></g>
+        <g class="vb"><rect x="147" y="24" width="34" height="132" rx="17" fill="url(#gV)"/><ellipse cx="161.6" cy="57" rx="9.2" ry="21.1" fill="url(#gG)"/></g>
+        <g class="vb"><rect x="185" y="48" width="28" height="86" rx="14" fill="url(#gV)"/><ellipse cx="197" cy="69.5" rx="7.6" ry="13.8" fill="url(#gG)"/></g>
+        <g class="vb"><rect x="216" y="67" width="22" height="48" rx="11" fill="url(#gV)"/><ellipse cx="225.5" cy="79" rx="5.9" ry="7.7" fill="url(#gG)"/></g>
+    </svg>
+    <h2 class="rv" id="h-final">Твій наступний пост уже є у твоєму останньому дзвінку.</h2>
+    <p class="lead rv">Дай Holos один матеріал. Подивись, які думки він знайде і як вони стануть готовим контентом у твоєму голосі.</p>
+    <div class="cta-row rv"><a class="btn btn-p btn-lg" href="/register">Створити перший пост безкоштовно</a></div>
+    <small class="rv">Без картки. Почни зі свого матеріалу.</small>
+  </div>
 </section>
 
-<footer><div class="wrap foot-in">
-  <div><span class="logo" style="font-size:16px"><span class="mark" style="width:22px;height:22px"><svg viewBox="0 0 24 24" fill="none" stroke="#0a0c12" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14c4-7 12-7 16 0"/><path d="M4 19c4-7 12-7 16 0"/><path d="M9 6.5l3-3 3 3"/></svg></span> Holos <span class="by">by Rozum</span></span></div>
-  <div>© 2026 ROZUM · holos.rozum.one · <a href="/privacy" style="color:var(--muted)">Політика конфіденційності</a> · <a href="/terms" style="color:var(--muted)">Умови</a> · <a href="/data-deletion" style="color:var(--muted)">Видалення даних</a></div>
-</div></footer>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="ft">
+      <div><a class="logo" href="/" aria-label="Holos by Rozum"><svg viewBox="0 0 238 180" aria-hidden="true"><use href="#mk"/></svg><span><b>Holos</b><small>by Rozum</small></span></a><p>Контент у твоєму голосі з того, що ти вже знаєш, кажеш і робиш.</p></div>
+      <div><h4>Продукт</h4><a href="#how">Як працює</a><a href="#sources">Джерела</a><a href="#channels">Мережі й формати</a><a href="#pricing">Ціни</a><a href="#faq">FAQ</a></div>
+      <div><h4>Акаунт</h4><a href="/register">Створити акаунт</a><a href="/login">Увійти</a><a href="/forgot">Забули пароль?</a></div>
+      <div><h4>Правове</h4><a href="/privacy">Політика конфіденційності</a><a href="/terms">Умови користування</a><a href="/data-deletion">Видалення даних</a></div>
+    </div>
+    <div class="copy"><span>© 2026 ROZUM · Holos by Rozum</span><span>holos.rozum.one</span></div>
+  </div>
+</footer>
 
 <script>
-// nav shadow
-const nav=document.getElementById('nav');
-addEventListener('scroll',()=>nav.classList.toggle('scrolled',scrollY>10));
+(function(){
+  var RM = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // шапка: щільніша після прокрутки + меню на телефоні
+  var hdr = document.getElementById("hdr"), menu = document.getElementById("menu"), nav = document.getElementById("nav");
+  function onScroll(){ hdr.classList.toggle("sc", scrollY > 60); }
+  addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  function closeMenu(){ hdr.classList.remove("open"); menu.setAttribute("aria-expanded", "false"); }
+  menu.addEventListener("click", function(){ var o = hdr.classList.toggle("open"); menu.setAttribute("aria-expanded", o ? "true" : "false"); });
+  nav.addEventListener("click", function(e){ if (e.target.closest("a")) closeMenu(); });
+  addEventListener("keydown", function(e){ if (e.key === "Escape") closeMenu(); });
 
-// reveal on scroll
-const io=new IntersectionObserver((es)=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}}),{threshold:.15});
-document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+  // поява блоків при прокрутці
+  var rv = document.querySelectorAll(".rv");
+  if (RM || !("IntersectionObserver" in window)) rv.forEach(function(el){ el.classList.add("in"); });
+  else {
+    var io = new IntersectionObserver(function(es){ es.forEach(function(e){ if (e.isIntersecting){ e.target.classList.add("in"); io.unobserve(e.target); } }); }, { rootMargin: "0px 0px -8% 0px", threshold: 0.08 });
+    rv.forEach(function(el){ io.observe(el); });
+  }
 
-// hero demo animation (loops, slow-motion)
-const POST="Ти не лінивий. Ти боїшся почати, бо хочеш ідеально.\n\nПрокрастинація часто це перфекціонізм у масці. Спробуй «погану першу версію» - дозволь собі зробити неідеально за 10 хвилин.\n\nПоріг входу падає, тривога відпускає. Перевір сьогодні 👇";
-const typed=document.getElementById('typed');
-const demo=document.getElementById('demo');
-let demoRan=false;
-function runDemo(){
-  // reset
-  document.querySelectorAll('.src,.idea-line,.tgline').forEach(e=>e.classList.remove('in'));
-  typed.innerHTML='<span class="cursor"></span>';
-  const seq=document.querySelectorAll('[data-d]');
-  // stagger sources + ideas
-  let t=300;
-  document.querySelectorAll('.src').forEach((el,i)=>setTimeout(()=>el.classList.add('in'),t+i*420));
-  t=300+4*420+250;
-  document.querySelectorAll('.idea-line').forEach((el,i)=>setTimeout(()=>el.classList.add('in'),t+i*380));
-  // type the post
-  const typeStart=t+4*380+400;
-  setTimeout(()=>typeText(),typeStart);
-}
-function typeText(){
-  let i=0;typed.textContent='';
-  const cur=document.createElement('span');cur.className='cursor';
-  const tick=()=>{
-    typed.textContent=POST.slice(0,i);
-    typed.appendChild(cur);
-    i++;
-    if(i<=POST.length){setTimeout(tick,18);}
-    else{document.querySelector('.tgline').classList.add('in');
-      setTimeout(()=>{if(prefersMotion())runDemo();},3800);}
-  };
-  tick();
-}
-function prefersMotion(){return !matchMedia('(prefers-reduced-motion:reduce)').matches;}
-const demoIO=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting&&!demoRan){demoRan=true;if(prefersMotion())runDemo();else{typed.textContent=POST;document.querySelectorAll('.src,.idea-line,.tgline').forEach(x=>x.classList.add('in'));}}}),{threshold:.3});
-demoIO.observe(demo);
+  // hero: шлях матеріалу - джерело → думки → тема → чернетка → публікація
+  var hv = document.getElementById("hv"), stEl = document.getElementById("hvState");
+  if (hv && !RM) {
+    var STEPS = [
+      [0, "", "Слухаємо джерело", "listen"],
+      [300, "on1", "Слухаємо джерело", "listen"],
+      [1700, "on2", "Шукаємо думки", "think"],
+      [3100, "on3", "Обираємо тему", "think"],
+      [4200, "on4", "Пишемо твоїм голосом", "think"],
+      [5600, "k1", "Пишемо твоїм голосом", "think"],
+      [6300, "k2", "Пишемо твоїм голосом", "think"],
+      [7000, "k3", "Чернетка готова", "ready"],
+      [8000, "on5", "Чекає на публікацію", "ready"],
+      [9800, "done", "Опубліковано", "ready"]
+    ];
+    var ALL = ["on1", "on2", "on3", "on4", "on5", "k1", "k2", "k3", "done", "listen", "think", "ready", "fade"];
+    var timers = [], running = false;
+    function reset(){ timers.forEach(clearTimeout); timers = []; ALL.forEach(function(c){ hv.classList.remove(c); }); }
+    function run(){
+      reset(); running = true; hv.classList.add("anim");
+      STEPS.forEach(function(s){ timers.push(setTimeout(function(){
+        if (s[1]) hv.classList.add(s[1]);
+        hv.classList.remove("listen", "think", "ready"); hv.classList.add(s[3]);
+        stEl.textContent = s[2];
+      }, s[0])); });
+      timers.push(setTimeout(function(){ hv.classList.add("fade"); }, 12600));
+      timers.push(setTimeout(run, 13200));
+    }
+    function stop(){ reset(); running = false; hv.classList.remove("anim"); stEl.textContent = "Holos працює з твоїм матеріалом"; }
+    var hio = new IntersectionObserver(function(es){ es.forEach(function(e){ if (e.isIntersecting && !running && !document.hidden) run(); else if (!e.isIntersecting && running) stop(); }); }, { threshold: 0.2 });
+    hio.observe(hv);
+    document.addEventListener("visibilitychange", function(){ if (document.hidden && running) stop(); });
+  }
 
-// use case tabs
-const UC=[
- ["Експерти й коучі","Кожна сесія, дзвінок чи голосове на ходу - це теми на тиждень. Holos дістає з них думки, пише у твоєму голосі й публікує, поки ти ведеш наступного клієнта."],
- ["Психологи й терапевти","Зі знеособлених нотаток і твого підходу Holos робить дбайливі, етичні пости - ти стабільно в стрічці, не торкаючись приватності клієнтів."],
- ["Малий бізнес і готелі","Новини закладу, фото з телефона, відгуки гостей, новини галузі - усе стає постами, каруселями й сторіс у Instagram, Facebook і Telegram за розкладом."],
- ["Агенції й команди","Кілька брендів в одному акаунті, доступ колегам за поштою, свій голос і свій план для кожного клієнта."]
-];
-const ucH=document.getElementById('uc-h'),ucP=document.getElementById('uc-p');
-function setUC(i){ucH.textContent=UC[i][0];ucP.textContent=UC[i][1];document.querySelectorAll('.tab').forEach((t,j)=>t.classList.toggle('active',i===j));}
-document.querySelectorAll('.tab').forEach((t,i)=>t.onclick=()=>setUC(i));
-setUC(0);
+  // «звідки береться пост»: крок у фокусі підсвічує джерело ліворуч
+  var steps = document.querySelectorAll(".step"), card = document.getElementById("srcCard"), tags = card ? card.querySelectorAll(".ptags span") : [];
+  function setK(k){
+    steps.forEach(function(s){ s.classList.toggle("on", +s.dataset.k === k); });
+    card.classList.toggle("k1", k >= 1);
+    tags.forEach(function(t){ t.classList.toggle("on", +t.dataset.k <= k); });
+  }
+  if (card && "IntersectionObserver" in window) {
+    var sio = new IntersectionObserver(function(es){ es.forEach(function(e){ if (e.isIntersecting) setK(+e.target.dataset.k); }); }, { rootMargin: "-45% 0px -45% 0px" });
+    steps.forEach(function(s){ sio.observe(s); });
+  } else if (card) setK(5);
 
-// signup stub
+  // мережі: вкладки + лічильник знаків під ліміт мережі
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
+  document.querySelectorAll(".tpanel").forEach(function(p){
+    var n = p.querySelector(".tp-txt").textContent.length, lim = +p.dataset.lim;
+    p.querySelector(".cnt").textContent = n + " з " + lim + " знаків";
+  });
+  function sel(t, focus){
+    tabs.forEach(function(x){ var on = x === t; x.setAttribute("aria-selected", on ? "true" : "false"); x.tabIndex = on ? 0 : -1; document.getElementById(x.getAttribute("aria-controls")).hidden = !on; });
+    if (focus) t.focus();
+  }
+  // без JS видно всі п'ять версій поспіль; з JS - вкладки
+  if (tabs.length) sel(tabs[0]);
+  tabs.forEach(function(t, i){
+    t.addEventListener("click", function(){ sel(t); });
+    t.addEventListener("keydown", function(e){
+      var j = e.key === "ArrowRight" ? i + 1 : e.key === "ArrowLeft" ? i - 1 : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : null;
+      if (j === null) return; e.preventDefault(); sel(tabs[(j + tabs.length) % tabs.length], true);
+    });
+  });
+})();
 </script>
 </body>
 </html>

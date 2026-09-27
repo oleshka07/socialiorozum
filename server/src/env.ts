@@ -87,6 +87,9 @@ export const env = {
   threads: {
     appId: process.env.THREADS_APP_ID ?? "",
     appSecret: process.env.THREADS_APP_SECRET ?? "",
+    // THREADS_PUBLIC=1 після схвалення App Review Threads: до того підключаються лише Threads Testers
+    // (лендинг показує Threads «за запрошенням»)
+    publicAccess: process.env.THREADS_PUBLIC === "1",
   },
   meta: {
     appId: process.env.META_APP_ID ?? "",

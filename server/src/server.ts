@@ -68,9 +68,10 @@ import { uploadLinkState, takeUploadSlot, markUploaded, refundUploadSlot, upload
 import { CLI_MODELS, cliAllowedFor, cliHealth, forgetCliAllowed, cliCooldown } from "./claudecli.js";
 import { sttChoice, sttAvailable } from "./stt.js";
 import { oauthWhy, oauthFailQuery } from "./oauthwhy.js";
+import { renderLanding, robotsTxt, sitemapXml } from "./landing.js";
 
 // ============================================================================
-// ЗМІСТ ФАЙЛУ (182 роути; шукай за банером «===== НАЗВА =====» або шляхом роуту)
+// ЗМІСТ ФАЙЛУ (186 роутів; шукай за банером «===== НАЗВА =====» або шляхом роуту)
 //   гейти/хуки:  BETA_PIN, onSend, preHandler auth (≈ рядок 60-140)
 //   AUTH+ACCOUNT: /api/auth/*, /api/account/* (register/login/lifecycle)
 //   SETTINGS/PROMPTS: /api/settings, /api/prompts
@@ -92,7 +93,19 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = Fastify({ logger: true, trustProxy: true });
 await app.register(cors, { origin: env.appBaseUrl, credentials: true });
 await app.register(cookie, { secret: env.sessionSecret });
-await app.register(fstatic, { root: join(__dirname, "..", "public"), prefix: "/" });
+await app.register(fstatic, {
+  root: join(__dirname, "..", "public"), prefix: "/",
+  // Cache-Control ставимо самі (свій заголовок send інакше перезаписав би наш): шрифти не міняються ніколи,
+  // картинки сайту при зміні отримують нову назву - хай браузер тримає їх; решта - як і було (max-age=0)
+  cacheControl: false,
+  setHeaders: (res: any, filePath: string) => {
+    const cc = /[\\/]fonts[\\/]/.test(filePath) ? "public, max-age=31536000, immutable"
+      : /[\\/]images[\\/]/.test(filePath) ? "public, max-age=2592000"
+      : /[\\/](favicon[^\\/]*|apple-touch-icon\.png|site\.webmanifest)$/.test(filePath) ? "public, max-age=604800"
+      : "public, max-age=0";
+    res.setHeader("Cache-Control", cc);
+  },
+});
 
 // медіа-сховище: файли на диску (Docker-volume), віддаємо публічно за /media/<uuid>.<ext>
 await app.register(multipart, { limits: { fileSize: 60 * 1024 * 1024, files: 10 } }); // 60МБ: b-roll відео для рілсів (фото й так менші)
@@ -174,7 +187,7 @@ document.getElementById('p').addEventListener('keydown',e=>{if(e.key==='Enter')g
     const url = (req.raw.url || "").split("?")[0];
     // `/thumb/` тут разом із `/media/`: прев'ю в Mini App інакше отримало б PIN-сторінку замість
     // картинки, а нової експозиції в ньому нема - це та сама картинка, лише менша
-    if (url === "/health" || url === "/beta-pin" || url === "/favicon.svg" || url.startsWith("/api/webhooks/") || url.startsWith("/media/") || url.startsWith("/thumb/")) return;
+    if (url === "/health" || url === "/beta-pin" || url === "/favicon.svg" || url === "/robots.txt" || url.startsWith("/api/webhooks/") || url.startsWith("/media/") || url.startsWith("/thumb/")) return;
     // Mini App живе всередині Telegram - PIN там ввести ніде, а захист у нього свій (підпис initData)
     if (url === "/tgapp" || url.startsWith("/api/tg/")) return;
     // MCP: клієнт - сервер Claude, кукі й PIN там взяти ніде; доступ дає токен у самій адресі
@@ -4260,6 +4273,25 @@ function appHtml(): string {
   return appHtmlCached;
 }
 app.get("/app", (_req, reply) => reply.type("text/html; charset=utf-8").send(appHtml()));
+// 🏠 Лендинг: шаблон index.html + адреса сервісу й статуси мереж із конфігурації (landing.ts) -
+// сторінка не обіцяє «Instagram працює», поки Meta пускає лише тестувальників.
+let landingCached = "";
+function landingHtml(): string {
+  if (landingCached) return landingCached;
+  const tpl = readFileSync(join(__dirname, "..", "public", "index.html"), "utf8");
+  landingCached = renderLanding(tpl, env.appBaseUrl, {
+    metaAppId: env.meta.appId, metaPublic: env.meta.publicAccess,
+    threadsAppId: env.threads.appId, threadsPublic: env.threads.publicAccess,
+    linkedinClientId: env.linkedin.clientId, googleClientId: env.google.clientId, tiktokKey: env.tiktok.clientKey,
+  });
+  return landingCached;
+}
+app.get("/", (_req, reply) => reply.type("text/html; charset=utf-8").send(landingHtml()));
+// сирий шаблон зі статикою віддавати не можна (там %BASE% замість адреси) - ведемо на головну
+app.get("/index.html", (_req, reply) => reply.redirect("/", 301));
+// пошуковикам: бета (PIN) закрита цілком, прод - без кабінету, API й технічних адрес
+app.get("/robots.txt", (_req, reply) => reply.type("text/plain; charset=utf-8").send(robotsTxt(env.appBaseUrl, !!env.beta.pin)));
+app.get("/sitemap.xml", (_req, reply) => reply.type("application/xml; charset=utf-8").send(sitemapXml(env.appBaseUrl)));
 // колишній другий варіант лендингу - посилання на нього ведуть на головну
 app.get("/B", (_req, reply) => reply.redirect("/", 301));
 app.get("/b", (_req, reply) => reply.redirect("/", 301));
