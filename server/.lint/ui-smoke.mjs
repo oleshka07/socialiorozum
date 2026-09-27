@@ -194,7 +194,7 @@ const API = {
   "GET /sources/recent": [],
   "GET /sources/rss": { feeds: [] },
   "GET /lead-magnets": { magnets: [] },
-  "GET /integrations/telegram": { channelChatId: "-1001234567890", groupChatId: "", hasToken: true, sharedBot: true, sharedDm: false, channelTitle: "Мій канал" },
+  "GET /integrations/telegram": { channelChatId: "-1001234567890", groupChatId: "", hasToken: true, sharedBot: true, sharedDm: false, channelTitle: "Мій канал", bot: "holos_rozum_bot", formerBot: "R_Socialio_bot" },
   "GET /integrations/threads": { connected: true, username: "brand" },
   "GET /integrations/meta": { connected: false },
   "GET /integrations/linkedin": { connected: false, available: false },
@@ -1263,6 +1263,13 @@ const run = async () => {
     const box = await page.$eval("#tgSharedOff", (el) => el.style.display + "|" + el.innerText).catch(() => "none|");
     const dis = await page.$eval("#tgConnectBot", (el) => el.disabled).catch(() => false);
     return box.startsWith("block") && box.includes("не приймає повідомлень") && dis === true;
+  });
+
+  // Спільного бота змінили: канал підключено через попереднього. Кабінет мусить сказати, що старий
+  // бот і далі публікує і як перейти на нового - інакше людина не знає, що взагалі щось змінилось.
+  await check("tgFormerBot", async () => {
+    const t = await page.$eval("#tgConnMsg", (el) => el.innerText).catch(() => "");
+    return t.includes("Мій канал") && t.includes("попереднього бота @R_Socialio_bot") && t.includes("@holos_rozum_bot") && t.includes("Підключити наш бот");
   });
 
   await check("wsSwitcher", async () => {

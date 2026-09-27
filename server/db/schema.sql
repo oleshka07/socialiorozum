@@ -545,6 +545,9 @@ create table if not exists tg_message (
   updated_at   timestamptz not null default now(),
   primary key (workspace_id, category)
 );
+-- який бот надіслав повідомлення: після зміни спільного бота номер повідомлення з одного чату в
+-- іншому означає ЧУЖЕ повідомлення (id у кожної розмови з ботом свої), тож гасимо лише тим самим ботом
+alter table tg_message add column if not exists bot_id text;
 
 -- 🦉 Помічник-провідник (сова Rozum): лог показаних порад/дій - для навчання й персоналізації
 create table if not exists guide_log (

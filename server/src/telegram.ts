@@ -21,9 +21,18 @@ async function tg<T = any>(token: string, method: string, body: Record<string, a
     clearTimeout(timer);
   }
   const j: any = await res.json().catch(() => ({}));
-  if (!j.ok) throw new Error(humanTgError(res.status, j.description));
+  if (!j.ok) throw tgError(res.status, j.description);
   return j.result as T;
 }
+
+// Людський текст - для людини, а сирий статус і опис Telegram - для коду, який вирішує, що робити далі
+// (напр., «бот не може написати першим» - спробувати інший бот), не розбираючи перекладений текст.
+function tgError(status: number, description?: string): Error & { tgStatus: number; tgDescription: string } {
+  return Object.assign(new Error(humanTgError(status, description)), { tgStatus: status, tgDescription: String(description || "") });
+}
+/** Бот не може написати цій людині: вона його не запускала («bot can't initiate conversation»), заблокувала або такого чату нема. */
+export const cantReachUser = (e: any): boolean =>
+  e?.tgStatus === 403 || /chat not found|bot can't initiate|user is deactivated/i.test(String(e?.tgDescription || ""));
 
 // Помилки Bot API - людською. «Telegram HTTP 403» нічого не каже власнику каналу; Telegram у
 // `description` завжди пояснює причину, і саме її треба перекласти в дію (LinkedIn і Meta вже мали
@@ -135,7 +144,7 @@ async function tgForm<T = any>(token: string, method: string, form: FormData, ti
     throw e;
   } finally { clearTimeout(timer); }
   const j: any = await res.json().catch(() => ({}));
-  if (!j.ok) throw new Error(humanTgError(res.status, j.description));
+  if (!j.ok) throw tgError(res.status, j.description);
   return j.result as T;
 }
 

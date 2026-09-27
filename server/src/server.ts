@@ -58,7 +58,7 @@ import { contextReview, contextIssueCount, suggestFieldFix } from "./context-che
 import { generateImageForPost, imageProviders, imageCosts, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto, appendCroppedSlide } from "./images.js";
 import { secretStatuses, setSecret, clearSecret, refreshSecrets } from "./secrets.js";
 import { kieCatalog, kieCredits, kieReady } from "./kie.js";
-import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook, sharedBotDmWorks, hookSecret, sameSecret, ownBotToken, refreshOwnBotWebhooks, initHookBase } from "./tgbot.js";
+import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook, sharedBotDmWorks, hookSecret, sameSecret, ownBotToken, refreshOwnBotWebhooks, initHookBase, sharedHookKind, looksLikeBotToken, switchSharedBot, loadFormerShared, isFormerShared, formerBotName, sharedTokens, liveSharedTokens } from "./tgbot.js";
 import { chat } from "./openrouter.js";
 import { handleBody, wantsSse, sseEncode, resolveToken, mcpTokenFor, issueMcpToken, revokeMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
 import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember, deleteBrand, workspaceTitle } from "./workspaces.js";
@@ -495,10 +495,18 @@ app.get("/api/admin/keys", async (req: any, reply) => {
 
 app.put("/api/admin/keys/:name", async (req: any, reply) => {
   if (!adminOnly(req, reply)) return;
+  const name = String(req.params.name), value = String(req.body?.value ?? "").trim();
   try {
-    await setSecret(String(req.params.name), String(req.body?.value ?? ""), String(req.user.email));
+    // спільний бот: спершу питаємо сам Telegram - хибний токен вимкнув би бота всім одразу
+    if (name === "TELEGRAM_BOT_TOKEN") {
+      if (!looksLikeBotToken(value)) return reply.code(400).send({ error: "Це не схоже на токен бота - він виглядає як 123456789:AA… (@BotFather → /mybots → бот → API Token)" });
+      try { await tg.getMe(value); } catch { return reply.code(400).send({ error: "Telegram не прийняв цей токен - перевір, чи скопіювався повністю, або випусти новий у @BotFather" }); }
+    }
+    const prevBot = env.telegram.botToken; // попередній спільний бот стане «колишнім», а не зникне
+    await setSecret(name, value, String(req.user.email));
     // у лог іде ЛИШЕ імʼя ключа - значення не пишемо нікуди
-    await logEvent("info", "admin", `ключ ${req.params.name} оновлено з адмінки`);
+    await logEvent("info", "admin", `ключ ${name} оновлено з адмінки`);
+    if (name === "TELEGRAM_BOT_TOKEN") return { ok: true, bot: await switchSharedBot(prevBot) };
     return { ok: true };
   } catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
@@ -506,8 +514,10 @@ app.put("/api/admin/keys/:name", async (req: any, reply) => {
 app.delete("/api/admin/keys/:name", async (req: any, reply) => {
   if (!adminOnly(req, reply)) return;
   try {
+    const prevBot = env.telegram.botToken;
     await clearSecret(String(req.params.name));
     await logEvent("info", "admin", `ключ ${req.params.name} прибрано з адмінки (діє значення з .env, якщо є)`);
+    if (req.params.name === "TELEGRAM_BOT_TOKEN") return { ok: true, bot: await switchSharedBot(prevBot) };
     return { ok: true };
   } catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
@@ -2089,15 +2099,19 @@ app.get("/api/integrations/telegram", async (req: any) => {
     channelTitle: c?.channel_title ?? "",
     groupTitle: c?.group_title ?? "",
     sharedBot: botEnabled(),
+    bot: botUsername(),
     // чи працюють DM-фічі спільного бота на ЦЬОМУ інстансі (на беті - ні, вебхук за продом)
     sharedDm: sharedBotDmWorks(),
+    // канал підключено через попереднього спільного бота: він публікує далі, а в кабінеті - як перейти
+    formerBot: c?.bot_token && isFormerShared(c.bot_token) ? await formerBotName(c.bot_token) : null,
   };
 });
 
 // спільний бот: видати deep-link для підключення каналу
 app.post("/api/integrations/telegram/connect-link", async (req: any, reply) => {
   if (!botEnabled()) return reply.code(400).send({ error: "Спільний бот не налаштований на сервері" });
-  try { return { link: await createConnectLink(req.user.workspace_id, req.user.id), bot: botUsername() }; }
+  // імʼя бота - з самого посилання: воно веде в бота, що обслуговує кабінет (власний або спільний)
+  try { const link = await createConnectLink(req.user.workspace_id, req.user.id); return { link, bot: /t\.me\/([^?/]+)/.exec(link)?.[1] || botUsername() }; }
   catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
 
@@ -3436,7 +3450,7 @@ app.post("/api/webhooks/telegram/bot/:botId", async (req: any, reply) => {
   return { ok: true };
 });
 app.post("/api/webhooks/telegram/:secret", async (req: any, reply) => {
-  const want = hookSecret("shared");
+  const want = hookSecret(sharedHookKind());
   if (!sameSecret(req.params.secret, want)) return reply.code(404).send({ error: "not found" });
   if (!sameSecret(req.headers["x-telegram-bot-api-secret-token"], want)) return reply.code(403).send({ error: "bad secret" });
   handleUpdate(req.body).catch(() => {});
@@ -3913,9 +3927,10 @@ app.post("/api/integrations/mcp/revoke", async (req: any) => {
 async function tgUser(req: any): Promise<{ ws: string; tgId: number } | null> {
   const initData = String(req.headers["x-tg-init-data"] || req.body?.initData || "");
   if (!initData) return null;
-  // Спільний бот: підпис зробив сам Telegram (токен знає лише сервіс) - id користувача справжній.
-  if (env.telegram.botToken) {
-    const u = verifyInitData(initData, env.telegram.botToken);
+  // Спільний бот (і колишній спільний - Mini App відкривають і з його меню): підпис зробив сам
+  // Telegram, токен знає лише сервіс - id користувача справжній.
+  for (const t of await liveSharedTokens()) {
+    const u = verifyInitData(initData, t);
     if (u) {
       const own = await one<{ workspace_id: string }>(`select workspace_id from tg_owner where tg_user_id=$1`, [u.id]);
       return own ? { ws: own.workspace_id, tgId: u.id } : null;
@@ -3924,7 +3939,7 @@ async function tgUser(req: any): Promise<{ ws: string; tgId: number } | null> {
   // Власний бот: його токен знає власник кабінету, тож таким підписом можна «назватись» будь-ким.
   // Тому підпис власним ботом відкриває ЛИШЕ кабінети, де стоїть саме цей токен (раніше звідси
   // відкривався кабінет будь-кого, чий Telegram id вписано в підпис).
-  const own = await q<{ bot_token: string }>(`select distinct bot_token from telegram_config where bot_token is not null and bot_token <> $1`, [env.telegram.botToken || ""]);
+  const own = await q<{ bot_token: string }>(`select distinct bot_token from telegram_config where bot_token is not null and bot_token <> all($1::text[])`, [sharedTokens()]);
   for (const r of own) {
     const u = verifyInitData(initData, r.bot_token);
     if (!u) continue;
@@ -4277,10 +4292,13 @@ await initHookBase(); // секрети вебхуків Telegram - до пер�
 // усе, що «бігло» до рестарту, робота вже не виконує - позначаємо ДО прийому запитів, інакше щойно
 // запущена джоба могла б потрапити під цю позначку
 await markLostJobs().catch(() => {});
-app.listen({ port: env.port, host: "0.0.0.0" }).then((addr) => {
+app.listen({ port: env.port, host: "0.0.0.0" }).then(async (addr) => {
   app.log.info(`${BRAND} на ${addr}`);
-  // ключі з адмінки накладаються поверх .env ПЕРШИМ ділом - до того, як воркери підуть у мережу
-  refreshSecrets();
+  // ключі з адмінки накладаються поверх .env ПЕРШИМ ділом і ДОЧЕКАВШИСЬ - до того, як воркери підуть у
+  // мережу: інакше бот стартував би зі старим токеном з .env (спільний бот теж ставиться з адмінки)
+  await refreshSecrets();
+  // колишні спільні боти - до першого апдейту й до воркерів (сповіщення пишуть і через них)
+  await loadFormerShared().catch((e: any) => app.log.error("loadFormerShared: " + e.message));
 
   startAutopost();
   startRssPoller();

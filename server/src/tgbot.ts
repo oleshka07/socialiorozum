@@ -2,6 +2,7 @@
 // Потік: кабінет дає deep-link t.me/<bot>?start=<code> -> юзер тисне Start -> бот просить
 // додати його адміном у канал і переслати пост -> бот перевіряє права й зберігає канал у workspace.
 import { randomBytes, createHmac, timingSafeEqual } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
 import * as tg from "./telegram.js";
@@ -23,11 +24,85 @@ let BOT_USERNAME = env.telegram.botUsername;
 export const botEnabled = (): boolean => !!env.telegram.botToken;
 export const botUsername = (): string => BOT_USERNAME;
 
-// Токен бота для ПРОАКТИВНИХ повідомлень воркспейсу (дайджест/щоденник/живі меседжі):
-// власний бот воркспейсу (введений у Налаштуваннях), якщо він відрізняється від спільного; інакше спільний.
+// 🔁 КОЛИШНІ СПІЛЬНІ БОТИ. Спільного бота міняють з адмінки (напр., @R_Socialio_bot → @holos_rozum_bot).
+// Кабінети, що підключали канал через попереднього, мають у telegram_config ЙОГО токен - і без цього
+// списку він виглядав би їхнім «власним» ботом: кнопка «Підключити наш бот» вела б назавжди в старого,
+// і перейти на нового не вийшло б ніяк. Колишній спільний - наш бот (його токен був у нашому .env чи
+// адмінці), тож і довіра до нього та сама, що до спільного: людину впізнаємо за tg_owner. Він і далі
+// публікує в канали, де стоїть адміном, і відповідає тим, хто пише йому, а все нове - посилання
+// підключення, сповіщення - іде через нового. Писати першим людині, яка нового бота ще не запускала,
+// Telegram не дає, тож до того сповіщення доходять старим ботом із проханням перейти. Зберігається
+// токен, а не лише id: без нього старий бот замовк би після першого ж рестарту.
+const formerShared = new Map<string, string>(); // id бота → токен
+const botIdOf = (token: string | null | undefined): string => String(token || "").split(":")[0];
+export const isFormerShared = (token?: string | null): boolean =>
+  !!token && token !== env.telegram.botToken && formerShared.get(botIdOf(token)) === token;
+/** Наш бот: поточний спільний або колишній спільний (на відміну від власного бота кабінету). */
+const sharedLike = (token: string): boolean => token === env.telegram.botToken || isFormerShared(token);
+/** Усі наші боти - поточний і колишні спільні (щоб жоден із них не вважався чиїмсь «власним»). */
+export const sharedTokens = (): string[] => [env.telegram.botToken, ...formerShared.values()].filter((t) => !!t);
+
+async function saveFormerShared(): Promise<void> {
+  await q(`insert into app_secret(name, value, updated_by) values('TG_FORMER_SHARED',$1,'system')
+           on conflict (name) do update set value=excluded.value, updated_at=now(), updated_by='system'`,
+    [JSON.stringify(Object.fromEntries(formerShared))]);
+}
+// Токен, якого Telegram більше не визнає (відкликали в @BotFather, бо засвітився), - уже не наш бот:
+// ним не опублікуєш і не отримаєш апдейтів, а підписом Mini App із ним можна було б назватись будь-ким.
+const deadToken = (e: any): boolean => e?.tgStatus === 401 || e?.tgStatus === 404;
+async function dropFormer(id: string, why: string): Promise<void> {
+  if (!formerShared.delete(id)) return;
+  await saveFormerShared();
+  await logEvent("warn", "tgbot", `попередній спільний бот ${id} прибрано: ${why}`);
+}
+/**
+ * Підписи Mini App, яким віримо як спільному боту: поточний і ті колишні, яких Telegram досі визнає
+ * (getMe не частіше разу на 10 хвилин). Не вдалося перевірити (мережа) - цього разу не віримо.
+ */
+const formerChecked = new Map<string, number>();
+export async function liveSharedTokens(): Promise<string[]> {
+  const out = env.telegram.botToken ? [env.telegram.botToken] : [];
+  for (const [id, tok] of [...formerShared]) {
+    if (tok === env.telegram.botToken) continue;
+    if (Date.now() - (formerChecked.get(id) || 0) > 600_000) {
+      try { await tg.getMe(tok); formerChecked.set(id, Date.now()); }
+      catch (e: any) { if (deadToken(e)) await dropFormer(id, "Telegram його не визнає (токен відкликано)"); continue; }
+    }
+    out.push(tok);
+  }
+  return out;
+}
+/** Попередній спільний бот стає колишнім; поточний колишнім не буває. */
+export async function rememberFormerShared(prevToken: string): Promise<void> {
+  const prev = String(prevToken || "").trim(), cur = env.telegram.botToken;
+  let changed = false;
+  if (prev && prev !== cur && looksLikeBotToken(prev) && formerShared.get(botIdOf(prev)) !== prev) { formerShared.set(botIdOf(prev), prev); changed = true; }
+  if (cur && formerShared.delete(botIdOf(cur))) changed = true;
+  if (changed) await saveFormerShared();
+}
+/** Старт: колишні з бази + бот із .env, якщо спільного вже поставили з адмінки. */
+export async function loadFormerShared(): Promise<void> {
+  formerShared.clear();
+  const r = await one<{ value: string }>(`select value from app_secret where name='TG_FORMER_SHARED'`);
+  try {
+    for (const [id, tok] of Object.entries(JSON.parse(r?.value || "{}")))
+      if (typeof tok === "string" && botIdOf(tok) === id) formerShared.set(id, tok);
+  } catch { /* битий запис - починаємо з порожнього */ }
+  await rememberFormerShared(String(process.env.TELEGRAM_BOT_TOKEN ?? ""));
+}
+// @нік колишнього бота - для підказки в кабінеті (getMe раз на процес)
+const formerNames = new Map<string, string>();
+export async function formerBotName(token: string): Promise<string> {
+  const id = botIdOf(token);
+  if (!formerNames.has(id)) { try { formerNames.set(id, (await tg.getMe(token)).username || id); } catch { return id; } }
+  return formerNames.get(id)!;
+}
+
+// Токен бота кабінету: власний бот (введений у Налаштуваннях), якщо він є; інакше спільний. Колишній
+// спільний «власним» не вважається - інакше кабінет не зміг би перейти на нового бота.
 export async function wsBotToken(workspaceId: string): Promise<string> {
   const r = await one<{ bot_token: string | null }>(`select bot_token from telegram_config where workspace_id=$1`, [workspaceId]);
-  return (r?.bot_token && r.bot_token !== env.telegram.botToken) ? r.bot_token : env.telegram.botToken;
+  return (r?.bot_token && !sharedLike(r.bot_token)) ? r.bot_token : env.telegram.botToken;
 }
 
 // Власний бот воркспейсу отримує СВІЙ вебхук → усі DM-фічі (щоденник, дайджест, ідеї) працюють
@@ -68,12 +143,21 @@ export function sameSecret(got: unknown, want: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 export const ownHookUrl = (botId: number | string) => `${env.appBaseUrl}/api/webhooks/telegram/bot/${botId}`;
+// Секрет вебхука спільного бота - свій для КОЖНОГО бота (за id з токена). Коли спільного бота міняють
+// з адмінки, старий бот лишається з вебхуком на наш сервер, і з однаковим секретом його апдейти
+// обробились би як від нового - а відповідали б токеном нового, якого людина в тому чаті не запускала.
+export const sharedHookKind = (token: string = env.telegram.botToken): string => "shared:" + String(token || "").split(":")[0];
+/** Схоже на токен бота від @BotFather (123456789:AA…) - перевірка формату до запиту в Telegram. */
+export const looksLikeBotToken = (v: string): boolean => /^\d{5,20}:[A-Za-z0-9_-]{30,}$/.test(String(v || "").trim());
 
 // id бота -> токен, який Telegram підтвердив (getMe). Токен у telegram_config міг вписати будь-хто,
 // тож вебхук власного бота довіряє лише перевіреному: інакше чужий рядок «<id бота>:сміття»
 // перехопив би апдейти справжнього бота.
 const verifiedBots = new Map<string, string>();
 export async function ownBotToken(botId: string): Promise<string | null> {
+  // колишній спільний бот - наш: його токен ми знаємо самі, у telegram_config його може й не бути
+  const former = formerShared.get(botId);
+  if (former && former !== env.telegram.botToken) return former;
   const rows = await q<{ bot_token: string }>(`select distinct bot_token from telegram_config where bot_token like $1`, [`${botId}:%`]);
   const known = verifiedBots.get(botId);
   if (known && rows.some((r) => r.bot_token === known)) return known;
@@ -90,19 +174,25 @@ export async function ownBotToken(botId: string): Promise<string | null> {
 export async function refreshOwnBotWebhooks(): Promise<void> {
   const legacy = legacyHosts(env.appBaseUrl, process.env.LEGACY_HOSTS);
   const rows = await q<{ bot_token: string }>(`select distinct bot_token from telegram_config where bot_token is not null`);
-  for (const r of rows) {
-    if (!r.bot_token || r.bot_token === env.telegram.botToken) continue;
+  // колишні спільні - навіть якщо жоден кабінет не тримає їх у рядку: людям, що пишуть старому боту,
+  // треба відповісти (і показати, куди він переїхав), а не мовчати
+  const tokens = new Set([...rows.map((r) => r.bot_token), ...formerShared.values()]);
+  for (const token of tokens) {
+    if (!token || token === env.telegram.botToken) continue;
     try {
-      const me = await tg.getMe(r.bot_token);
-      verifiedBots.set(String(me.id), r.bot_token);
-      const info = await tg.getWebhookInfo(r.bot_token);
+      const me = await tg.getMe(token);
+      verifiedBots.set(String(me.id), token);
+      const info = await tg.getWebhookInfo(token);
       const want = ownHookUrl(me.id);
       if (info.url && info.url !== want && isOurHookUrl(info.url, env.appBaseUrl, legacy)) {
-        await tg.setWebhook(r.bot_token, want, hookSecret(`bot:${me.id}`));
-        await registerMenu(r.bot_token);
+        await tg.setWebhook(token, want, hookSecret(`bot:${me.id}`));
+        await registerMenu(token);
         console.log(`[tgbot] власний бот @${me.username || me.id}: вебхук переведено на ${env.appBaseUrl}`);
       }
-    } catch (e: any) { await logEvent("warn", "tgbot", `власний бот: перевірка вебхука не вдалась: ${String(e.message).slice(0, 160)}`); }
+    } catch (e: any) {
+      if (isFormerShared(token) && deadToken(e)) { await dropFormer(botIdOf(token), "Telegram його не визнає (токен відкликано)"); continue; }
+      await logEvent("warn", "tgbot", `власний бот: перевірка вебхука не вдалась: ${String(e.message).slice(0, 160)}`);
+    }
   }
 }
 
@@ -117,11 +207,23 @@ export async function initTelegramBot(): Promise<void> {
       console.log(`[tgbot] бот @${BOT_USERNAME} (id ${BOT_ID}); TELEGRAM_WEBHOOK_OFF=1 → webhook лишається за продом`);
       return;
     }
-    const url = `${env.appBaseUrl}/api/webhooks/telegram/${hookSecret("shared")}`;
-    await tg.setWebhook(env.telegram.botToken, url, hookSecret("shared"));
+    const secret = hookSecret(sharedHookKind());
+    await tg.setWebhook(env.telegram.botToken, `${env.appBaseUrl}/api/webhooks/telegram/${secret}`, secret);
     await registerMenu(env.telegram.botToken);
     console.log(`[tgbot] спільний бот @${BOT_USERNAME} (id ${BOT_ID}); webhook зареєстровано`);
   } catch (e: any) { console.error("[tgbot] init: " + e.message); }
+}
+
+/**
+ * Спільного бота змінили з адмінки (новий токен уже в env). Попередній стає колишнім: публікує далі в
+ * канали, де стоїть адміном (новий там не адмін), а його вебхук переходить на адресу власного бота.
+ * Потім - новий бот: вебхук, команди й кнопка Mini App. Вертає @нік нового бота.
+ */
+export async function switchSharedBot(prevToken: string): Promise<string> {
+  await rememberFormerShared(prevToken);
+  await refreshOwnBotWebhooks();
+  await initTelegramBot();
+  return BOT_USERNAME;
 }
 
 // true, якщо СПІЛЬНИЙ бот на цьому інстансі реально приймає повідомлення. На беті webhook свідомо
@@ -174,7 +276,7 @@ async function attachChannel(fromId: number, chatId: number, title: string, toke
 // Власний бот обслуговує ЛИШЕ кабінети, де стоїть саме його токен: інакше чужий бот, якому людина
 // написала, діяв би в її кабінеті (читав ідеї, публікував), а власник того бота бачив би все.
 async function ownerWorkspace(fromId: number, token: string): Promise<string | null> {
-  const own = token !== env.telegram.botToken;
+  const own = !sharedLike(token);
   const o = own
     ? await one<{ workspace_id: string }>(`select o.workspace_id from tg_owner o join telegram_config c on c.workspace_id=o.workspace_id and c.bot_token=$2 where o.tg_user_id=$1`, [fromId, token])
     : await one<{ workspace_id: string }>(`select workspace_id from tg_owner where tg_user_id=$1`, [fromId]);
@@ -189,16 +291,56 @@ async function setOwner(fromId: number, workspaceId: string, chatId: string, use
            on conflict (tg_user_id) do update set workspace_id=excluded.workspace_id, chat_id=excluded.chat_id, user_id=excluded.user_id`, [fromId, workspaceId, chatId, userId]);
 }
 
+// Відповідь на апдейт іде тим ботом, якому людина написала (liveSend бере його звідси): після зміни
+// спільного бота людина може писати ще старому, і відповідь новим ботом опинилась би в іншому чаті.
+const viaBot = new AsyncLocalStorage<string>();
+
+// «я переїхав»: колишній спільний бот показує, де тепер нового
+const movedButton = (code = ""): tg.TgButton[][] =>
+  [[{ text: `➡️ Відкрити @${BOT_USERNAME}`, url: `https://t.me/${BOT_USERNAME}${code ? `?start=${code}` : ""}` }]];
+const movedText = (): string =>
+  `🔁 Я переїхав: тепер я @${BOT_USERNAME}. Відкрий його й натисни «Start» - там усе те саме: ідеї, щоденник, пости, зведення, застосунок.`;
+
 // «один живий меседж на категорію»: гасить попереднє повідомлення категорії, шле нове, зберігає message_id.
 export async function liveSend(workspaceId: string, chatId: string, category: string, text: string, buttons?: tg.TgButton[][]): Promise<void> {
-  const token = await wsBotToken(workspaceId); // власний бот воркспейсу, якщо задано
-  const prev = await one<{ message_id: string; chat_id: string | null }>(`select message_id, chat_id from tg_message where workspace_id=$1 and category=$2`, [workspaceId, category]);
-  // попереднє повідомлення категорії гасимо в ЙОГО чаті: той самий message_id в іншому чаті - чуже повідомлення
-  if (prev?.message_id && (!prev.chat_id || String(prev.chat_id) === String(chatId))) await tg.deleteMessage(token, chatId, Number(prev.message_id));
-  const r = await tg.sendMessage(token, chatId, text, buttons);
-  await q(`insert into tg_message(workspace_id, category, chat_id, message_id, updated_at) values($1,$2,$3,$4,now())
-           on conflict (workspace_id, category) do update set chat_id=excluded.chat_id, message_id=excluded.message_id, updated_at=now()`,
-    [workspaceId, category, chatId, r.message_id]);
+  const cfg = await one<{ bot_token: string | null }>(`select bot_token from telegram_config where workspace_id=$1`, [workspaceId]);
+  const row = cfg?.bot_token || "";
+  // Ким писати: у відповідь - тим ботом, якому людина написала; першими - власним ботом кабінету, а без
+  // нього спільним, за яким колишні спільні (спершу той, що в рядку кабінету): новому боту Telegram не
+  // дає писати людині першим, поки вона його не запустила.
+  const via = viaBot.getStore();
+  const tokens = via ? [via]
+    : row && !sharedLike(row) ? [row]
+    : [env.telegram.botToken, ...(isFormerShared(row) ? [row] : []), ...[...formerShared.values()].reverse().filter((t) => t !== row)].filter((t) => !!t);
+  const prev = await one<{ message_id: string; chat_id: string | null; bot_id: string | null }>(
+    `select message_id, chat_id, bot_id from tg_message where workspace_id=$1 and category=$2`, [workspaceId, category]);
+  // Попереднє повідомлення категорії гасимо лише в ЙОГО чаті й ТИМ САМИМ ботом: номери повідомлень у
+  // кожній розмові з ботом свої, і чужим ботом під тим самим номером видалилось би зовсім інше
+  // повідомлення. Записи до цієї версії без bot_id надіслав бот, що тоді писав кабінету: власний, а
+  // без нього - спільний із .env.
+  const envTok = String(process.env.TELEGRAM_BOT_TOKEN ?? "");
+  const prevBot = prev?.bot_id || botIdOf(row && row !== envTok ? row : envTok);
+  let lastErr: any = new Error("Спільний бот не налаштований на сервері");
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (prev?.message_id && (!prev.chat_id || String(prev.chat_id) === String(chatId)) && prevBot === botIdOf(token))
+      await tg.deleteMessage(token, chatId, Number(prev.message_id));
+    try {
+      // i > 0 - пишемо колишнім спільним ботом, бо нового людина ще не запускала: заодно кличемо перейти
+      const r = i > 0
+        ? await tg.sendMessage(token, chatId, `${text}\n\n${movedText()}`, [...(buttons || []), ...movedButton()])
+        : await tg.sendMessage(token, chatId, text, buttons);
+      await q(`insert into tg_message(workspace_id, category, chat_id, message_id, bot_id, updated_at) values($1,$2,$3,$4,$5,now())
+               on conflict (workspace_id, category) do update set chat_id=excluded.chat_id, message_id=excluded.message_id, bot_id=excluded.bot_id, updated_at=now()`,
+        [workspaceId, category, chatId, r.message_id, botIdOf(token)]);
+      return;
+    } catch (e: any) {
+      lastErr = e;
+      if (isFormerShared(token) && deadToken(e)) { await dropFormer(botIdOf(token), "Telegram його не визнає (токен відкликано)"); continue; }
+      if (!tg.cantReachUser(e)) throw e; // ліміт, битий текст тощо - інший бот тут не допоможе
+    }
+  }
+  throw lastErr;
 }
 
 // ідея з банку -> чернетка поста (той самий шлях, що й /api/ideas/:id/post); повертає id+текст поста.
@@ -326,6 +468,36 @@ async function sendPlan(ws: string, chatId: string): Promise<void> {
 
 export async function handleUpdate(update: any, tokenOverride?: string): Promise<void> {
   const token = tokenOverride || env.telegram.botToken; if (!token) return;
+  await viaBot.run(token, () => handleUpdateIn(update, token));
+  // колишній спільний бот обробив, що просили (нічого не губиться), і раз на добу кличе перейти
+  const from = update?.callback_query?.from?.id ?? update?.message?.from?.id;
+  const chat = update?.callback_query?.message?.chat ?? update?.message?.chat;
+  if (from && isFormerShared(token) && (!chat?.type || chat.type === "private")) await nudgeMoved(token, String(chat?.id ?? from), from);
+}
+
+// Колишній спільний бот: підключення (/start, пересланий пост каналу, @канал) - уже через нового, бо
+// кабінет має перейти на нього; решту (ідеї, щоденник, кнопки старих повідомлень) обробляє як раніше.
+const movedNudged = new Map<number, number>(); // tg id → коли нагадували
+async function nudgeMoved(token: string, chatId: string, fromId: number): Promise<void> {
+  if (Date.now() - (movedNudged.get(fromId) || 0) < 24 * 3600_000) return;
+  movedNudged.set(fromId, Date.now());
+  await tg.sendMessage(token, chatId, `${movedText()} Тут я ще відповідаю, але сповіщення й усе нове - вже там.`, movedButton()).catch(() => {});
+}
+async function movedNotice(token: string, chatId: string, fromId: number, msg: any, text: string): Promise<boolean> {
+  const fwd = msg.forward_origin?.type === "channel" || msg.forward_from_chat?.type === "channel";
+  if (text.startsWith("/start")) {
+    // код підключення кабінету не привʼязаний до бота - той самий код відкриється в новому
+    const code = text.split(/\s+/)[1] || "";
+    const ok = /^[0-9a-f]{16}$/.test(code);
+    await tg.sendMessage(token, chatId, movedText() + (ok ? "\n\nПосилання підключення відкриється вже в ньому." : ""), movedButton(ok ? code : ""));
+  } else if (fwd || /^@\w{4,}$/.test(text)) {
+    await tg.sendMessage(token, chatId, `🔁 Канали тепер підключає @${BOT_USERNAME}. У Holos: Налаштування → Канали → «Підключити наш бот» (відкриє його), далі додай @${BOT_USERNAME} АДМІНОМ у канал і перешли пост уже йому. Попередній бот може лишатись у каналі - він просто більше не знадобиться.`, movedButton());
+  } else return false;
+  movedNudged.set(fromId, Date.now());
+  return true;
+}
+
+async function handleUpdateIn(update: any, token: string): Promise<void> {
   try {
     if (update?.callback_query) { await handleCallback(update.callback_query, token); return; }
     const msg = update?.message; if (!msg || !msg.from) return;
@@ -334,6 +506,7 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
     // з групи тихо падав у щоденник і цитувався там же
     if (msg.chat?.type && msg.chat.type !== "private") return;
     const fromId = msg.from.id; const chatId = String(msg.chat?.id ?? fromId); const text = String(msg.text || "").trim();
+    if (isFormerShared(token) && await movedNotice(token, chatId, fromId, msg, text)) return;
 
     // /start [code] — вітання + (за наявності коду) закріплення власника воркспейсу
     if (text.startsWith("/start")) {
@@ -360,6 +533,11 @@ export async function handleUpdate(update: any, tokenOverride?: string): Promise
       if (code) {
         await logEvent("warn", "tgbot", `/start із невідомим кодом ${code.slice(0, 8)}… (tg ${fromId}) - код створено на іншому інстансі або застарів`);
         await tg.sendMessage(token, chatId, "Це посилання підключення не діє: код або застарів, або створений в іншому середовищі (бета й прод мають окремі бази). Відкрий Holos і натисни «Підключити наш бот» ще раз.");
+        return;
+      }
+      // людина вже привʼязана (напр., прийшла з попереднього спільного бота) - просто вітаємо з кнопками
+      if (await ownerWorkspace(fromId, token)) {
+        await tg.sendWithKeyboard(token, chatId, "Вітаю! 🤝 Кабінет уже підключено.\n\n• Надішли будь-яку думку — збережу як ідею.\n• /post — новий пост, /idea — ідеї, /diary — щоденник, /plan — що заплановано.\n\nЩоб публікувати у свій канал через мене: додай мене АДМІНОМ у канал і перешли сюди будь-який пост із нього.", mainKeyboard());
         return;
       }
       await tg.sendMessage(token, chatId, "Привіт! Щоб під'єднати мене до твого кабінету, відкрий посилання «Підключити наш бот» у Holos.");

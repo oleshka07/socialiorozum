@@ -17,7 +17,7 @@ export type SecretDef = {
   name: string;      // імʼя змінної середовища - те саме, що в .env, щоб не було двох правд
   label: string;
   hint: string;
-  group: "text" | "image" | "video" | "other";
+  group: "text" | "image" | "video" | "bot" | "other";
   apply: (v: string) => void; // куди покласти значення в живому обʼєкті env
 };
 
@@ -34,6 +34,7 @@ export const SECRET_DEFS: SecretDef[] = [
   { name: "AZURE_SPEECH_KEY", label: "Azure Speech", group: "video", hint: "Українська озвучка рілсів. Безкоштовного тарифу F0 вистачає.", apply: (v) => { env.azure.speechKey = v; } },
   { name: "DEEPGRAM_API_KEY", label: "Deepgram", group: "video", hint: "Розшифровка голосових у щоденник. Швидший і дешевший за Whisper; якщо не спрацює - автоматично піде Whisper.", apply: (v) => { env.deepgram.apiKey = v; } },
   { name: "PEXELS_API_KEY", label: "Pexels", group: "video", hint: "Безкоштовний стоковий b-roll для рілсів.", apply: (v) => { env.pexels.apiKey = v; } },
+  { name: "TELEGRAM_BOT_TOKEN", label: "Спільний Telegram-бот", group: "bot", hint: "Один бот на всіх: кожен підключає його з кабінету й бачить там свій акаунт - Mini App, щоденник, зведення, публікацію. Токен дає @BotFather → /mybots → бот → API Token. Бот перемикається одразу після збереження; канали, де адміном стоїть попередній бот, публікуються через нього й далі.", apply: (v) => { env.telegram.botToken = v; } },
 ];
 
 const DEF_BY_NAME = new Map(SECRET_DEFS.map((d) => [d.name, d]));

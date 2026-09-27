@@ -3248,7 +3248,9 @@ async function loadTelegram(){ try{ const c=await api('/integrations/telegram');
   // спільний бот є, але його DM мертві на цьому інстансі (бета) - кажемо це ДО кліку, а кнопку
   // підключення глушимо: інакше вона видає посилання, яке нікуди не веде
   const off=c.sharedBot&&c.sharedDm===false; if($('tgSharedOff')) $('tgSharedOff').style.display=off?'block':'none';
-  if($('tgConnectBot')){ $('tgConnectBot').disabled=!!off; $('tgConnectBot').title=off?'У цьому середовищі спільний бот не приймає повідомлень - підключи власного бота нижче':''; } if($('tgConnMsg')&&c.channelTitle) $('tgConnMsg').innerHTML='✅ підключено: <b>'+esc(c.channelTitle)+'</b>'; }catch(e){} }
+  if($('tgConnectBot')){ $('tgConnectBot').disabled=!!off; $('tgConnectBot').title=off?'У цьому середовищі спільний бот не приймає повідомлень - підключи власного бота нижче':''; } if($('tgConnMsg')&&c.channelTitle) $('tgConnMsg').innerHTML='✅ підключено: <b>'+esc(c.channelTitle)+'</b>'
+    // канал підключав попередній спільний бот: він публікує далі, а тут - як перейти на нового
+    +(c.formerBot?'<div class="hint">🔁 Канал підключено через попереднього бота <b>@'+esc(c.formerBot)+'</b> - він і далі публікує. Щоб перейти на <b>@'+esc(c.bot||'')+'</b>: натисни «Підключити наш бот», додай його адміном у канал і перешли йому будь-який пост.</div>':''); }catch(e){} }
 if($('tgConnectBot')) $('tgConnectBot').onclick=async()=>{ const m=$('tgConnMsg'); m.style.color='var(--muted)'; m.textContent='…'; try{ const r=await api('/integrations/telegram/connect-link',{method:'POST'}); const steps=$('tgBotSteps'); if(steps){ steps.style.display='block'; steps.innerHTML='1) Відкрий <a href="'+r.link+'" target="_blank"><b>@'+esc(r.bot)+'</b></a> → натисни <b>Start</b>.<br>2) Додай бота <b>адміном</b> у свій канал.<br>3) Перешли боту будь-який пост із каналу.<br>Потім онови цю сторінку - канал зʼявиться тут.'; } m.textContent=''; window.open(r.link,'_blank'); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
 async function loadThreads(){
   try{ const c=await api('/integrations/threads'); const st=$('thStatus'), conn=$('thConnect'), dis=$('thDisconnect'); if(!st) return;
@@ -3966,7 +3968,7 @@ async function loadAdminSpend(){
 // ---------- Ключі провайдерів (адмін) ----------
 // Значення сюди НЕ приходить - лише «стоїть/не стоїть», джерело і хвіст із 4 символів.
 // Тому поле завжди порожнє: воно для ВВЕДЕННЯ нового ключа, а не для редагування наявного.
-const KEYGRP={text:'📝 Тексти',image:'🖼 Зображення',video:'🎬 Відео та озвучка',other:'Інше'};
+const KEYGRP={text:'📝 Тексти',image:'🖼 Зображення',video:'🎬 Відео та озвучка',bot:'🤖 Telegram-бот',other:'Інше'};
 async function loadAdminKeys(){
   const box=$('admKeys'); if(!box) return;
   box.innerHTML='<div class="empty">…</div>';
@@ -3999,13 +4001,13 @@ async function loadAdminKeys(){
       c.querySelector('.kSave').onclick=async()=>{
         const v=inp.value.trim(); if(!v){ msg.style.color='var(--danger)'; msg.textContent='порожньо'; return; }
         msg.style.color='var(--muted)'; msg.textContent='…';
-        try{ await api('/admin/keys/'+name,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:v})});
-          inp.value=''; loadAdminKeys(); }
+        try{ const r=await api('/admin/keys/'+name,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:v})});
+          inp.value=''; if(r&&r.bot) flash('✅ Спільний бот тепер @'+r.bot); loadAdminKeys(); }
         catch(e){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+e.message; }
       };
       const del=c.querySelector('.kDel');
       if(del) del.onclick=async()=>{ if(!confirm('Прибрати ключ з адмінки? Повернеться значення з .env, якщо воно там є.')) return;
-        try{ await api('/admin/keys/'+name,{method:'DELETE'}); loadAdminKeys(); }catch(e){ alert('⚠ '+e.message); } };
+        try{ const r=await api('/admin/keys/'+name,{method:'DELETE'}); if(r&&r.bot) flash('Спільний бот знову @'+r.bot); loadAdminKeys(); }catch(e){ alert('⚠ '+e.message); } };
     });
   }catch(e){ box.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }
