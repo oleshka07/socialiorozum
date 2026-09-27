@@ -57,6 +57,12 @@ jobs:
             cd "${{ secrets.APP_DIR }}/server" && docker compose logs --since 10m app 2>&1 | grep -iE "tgbot|error|fail|warn" | cut -c1-220 | mask | tail -20
             echo "=== журнал беті після рестарту ==="
             cd "${{ secrets.APP_DIR }}-beta/server" && docker compose logs --since 10m app 2>&1 | grep -iE "tgbot|error|fail|warn" | cut -c1-220 | mask | tail -20
+            echo "=== продовження сертифікатів (лише читання конфігів certbot) ==="
+            for h in holos.rozum.one beta.holos.rozum.one socialio.rozum.one; do
+              f=/etc/letsencrypt/renewal/$h.conf
+              if $SUDO test -f "$f"; then echo "$h: $($SUDO grep -E '^(authenticator|installer|webroot_path)|^[a-z0-9.-]+ = /' "$f" | tr '\n' ' ')"; else echo "$h: нема $f"; fi
+            done
+            systemctl list-timers 2>/dev/null | grep -i certbot || (ls /etc/cron.d 2>/dev/null | grep -i certbot) || echo "таймер certbot не знайдено"
             echo "=== keepalive ==="
             head -12 /opt/socialio-keepalive.sh | grep -n "flock" || echo "keepalive без блокування"
             cat /opt/socialio-keepalive.log 2>/dev/null
