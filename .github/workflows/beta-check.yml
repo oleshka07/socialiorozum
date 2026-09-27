@@ -1,11 +1,9 @@
 name: beta-check
 
 # Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ, нічого не змінює й не перезапускає.
-# 28.09: у Олега вікно Meta показує «URL Blocked: redirect URI is not whitelisted» при підключенні
-# Facebook/Instagram і Threads. Питання: (1) на якій адресі він тиснув «Підключити» - прод чи бета
-# (журнал app_log пише «connect redirect_uri=…» на кожен клік); (2) які адреси повернення Meta, Threads
-# і Google насправді приймають зараз - перевіряємо самі діалоги входу БЕЗ входу в акаунт: лише публічний
-# ID застосунку, жодних токенів і секретів. Контрольні: example.org (точно не дозволена).
+# 28.09: новий лендинг і вхід Holos викотились на прод (db3bc4d) - перевіряємо ззовні (з самого сервера,
+# через nginx): версія, сторінки й статуси мереж, SEO, кеш статики, стара адреса, вхід через Google,
+# журнал після рестарту.
 
 on:
   push:
@@ -16,97 +14,50 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: OAuth redirect diagnostics (read-only)
+      - name: Landing on prod (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 6m
+          command_timeout: 4m
           script: |
             mask() { sed -E -e 's/([A-Za-z0-9._%+-]{1,3})[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+)/\1***@\2/g' \
                             -e 's/[0-9a-fA-F]{24,}/<hex>/g' -e 's/[0-9]{6,}:[A-Za-z0-9_-]{30,}/<bot-token>/g' \
-                            -e 's/EAA[A-Za-z0-9]{20,}/<meta-token>/g' -e 's/TH[A-Za-z0-9]{40,}/<th-token>/g' \
-                            -e 's/((code|state|access_token|client_secret)=)[^&" ]+/\1<x>/g'; }
-            enc() { printf '%s' "$1" | sed -e 's/%/%25/g' -e 's/:/%3A/g' -e 's#/#%2F#g' -e 's/?/%3F/g' -e 's/=/%3D/g' -e 's/&/%26/g'; }
-            SUDO=$([ "$(id -u)" = 0 ] || echo "sudo -n")
-            UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36'
-            T=$(mktemp -d)
+                            -e 's/((key|token|secret|password|passwd|pwd)[^=:]{0,20}[=:] *)[^ ,"]+/\1<masked>/Ig'; }
+            P=https://holos.rozum.one
             echo "=== версії ==="
             echo "prod HEAD $(git -C "${{ secrets.APP_DIR }}" rev-parse --short HEAD) | beta HEAD $(git -C "${{ secrets.APP_DIR }}-beta" rev-parse --short HEAD)"
-
-            for d in "${{ secrets.APP_DIR }}" "${{ secrets.APP_DIR }}-beta"; do
-            echo; echo "=================== журнал підключень: $d (36 год, час Київ) ==================="
-            cd "$d/server" || continue
-            docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -v ON_ERROR_STOP=0' <<'SQL' 2>&1 | mask
-            set session characteristics as transaction read only;
-            select to_char(l.created_at at time zone 'Europe/Kyiv','DD.MM HH24:MI:SS') as t, l.level, l.scope,
-                   left(regexp_replace(l.message,'\s+',' ','g'),170) as msg, u.email
-              from app_log l left join app_user u on u.id = l.user_id
-             where l.created_at > now() - interval '36 hours'
-               and (l.scope in ('meta','threads','linkedin','google','gdrive','youtube','tiktok','oauth')
-                    or l.message ilike '%redirect%' or l.message ilike '%oauth%' or l.message ilike '%google%')
-             order by l.created_at desc limit 60;
-            SQL
+            docker ps --filter name=socialio --format '{{.Names}}\t{{.Status}}'
+            echo "health: $(curl -sS -m 15 -o /dev/null -w '%{http_code}' $P/health)"
+            H=$(curl -sS -m 15 $P/)
+            echo "=== головна ==="
+            echo "головна: $(curl -sS -m 15 -o /dev/null -w '%{http_code} %{size_download}B' $P/)"
+            echo "title: $(echo "$H" | grep -o '<title>[^<]*' | head -1)"
+            echo "canonical: $(echo "$H" | grep -o '<link rel="canonical"[^>]*>' | head -1)"
+            echo "og:image: $(echo "$H" | grep -o 'property="og:image" content="[^"]*"' | head -1)"
+            echo "robots meta: $(echo "$H" | grep -o '<meta name="robots"[^>]*>' | head -1)"
+            echo "невставлені токени: $(echo "$H" | grep -cE '%(BASE|ST:|SC:|NET_NOTE|FAQ_NETS)')"
+            echo "ld+json: $(echo "$H" | grep -c 'application/ld+json')"
+            echo "статуси мереж на лендингу:"
+            echo "$H" | grep -oE 'id="p-[a-z]+"|<span class="st st-[a-z]+">[^<]+' | paste - - | sed 's/<span class="st /  /'
+            echo "примітка: $(echo "$H" | grep -o '<p class="netnote">[^<]*' | sed 's/<p class="netnote">//')"
+            echo "ціни (ранній доступ): $(echo "$H" | grep -o 'Ранній доступ[^<]*' | head -1)"
+            echo "=== SEO ==="
+            echo "robots.txt: $(curl -sS -m 15 $P/robots.txt | tr '\n' '|')"
+            echo "sitemap: $(curl -sS -m 15 $P/sitemap.xml | grep -o '<loc>[^<]*' | sed 's/<loc>//' | tr '\n' ' ')"
+            echo "/index.html -> $(curl -sS -m 15 -o /dev/null -w '%{http_code} %{redirect_url}' $P/index.html)"
+            for p in /register /login /app /privacy /terms /data-deletion /tgapp; do echo "$p: $(curl -sS -m 15 -o /dev/null -w '%{http_code}' $P$p) $(curl -sS -m 15 $P$p | grep -oE '<title>[^<]*|noindex,nofollow' | tr '\n' ' ')"; done
+            echo "=== статика й кеш ==="
+            for p in /fonts/inter-cyrillic.woff2 /images/site/holos-source-to-post-800.webp /images/og/holos-og-1200x630.jpg /favicon.ico /favicon.svg /apple-touch-icon.png /site.webmanifest /app.js; do
+              echo "$p: $(curl -sS -m 15 -D - -o /dev/null $P$p | grep -iE '^(HTTP|content-type|cache-control)' | tr -d '\r' | tr '\n' ' ')"
             done
-
-            echo; echo "=================== nginx: кліки «Підключити» й повернення (сьогодні й учора) ==================="
-            $SUDO ls -1 /var/log/nginx/ 2>/dev/null | grep -i access | head -20
-            for f in /var/log/nginx/*access*.log /var/log/nginx/*access*.log.1; do
-              [ -r "$f" ] || continue
-              grep -hE '/api/(integrations/(meta|threads|linkedin|gdrive|youtube|tiktok)/(connect|callback)|auth/google)' "$f" 2>/dev/null \
-                | sed -E 's/^([0-9]+\.[0-9]+)\.[0-9]+\.[0-9]+/\1.x.x/' | mask | cut -c1-260 | sed "s#^#$(basename $f): #" | tail -25
-            done
-
-            echo; echo "=================== Meta (Facebook Login) - діалог без входу, app 1255606142995192 ==================="
-            for R in https://holos.rozum.one https://beta.holos.rozum.one https://socialio.rozum.one https://beta.socialio.rozum.one https://example.org; do
-              U="https://www.facebook.com/v23.0/dialog/oauth?client_id=1255606142995192&redirect_uri=$(enc "$R/api/integrations/meta/callback")&response_type=code&scope=public_profile&state=diag"
-              curl -sS -m 25 -A "$UA" -H 'Accept-Language: en-US,en;q=0.9' -D $T/h -o $T/b "$U" >/dev/null 2>$T/e || true
-              L=$(grep -i '^location:' $T/h | head -1 | tr -d '\r' | cut -c11-)
-              echo "--- $R -> $(head -1 $T/h | tr -d '\r') $(wc -c < $T/b)B $(cat $T/e)"
-              echo "    маркери: $(grep -oE 'URL Blocked|not whitelisted|Can.t Load URL|isn.t included in the app.s domains|Invalid App ID|login_form|Log in to Facebook|Log into Facebook|redirect_uri_mismatch|Error' $T/b | sort | uniq -c | tr '\n' ' ')"
-              [ -n "$L" ] && echo "    location: $(echo "$L" | mask | cut -c1-300)"
-              [ -n "$L" ] && echo "    cancel_url у location: $(echo "$L" | grep -oE 'cancel_url=[^&]{0,120}' | head -1)"
-              curl -sS -m 25 -L --max-redirs 4 -A "$UA" -H 'Accept-Language: en-US,en;q=0.9' -o $T/b2 -w '    після редиректів: %{http_code} %{url_effective}\n' "$U" 2>&1 | mask | cut -c1-260
-              echo "    маркери після редиректів: $(grep -oE 'URL Blocked|not whitelisted|Can.t Load URL|isn.t included in the app.s domains|Invalid App ID|login_form|redirect_uri|Log in' $T/b2 | sort | uniq -c | tr '\n' ' ')"
-            done
-
-            echo; echo "=================== Threads - діалог без входу, app 1347525417441376 ==================="
-            for R in https://holos.rozum.one https://beta.holos.rozum.one https://socialio.rozum.one https://beta.socialio.rozum.one https://example.org; do
-              U="https://threads.net/oauth/authorize?client_id=1347525417441376&redirect_uri=$(enc "$R/api/integrations/threads/callback")&scope=threads_basic&response_type=code&state=diag"
-              curl -sS -m 25 -L --max-redirs 4 -A "$UA" -H 'Accept-Language: en-US,en;q=0.9' -D $T/h -o $T/b -w '%{http_code} %{url_effective}' "$U" > $T/w 2>$T/e || true
-              echo "--- $R -> $(cat $T/w | mask | cut -c1-200) $(wc -c < $T/b)B $(cat $T/e)"
-              echo "    статуси хопів: $(grep -E '^HTTP' $T/h | tr -d '\r' | tr '\n' ' ')"
-              echo "    маркери: $(grep -oE 'URL Blocked|not whitelisted|error_message|Invalid redirect_uri|redirect_uri|Log in|login' $T/b | sort | uniq -c | tr '\n' ' ')"
-              echo "    початок тіла: $(head -c 300 $T/b | tr -d '\n' | mask)"
-            done
-
-            echo; echo "=================== Google - клієнт, яким входять на проді й беті ==================="
-            GP=$(curl -sS -m 15 -D - -o /dev/null https://holos.rozum.one/api/auth/google | grep -i '^location:' | tr -d '\r')
-            CID=$(echo "$GP" | grep -oE 'client_id=[^&]+' | head -1 | cut -d= -f2)
-            echo "прод: redirect_uri у запиті: $(echo "$GP" | grep -oE 'redirect_uri=[^&]+' | head -1)"
-            echo "прод: client_id = $(echo "$CID" | sed -E 's/^([0-9]+)-[a-z0-9]+(\.apps\.googleusercontent\.com)$/\1-…\2/')"
-            J=$(mktemp)
-            curl -sS -m 15 -c $J -o /dev/null -H 'content-type: application/json' -d '{"pin":"2345"}' https://beta.holos.rozum.one/beta-pin
-            GB=$(curl -sS -m 15 -b $J -D - -o /dev/null https://beta.holos.rozum.one/api/auth/google | grep -i '^location:' | tr -d '\r')
-            CIDB=$(echo "$GB" | grep -oE 'client_id=[^&]+' | head -1 | cut -d= -f2)
-            echo "бета: client_id = $(echo "$CIDB" | sed -E 's/^([0-9]+)-[a-z0-9]+(\.apps\.googleusercontent\.com)$/\1-…\2/') $( [ -n "$CID" ] && [ "$CID" = "$CIDB" ] && echo '(той самий, що на проді)')"
-            rm -f $J
-            if [ -n "$CID" ]; then
-              for R in https://holos.rozum.one https://beta.holos.rozum.one https://socialio.rozum.one https://example.org; do
-                for P in /api/auth/google/callback /api/integrations/gdrive/callback /api/integrations/youtube/callback; do
-                  U="https://accounts.google.com/o/oauth2/v2/auth?client_id=$CID&redirect_uri=$(enc "$R$P")&response_type=code&scope=openid&state=diag"
-                  curl -sS -m 20 -A "$UA" -H 'Accept-Language: en-US,en;q=0.9' -D $T/h -o $T/b "$U" >/dev/null 2>&1 || true
-                  S=$(head -1 $T/h | tr -d '\r' | awk '{print $2}')
-                  M=$(grep -oE 'redirect_uri_mismatch|invalid_request|disabled_client|deleted_client|Error 400|Error 401' $T/b | sort -u | tr '\n' ' ')
-                  L=$(grep -i '^location:' $T/h | head -1 | tr -d '\r' | grep -oE 'accounts\.google\.com/[a-zA-Z0-9/_.-]+' | head -1)
-                  echo "$R$P -> $S ${M:-OK} ${L}"
-                done
-              done
-            fi
-
-            echo; echo "=================== Сторінки для Meta (краулер facebookexternalhit) ==================="
-            for u in https://holos.rozum.one/ https://holos.rozum.one/privacy https://holos.rozum.one/terms https://holos.rozum.one/data-deletion https://socialio.rozum.one/privacy https://socialio.rozum.one/data-deletion; do
-              echo "$u -> $(curl -sS -m 15 -A 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)' -o /dev/null -w '%{http_code} %{redirect_url}' "$u")"
-            done
-            rm -rf $T
+            echo "gzip головної через nginx: $(curl -sS -m 15 -H 'Accept-Encoding: gzip' -D - -o /dev/null $P/ | grep -i '^content-encoding' | tr -d '\r')"
+            echo "=== стара адреса ==="
+            for p in / /robots.txt /sitemap.xml /login /app; do echo "socialio$p -> $(curl -sS -m 15 -o /dev/null -w '%{http_code} %{redirect_url}' https://socialio.rozum.one$p)"; done
+            echo "socialio /health -> $(curl -sS -m 15 -o /dev/null -w '%{http_code}' https://socialio.rozum.one/health) (машинний маршрут без редіректу)"
+            echo "=== вхід через Google ==="
+            echo "$(curl -sS -m 15 -D - -o /dev/null $P/api/auth/google | grep -i '^location:' | tr -d '\r' | grep -oE 'https://accounts\.google\.com/[^?]+|redirect_uri=[^&]+' | tr '\n' ' ')"
+            echo "=== журнал проду після рестарту ==="
+            cd "${{ secrets.APP_DIR }}/server" && docker compose logs --since 10m app 2>&1 | grep -iE '"level":(40|50)|error|unhandled' | cut -c1-220 | mask | tail -15
+            echo "(кінець журналу)"
