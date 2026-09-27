@@ -1,13 +1,18 @@
-# Meta App Review: що саме знімати і що вписувати · оновлено 26.09.2026
+# Meta App Review: що саме знімати і що вписувати · оновлено 28.09.2026
 
 > **Holos by Rozum (колишній socialio).** Записуємо й подаємо вже після переїзду на `holos.rozum.one`: рецензент бачить ту саму назву й адресу, що й користувачі. У застосунку Meta (App settings → Basic) Privacy Policy, Terms і Data Deletion - теж на holos.rozum.one; адреси повернення додає картка «Holos: додати адресу holos.rozum.one…».
 
-Два застосунки, дві окремі заявки:
+Один застосунок, у ньому два набори дозволів. Threads - не окремий застосунок, а use case «Access
+the Threads API» усередині ROZUM Marketing Pulse; `1347525417441376` - його **Threads App ID** (так він
+і стоїть у `THREADS_APP_ID`). Це знайшов Олег 27.09 у консолі Meta; до того ми вважали Threads
+окремим застосунком.
 
-| Застосунок | App ID | Навіщо | Дозволи на ревʼю |
+| Що | ID | Навіщо | Дозволи на ревʼю |
 |---|---|---|---|
-| **ROZUM Marketing Pulse** | `1255606142995192` | Facebook-Сторінка + Instagram | 9 (3 нові: коментарі й статистика) |
-| **Threads** | `1347525417441376` | Threads | 4 |
+| **ROZUM Marketing Pulse** | App ID `1255606142995192` | Facebook-Сторінка + Instagram | 9 (3 нові: коментарі й статистика) |
+| **Threads у тому ж застосунку** | Threads App ID `1347525417441376` | Threads | 4 |
+
+Подаються з App Review того самого застосунку; якщо Meta дозволить - однією заявкою.
 
 Кнопки **Submit** тиснеш ти. Паролів і токенів у цьому файлі нема й не буде.
 
@@ -34,9 +39,10 @@
 
 ## Крок 0. Один раз перед записом
 
-1. **Прод має містити нові функції.** Перший коментар, Аналітика 2.0 і англійські підписи зараз лише
-   на беті (`beta.socialio.rozum.one`, за PIN). Рецензент ходить на прод, тож спершу промоушн беті
-   на прод (merge `beta` → `main`, робить Claude після твого «так»).
+1. **Прод уже містить усе потрібне** (перший коментар, Аналітика 2.0, англійські підписи - з 27.09).
+   **Перевіряй і записуй лише на `holos.rozum.one`.** Адрес беті (`beta.holos.rozum.one`) у
+   налаштуваннях Meta немає, тож там вікно Meta пише «URL Blocked» - 28.09 саме так і сталося.
+   Кабінет тепер так і пояснює цю помилку (адреса й точне поле для адміна), а не «скасовано».
 2. **Додати 3 нові дозволи в застосунок Meta.** developers.facebook.com → My Apps → ROZUM Marketing
    Pulse → **Use cases** → сценарій із Facebook-Сторінкою → **Customize** → додати
    `pages_manage_engagement` і `read_insights`; сценарій з Instagram → додати
@@ -133,7 +139,7 @@ Advanced - не чіпай.
 | `instagram_manage_insights` | 3 | The app reads insights of the user's own Instagram media (views, reach, likes, comments, shares, saves, follows) and the account's follower count to show per-post performance and follower growth in the Analytics screen. |
 | `read_insights` | 3 | The app reads insights of the user's own Page posts (media views and unique views) to show in the Analytics screen how many people saw each post the user published, compared with the user's typical post. |
 
-## Крок 3. Подання - Threads (1347525417441376)
+## Крок 3. Подання - Threads (той самий ROZUM Marketing Pulse, Threads App ID 1347525417441376)
 
 | Дозвіл | How will you use this permission |
 |---|---|
@@ -183,10 +189,11 @@ Threads Testers і прийняти в Threads (Налаштування → А�
 - Бізнес-верифікація ✅; іконка `app-icon-1024.png` у цій папці; Privacy Policy
   `https://holos.rozum.one/privacy`, Terms `https://holos.rozum.one/terms`, Data Deletion
   `https://holos.rozum.one/data-deletion`.
-- Redirect URI (Facebook Login → Settings → Valid OAuth Redirect URIs):
-  `https://holos.rozum.one/api/integrations/meta/callback` і
-  `https://beta.socialio.rozum.one/api/integrations/meta/callback`; Threads:
-  `https://holos.rozum.one/api/integrations/threads/callback` (+ бета).
+- Redirect URI (Facebook Login for Business → Settings → Valid OAuth Redirect URIs):
+  `https://holos.rozum.one/api/integrations/meta/callback` (додано 27.09) і старі socialio; Threads
+  (Use cases → Access the Threads API → Settings → Redirect Callback URLs):
+  `https://holos.rozum.one/api/integrations/threads/callback` (додано 27.09). Адрес беті
+  `https://beta.holos.rozum.one/...` ще нема (картка «адреси beta.holos.rozum.one»).
 - Базове підключення Holos просить рівно 7 дозволів (`public_profile`, `pages_show_list`,
   `pages_read_engagement`, `pages_manage_posts`, `instagram_basic`, `instagram_content_publish`,
   `instagram_manage_insights`); коментарі й статистику - окремими кнопками, щоб базове підключення
