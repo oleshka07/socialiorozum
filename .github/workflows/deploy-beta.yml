@@ -26,21 +26,24 @@ jobs:
               echo "beta не розгорнута на сервері ($BETA_DIR відсутня) - пропускаю (див. server/BETA.md)"
               exit 0
             fi
-            cd "$BETA_DIR"
-            git pull origin beta
-            cd server
-            docker compose up -d --build
-            docker image prune -f
             # 🛡 KEEPALIVE проти сторонніх зачисток. 28.07 контейнери socialio знесло чужим деплоєм
             # на цьому ж боксі (`Creating` замість `Running` у логу) - і вони НЕ повернулись самі:
             # `restart: unless-stopped` не воскрешає ВИДАЛЕНИЙ контейнер. Ставимо host-cron, який
             # раз на 10 хв ідемпотентно піднімає обидва стеки: якщо все живе, `up -d` не робить нічого.
             # Пишемо через деплой, бо це єдиний наш канал до хоста; крок навмисно НЕ валить деплой.
+            # 🔒 Поки йде деплой (тримає /opt/socialio-deploy.lock), keepalive пропускає хід: 27.09 cron
+            # спрацював о 13:00 посеред деплою беті, два `compose up` перестворювали той самий контейнер,
+            # і деплой упав з «container name ... is already in use». Тому keepalive ставиться ПЕРШИМ.
             if command -v crontab >/dev/null 2>&1; then
               cat > /opt/socialio-keepalive.sh <<'KEEPSH'
             #!/bin/sh
             # піднімає стеки socialio, якщо їх знесли. --build у фолбеку: якщо образ теж запрунили,
             # без нього compose скаже «image not found» і нічого не підніме.
+            # Поки йде деплой (тримає /opt/socialio-deploy.lock) - нічого не чіпаємо.
+            if command -v flock >/dev/null 2>&1; then
+              exec 9>/opt/socialio-deploy.lock
+              flock -n 9 || exit 0
+            fi
             for d in /opt/socialio/server /opt/socialio-beta/server; do
               [ -d "$d" ] || continue
               cd "$d" || continue
@@ -55,6 +58,20 @@ jobs:
             else
               echo "⚠️ crontab на хості немає - keepalive не встановлено"
             fi
+            # keepalive попередньої версії (без блокування) міг щойно стартувати (cron о :x0) - даємо добігти
+            s=$(( $(date +%s) % 600 )); if [ "$s" -lt 60 ]; then sleep $((60 - s)); fi
+            exec 9>/opt/socialio-deploy.lock
+            if command -v flock >/dev/null 2>&1; then flock -w 180 9 || echo "⚠️ блокування не звільнилось за 3 хв - продовжую"; fi
+            cd "$BETA_DIR"
+            git pull origin beta
+            cd server
+            # тимчасові контейнери недобіглого перестворення («<12 hex>_назва», не запущені) - геть,
+            # інакше `compose up` знову впреться в їхнє імʼя
+            PROJ=$(grep -E '^COMPOSE_PROJECT_NAME=' .env 2>/dev/null | cut -d= -f2); PROJ=${PROJ:-socialio}
+            docker ps -a --filter "label=com.docker.compose.project=$PROJ" --format '{{.ID}} {{.Names}} {{.State}}' \
+              | awk '$2 ~ /^[0-9a-f]{12}_/ && $3 != "running" {print $1}' | xargs -r docker rm -f
+            docker compose up -d --build
+            docker image prune -f
             # 💾 БЕКАП на цьому ж боксі (блокер ④ з аудиту). Щоночі pg_dump бази + tar медіа-тому
             # в /opt/socialio-backups, ротація 14 днів. Це захист від помилкової міграції, кривого
             # деплою чи випадкового видалення - НЕ від втрати диска: копія поза сервером лишається

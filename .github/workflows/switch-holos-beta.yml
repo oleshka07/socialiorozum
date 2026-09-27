@@ -1,0 +1,114 @@
+name: switch-holos-beta
+
+# РАЗОВЕ перемикання БЕТИ на нову адресу beta.holos.rozum.one (запуск: push у гілку switch-holos-beta).
+# Кроки: vhost beta.holos.rozum.one → застосунок беті (порт 8081) → сертифікат Let's Encrypt (certbot)
+# → APP_BASE_URL у .env беті → перезапуск і перевірка. beta.socialio.rozum.one не вимикається: сторінки
+# звідти застосунок перекидає на нову адресу (301), машинні адреси працюють як і раніше.
+# .env міняється ЛИШЕ після сертифіката: інакше бета перекидала б людей на адресу без https.
+
+on:
+  push:
+    branches: [switch-holos-beta]
+
+jobs:
+  switch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Switch beta to beta.holos.rozum.one
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          command_timeout: 15m
+          script: |
+            set -e
+            BETA_DIR="${{ secrets.APP_DIR }}-beta"
+            SUDO=""; [ "$(id -u)" != "0" ] && SUDO="sudo -n"
+            STAMP=$(date +%Y%m%d-%H%M%S)
+            BK=/root/holos-beta-switch-$STAMP
+            $SUDO mkdir -p "$BK/enabled"
+
+            echo "== 0/4: передумови =="
+            test -f "$BETA_DIR/server/src/brand.ts" || { echo "На беті старий код без Holos"; exit 1; }
+            getent hosts beta.holos.rozum.one || { echo "DNS: beta.holos.rozum.one не резолвиться - потрібен A-запис на цей сервер"; exit 1; }
+            curl -fsS 127.0.0.1:8081/health >/dev/null || { echo "бета не відповідає на 8081"; exit 1; }
+
+            echo "== 1/4: nginx - beta.holos.rozum.one → бета (8081) =="
+            for f in /etc/nginx/sites-enabled/*; do
+              [ -e "$f" ] || [ -L "$f" ] || continue
+              if $SUDO grep -qE "server_name([[:space:]]+[^;[:space:]]+)*[[:space:]]+beta\.holos\.rozum\.one([[:space:];]|$)" "$f" 2>/dev/null; then
+                $SUDO cp -a "$f" "$BK/enabled/"
+                echo "вимикаю старий конфіг: $f -> $(readlink -f "$f")"
+                $SUDO rm -f "$f"
+              fi
+            done
+            TARGET=/etc/nginx/sites-available/beta.holos.rozum.one
+            if [ -f "$TARGET" ]; then $SUDO cp -a "$TARGET" "$BK/beta.holos.rozum.one.available"; fi
+            $SUDO tee "$TARGET" >/dev/null <<'NGINX'
+            server {
+                server_name beta.holos.rozum.one;
+                listen 80;
+                client_max_body_size 20m;
+                location / {
+                    proxy_pass http://127.0.0.1:8081;
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Forwarded-Proto $scheme;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_read_timeout 300s;
+                }
+            }
+            NGINX
+            $SUDO ln -sf "$TARGET" /etc/nginx/sites-enabled/beta.holos.rozum.one
+            if ! $SUDO nginx -t; then
+              echo "nginx -t не пройшов - повертаю як було"
+              $SUDO rm -f /etc/nginx/sites-enabled/beta.holos.rozum.one
+              if [ -f "$BK/beta.holos.rozum.one.available" ]; then $SUDO cp -a "$BK/beta.holos.rozum.one.available" "$TARGET"; else $SUDO rm -f "$TARGET"; fi
+              $SUDO cp -a "$BK/enabled/." /etc/nginx/sites-enabled/ 2>/dev/null || true
+              exit 1
+            fi
+            $SUDO systemctl reload nginx
+            echo "nginx: OK"
+
+            echo "== 2/4: сертифікат =="
+            if $SUDO certbot --nginx -d beta.holos.rozum.one -n --agree-tos --redirect --keep-until-expiring -m o.stepeniev@swipescape.eu; then
+              echo "SSL: OK"
+            else
+              echo "SSL не вдалось (найчастіше DNS ще не розійшовся). .env не чіпаю - бета працює як і раніше. Перезапусти пізніше."
+              exit 1
+            fi
+
+            echo "== 3/4: APP_BASE_URL беті → https://beta.holos.rozum.one =="
+            ENVF="$BETA_DIR/server/.env"
+            $SUDO cp -a "$ENVF" "$BK/.env"
+            $SUDO chmod 600 "$BK/.env"
+            if grep -q '^APP_BASE_URL=' "$ENVF"; then
+              $SUDO sed -i -E 's|^APP_BASE_URL=.*|APP_BASE_URL=https://beta.holos.rozum.one|' "$ENVF"
+            else
+              echo 'APP_BASE_URL=https://beta.holos.rozum.one' | $SUDO tee -a "$ENVF" >/dev/null
+            fi
+            grep '^APP_BASE_URL=' "$ENVF"
+
+            echo "== 4/4: перезапуск і перевірка =="
+            cd "$BETA_DIR/server"
+            docker compose up -d --force-recreate --no-deps app
+            ok=""
+            for i in $(seq 1 45); do
+              if curl -fsS 127.0.0.1:8081/health >/dev/null 2>&1; then ok=1; break; fi
+              sleep 2
+            done
+            [ -n "$ok" ] || { echo "health: FAIL"; docker compose logs --tail=40 app; exit 1; }
+            echo "health: OK"
+            sleep 3
+            H=$(curl -sS -m 15 -o /dev/null -w '%{http_code}' https://beta.holos.rozum.one/health || true)
+            echo "https://beta.holos.rozum.one/health -> $H"
+            echo "https://beta.holos.rozum.one/app    -> $(curl -sS -m 15 -o /dev/null -w '%{http_code}' https://beta.holos.rozum.one/app || true) (без PIN - сторінка PIN)"
+            R=$(curl -sS -m 15 -o /dev/null -w '%{http_code} %{redirect_url}' 'https://beta.socialio.rozum.one/app?x=1' || true)
+            echo "https://beta.socialio.rozum.one/app?x=1 -> $R"
+            echo "beta.socialio /health (без редіректу) -> $(curl -sS -m 15 -o /dev/null -w '%{http_code}' https://beta.socialio.rozum.one/health || true)"
+            echo
+            echo "Резервні копії: $BK"
+            echo "ВІДКАТ: sudo cp -a $BK/.env $ENVF && cd $BETA_DIR/server && docker compose up -d --force-recreate --no-deps app"
+            [ "$H" = "200" ] || { echo "beta.holos.rozum.one/health не 200 - дивись вище"; exit 1; }
+            echo "$R" | grep -q "^301 https://beta.holos.rozum.one/app?x=1" || { echo "стара адреса беті не перекидає на нову - дивись вище"; exit 1; }
+            echo "ПЕРЕМИКАННЯ БЕТИ: OK"
