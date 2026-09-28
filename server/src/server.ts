@@ -60,6 +60,7 @@ import { secretStatuses, setSecret, clearSecret, refreshSecrets } from "./secret
 import { kieCatalog, kieCredits, kieReady } from "./kie.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook, sharedBotDmWorks, hookSecret, sameSecret, ownBotToken, refreshOwnBotWebhooks, initHookBase, sharedHookKind, looksLikeBotToken, switchSharedBot, loadFormerShared, isFormerShared, formerBotName, sharedTokens, liveSharedTokens } from "./tgbot.js";
 import { chat } from "./openrouter.js";
+import { threadsToken, threadsAccounts, saveThreadsLogin, setMainThreads, removeThreadsAccount, metaPages, saveMetaLogin, addMetaPage, setMainPage, removeMetaPage, accountChoices, postsUsingAccount, metaAccountForRow, threadsAccountForRow } from "./accounts.js";
 import { handleBody, wantsSse, sseEncode, resolveToken, mcpTokenFor, issueMcpToken, revokeMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
 import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember, deleteBrand, workspaceTitle } from "./workspaces.js";
 import { postMediaList, mediaCounts, setPostMediaOrder, setPostVideo, appendPostMedia, removePostMedia, promoteIfCoverless, healCoverless, SlideError, MAX_SLIDES, altToOriginal } from "./slides.js";
@@ -960,6 +961,8 @@ app.get("/api/channels/status", async (req: any) => {
     one<{ access_token: string | null }>(`select access_token from youtube_config where workspace_id=$1`, [ws]),
     one<{ access_token: string | null }>(`select access_token from tiktok_config where workspace_id=$1`, [ws]),
   ]);
+  // 👥 акаунти для вибору в композері (імена без токенів); Instagram є, якщо він є хоч в одної Сторінки
+  const accounts = await accountChoices(ws);
   return {
     // До схвалення App Review OAuth Meta пройде лише для людей зі списку Testers. Поки META_PUBLIC
     // не задано, кабінет показує Instagram як «для тестерів», а онбординг починає з тексту -
@@ -968,10 +971,11 @@ app.get("/api/channels/status", async (req: any) => {
     telegram: !!(tgc && tgc.bot_token && (tgc.channel_chat_id || tgc.group_chat_id)),
     threads: !!(th && th.access_token),
     facebook: !!(mt && mt.page_token),
-    instagram: !!(mt && mt.page_token && mt.ig_user_id),
+    instagram: !!(mt && mt.page_token && (mt.ig_user_id || accounts.instagram.length)),
     linkedin: !!(li && li.access_token),
     youtube: !!(yt && yt.access_token),
     tiktok: !!(tt && tt.access_token),
+    accounts,
   };
 });
 
@@ -1131,10 +1135,10 @@ async function postPermalinks(ws: string, postId: string): Promise<Record<string
   const [tg, th, mt, li, tgc] = await Promise.all([
     q<{ id: string; chat_id: string | null; message_id: string | null; permalink: string | null; target: string }>(
       `select id, chat_id, message_id::text as message_id, permalink, target from telegram_publish where post_id=$1 and status='sent'`, [postId]),
-    q<{ id: string; media_id: string | null; permalink: string | null }>(
-      `select id, media_id, permalink from threads_publish where post_id=$1 and status='sent'`, [postId]),
-    q<{ id: string; channel: string; external_id: string | null; permalink: string | null }>(
-      `select id, channel, external_id, permalink from meta_publish where post_id=$1 and status='sent'`, [postId]),
+    q<{ id: string; media_id: string | null; permalink: string | null; account_id: string | null; account_name: string | null }>(
+      `select id, media_id, permalink, account_id, account_name from threads_publish where post_id=$1 and status='sent'`, [postId]),
+    q<{ id: string; channel: string; external_id: string | null; permalink: string | null; account_id: string | null; account_name: string | null }>(
+      `select id, channel, external_id, permalink, account_id, account_name from meta_publish where post_id=$1 and status='sent'`, [postId]),
     q<{ id: string; external_id: string | null; permalink: string | null }>(
       `select id, external_id, permalink from linkedin_publish where post_id=$1 and status='sent'`, [postId]),
     one<{ channel_username: string | null }>(`select channel_username from telegram_config where workspace_id=$1`, [ws]),
@@ -1165,8 +1169,9 @@ async function postPermalinks(ws: string, postId: string): Promise<Record<string
     let url = r.permalink || "";
     if (!url && r.media_id) {
       try {
-        const tok = await thValidToken(ws);
-        if (tok) { url = await threads.mediaPermalink(tok.token, r.media_id); if (url) await heal("threads_publish", r.id, url); }
+        // посилання віддає лише акаунт, яким пост опубліковано
+        const acc = await threadsAccountForRow(ws, r);
+        if (acc.ok) { url = await threads.mediaPermalink(acc.acc.token, r.media_id); if (url) await heal("threads_publish", r.id, url); }
       } catch { /* лишиться без лінка */ }
     }
     if (url && !out.threads) out.threads = url;
@@ -1175,8 +1180,8 @@ async function postPermalinks(ws: string, postId: string): Promise<Record<string
   for (const r of mt) {
     if (r.channel !== "instagram" || r.permalink || !r.external_id) continue;
     try {
-      const cfg = await one<{ page_token: string | null }>(`select page_token from meta_config where workspace_id=$1`, [ws]);
-      if (cfg?.page_token) { const url = await meta.mediaPermalink(r.external_id, cfg.page_token); if (url) { await heal("meta_publish", r.id, url); out.instagram = out.instagram || url; } }
+      const acc = await metaAccountForRow(ws, "instagram", r);
+      if (acc.ok) { const url = await meta.mediaPermalink(r.external_id, acc.acc.pageToken); if (url) { await heal("meta_publish", r.id, url); out.instagram = out.instagram || url; } }
     } catch { /* лишиться без лінка */ }
   }
   return out;
@@ -1187,7 +1192,12 @@ app.get("/api/posts/:postId/publish-state", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
   const sent = await alreadySentNetworks(req.params.postId);
-  return { sent, links: await postPermalinks(ws, req.params.postId), comments: await commentStates(req.params.postId) };
+  // 👥 яким акаунтом пост вийшов у мережу (імʼя) - композер показує це біля мережі
+  const accs = await q<{ net: string; name: string | null }>(
+    `select 'threads'::text as net, account_name as name from threads_publish where post_id=$1 and status='sent'
+     union all select channel, account_name from meta_publish where post_id=$1 and status='sent'`, [req.params.postId]);
+  return { sent, links: await postPermalinks(ws, req.params.postId), comments: await commentStates(req.params.postId),
+    accounts: Object.fromEntries(accs.filter((a) => a.name).map((a) => [a.net, a.name])) };
 });
 
 // 💬 «Надіслати коментар»: для мереж, куди пост уже вийшов, а першого коментаря ще нема (дописали
@@ -1276,11 +1286,12 @@ app.post("/api/threads/niche-review", async (req: any, reply) => {
 // Потребує threads_manage_replies у токені (перепідключення після апруву пермішена).
 app.get("/api/threads/comments", async (req: any, reply) => {
   const ws = req.user.workspace_id;
-  const cfg = await one<{ access_token: string | null; threads_user_id: string | null; username: string | null }>(
-    `select access_token, threads_user_id, username from threads_config where workspace_id=$1`, [ws]);
-  if (!cfg?.access_token) return reply.code(400).send({ error: "Threads не підключено" });
-  const posts = await q<{ media_id: string; content: string }>(
-    `select tp.media_id, p.content from threads_publish tp join post p on p.id=tp.post_id
+  const accs = await threadsAccounts(ws);
+  if (!accs.length) return reply.code(400).send({ error: "Threads не підключено" });
+  // власні відповіді - будь-якого акаунта бренду (особистий відповідає під постом компанії - теж «свій»)
+  const own = new Set(accs.map((a) => a.username.toLowerCase()).filter(Boolean));
+  const posts = await q<{ media_id: string; content: string; account_id: string | null; account_name: string | null }>(
+    `select tp.media_id, p.content, tp.account_id, tp.account_name from threads_publish tp join post p on p.id=tp.post_id
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where s.workspace_id=$1 and tp.status='sent' and tp.media_id is not null
        and tp.created_at > now() - interval '7 days' order by tp.created_at desc limit 6`, [ws]);
@@ -1288,14 +1299,17 @@ app.get("/api/threads/comments", async (req: any, reply) => {
   let replied: string[] = [];
   try { const rr = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='th_replied'`, [ws]); replied = JSON.parse(rr?.content || "[]") || []; } catch { replied = []; }
   const repliedSet = new Set(replied);
-  const items: { commentId: string; username: string; comment: string; postTitle: string; postText: string; timestamp: string }[] = [];
+  const items: { commentId: string; username: string; comment: string; postTitle: string; postText: string; timestamp: string; account: string; accountName: string }[] = [];
   let permErr = "";
   for (const p of posts) {
     try {
-      for (const r of await threads.mediaReplies(cfg.access_token, p.media_id)) {
-        if (cfg.username && r.username.toLowerCase() === cfg.username.toLowerCase()) continue; // власні ветки/відповіді
+      // коментарі під постом бачить (і відповідає на них) лише акаунт, яким пост опубліковано
+      const acc = await threadsAccountForRow(ws, p);
+      if (!acc.ok) { permErr = acc.error; continue; }
+      for (const r of await threads.mediaReplies(acc.acc.token, p.media_id)) {
+        if (own.has(String(r.username || "").toLowerCase())) continue; // власні ветки/відповіді
         if (repliedSet.has(r.id)) continue;
-        items.push({ commentId: r.id, username: r.username, comment: r.text, postTitle: (p.content || "").split("\n")[0].slice(0, 70), postText: p.content || "", timestamp: r.timestamp });
+        items.push({ commentId: r.id, username: r.username, comment: r.text, postTitle: (p.content || "").split("\n")[0].slice(0, 70), postText: p.content || "", timestamp: r.timestamp, account: acc.acc.userId, accountName: acc.acc.username });
       }
     } catch (e: any) { permErr = String(e.message).slice(0, 200); }
   }
@@ -1307,7 +1321,8 @@ app.get("/api/threads/comments", async (req: any, reply) => {
   let drafts: Record<string, string> = {};
   try { drafts = await suggestThreadReplies(ws, items.map((it) => ({ commentId: it.commentId, postText: it.postText, comment: it.comment, username: it.username }))); }
   catch { /* без драфтів теж корисно - користувач напише сам */ }
-  return { items: items.slice(0, 15).map((it) => ({ commentId: it.commentId, username: it.username, comment: it.comment, postTitle: it.postTitle, timestamp: it.timestamp, draft: drafts[it.commentId] || "" })) };
+  return { items: items.slice(0, 15).map((it) => ({ commentId: it.commentId, username: it.username, comment: it.comment, postTitle: it.postTitle, timestamp: it.timestamp, draft: drafts[it.commentId] || "",
+    account: it.account, accountName: accs.length > 1 ? it.accountName : "" })) };
 });
 
 // відповісти на конкретний комент (reply_to_id = id комента; фіксуємо, щоб не показувати вдруге)
@@ -1315,7 +1330,8 @@ app.post("/api/threads/reply", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   const commentId = String(req.body?.commentId || ""), text = String(req.body?.text || "").trim().slice(0, 490);
   if (!commentId || !text) return reply.code(400).send({ error: "порожня відповідь" });
-  const tok = await thValidToken(ws);
+  // відповідає той акаунт, під чиїм постом коментар (account з /api/threads/comments; нема - основний)
+  const tok = await thValidToken(ws, typeof req.body?.account === "string" && req.body.account ? req.body.account : null);
   if (!tok) return reply.code(400).send({ error: "Threads не підключено" });
   try {
     await threads.publish(tok.token, tok.userId, text, undefined, commentId);
@@ -1640,7 +1656,10 @@ app.get("/api/analytics/benchmarks", async (req: any) => networkBenchmarks(req.u
 // чистому analytics.ts. Беремо подвійний період: попередній потрібен для порівняння «до/після».
 app.get("/api/analytics/posts", async (req: any) => {
   const days = [7, 30, 90, 180, 365].includes(Number(req.query?.days)) ? Number(req.query.days) : 90;
-  const net = ["all", "threads", "instagram", "facebook", "telegram", "linkedin"].includes(String(req.query?.net)) ? String(req.query.net) : "all";
+  // мережа або один акаунт мережі («threads:<id акаунта>», кілька акаунтів однієї мережі в бренді)
+  const raw = String(req.query?.net ?? "");
+  const net = ["all", "threads", "instagram", "facebook", "telegram", "linkedin"].includes(raw)
+    || /^(threads|instagram|facebook):[A-Za-z0-9_.:@-]{1,80}$/.test(raw) ? raw : "all";
   return analyticsFor(req.user.workspace_id, days, net);
 });
 
@@ -2216,37 +2235,31 @@ const THREADS_REDIRECT = `${env.appBaseUrl}/api/integrations/threads/callback`;
 // може лише людина зі списку Threads Testers, а причину кабінет тепер пояснює сам (oauthwhy.ts).
 const THREADS_SCOPES = ["threads_basic", "threads_content_publish", "threads_manage_insights", "threads_manage_replies"];
 
-async function thConfig(ws: string) {
-  return one<{ threads_user_id: string | null; username: string | null; access_token: string | null; token_expires_at: string | null }>(
-    `select threads_user_id, username, access_token, token_expires_at from threads_config where workspace_id=$1`, [ws]);
-}
-
-// дійсний токен (рефреш якщо лишилось < 7 днів до завершення 60-денного)
-async function thValidToken(ws: string): Promise<{ token: string; userId: string } | null> {
-  const c = await thConfig(ws);
-  if (!c?.access_token || !c.threads_user_id) return null;
-  const exp = c.token_expires_at ? new Date(c.token_expires_at).getTime() : 0;
-  if (exp && exp - Date.now() < 7 * 864e5) {
-    try {
-      const r = await threads.refreshToken(c.access_token);
-      const newExp = new Date(Date.now() + r.expires_in * 1000).toISOString();
-      await q(`update threads_config set access_token=$2, token_expires_at=$3, updated_at=now() where workspace_id=$1`, [ws, r.access_token, newExp]);
-      return { token: r.access_token, userId: c.threads_user_id };
-    } catch { /* рефреш не вдався - пробуємо наявним токеном */ }
-  }
-  return { token: c.access_token, userId: c.threads_user_id };
+// 👥 Акаунтів Threads у бренді може бути кілька (accounts.ts): основний + додаткові. Без userId -
+// основний, як і раніше.
+async function thValidToken(ws: string, userId?: string | null): Promise<{ token: string; userId: string } | null> {
+  const t = await threadsToken(ws, userId);
+  return t ? { token: t.token, userId: t.userId } : null;
 }
 
 app.get("/api/integrations/threads", async (req: any) => {
-  const c = await thConfig(req.user.workspace_id);
-  return { configured: !!env.threads.appId, hasToken: !!(c && c.access_token), username: c?.username ?? "", expiresAt: c?.token_expires_at ?? null };
+  const ws = req.user.workspace_id;
+  const accs = await threadsAccounts(ws);
+  const main = accs.find((a) => a.main);
+  return {
+    configured: !!env.threads.appId, hasToken: !!main, username: main?.username ?? "", expiresAt: main?.expiresAt ?? null,
+    accounts: await Promise.all(accs.map(async (a) => ({ ...a, posts: await postsUsingAccount(ws, [{ net: "threads", id: a.userId }]) }))),
+  };
 });
 
 app.get("/api/integrations/threads/connect", async (req: any, reply) => {
   if (!env.threads.appId) return reply.code(400).send({ error: "THREADS_APP_ID не заданий на сервері" });
   const state = auth.newToken();
   reply.setCookie("threads_state", state, stateCookie);
-  await logEvent("info", "threads", `connect redirect_uri=${THREADS_REDIRECT}`, { scopes: THREADS_SCOPES }, req.user.id);
+  // ?add=1 - ДОДАТИ ще один акаунт у бренд (основний не міняється); без нього - підключений акаунт
+  // стає основним, як кнопка «Підключити» робила завжди
+  if (String(req.query?.add ?? "") === "1") reply.setCookie("threads_add", "1", stateCookie); else reply.clearCookie("threads_add", { path: "/" });
+  await logEvent("info", "threads", `connect redirect_uri=${THREADS_REDIRECT}${String(req.query?.add ?? "") === "1" ? " (+акаунт)" : ""}`, { scopes: THREADS_SCOPES }, req.user.id);
   return reply.redirect(threads.authUrl(env.threads.appId, THREADS_REDIRECT, state, THREADS_SCOPES));
 });
 
@@ -2257,19 +2270,18 @@ app.get("/api/integrations/threads/callback", async (req: any, reply) => {
   if (oerr) { await logEvent("error", "threads", `Threads відмовив: ${oerr}`, { error: req.query?.error, code: req.query?.error_code }, req.user.id); return reply.redirect("/app?threads=error" + oauthFailQuery(oauthWhy(oerr, "provider"))); }
   if (!code) { await logEvent("error", "threads", "callback без code", { keys: Object.keys(req.query || {}) }, req.user.id); return reply.redirect("/app?threads=error" + oauthFailQuery(oauthWhy("", "provider"))); }
   if (!state || state !== req.cookies?.threads_state) { await logEvent("error", "threads", `state mismatch - cookie ${req.cookies?.threads_state ? "є але != state" : "ВІДСУТНІЙ"}`, null, req.user.id); return reply.redirect("/app?threads=error&why=session"); }
-  reply.clearCookie("threads_state", { path: "/" });
+  const addMode = req.cookies?.threads_add === "1";
+  reply.clearCookie("threads_state", { path: "/" }); reply.clearCookie("threads_add", { path: "/" });
   try {
     const short = await threads.exchangeCode(env.threads.appId, env.threads.appSecret, THREADS_REDIRECT, code);
     const long = await threads.exchangeLongLived(env.threads.appSecret, short.access_token);
     const me = await threads.getMe(long.access_token).catch(() => ({ id: short.user_id, username: "" }));
     const exp = new Date(Date.now() + long.expires_in * 1000).toISOString();
-    await q(`insert into threads_config(workspace_id, threads_user_id, username, access_token, token_expires_at, updated_at)
-             values($1,$2,$3,$4,$5,now())
-             on conflict (workspace_id) do update set threads_user_id=excluded.threads_user_id, username=excluded.username,
-               access_token=excluded.access_token, token_expires_at=excluded.token_expires_at, updated_at=now()`,
-      [req.user.workspace_id, me.id || short.user_id, me.username ?? "", long.access_token, exp]);
-    await logEvent("info", "threads", `підключено @${me.username || me.id}`, null, req.user.id);
-    return reply.redirect("/app?threads=ok");
+    const userId = String(me.id || short.user_id);
+    const how = await saveThreadsLogin(req.user.workspace_id, { userId, username: me.username ?? "", token: long.access_token, expiresAt: exp }, addMode ? "add" : "main");
+    const HOW: Record<string, string> = { new: "", refreshed: " (оновлено доступ)", added: " (додатковий акаунт)", main: " (тепер основний)" };
+    await logEvent("info", "threads", `підключено @${me.username || userId}${HOW[how] || ""}`, null, req.user.id);
+    return reply.redirect(`/app?threads=ok&acc=${encodeURIComponent(me.username || "")}&how=${how}`);
   } catch (e: any) {
     await logEvent("error", "threads", "OAuth callback: " + e.message, null, req.user.id);
     return reply.redirect("/app?threads=error" + oauthFailQuery(oauthWhy(e.message)));
@@ -2278,7 +2290,25 @@ app.get("/api/integrations/threads/callback", async (req: any, reply) => {
 
 app.post("/api/integrations/threads/disconnect", async (req: any) => {
   await q(`delete from threads_config where workspace_id=$1`, [req.user.workspace_id]);
+  await q(`delete from threads_account where workspace_id=$1`, [req.user.workspace_id]);
   return { ok: true };
+});
+
+// 👥 основний / прибрати один акаунт Threads (кілька акаунтів у бренді)
+app.post("/api/integrations/threads/accounts/main", async (req: any, reply) => {
+  const ws = req.user.workspace_id, id = String(req.body?.userId ?? "");
+  if (!(await setMainThreads(ws, id))) return reply.code(404).send({ error: "такого акаунта Threads у бренді нема" });
+  await logEvent("info", "threads", `основний акаунт: ${(await threadsAccounts(ws)).find((a) => a.main)?.username || id}`, null, req.user.id);
+  return { ok: true };
+});
+app.post("/api/integrations/threads/accounts/remove", async (req: any, reply) => {
+  const ws = req.user.workspace_id, id = String(req.body?.userId ?? "");
+  const acc = (await threadsAccounts(ws)).find((a) => a.userId === id);
+  if (!acc) return reply.code(404).send({ error: "такого акаунта Threads у бренді нема" });
+  const posts = await postsUsingAccount(ws, [{ net: "threads", id }]);
+  const r = await removeThreadsAccount(ws, id);
+  await logEvent("info", "threads", `прибрано @${acc.username || id}${r === "last" ? " (Threads відключено)" : ""}`, null, req.user.id);
+  return { ok: true, result: r, posts };
 });
 
 // ===================== LINKEDIN (автопостинг, 5-та мережа) =====================
@@ -2415,13 +2445,14 @@ app.post("/api/integrations/tiktok/disconnect", async (req: any) => {
 app.get("/api/posts/:postId/threads-insights", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
-  const pub = await one<{ media_id: string }>(
-    `select media_id from threads_publish where post_id=$1 and status='sent' and media_id is not null order by created_at desc limit 1`,
+  const pub = await one<{ media_id: string; account_id: string | null; account_name: string | null }>(
+    `select media_id, account_id, account_name from threads_publish where post_id=$1 and status='sent' and media_id is not null order by created_at desc limit 1`,
     [req.params.postId]);
   if (!pub?.media_id) return reply.code(400).send({ error: "Цей пост ще не опубліковано в Threads" });
-  const tok = await thValidToken(ws);
-  if (!tok) return reply.code(400).send({ error: "Threads не підключений" });
-  try { return await threads.mediaInsights(tok.token, pub.media_id); }
+  // статистику поста бачить лише акаунт, яким його опубліковано
+  const acc = await threadsAccountForRow(ws, pub);
+  if (!acc.ok) return reply.code(400).send({ error: acc.error });
+  try { return await threads.mediaInsights(acc.acc.token, pub.media_id); }
   catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
 
@@ -2454,6 +2485,12 @@ app.get("/api/integrations/meta", async (req: any) => {
     extras: Object.fromEntries(Object.entries(META_EXTRA).map(([k, perms]) =>
       [k, c?.granted == null ? null : perms.every((p) => c.granted!.split(",").includes(p))])),
     granted: c?.granted == null ? null : c.granted.split(",").filter(Boolean),
+    // 👥 Сторінки бренду (основна першою) - без токенів; posts - скільки ще не опублікованих постів
+    // обрали саме цю Сторінку чи її Instagram (попередити перед «прибрати»)
+    accounts: await Promise.all((await metaPages(req.user.workspace_id)).map(async (p) => ({
+      pageId: p.pageId, pageName: p.pageName, igUserId: p.igUserId, igUsername: p.igUsername, main: p.main,
+      posts: await postsUsingAccount(req.user.workspace_id, [{ net: "facebook", id: p.pageId }, ...(p.igUserId ? [{ net: "instagram" as const, id: p.igUserId }] : [])]),
+    }))),
   };
 });
 
@@ -2487,13 +2524,8 @@ app.get("/api/integrations/meta/callback", async (req: any, reply) => {
     const exp = long.expires_in ? new Date(Date.now() + long.expires_in * 1000).toISOString() : null;
     // які дозволи людина реально дала (могла зняти галочки) - щоб не смикати мережу даремно і казати правду
     const granted = await meta.grantedPermissions(long.access_token).then((g) => g.join(",")).catch(() => null);
-    await q(`insert into meta_config(workspace_id, user_token, page_id, page_name, page_token, ig_user_id, ig_username, token_expires_at, granted, updated_at)
-             values($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
-             on conflict (workspace_id) do update set user_token=excluded.user_token, page_id=excluded.page_id, page_name=excluded.page_name,
-               page_token=excluded.page_token, ig_user_id=excluded.ig_user_id, ig_username=excluded.ig_username,
-               token_expires_at=excluded.token_expires_at, granted=excluded.granted, updated_at=now()`,
-      [req.user.workspace_id, long.access_token, page.id, page.name, page.access_token,
-       page.instagram_business_account?.id ?? null, page.instagram_business_account?.username ?? null, exp, granted]);
+    // основна Сторінка + свіжі токени додаткових (кілька Сторінок у бренді - accounts.ts)
+    await saveMetaLogin(req.user.workspace_id, { userToken: long.access_token, expiresAt: exp, granted }, page, pages);
     // щойно дали статистику Facebook - дописи, яким бракувало переглядів, перепитуємо на найближчому
     // проході (і кнопкою «Оновити статистику» одразу), а не чекаємо тижневого повтору після відмов
     if (granted && granted.split(",").includes("read_insights"))
@@ -2510,6 +2542,7 @@ app.get("/api/integrations/meta/callback", async (req: any, reply) => {
 
 app.post("/api/integrations/meta/disconnect", async (req: any) => {
   await q(`delete from meta_config where workspace_id=$1`, [req.user.workspace_id]);
+  await q(`delete from meta_page where workspace_id=$1`, [req.user.workspace_id]);
   return { ok: true };
 });
 
@@ -2541,13 +2574,14 @@ app.post("/api/integrations/meta/import-voice", async (req: any, reply) => {
 app.get("/api/posts/:postId/facebook-insights", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
-  const pub = await one<{ external_id: string }>(
-    `select external_id from meta_publish where post_id=$1 and channel='facebook' and status='sent' and external_id is not null order by created_at desc limit 1`,
+  const pub = await one<{ external_id: string; account_id: string | null; account_name: string | null }>(
+    `select external_id, account_id, account_name from meta_publish where post_id=$1 and channel='facebook' and status='sent' and external_id is not null order by created_at desc limit 1`,
     [req.params.postId]);
   if (!pub?.external_id) return reply.code(400).send({ error: "Цей пост ще не опубліковано у Facebook" });
-  const c = await metaCfg(ws);
-  if (!c?.page_token) return reply.code(400).send({ error: "Facebook не підключений" });
-  try { return await meta.postInsights(pub.external_id, c.page_token); }
+  // статистику віддає лише та Сторінка, з якої пост вийшов
+  const acc = await metaAccountForRow(ws, "facebook", pub);
+  if (!acc.ok) return reply.code(400).send({ error: acc.error });
+  try { return await meta.postInsights(pub.external_id, acc.acc.pageToken); }
   catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
 
@@ -2559,32 +2593,78 @@ app.get("/api/integrations/meta/stats", async (req: any, reply) => {
   try { if (c.page_id) out.facebook = await meta.pageStats(c.page_id, c.page_token); } catch (e: any) { out.facebookError = e.message; }
   try { if (c.ig_user_id) out.instagram = await meta.igStats(c.ig_user_id, c.page_token); } catch (e: any) { out.instagramError = e.message; }
   try { if (c.ig_user_id) out.instagramInsights = await meta.igInsights(c.ig_user_id, c.page_token); } catch (e: any) { out.instagramInsightsError = e.message; }
+  // 👥 додаткові Сторінки бренду - теж (підписники кожної окремо)
+  out.extra = [];
+  for (const p of (await metaPages(req.user.workspace_id)).filter((x) => !x.main)) {
+    const e: any = { pageName: p.pageName };
+    try { e.facebook = await meta.pageStats(p.pageId, p.pageToken); } catch (err: any) { e.facebookError = err.message; }
+    try { if (p.igUserId) e.instagram = await meta.igStats(p.igUserId, p.pageToken); } catch (err: any) { e.instagramError = err.message; }
+    out.extra.push(e);
+  }
   return out;
 });
 
-// список доступних FB-Сторінок (+ їх IG) для вибору акаунта
+// список доступних FB-Сторінок (+ їх IG): усе, що Meta віддала за входом людини. current - основна
+// Сторінка бренду, added - уже в бренді (основна чи додаткова)
 app.get("/api/integrations/meta/pages", async (req: any, reply) => {
-  const c = await one<{ user_token: string | null; page_id: string | null }>(`select user_token, page_id from meta_config where workspace_id=$1`, [req.user.workspace_id]);
+  const ws = req.user.workspace_id;
+  const c = await one<{ user_token: string | null; page_id: string | null }>(`select user_token, page_id from meta_config where workspace_id=$1`, [ws]);
   if (!c?.user_token) return reply.code(400).send({ error: "Meta не підключений" });
   try {
-    const pages = await meta.getPages(c.user_token);
-    return pages.map((p) => ({ id: p.id, name: p.name, ig: p.instagram_business_account?.username || null, current: p.id === c.page_id }));
+    const [pages, mine] = await Promise.all([meta.getPages(c.user_token), metaPages(ws)]);
+    const added = new Set(mine.map((p) => p.pageId));
+    return pages.map((p) => ({ id: p.id, name: p.name, ig: p.instagram_business_account?.username || null, current: p.id === c.page_id, added: added.has(p.id) }));
   } catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
 
-// обрати конкретну сторінку (та її IG) як активну
+// Сторінка зі свіжого списку Meta (з токеном) - для додавання й вибору основної
+async function metaPageFromLogin(ws: string, pageId: string): Promise<meta.FbPage | null | "nologin"> {
+  const c = await one<{ user_token: string | null }>(`select user_token from meta_config where workspace_id=$1`, [ws]);
+  if (!c?.user_token) return "nologin";
+  const pages = await meta.getPages(c.user_token).catch(() => [] as meta.FbPage[]);
+  return pages.find((p) => p.id === pageId) || null;
+}
+
+// обрати конкретну сторінку (та її IG) як ОСНОВНУ. Колишня основна лишається в бренді, якщо з неї вже
+// публікували або Сторінок у бренді кілька (accounts.ts) - інакше її постам не було б чим коментувати
 app.post("/api/integrations/meta/select", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   const pageId = String(req.body?.pageId ?? "");
-  const c = await one<{ user_token: string | null }>(`select user_token from meta_config where workspace_id=$1`, [ws]);
-  if (!c?.user_token) return reply.code(400).send({ error: "Meta не підключений" });
-  const pages = await meta.getPages(c.user_token).catch(() => [] as any[]);
-  const page = pages.find((p) => p.id === pageId);
-  if (!page) return reply.code(404).send({ error: "сторінку не знайдено" });
-  await q(`update meta_config set page_id=$2, page_name=$3, page_token=$4, ig_user_id=$5, ig_username=$6, updated_at=now() where workspace_id=$1`,
-    [ws, page.id, page.name, page.access_token, page.instagram_business_account?.id ?? null, page.instagram_business_account?.username ?? null]);
-  await logEvent("info", "meta", `обрано сторінку «${page.name}»`, null, req.user.id);
+  const page = await metaPageFromLogin(ws, pageId);
+  if (page === "nologin") return reply.code(400).send({ error: "Meta не підключений" });
+  const known = (await metaPages(ws)).find((p) => p.pageId === pageId);
+  if (!page && !known) return reply.code(404).send({ error: "сторінку не знайдено" });
+  await setMainPage(ws, pageId, page);
+  await logEvent("info", "meta", `обрано сторінку «${page?.name || known?.pageName || pageId}»`, null, req.user.id);
   return { ok: true };
+});
+
+// 👥 додати Сторінку до бренду (кілька Сторінок: особиста й компанії) / основна / прибрати
+app.post("/api/integrations/meta/accounts", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const page = await metaPageFromLogin(ws, String(req.body?.pageId ?? ""));
+  if (page === "nologin") return reply.code(400).send({ error: "Meta не підключений" });
+  if (!page) return reply.code(404).send({ error: "Цієї Сторінки нема в доступі застосунку. Натисни «＋ Ще Сторінка» і в вікні Meta відміть її галочкою." });
+  const r = await addMetaPage(ws, page);
+  await logEvent("info", "meta", `додано сторінку «${page.name}»${page.instagram_business_account ? ` + IG @${page.instagram_business_account.username || ""}` : ""}`, null, req.user.id);
+  return { ok: true, result: r };
+});
+app.post("/api/integrations/meta/accounts/main", async (req: any, reply) => {
+  const ws = req.user.workspace_id, id = String(req.body?.pageId ?? "");
+  const known = (await metaPages(ws)).find((p) => p.pageId === id);
+  if (!known) return reply.code(404).send({ error: "такої Сторінки в бренді нема" });
+  await setMainPage(ws, id, null);
+  await logEvent("info", "meta", `основна сторінка: «${known.pageName}»`, null, req.user.id);
+  return { ok: true };
+});
+app.post("/api/integrations/meta/accounts/remove", async (req: any, reply) => {
+  const ws = req.user.workspace_id, id = String(req.body?.pageId ?? "");
+  const known = (await metaPages(ws)).find((p) => p.pageId === id);
+  if (!known) return reply.code(404).send({ error: "такої Сторінки в бренді нема" });
+  const posts = await postsUsingAccount(ws, [{ net: "facebook", id }, ...(known.igUserId ? [{ net: "instagram" as const, id: known.igUserId }] : [])]);
+  const r = await removeMetaPage(ws, id);
+  await logEvent("info", "meta", `прибрано сторінку «${known.pageName}»${r === "last" ? " (Meta відключено)" : ""}`, null, req.user.id);
+  return { ok: true, result: r, posts };
 });
 
 // ===================== POST-ЮНІТИ (банк публікацій) =====================

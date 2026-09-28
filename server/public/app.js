@@ -1023,38 +1023,40 @@ function tableColumns(series){
 // ---- підписники: окрема мініатюра на мережу (масштаби різні - одна вісь сплющила б малі) ----
 function chartFollowers(host,followers){
   host.textContent='';
-  const nets=AN_NETS.filter(n=>followers&&followers[n]);
+  // 👥 ключ - мережа або «мережа:акаунт» (кілька акаунтів однієї мережі - у кожного своя картка)
+  const nets=Object.keys(followers||{}).filter(k=>AN_NETS.includes((followers[k]&&followers[k].net)||k.split(':')[0]))
+    .sort((x,y)=>AN_NETS.indexOf((followers[x].net)||x.split(':')[0])-AN_NETS.indexOf((followers[y].net)||y.split(':')[0]));
   if(!nets.length){ host.innerHTML='<div class="empty">Знімків підписників ще нема. Перший зʼявиться з найближчим збором статистики (раз на 6 годин) - або натисни «↻ Оновити статистику».</div>'; return; }
   const grid=document.createElement('div'); grid.className='vz-facets'; host.appendChild(grid);
   const cards=[];
-  nets.forEach(n=>{ const f=followers[n];
+  nets.forEach(key=>{ const f=followers[key], n=f.net||key.split(':')[0];
     const card=document.createElement('div'); card.className='vz-facet'; grid.appendChild(card);
-    const fnm=document.createElement('div'); fnm.className='fn'; const lk=document.createElement('i'); lk.className='vz-lk'; lk.style.background='var(--viz-'+n+')'; fnm.appendChild(lk); fnm.appendChild(document.createTextNode(AN_LABEL[n])); card.appendChild(fnm);
+    const fnm=document.createElement('div'); fnm.className='fn'; const lk=document.createElement('i'); lk.className='vz-lk'; lk.style.background='var(--viz-'+n+')'; fnm.appendChild(lk); fnm.appendChild(document.createTextNode(AN_LABEL[n]+(f.label?' '+f.label:''))); card.appendChild(fnm);
     const fv=document.createElement('div'); fv.className='fv'; fv.textContent=fmtN(f.now); card.appendChild(fv);
     const fh=document.createElement('div'); fh.className='fh';
     if(f.delta!=null){ const d=document.createElement('span'); d.className=f.delta>0?'vz-up':f.delta<0?'vz-down':'vz-dz'; d.style.fontWeight='700';
       d.textContent=(f.delta>0?'▲ +':f.delta<0?'▼ ':'')+fmtN(f.delta); fh.appendChild(d); fh.appendChild(document.createTextNode(' з '+fmtDay(f.since))); }
     else fh.textContent='перший знімок - зміну покаже з наступних днів';
     card.appendChild(fh);
-    cards.push([n,f,card]); });
+    cards.push([n,f,card,AN_LABEL[n]+(f.label?' '+f.label:'')]); });
   // ширину міряємо, коли в сітці вже ВСІ картки: одна картка в auto-fill займала б увесь рядок
-  cards.forEach(([n,f,card])=>{
+  cards.forEach(([n,f,card,lab])=>{
     const pts=f.points||[];
     if(pts.length<2) return;
     const W=Math.max(120,card.clientWidth-26), H=58, pad=6;
     const vals=pts.map(p=>p.n); let lo=Math.min(...vals), hi=Math.max(...vals); if(lo===hi){ lo-=1; hi+=1; }
     const X=(i)=>pad+(W-2*pad)*(pts.length===1?0.5:i/(pts.length-1)), Y=(v)=>pad+(H-2*pad)*(1-(v-lo)/(hi-lo));
-    const svg=sv('svg',{width:W,height:H,viewBox:'0 0 '+W+' '+H,role:'img','aria-label':'Підписники '+AN_LABEL[n]+': від '+fmtN(pts[0].n)+' до '+fmtN(pts[pts.length-1].n)},card);
+    const svg=sv('svg',{width:W,height:H,viewBox:'0 0 '+W+' '+H,role:'img','aria-label':'Підписники '+lab+': від '+fmtN(pts[0].n)+' до '+fmtN(pts[pts.length-1].n)},card);
     svg.style.marginTop='6px';
     sv('path',{d:pts.map((p,i)=>(i?'L':'M')+X(i).toFixed(1)+','+Y(p.n).toFixed(1)).join(''),style:'fill:none;stroke:var(--viz-'+n+');stroke-width:2;stroke-linejoin:round;stroke-linecap:round'},svg);
     const last=pts.length-1;
     sv('circle',{cx:X(last),cy:Y(pts[last].n),r:4,style:'fill:var(--viz-'+n+');stroke:var(--surface);stroke-width:2'},svg);
     const cross=sv('line',{x1:0,x2:0,y1:0,y2:H,class:'vz-base',style:'display:none'},svg);
     const dot=sv('circle',{r:4,style:'display:none;fill:var(--viz-'+n+');stroke:var(--surface);stroke-width:2'},svg);
-    const hit=sv('rect',{x:0,y:0,width:W,height:H,class:'vz-hit',tabindex:'0','aria-label':'Підписники '+AN_LABEL[n]+' по днях'},svg);
+    const hit=sv('rect',{x:0,y:0,width:W,height:H,class:'vz-hit',tabindex:'0','aria-label':'Підписники '+lab+' по днях'},svg);
     const at=(e)=>{ let i=last; if(e&&e.type!=='focus'&&e.clientX!=null){ const b=svg.getBoundingClientRect(); const rel=(e.clientX-b.left-pad)/(W-2*pad); i=Math.max(0,Math.min(last,Math.round(rel*last))); }
       cross.setAttribute('x1',X(i)); cross.setAttribute('x2',X(i)); cross.style.display=''; dot.setAttribute('cx',X(i)); dot.setAttribute('cy',Y(pts[i].n)); dot.style.display='';
-      showTip(e,hit,fmtDay(pts[i].day),[{value:fmtN(pts[i].n),name:'підписників '+AN_LABEL[n],color:'var(--viz-'+n+')'}]); };
+      showTip(e,hit,fmtDay(pts[i].day),[{value:fmtN(pts[i].n),name:'підписників '+lab,color:'var(--viz-'+n+')'}]); };
     tipOn(hit,at); hit.addEventListener('pointerleave',()=>{ cross.style.display='none'; dot.style.display='none'; }); hit.addEventListener('blur',()=>{ cross.style.display='none'; dot.style.display='none'; });
   });
 }
@@ -1121,6 +1123,8 @@ function anSorted(){
     if(x==null&&y==null) return 0; if(x==null) return 1; if(y==null) return -1; // «невідомо» завжди внизу
     return (x<y?-1:x>y?1:0)*dir; });
 }
+// 👥 у мережі кілька акаунтів - біля поста пишемо, яким він вийшов
+const anMulti=(net)=>!!(AnData&&(AnData.accounts||[]).some(x=>x.net===net));
 function renderAnTable(){
   const box=$('anTbl'); if(!box||!AnData) return;
   const rows=anSorted(), shown=rows.slice(0,AnShown);
@@ -1135,7 +1139,7 @@ function renderAnTable(){
   box.innerHTML='<div style="overflow-x:auto"><table class="an-tbl"><tr>'+COLS.map(c=>{ const on=AnSort.key===c[0];
       return '<th aria-sort="'+(on?(AnSort.dir>0?'ascending':'descending'):'none')+'"><button class="'+(on?'on':'')+'" data-k="'+c[0]+'">'+c[1]+(on?(AnSort.dir>0?' ↑':' ↓'):'')+'</button></th>'; }).join('')+'</tr>'
     +shown.map(p=>'<tr><td><button class="pt" data-id="'+esc(p.post_id)+'" title="Відкрити пост">'+esc(p.title||'(без тексту)')+'</button>'
-      +'<div class="pm">'+(AN_ICON[p.net]||'')+' '+esc(AN_LABEL[p.net]||p.net)+' · '+esc(new Date(p.created_at).toLocaleString('uk-UA',{timeZone:TZ,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+' · '+esc(AN_MEDIA[p.media]||p.media)
+      +'<div class="pm">'+(AN_ICON[p.net]||'')+' '+esc(AN_LABEL[p.net]||p.net)+(anMulti(p.net)&&p.account_name?' '+esc(p.account_name):'')+' · '+esc(new Date(p.created_at).toLocaleString('uk-UA',{timeZone:TZ,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+' · '+esc(AN_MEDIA[p.media]||p.media)
       +(p.permalink?' · <a href="'+esc(p.permalink)+'" target="_blank" rel="noopener" title="Відкрити в мережі" style="color:var(--brand);text-decoration:none;font-weight:700">↗</a>':'')+'</div></td>'
       +COLS.slice(1).map(c=>cell(p,c[0])).join('')+'</tr>').join('')+'</table></div>'
     +(rows.length>shown.length?'<button class="ghost" id="anMore" style="margin-top:10px">Показати ще ('+(rows.length-shown.length)+')</button>':'');
@@ -1148,7 +1152,7 @@ function anCsv(){
   const q=(s)=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"', dec=(v,d)=>v==null?'':String(Math.round(v*Math.pow(10,d))/Math.pow(10,d)).replace('.',',');
   const head=['Дата','Мережа','Пост','Тип','Перегляди','Охоплення','Лайки','Коментарі','Поширення','Збереження','Підписались','ER %','×Норма','Посилання'];
   const lines=[head.map(q).join(';')].concat(anSorted().map(p=>[
-    new Date(p.created_at).toLocaleString('uk-UA',{timeZone:TZ}), AN_LABEL[p.net]||p.net, p.title, AN_MEDIA[p.media]||p.media,
+    new Date(p.created_at).toLocaleString('uk-UA',{timeZone:TZ}), (AN_LABEL[p.net]||p.net)+(anMulti(p.net)&&p.account_name?' '+p.account_name:''), p.title, AN_MEDIA[p.media]||p.media,
     p.views??'', p.reach??'', p.likes??'', p.replies??'', p.shares??'', p.saves??'', p.follows??'', p.er==null?'':dec(p.er*100,2), dec(p.mult,2), p.permalink||'',
   ].map((v,i)=>i===2||i===0||i===13||i===1||i===3?q(v):v).join(';')));
   const blob=new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'}); // BOM - щоб Excel прочитав кирилицю
@@ -1212,11 +1216,15 @@ async function loadAnalytics(){
   try{ a=await api('/analytics/posts?days='+AnState.days+'&net='+encodeURIComponent(AnState.net)); }catch(e){ err=e.message; }
   box.style.opacity='';
   if(!a){ box.innerHTML='<div class="empty">Не вдалося завантажити аналітику: '+esc(err)+'</div>'; return; }
+  // збережений фільтр по акаунту, якого вже нема (прибрали з бренду) - назад до «Усі мережі»
+  if(String(a.net).includes(':')&&!(a.accounts||[]).some(x=>x.key===a.net)){ AnState.net='all'; try{ localStorage.setItem('kg_an',JSON.stringify(AnState)); }catch(e){ /* ignore */ } return loadAnalytics(); }
   AnData=a; AnShown=30;
   // повільні панелі (Threads, витрати) довантажуються окремо - до того тримаємо їхній попередній
   // вигляд, а не порожнє місце, що стрибає під курсором
   const prevTh=$('thAnPanel'), prevThHtml=prevTh&&prevTh.style.display!=='none'?prevTh.innerHTML:'', prevSpend=($('anSpend')||{}).innerHTML||'';
-  const netOpts=[['all','Усі мережі']].concat(['threads','instagram','facebook','telegram','linkedin'].map(n=>[n,(AN_ICON[n]||'')+' '+AN_LABEL[n]]));
+  // 👥 кілька акаунтів однієї мережі - під мережею ще й кожен акаунт окремо
+  const netOpts=[['all','Усі мережі']].concat(...['threads','instagram','facebook','telegram','linkedin'].map(n=>[[n,(AN_ICON[n]||'')+' '+AN_LABEL[n]+((a.accounts||[]).some(x=>x.net===n)?' (усі акаунти)':'')]]
+    .concat((a.accounts||[]).filter(x=>x.net===n).map(x=>[x.key,'\u00a0\u00a0\u00a0· '+x.name]))));
   const ins=(a.insights||[]);
   box.innerHTML='<div class="viz">'
     +'<div class="anbar"><div class="anseg" role="group" aria-label="Період">'+AN_PERIODS.map(p=>'<button data-d="'+p[0]+'" class="'+(p[0]===a.days?'on':'')+'" aria-pressed="'+(p[0]===a.days)+'">'+p[1]+'</button>').join('')+'</div>'
@@ -1642,7 +1650,7 @@ async function openThreadsComments(btn){ const b=btn||null; if(b) b.disabled=tru
       +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:16px">💬 Коментарі під твоїми постами</b><button class="icon" id="tcmX" style="margin-left:auto">✕</button></div>'
       +'<div class="hint" style="margin-bottom:10px">Відповідь автора повертає людину в гілку і розганяє пост («відповідай більше, ніж постиш»). Драфт можна правити перед відправкою.</div>'
       +(items.length?items.map((it,i)=>'<div class="card" style="margin-bottom:10px;padding:12px 14px" data-ci="'+i+'">'
-        +'<div style="font-size:11px;color:var(--faint);margin-bottom:4px">під постом: '+esc(it.postTitle||'')+'</div>'
+        +'<div style="font-size:11px;color:var(--faint);margin-bottom:4px">під постом'+(it.accountName?' @'+esc(it.accountName):'')+': '+esc(it.postTitle||'')+'</div>'
         +'<div style="font-size:13px;line-height:1.5"><b>@'+esc(it.username)+':</b> '+esc(it.comment)+'</div>'
         +'<textarea class="txt tcmTxt" rows="2" style="margin-top:8px;font-size:13px">'+esc(it.draft||'')+'</textarea>'
         +'<div class="btnrow" style="margin-top:6px"><button class="primary tcmSend" style="padding:6px 12px;font-size:12.5px">↩ Відповісти</button><span class="tcmMsg" style="font-size:12px;color:var(--muted)"></span></div>'
@@ -1653,7 +1661,7 @@ async function openThreadsComments(btn){ const b=btn||null; if(b) b.disabled=tru
     ov.querySelectorAll('[data-ci]').forEach(card=>{ const it=items[+card.dataset.ci];
       card.querySelector('.tcmSend').onclick=async(ev)=>{ const sb=ev.target, m=card.querySelector('.tcmMsg'); const text=card.querySelector('.tcmTxt').value.trim();
         if(!text){ m.textContent='порожньо'; return; } sb.disabled=true; m.textContent='надсилаю…';
-        try{ await api('/threads/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({commentId:it.commentId,text})});
+        try{ await api('/threads/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({commentId:it.commentId,text,account:it.account||''})});
           m.style.color='var(--brand)'; m.textContent='✓ відповідь у гілці'; card.style.opacity='.55'; }
         catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; sb.disabled=false; } }; });
   }catch(e){ flash('⚠ '+e.message); } finally{ if(b) b.disabled=false; aiDone(); } }
@@ -1829,7 +1837,13 @@ async function storytellingCheck(id){ aiBusy('📖 Оцінюю пост як і
     try{ await api('/posts/'+id+'/regenerate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instruction})}); await loadStudioPosts(); flash('Історію підсилено ✓'); }
     catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } }; }
 async function loadChanStatus(){ try{ ChanStatus=await api('/channels/status'); }catch(e){ ChanStatus={}; } }
-function chanDots(ch){ if(!ch) return ''; return NETS.filter(n=>ch[n[0]]&&ch[n[0]].on).map(n=>'<span class="cdot" title="'+n[1]+'" style="background:var('+NETVAR[n[0]]+')"><svg width="11" height="11" viewBox="0 0 24 24" fill="#fff"><path d="'+NETICON[n[0]]+'"></path></svg></span>').join(''); }
+// 👥 мережа з кількома акаунтами в бренді: яким акаунтом піде пост (обраний у пості або основний)
+function chanAcc(ch,k){ const l=((ChanStatus.accounts||{})[k])||[]; if(l.length<2) return null; const id=ch&&ch[k]&&ch[k].account;
+  const a=id?l.find(x=>x.id===id):(l.find(x=>x.main)||l[0]); return a?a.name:(id?'⚠ акаунт прибрано':null); }
+function chanDots(ch){ if(!ch) return ''; const on=NETS.filter(n=>ch[n[0]]&&ch[n[0]].on);
+  const accs=[...new Set(on.map(n=>chanAcc(ch,n[0])).filter(Boolean))];
+  return on.map(n=>{ const acc=chanAcc(ch,n[0]); return '<span class="cdot" title="'+esc(n[1]+(acc?' · '+acc:''))+'" style="background:var('+NETVAR[n[0]]+')"><svg width="11" height="11" viewBox="0 0 24 24" fill="#fff"><path d="'+NETICON[n[0]]+'"></path></svg></span>'; }).join('')
+    +(accs.length?'<span style="font-size:11px;color:var(--muted);margin-left:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px;display:inline-block;vertical-align:middle">'+esc(accs.join(', '))+'</span>':''); }
 function chanIcons(ch){ if(!ch) return ''; const I={telegram:'✈️',instagram:'📸',facebook:'📘',threads:'🧵',linkedin:'💼'}; return Object.keys(I).filter(k=>ch[k]&&ch[k].on).map(k=>I[k]).join(''); }
 // мережі, куди пост УЖЕ опубліковано: ті самі кольорові кружечки + ✓ (youtube/tiktok - для рілсів)
 // іконки мереж, куди пост поїхав. links[мережа] (з /posts/studio) робить іконку ПОСИЛАННЯМ на
@@ -2270,6 +2284,7 @@ async function openComposer(postId, opts){
   let full; try{ full=await api('/posts/'+postId+'/full'); }catch(e){ flash('Не вдалося відкрити: '+e.message); if(/^#\/post\//.test(location.hash)) location.hash=_routeBack; return; }
   let ps={sent:[],links:{}}; try{ ps=await api('/posts/'+postId+'/publish-state'); }catch(e){}
   let sentLinks=ps.links||{}; // 🔗 мережа → URL живого поста (щоб одразу перескочити й глянути)
+  let sentAccs=ps.accounts||{}; // 👥 мережа → яким акаунтом пост уже вийшов
   const sentSet=new Set(ps.sent||[]);
   const C=JSON.parse(JSON.stringify(full.channels||{}));
   // якщо жодна мережа не обрана - вмикаємо всі підключені й ще не надіслані
@@ -2292,6 +2307,7 @@ async function openComposer(postId, opts){
     +'<div class="cmp-body">'
       +'<div class="cmp-left">'
         +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Канали</div><div id="cmpChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>'
+        +'<div id="cmpAccs"></div>'
         +'<div id="cmpThreadWrap" style="display:none;margin:0 0 12px;padding:9px 11px;border:1px dashed var(--line);border-radius:10px">'
           +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
             +'<button class="netchip" id="cmpThread" title="Опублікувати серією повʼязаних постів: перший = гачок, далі відповіді автора">🧵 Гілкою</button>'
@@ -2380,6 +2396,23 @@ async function openComposer(postId, opts){
     }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); }
     finally{ if(btn) btn.disabled=false; aiDone(); }
   }
+  // 👥 кілька акаунтів однієї мережі в бренді (особистий і компанії): обрати, яким піде пост.
+  // Без вибору - основний (так і було). Обраний, але вже прибраний із бренду - червоним.
+  const ACC_NETS=['facebook','instagram','threads'];
+  const accList=(k)=>((ChanStatus.accounts||{})[k])||[];
+  const accMain=(k)=>{ const l=accList(k); return l.find(a=>a.main)||l[0]||null; };
+  const accOf=(k)=>{ const id=C[k]&&C[k].account; if(!id) return accMain(k); return accList(k).find(a=>a.id===id)||{id,name:'⚠ акаунт прибрано з бренду',gone:true}; };
+  // як підписати акаунт у прев'ю (без @, як у самих мережах)
+  function pvUser(k){ if(sentSet.has(k)&&sentAccs[k]) return String(sentAccs[k]).replace(/^@/,''); if(!ACC_NETS.includes(k)) return 'ваш_профіль'; const a=accOf(k); return a&&!a.gone?String(a.name).replace(/^@/,''):'ваш_профіль'; }
+  function renderAccs(){ const box=ov.querySelector('#cmpAccs'); if(!box) return;
+    const nets=ACC_NETS.filter(k=>C[k]&&C[k].on&&(accList(k).length>1||(C[k].account&&accOf(k).gone)));
+    box.style.display=nets.length?'':'none';
+    box.innerHTML=nets.map(k=>{ const lab=netName(k);
+      if(sentSet.has(k)) return '<label>'+esc(lab)+': <b style="color:var(--ink)">✓ '+esc(sentAccs[k]||'опубліковано')+'</b></label>';
+      const cur=accOf(k); const opts=accList(k).map(a=>'<option value="'+esc(a.id)+'"'+(cur&&cur.id===a.id?' selected':'')+'>'+esc(a.name)+(a.main?' (основн'+(k==='facebook'?'а':'ий')+')':'')+'</option>').join('');
+      return '<label title="Яким акаунтом '+esc(lab)+' опублікувати цей пост">'+esc(lab)+': <select data-acc="'+k+'"'+(cur&&cur.gone?' class="bad"':'')+'>'+(cur&&cur.gone?'<option value="'+esc(cur.id)+'" selected>'+esc(cur.name)+'</option>':'')+opts+'</select></label>'; }).join('');
+    box.querySelectorAll('[data-acc]').forEach(sel=>sel.onchange=()=>{ const k=sel.dataset.acc, m=accMain(k); C[k]=C[k]||{text:''};
+      if(m&&sel.value===m.id) delete C[k].account; else C[k].account=sel.value; renderAccs(); renderPrev(); }); }
   function renderChips(){ const box=ov.querySelector('#cmpChips'); const thOn=!!(C.threads&&C.threads.on&&C.threads.thread);
     box.innerHTML=NETS.map(n=>{ const k=n[0]; const on=C[k]&&C[k].on; const conn=ChanStatus[k]; const sent=sentSet.has(k);
       const storyOff=isStory()&&!STORY_NETS.includes(k); // сторіс - лише Instagram і Facebook
@@ -2411,7 +2444,8 @@ async function openComposer(postId, opts){
         if(C.threads.thread){ thSnap=NETS.map(n=>n[0]).filter(k=>k!=='threads'&&C[k]&&C[k].on); thSnap.forEach(k=>{ C[k].on=false; }); }
         else if(thSnap){ thSnap.forEach(k=>{ if(C[k]&&!sentSet.has(k)) C[k].on=true; }); thSnap=null; }
         renderChips(); renderPrev(); };
-      nb.onclick=()=>{ C.threads.number=C.threads.number===false?true:false; renderChips(); renderPrev(); }; } }
+      nb.onclick=()=>{ C.threads.number=C.threads.number===false?true:false; renderChips(); renderPrev(); }; }
+    renderAccs(); }
   // ----- медіа (ліва панель) -----
   // 🖼 смужка кадрів: обкладинка першою, ✕ прибрати, ‹ › переставити, «＋» додати ще
   function setMedia(list){ media=(list||[]).filter(m=>m&&m.filename); mediaFilename=media.length?media[0].filename:null; }
@@ -2506,10 +2540,11 @@ async function openComposer(postId, opts){
     box.innerHTML=sel.map(n=>{ const k=n[0]; const t=textOf(k); const lim=NETLIM[k]||2200; const over=t.length>lim; const sent=sentSet.has(k);
       const img=pvMedia(k);
       const cnt=sent?'<span style="margin-left:auto;font-size:11px;font-weight:800;color:var(--brand)">✓</span>':'<span class="cmp-cnt" style="margin-left:auto;color:'+(over?'var(--danger)':'var(--faint)')+'">'+t.length+'/'+lim+'</span>';
-      const head='<div class="phone-h"><span class="phone-av">'+esc(av)+'</span><span class="phone-user">ваш_профіль</span>'+cnt+'</div>';
+      const who=pvUser(k); // 👥 акаунт, яким пост піде (кілька акаунтів однієї мережі)
+      const head='<div class="phone-h"><span class="phone-av">'+esc(av)+'</span><span class="phone-user">'+esc(who)+'</span>'+cnt+'</div>';
       const empty='<span style="color:var(--muted)">порожньо</span>';
       let body;
-      if(k==='instagram') body=(collabList().length?head.replace('ваш_профіль</span>','ваш_профіль <span style="font-weight:500;color:var(--muted)">і</span> '+esc(collabList()[0])+(collabList().length>1?' <span style="font-weight:500;color:var(--muted)">та ще '+(collabList().length-1)+'</span>':'')+'</span>'):head)+img+'<div class="ig-acts">♡ 💬 ↗<span class="sp"></span>🔖</div><div class="phone-b"><span class="phone-user">ваш_профіль</span> <span class="phone-txt" style="display:inline">'+(t?pvCap(k,t):empty)+'</span></div>';
+      if(k==='instagram') body=(collabList().length?head.replace(esc(who)+'</span>',esc(who)+' <span style="font-weight:500;color:var(--muted)">і</span> '+esc(collabList()[0])+(collabList().length>1?' <span style="font-weight:500;color:var(--muted)">та ще '+(collabList().length-1)+'</span>':'')+'</span>'):head)+img+'<div class="ig-acts">♡ 💬 ↗<span class="sp"></span>🔖</div><div class="phone-b"><span class="phone-user">'+esc(who)+'</span> <span class="phone-txt" style="display:inline">'+(t?pvCap(k,t):empty)+'</span></div>';
       else if(k==='telegram') body=head+img+'<div class="phone-b"><div class="phone-txt">'+(t?esc(t):empty)+'</div></div>'+((over&&mediaFilename)?'<div class="pv-note">довгий підпис Telegram надішле окремим повідомленням під '+(isVideo()?'відео':media.length>1?'альбомом':'фото')+'</div>':'');
       else if(k==='threads'&&C.threads&&C.threads.thread){
         // 🧵 прев'ю гілки як у Threads: аватар + вертикальна лінія + частини-відповіді
@@ -2518,7 +2553,7 @@ async function openComposer(postId, opts){
         body=head+'<div style="padding:10px 12px">'+parts.map((p,i)=>
           '<div style="display:flex;gap:8px">'
             +'<div style="display:flex;flex-direction:column;align-items:center;flex:none"><span class="phone-av" style="width:22px;height:22px;font-size:10px">'+esc(av)+'</span>'+(i<parts.length-1?'<span style="flex:1;width:2px;background:var(--line);margin:3px 0;border-radius:2px"></span>':'')+'</div>'
-            +'<div style="flex:1;min-width:0;padding-bottom:'+(i<parts.length-1?'12px':'0')+'"><div style="font-size:10.5px;color:var(--faint);font-weight:700">ваш_профіль'+(i?' · відповідь':'')+'</div><div class="phone-txt" style="margin-top:2px">'+(num&&i?('<b>'+(i+1)+'/</b> '):'')+esc(p)+'</div>'+(i===0&&mediaFilename?'<div style="margin-top:6px;border-radius:8px;overflow:hidden">'+pvMedia('threads')+'</div>':'')+'</div>'
+            +'<div style="flex:1;min-width:0;padding-bottom:'+(i<parts.length-1?'12px':'0')+'"><div style="font-size:10.5px;color:var(--faint);font-weight:700">'+esc(who)+(i?' · відповідь':'')+'</div><div class="phone-txt" style="margin-top:2px">'+(num&&i?('<b>'+(i+1)+'/</b> '):'')+esc(p)+'</div>'+(i===0&&mediaFilename?'<div style="margin-top:6px;border-radius:8px;overflow:hidden">'+pvMedia('threads')+'</div>':'')+'</div>'
           +'</div>').join('')+'</div>'
           +'<div class="pv-note">🧵 гілка: '+parts.length+' частин(и)'+(num?' з нумерацією 2/ 3/…':' без нумерації')+' - root-гачок + відповіді</div>';
       }
@@ -2567,7 +2602,7 @@ async function openComposer(postId, opts){
     if(!t&&!own&&!cs) return '';
     const lim=FC_MAX[k], st=fcStateHtml(cs);
     const bubble=t
-      ?'<div class="pv-fc"><span class="phone-av">'+esc(av)+'</span><div class="pv-fc-t"><b>ваш_профіль</b>'+(k==='threads'?' · відповідь':'')+'<br>'+esc(t)
+      ?'<div class="pv-fc"><span class="phone-av">'+esc(av)+'</span><div class="pv-fc-t"><b>'+esc(pvUser(k))+'</b>'+(k==='threads'?' · відповідь':'')+'<br>'+esc(t)
         +(t.length>lim?'<div style="color:var(--danger);font-size:10.5px">'+t.length+'/'+lim+' - задовгий для '+netName(k)+'</div>':'')
         +(st?'<div style="font-size:10.5px;margin-top:2px">💬 '+st+'</div>':'')+'</div></div>'
       :'<div class="pv-fc-off">💬 без першого коментаря в '+netName(k)+(st?' · '+st:'')+'</div>';
@@ -2722,7 +2757,7 @@ async function openComposer(postId, opts){
           missing.forEach(k=>{ const v=ra.channels&&ra.channels[k]; if(v&&v.text) C[k]={...(C[k]||{}),on:true,text:v.text}; }); renderPrev();
         } finally { aiDone(); } }
     }catch(_){ /* адаптація не критична - публікуємо майстер-текстом */ }
-    setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const res=await runPublish(postId,setMsg); const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); ok.forEach(k=>sentSet.add(k)); await refreshSentState(postId,sentSet,(l,st)=>{ sentLinks=l; if(st&&st.comments) cmStates=st.comments; renderChips(); renderPrev(); }); renderChips(); renderPrev();
+    setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const res=await runPublish(postId,setMsg); const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); ok.forEach(k=>sentSet.add(k)); await refreshSentState(postId,sentSet,(l,st)=>{ sentLinks=l; if(st&&st.comments) cmStates=st.comments; if(st&&st.accounts) sentAccs=st.accounts; renderChips(); renderPrev(); }); renderChips(); renderPrev();
       // 💬 перший коментар: окремий рядок - пост уже в мережі, навіть якщо коментар ні
       const cm=res.filter(x=>x.comment); const cmBad=cm.filter(x=>x.comment.status!=='sent');
       const cmTxt=cm.length?(' · 💬 '+cm.map(x=>x.channel+(x.comment.status==='sent'?' ✓':x.comment.status==='pending'?' ⏳':' ⚠')).join(', ')):'';
@@ -2731,7 +2766,7 @@ async function openComposer(postId, opts){
       if(cmStates.some(x=>x.status==='sending'||(x.status==='pending'&&!x.error))) pollComments(); if(ok.length&&!err.length) flash('Опубліковано ✓ Якщо пост залетить - 🔥 на картці дасть 5 кутів продовження'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)');
       // навіть при збої частина мереж могла пройти - перечитуємо ФАКТИЧНИЙ стан, щоб інтерфейс
       // не показував «не опубліковано» на пості, який уже вийшов
-      try{ await refreshSentState(postId,sentSet,(l,st)=>{ sentLinks=l; if(st&&st.comments) cmStates=st.comments; renderChips(); renderPrev(); }); }catch(_){ }
+      try{ await refreshSentState(postId,sentSet,(l,st)=>{ sentLinks=l; if(st&&st.comments) cmStates=st.comments; if(st&&st.accounts) sentAccs=st.accounts; renderChips(); renderPrev(); }); }catch(_){ }
     } finally{ b.disabled=false; aiDone(); } };
   ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ setMsg('вкажи дату й час','var(--danger)'); return; } const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('немає каналів для планування (усі вже опубліковано)','var(--danger)'); return; } if(!carGuard()) return; const b=e.target; b.disabled=true; setMsg('🗓 зберігаю…'); const at=zonedToUTCISO(d,t); try{ await saveDraft(); if(opts.slotId){ await scheduleApi('/schedule/'+opts.slotId,'PUT',{scheduledAt:at}); } else { await scheduleApi('/schedule','POST',{postId,scheduledAt:at}); } setMsg('заплановано ✓ ('+todo.join(', ')+')','var(--brand)'); try{await loadPublish();}catch(_){} try{await loadStudioPosts();}catch(_){} setTimeout(close,1000); }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); b.disabled=false; } };
 }
@@ -3253,27 +3288,43 @@ async function loadTelegram(){ try{ const c=await api('/integrations/telegram');
     +(c.formerBot?'<div class="hint">🔁 Канал підключено через попереднього бота <b>@'+esc(c.formerBot)+'</b> - він і далі публікує. Щоб перейти на <b>@'+esc(c.bot||'')+'</b>: натисни «Підключити наш бот», додай його адміном у канал і перешли йому будь-який пост.</div>':''); }catch(e){} }
 if($('tgConnectBot')) $('tgConnectBot').onclick=async()=>{ const m=$('tgConnMsg'); m.style.color='var(--muted)'; m.textContent='…'; try{ const r=await api('/integrations/telegram/connect-link',{method:'POST'}); const steps=$('tgBotSteps'); if(steps){ steps.style.display='block'; steps.innerHTML='1) Відкрий <a href="'+r.link+'" target="_blank"><b>@'+esc(r.bot)+'</b></a> → натисни <b>Start</b>.<br>2) Додай бота <b>адміном</b> у свій канал.<br>3) Перешли боту будь-який пост із каналу.<br>Потім онови цю сторінку - канал зʼявиться тут.'; } m.textContent=''; window.open(r.link,'_blank'); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
 async function loadThreads(){
-  try{ const c=await api('/integrations/threads'); const st=$('thStatus'), conn=$('thConnect'), dis=$('thDisconnect'); if(!st) return;
-    if(!c.configured){ st.textContent='🕓 Підключення Threads тимчасово недоступне.'; if(conn)conn.style.display='none'; if(dis)dis.style.display='none'; return; }
-    if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.username?(' як <b>@'+esc(c.username)+'</b>'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-flex'; if($('thStratBox'))$('thStratBox').style.display=''; }
-    else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-flex'; if(dis)dis.style.display='none'; if($('thStratBox'))$('thStratBox').style.display='none'; }
+  try{ const c=await api('/integrations/threads'); const st=$('thStatus'), conn=$('thConnect'), dis=$('thDisconnect'), add=$('thAdd'), box=$('thAccs'); if(!st) return;
+    if(!c.configured){ st.textContent='🕓 Підключення Threads тимчасово недоступне.'; [conn,dis,add,box].forEach(b=>b&&(b.style.display='none')); return; }
+    const accs=c.accounts||[];
+    if(c.hasToken){
+      st.innerHTML=accs.length>1?'✅ Підключено акаунтів: <b>'+accs.length+'</b> - пост іде основним, інший обираєш у композері':'✅ Підключено'+(c.username?(' як <b>@'+esc(c.username)+'</b>'):'');
+      if(conn)conn.style.display='none'; if(dis){ dis.style.display='inline-flex'; dis.textContent=accs.length>1?'Відключити всі':'Відключити'; } if(add)add.style.display='inline-flex'; if($('thStratBox'))$('thStratBox').style.display='';
+      // 👥 кілька акаунтів (особистий і компанії): список лише коли їх більше одного
+      if(box){ box.style.display=accs.length>1?'':'none';
+        box.innerHTML=accs.length>1?accs.map(a=>'<div class="acc-row"><span class="nm">@'+esc(a.username||a.userId)+'</span>'+(a.main?'<span class="tag">основний</span>':'')
+          +(a.posts?'<span class="sub">'+a.posts+' '+anPlural(a.posts,'пост чекає','пости чекають','постів чекають')+' на нього</span>':'')+'<span class="sp"></span>'
+          +(a.main?'':'<button class="ghost" data-thmain="'+esc(a.userId)+'" title="Нові пости без явного вибору підуть цим акаунтом">Зробити основним</button>')
+          +'<button class="ghost" data-thrm="'+esc(a.userId)+'" data-nm="'+esc(a.username||'')+'" data-n="'+(a.posts||0)+'">Прибрати</button></div>').join(''):'';
+        box.querySelectorAll('[data-thmain]').forEach(b=>b.onclick=async()=>{ b.disabled=true; try{ await api('/integrations/threads/accounts/main',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:b.dataset.thmain})}); flash('Основний акаунт Threads змінено ✓'); await loadThreads(); loadChanStatus(); }catch(e){ flash('⚠ '+e.message); b.disabled=false; } });
+        box.querySelectorAll('[data-thrm]').forEach(b=>b.onclick=async()=>{ const n=+b.dataset.n;
+          if(!confirm('Прибрати @'+b.dataset.nm+' з бренду?'+(n?'\n\n'+n+' '+anPlural(n,'пост обрав','пости обрали','постів обрали')+' саме цей акаунт - вони не вийдуть, поки не обереш у них інший.':'')+'\n\nКоментарі й статистика вже опублікованих ним постів теж зупиняться (їх бачить лише він).')) return;
+          try{ await api('/integrations/threads/accounts/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:b.dataset.thrm})}); await loadThreads(); loadChanStatus(); }catch(e){ flash('⚠ '+e.message); } }); }
+    }
+    else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-flex'; if(dis)dis.style.display='none'; if(add)add.style.display='none'; if(box)box.style.display='none'; if($('thStratBox'))$('thStratBox').style.display='none'; }
   }catch(e){}
 }
-$('thDisconnect').onclick=async()=>{ if(!confirm('Відключити Threads?')) return; try{ await api('/integrations/threads/disconnect',{method:'POST'}); await loadThreads(); }catch(e){} };
+$('thDisconnect').onclick=async()=>{ if(!confirm($('thDisconnect').textContent==='Відключити всі'?'Відключити всі акаунти Threads від бренду?':'Відключити Threads?')) return; try{ await api('/integrations/threads/disconnect',{method:'POST'}); await loadThreads(); }catch(e){} };
+if($('thAdd')) $('thAdd').onclick=()=>openThreadsConnect(true);
 // Threads не віддає списку акаунтів (на відміну від FB-сторінок): підключається той профіль,
 // під яким ти залогінений у threads.net. Тому перед OAuth - крок «який акаунт підключаємо».
-function openThreadsConnect(){
+// add=true - ДОДАТИ ще один акаунт у бренд (особистий і компанії), основний лишається як був.
+function openThreadsConnect(add){
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
   ov.innerHTML='<div class="modal-card" style="max-width:480px;padding:20px">'
-    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">🧵 Який Threads підключаємо?</b><button class="icon" id="tcX" style="margin-left:auto">✕</button></div>'
-    +'<div style="font-size:13px;color:var(--ink2);line-height:1.6">Підключиться акаунт, під яким ти <b>зараз залогінений у Threads</b> у цьому браузері. Якщо акаунтів кілька - спершу перемкнись на потрібний.</div>'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">🧵 '+(add?'Який акаунт Threads додаємо?':'Який Threads підключаємо?')+'</b><button class="icon" id="tcX" style="margin-left:auto">✕</button></div>'
+    +'<div style="font-size:13px;color:var(--ink2);line-height:1.6">Підключиться акаунт, під яким ти <b>зараз залогінений у Threads</b> у цьому браузері. '+(add?'Щоб додати інший (наприклад, акаунт компанії поруч з особистим), спершу перемкнись у Threads на нього.':'Якщо акаунтів кілька - спершу перемкнись на потрібний.')+'</div>'
     +'<div class="btnrow" style="margin-top:14px;flex-wrap:wrap">'
     +'<a class="btn ghost" href="https://www.threads.net/settings" target="_blank" rel="noopener">🔄 Перемкнути акаунт у Threads</a>'
     +'<button class="primary" id="tcGo" style="margin-left:auto">✓ Так, підключити цей</button></div>'
-    +'<div class="hint" style="margin-top:8px">Перемкнув? Повернись сюди і натисни «Підключити цей». У вікні авторизації Threads теж можна змінити акаунт.</div></div>';
+    +'<div class="hint" style="margin-top:8px">Перемкнув? Повернись сюди і натисни «Підключити цей». У вікні авторизації Threads теж можна змінити акаунт.'+(add?' Якщо підключиться той, що вже є в бренді, - він просто отримає свіжий доступ.':'')+'</div></div>';
   document.body.appendChild(ov); const close=()=>ov.remove();
   ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#tcX').onclick=close;
-  ov.querySelector('#tcGo').onclick=()=>{ close(); connectPopup('/api/integrations/threads/connect'); };
+  ov.querySelector('#tcGo').onclick=()=>{ close(); connectPopup('/api/integrations/threads/connect'+(add===true?'?add=1':'')); };
   return false;
 }
 async function loadLinkedin(){
@@ -3317,9 +3368,9 @@ if($('brollUpload')) $('brollUpload').onclick=async()=>{ const inp=$('brollFile'
 async function loadMeta(){
   try{ const c=await api('/integrations/meta'); const st=$('mtStatus'), conn=$('mtConnect'), dis=$('mtDisconnect'), stats=$('mtStats'); if(!st) return;
     if(!c.configured){ st.textContent='🕓 Підключення Facebook/Instagram тимчасово недоступне.'; [conn,dis,stats].forEach(b=>b&&(b.style.display='none')); return; }
-    const row=$('mtPageRow');
-    if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.pageName?(' · FB: <b>'+esc(c.pageName)+'</b>'):'')+(c.igUsername?(' · IG: <b>@'+esc(c.igUsername)+'</b>'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-flex'; if(stats)stats.style.display='inline-flex'; if($('mtVoice'))$('mtVoice').style.display=c.igUsername?'inline-flex':'none'; if(row)row.style.display='flex'; loadMetaPages(); }
-    else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-flex'; if(dis)dis.style.display='none'; if(stats)stats.style.display='none'; if($('mtVoice'))$('mtVoice').style.display='none'; if(row)row.style.display='none'; }
+    const accs=c.accounts||[];
+    if(c.hasToken){ st.innerHTML=accs.length>1?'✅ Підключено Сторінок: <b>'+accs.length+'</b> - пост іде основною, іншу обираєш у композері':'✅ Підключено'+(c.pageName?(' · FB: <b>'+esc(c.pageName)+'</b>'):'')+(c.igUsername?(' · IG: <b>@'+esc(c.igUsername)+'</b>'):''); if(conn)conn.style.display='none'; if(dis){ dis.style.display='inline-flex'; dis.textContent=accs.length>1?'Відключити всі':'Відключити'; } if(stats)stats.style.display='inline-flex'; if($('mtVoice'))$('mtVoice').style.display=c.igUsername?'inline-flex':'none'; renderMetaAccs(accs); }
+    else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-flex'; if(dis)dis.style.display='none'; if(stats)stats.style.display='none'; if($('mtVoice'))$('mtVoice').style.display='none'; if($('mtAccs'))$('mtAccs').style.display='none'; }
     // ➕ розширені дозволи - окремим вікном Meta, лише коли потрібні: базове підключення від них не залежить
     const ex=$('mtExtras');
     if(ex){ if(!c.hasToken){ ex.style.display='none'; }
@@ -3335,12 +3386,32 @@ async function loadMeta(){
         ex.querySelectorAll('[data-mtadd]').forEach(b=>b.onclick=()=>connectPopup('/api/integrations/meta/connect?add='+b.dataset.mtadd)); } }
   }catch(e){}
 }
-$('mtDisconnect').onclick=async()=>{ if(!confirm('Відключити Facebook/Instagram?')) return; try{ await api('/integrations/meta/disconnect',{method:'POST'}); await loadMeta(); }catch(e){} };
+$('mtDisconnect').onclick=async()=>{ if(!confirm($('mtDisconnect').textContent==='Відключити всі'?'Відключити всі Сторінки Facebook (і їхній Instagram) від бренду?':'Відключити Facebook/Instagram?')) return; try{ await api('/integrations/meta/disconnect',{method:'POST'}); await loadMeta(); }catch(e){} };
+// 👥 Сторінки бренду (особиста й компанії, кожна зі своїм Instagram) + ті, що доступні з входу Meta
+async function renderMetaAccs(accs){
+  const box=$('mtAccs'); if(!box) return;
+  let avail=[]; try{ const pages=await api('/integrations/meta/pages'); avail=(Array.isArray(pages)?pages:[]).filter(p=>!p.added); }catch(e){ /* вхід Meta протух - список доданих усе одно покажемо */ }
+  const row=(p)=>'<div class="acc-row"><span class="nm">'+esc(p.pageName)+'</span>'+(p.igUsername?'<span class="sub">IG @'+esc(p.igUsername)+'</span>':'<span class="sub">без Instagram</span>')+(p.main?'<span class="tag">основна</span>':'')
+    +(p.posts?'<span class="sub">'+p.posts+' '+anPlural(p.posts,'пост чекає','пости чекають','постів чекають')+' на неї</span>':'')+'<span class="sp"></span>'
+    +(p.main?'':'<button class="ghost" data-mtmain="'+esc(p.pageId)+'" title="Нові пости без явного вибору підуть сюди">Зробити основною</button>')
+    +(accs.length>1?'<button class="ghost" data-mtrm="'+esc(p.pageId)+'" data-nm="'+esc(p.pageName)+'" data-n="'+(p.posts||0)+'">Прибрати</button>':'')+'</div>';
+  box.style.display='';
+  box.innerHTML=(accs.length>1?'<div class="acc-h">СТОРІНКИ В БРЕНДІ</div>'+accs.map(row).join(''):'')
+    +(avail.length?'<div class="acc-h">ЩЕ МОЖНА ДОДАТИ (доступні з твого входу в Meta)</div>'+avail.map(p=>'<div class="acc-row avail"><span class="nm">'+esc(p.name)+'</span>'+(p.ig?'<span class="sub">IG @'+esc(p.ig)+'</span>':'<span class="sub">без Instagram</span>')+'<span class="sp"></span><button class="ghost" data-mtadd="'+esc(p.id)+'">＋ Додати до бренду</button></div>').join(''):'')
+    +'<div class="hint" style="margin:2px 0 0">Потрібної Сторінки нема в списку? <a href="#" data-mtmore="1" style="color:var(--brand)">＋ Ще Сторінка</a> - у вікні Meta відміть її галочкою (особисті профілі й групи Facebook через API не публікуються - лише Сторінки).</div>';
+  box.querySelectorAll('[data-mtadd]').forEach(b=>b.onclick=async()=>{ b.disabled=true; try{ await api('/integrations/meta/accounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pageId:b.dataset.mtadd})}); flash('Сторінку додано ✓ - обирай її в композері'); await loadMeta(); loadChanStatus(); }catch(e){ flash('⚠ '+e.message); b.disabled=false; } });
+  box.querySelectorAll('[data-mtmain]').forEach(b=>b.onclick=async()=>{ b.disabled=true; try{ await api('/integrations/meta/accounts/main',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pageId:b.dataset.mtmain})}); flash('Основну Сторінку змінено ✓'); await loadMeta(); loadChanStatus(); }catch(e){ flash('⚠ '+e.message); b.disabled=false; } });
+  box.querySelectorAll('[data-mtrm]').forEach(b=>b.onclick=async()=>{ const n=+b.dataset.n;
+    if(!confirm('Прибрати Сторінку «'+b.dataset.nm+'» (і її Instagram) з бренду?'+(n?'\n\n'+n+' '+anPlural(n,'пост обрав','пости обрали','постів обрали')+' саме її - вони не вийдуть, поки не обереш у них іншу.':'')+'\n\nКоментарі й статистика вже опублікованих нею постів теж зупиняться.')) return;
+    try{ await api('/integrations/meta/accounts/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pageId:b.dataset.mtrm})}); await loadMeta(); loadChanStatus(); }catch(e){ flash('⚠ '+e.message); } });
+  const more=box.querySelector('[data-mtmore]'); if(more) more.onclick=(e)=>{ e.preventDefault(); connectPopup('/api/integrations/meta/connect'); };
+}
 $('mtVoice').onclick=async()=>{ const b=$('mtVoice'); const o=b.textContent; b.disabled=true; b.textContent='…читаю пости'; aiBusy('📸 Читаю пости Instagram і виводжу голос бренду…'); try{ const r=await api('/integrations/meta/import-voice',{method:'POST'}); flash('✨ Голос, нішу й мову виведено з '+r.count+' постів IG'); if(r.derived&&typeof renderDerived==='function') renderDerived(r.derived); await loadSettings(); }catch(e){ flash('⚠ '+e.message); } finally{ b.disabled=false; b.textContent=o; aiDone(); } };
-async function loadMetaPages(){ const sel=$('mtPage'); if(!sel) return; try{ const pages=await api('/integrations/meta/pages'); if(!Array.isArray(pages)||!pages.length){ sel.innerHTML='<option>-</option>'; return; } sel.innerHTML=pages.map(p=>'<option value="'+p.id+'"'+(p.current?' selected':'')+'>'+esc(p.name)+(p.ig?(' · IG @'+esc(p.ig)):'')+'</option>').join(''); }catch(e){ sel.innerHTML='<option>-</option>'; } }
-$('mtPage').onchange=async(e)=>{ try{ await api('/integrations/meta/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pageId:e.target.value})}); await loadMeta(); flashSaved(); }catch(err){ flash('Не вдалося змінити акаунт: '+err.message); } };
 $('mtStats').onclick=async()=>{ const o=$('mtStatsOut'); o.innerHTML='<div class="empty"><span class="spin"></span> завантаження…</div>';
-  try{ const s=await api('/integrations/meta/stats'); o.innerHTML=(s.facebook?('<div class="card">📘 <b>'+esc(s.facebook.name||'FB')+'</b>: '+(s.facebook.followers_count||s.facebook.fan_count||0)+' підписників</div>'):'')+(s.instagram?('<div class="card">📸 <b>@'+esc(s.instagram.username||'')+'</b>: '+(s.instagram.followers_count||0)+' підписників · '+(s.instagram.media_count||0)+' постів</div>'):'')+(!s.facebook&&!s.instagram?'<div class="empty">Немає даних.</div>':''); }catch(e){ o.innerHTML='<div class="card" style="color:var(--danger)">⚠ '+esc(e.message)+'</div>'; } };
+  try{ const s=await api('/integrations/meta/stats');
+    const one=(x)=>(x.facebook?('<div class="card">📘 <b>'+esc(x.facebook.name||x.pageName||'FB')+'</b>: '+(x.facebook.followers_count||x.facebook.fan_count||0)+' підписників</div>'):'')+(x.instagram?('<div class="card">📸 <b>@'+esc(x.instagram.username||'')+'</b>: '+(x.instagram.followers_count||0)+' підписників · '+(x.instagram.media_count||0)+' постів</div>'):'');
+    const all=[s].concat(s.extra||[]).map(one).join(''); // 👥 кожна Сторінка бренду окремо
+    o.innerHTML=all||'<div class="empty">Немає даних.</div>'; }catch(e){ o.innerHTML='<div class="card" style="color:var(--danger)">⚠ '+esc(e.message)+'</div>'; } };
 $('tgSave').onclick=async()=>{ try{ const r=await api('/integrations/telegram',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({botToken:$('tgToken').value,channelChatId:$('tgChannel').value,groupChatId:$('tgGroup').value})}); $('tgToken').value=''; $('tgToken').placeholder='•••••••• (токен збережено)';
   $('tgResult').innerHTML=r.dmReady?('<div class="card" style="color:var(--brand)">✅ Власний бот <b>@'+esc(r.ownBot)+'</b> підключено повністю: публікація + асистент у DM (щоденник, дайджест, ідеї). Напиши боту /start із посилання «Підключити бот».</div>')
     :(r.warn?('<div class="card" style="color:var(--amber)">⚠ '+esc(r.warn)+'</div>'):'<div class="card" style="color:var(--brand)">Збережено ✓</div>'); }
@@ -4181,13 +4252,19 @@ function oauthFailText(net, why){
   if(why==='retry') return 'Код підключення протух, поки вікно було відкрите. Просто спробуй ще раз.';
   return 'Не вдалося підключити '+name+'.\n\nСпробуй ще раз. Якщо повториться - напиши адміністратору Holos: причину записано в журнал сервісу.';
 }
+// 👥 що саме сталося після входу в Threads: новий акаунт, додатковий, оновлений доступ чи новий основний
+function threadsOkText(acc,how){ const a=acc?'@'+acc:'Threads';
+  return how==='added'?a+' додано до бренду ✓ Основний не змінився - цей акаунт обирай для поста в композері.'
+    :how==='refreshed'?a+': доступ оновлено ✓'
+    :how==='main'?a+' тепер основний акаунт Threads ✓ Попередній лишився в бренді, якщо з нього вже публікували - його можна прибрати в Каналах.'
+    :a+' підключено ✓'; }
 function connectPopup(url){ try{ const w=Math.min(620,screen.width||620), h=Math.min(740,screen.height||740); const x=Math.max(0,((screen.width||w)-w)/2), y=Math.max(0,((screen.height||h)-h)/2); const p=window.open(url,'oauth_connect','width='+w+',height='+h+',left='+x+',top='+y); if(!p) location.href=url; }catch(e){ location.href=url; } return false; }
 window.addEventListener('message',(ev)=>{ if(ev.origin!==location.origin) return; const d=ev.data||{}; if(!d.oauth) return;
   if(d.meta!=null){ try{loadMeta();}catch(e){} try{loadChanStatus();}catch(e){} try{ document.dispatchEvent(new CustomEvent('kg-meta')); }catch(e){} const cs=(typeof OB_STEPS!=='undefined')&&OB_STEPS[obIdx];
     // збій пояснюємо ЗАВЖДИ, і в онбордингу теж: раніше там крок просто перемальовувався мовчки
     if(d.meta==='error') alert(oauthFailText('meta',d.why));
     if($('onboarding')&&$('onboarding').style.display!=='none'&&cs&&cs.type==='connect'){ obVoiceImported=false; renderOb(); } else if(d.meta!=='error') flash(d.meta==='ok'?'Instagram/Facebook підключено ✓':'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).'); }
-  if(d.threads!=null){ try{loadThreads();}catch(e){} try{loadChanStatus();}catch(e){} if(d.threads==='ok') flash('Threads підключено ✓'); else alert(oauthFailText('threads',d.why)); }
+  if(d.threads!=null){ try{loadThreads();}catch(e){} try{loadChanStatus();}catch(e){} if(d.threads==='ok') flash(threadsOkText(d.acc,d.how)); else alert(oauthFailText('threads',d.why)); }
   if(d.linkedin!=null){ try{loadLinkedin();}catch(e){} try{loadChanStatus();}catch(e){} flash(d.linkedin==='ok'?'LinkedIn підключено ✓':'Не вдалося підключити LinkedIn.'); }
   if(d.youtube!=null){ try{loadYoutube();}catch(e){} try{loadChanStatus();}catch(e){} flash(d.youtube==='ok'?'YouTube підключено ✓':'Не вдалося підключити YouTube.'); }
   if(d.tiktok!=null){ try{loadTiktok();}catch(e){} try{loadChanStatus();}catch(e){} flash(d.tiktok==='ok'?'TikTok підключено ✓':'Не вдалося підключити TikTok.'); }
@@ -4389,7 +4466,7 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
 
 // ---------- init ----------
 (async()=>{
-  try{ const _q=new URLSearchParams(location.search); if(window.opener && window.opener!==window && (_q.has('meta')||_q.has('threads')||_q.has('gdrive')||_q.has('linkedin')||_q.has('youtube')||_q.has('tiktok'))){ window.opener.postMessage({oauth:true, meta:_q.get('meta'), threads:_q.get('threads'), gdrive:_q.get('gdrive'), linkedin:_q.get('linkedin'), youtube:_q.get('youtube'), tiktok:_q.get('tiktok'), why:_q.get('why')}, location.origin); document.body.innerHTML='<div style="padding:40px;text-align:center;font-family:sans-serif;color:#333">Готово ✓ Можна закрити це вікно.</div>'; try{window.close();}catch(e){} return; } }catch(e){}
+  try{ const _q=new URLSearchParams(location.search); if(window.opener && window.opener!==window && (_q.has('meta')||_q.has('threads')||_q.has('gdrive')||_q.has('linkedin')||_q.has('youtube')||_q.has('tiktok'))){ window.opener.postMessage({oauth:true, meta:_q.get('meta'), threads:_q.get('threads'), gdrive:_q.get('gdrive'), linkedin:_q.get('linkedin'), youtube:_q.get('youtube'), tiktok:_q.get('tiktok'), why:_q.get('why'), acc:_q.get('acc'), how:_q.get('how')}, location.origin); document.body.innerHTML='<div style="padding:40px;text-align:center;font-family:sans-serif;color:#333">Готово ✓ Можна закрити це вікно.</div>'; try{window.close();}catch(e){} return; } }catch(e){}
   setTheme(localStorage.getItem('kg_theme')||'light');
   // маркер БЕТИ: щоб завжди було видно, в якому середовищі ти (прод не зачіпає)
   if(location.hostname.startsWith('beta.')){ document.title='[BETA] '+document.title;
@@ -4416,7 +4493,7 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
   await loadTelegram(); loadThreads(); loadMeta(); loadLinkedin(); loadYoutube(); loadTiktok();
   const _sp=new URLSearchParams(location.search); const _thq=_sp.get('threads'), _mtq=_sp.get('meta'), _gdq=_sp.get('gdrive');
   if(_thq||_mtq||_gdq) history.replaceState(null,'',location.pathname);
-  if(_thq){ go('settings'); alert(_thq==='ok'?'Threads підключено ✓':oauthFailText('threads',_sp.get('why'))); }
+  if(_thq){ go('settings'); alert(_thq==='ok'?threadsOkText(_sp.get('acc'),_sp.get('how')):oauthFailText('threads',_sp.get('why'))); }
   if(_mtq){ go('settings'); alert(_mtq==='ok'?'Facebook/Instagram підключено ✓':(_mtq==='nopage'?'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).':oauthFailText('meta',_sp.get('why')))); }
   if(_gdq){ go('sources'); alert(_gdq==='ok'?'Google Drive підключено ✓':'Не вдалося підключити Google Drive.'); }
   await loadPrompts();

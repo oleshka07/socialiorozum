@@ -83,3 +83,10 @@ test("commentPlanLines: без коментаря - порожньо; сторі
   // дозвіл невідомий (null - підключено до того, як ми його памʼятали) - не лякаємо попередженням
   assert.doesNotMatch(commentPlanLines({ first_comment: "x", channels: { facebook: { on: true } } }, ["facebook"], [], [], null).join("\n"), /немає дозволу/);
 });
+
+test("humanCommentError: мережа не бачить пост навіть після повторів - людська причина, без повторів", () => {
+  const r = humanCommentError("threads", "The requested resource does not exist");
+  assert.equal(r.permanent, true);
+  assert.match(r.text, /Threads не знаходить цей пост/);
+  assert.match(r.text, /does not exist/, "оригінал мережі лишається в дужках - для підтримки");
+});

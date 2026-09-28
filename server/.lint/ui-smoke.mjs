@@ -66,6 +66,7 @@ const CHUNKS = new Map();
 const chunkPuts = [];
 const videoCalls = [];
 const chanSaves = [];   // що композер зберіг як мережі поста (POST /posts/:id/channels)
+const accOps = [];      // 👥 дії з акаунтами в Каналах (додати / основний / прибрати)
 
 const POSTS = [
   {
@@ -484,6 +485,8 @@ function handleApi(method, path, body) {
   if (method === "POST" && m) return { ok: true, channels: { telegram: { on: true, text: "TG-версія" }, threads: { on: true, text: "TH-версія" } } };
   m = /^\/posts\/([0-9a-f-]+)\/channels$/.exec(path);
   if (method === "POST" && m) { chanSaves.push({ id: m[1], channels: body && body.channels }); return { ok: true }; }
+  m = /^\/integrations\/(threads|meta)\/accounts(?:\/(main|remove))?$/.exec(path);
+  if (method === "POST" && m) { accOps.push({ net: m[1], op: m[2] || "add", body }); return { ok: true, result: "extra", posts: 0 }; }
   m = /^\/media\/([\w-]+)\/alt$/.exec(path);
   if (method === "PUT" && m) { altPuts.push({ id: m[1], alt: body && body.alt_text }); const a = String((body && body.alt_text) || "").replace(/\s+/g, " ").trim(); return { ok: true, alt_text: a || null }; }
   m = /^\/posts\/([0-9a-f-]+)\/first-comment\/send$/.exec(path);
@@ -2149,6 +2152,86 @@ const run = async () => {
     if (!good) console.log("   ↳ igExtras:", JSON.stringify({ st, alt, altPuts, saved: saved && saved.channels.instagram, inStory }));
     await closeComposers();
     await page.evaluate(() => { Object.assign(ChanStatus, window.__cs4); });
+    return good;
+  });
+
+  await check("accountPicker", async () => {
+    // 👥 кілька акаунтів однієї мережі (особистий і компанії): вибір акаунта лише для мереж, де їх 2+;
+    // прев'ю підписане обраним акаунтом; основний = без account у збереженому; акаунт, якого вже нема
+    // в бренді, - червоним, а не тихо основним
+    await page.evaluate(() => { window.__cs5 = JSON.parse(JSON.stringify(ChanStatus)); ChanStatus.facebook = true; ChanStatus.threads = true; ChanStatus.instagram = true;
+      ChanStatus.accounts = { facebook: [{ id: "111", name: "Oleg Stepeniev", main: true }, { id: "222", name: "Rozum.one", main: false }],
+        instagram: [{ id: "igu", name: "@olegalisio", main: true }],
+        threads: [{ id: "901", name: "@olegalisio", main: true }, { id: "902", name: "@rozum.one", main: false }] }; });
+    const keep = JSON.parse(JSON.stringify(P8POST.channels));
+    P8POST.channels = { facebook: { on: true }, threads: { on: true, account: "999" }, instagram: { on: true } };
+    const head = (net) => { const l = [...document.querySelectorAll("#cmpPrev .pv-label")].find((x) => x.textContent === net); let n = l && l.nextElementSibling; while (n && !n.classList.contains("phone")) n = n.nextElementSibling; return n ? n.querySelector(".phone-h .phone-user").textContent : null; };
+    await closeComposers();
+    await page.evaluate((id) => openComposer(id), P8);
+    await page.waitForSelector(".cmp-ov #cmpAccs select", { timeout: 6000 });
+    const st = await page.evaluate((h) => { const head = eval(h); return {
+      sels: [...document.querySelectorAll("#cmpAccs select")].map((x) => x.dataset.acc + "=" + x.value + (x.classList.contains("bad") ? "(bad)" : "")).join("|"),
+      fb: head("Facebook"), ig: head("Instagram") }; }, head.toString());
+    await page.evaluate(() => {
+      const f = document.querySelector('#cmpAccs select[data-acc="facebook"]'); f.value = "222"; f.dispatchEvent(new Event("change"));
+      const t = document.querySelector('#cmpAccs select[data-acc="threads"]'); t.value = "901"; t.dispatchEvent(new Event("change")); });
+    const after = await page.evaluate((h) => { const head = eval(h); return { fb: head("Facebook"), th: head("Threads"), bad: !!document.querySelector("#cmpAccs select.bad") }; }, head.toString());
+    if (process.env.SMOKE_SHOTS) { await new Promise((r) => setTimeout(r, 900)); await page.screenshot({ path: join(HERE, "accounts-composer.png") }); }
+    chanSaves.length = 0;
+    await page.evaluate(() => document.querySelector("#cmpSave").click());
+    await page.waitForFunction(() => /збережено/.test((document.querySelector(".cmp-ov #cmpMsg") || {}).textContent || ""), undefined, { timeout: 6000 }).catch(() => {});
+    const last = chanSaves[chanSaves.length - 1];
+    const good = st.sels === "facebook=111|threads=999(bad)" && st.fb === "Oleg Stepeniev" && st.ig === "olegalisio"
+      && after.fb === "Rozum.one" && after.th === "olegalisio" && !after.bad
+      && !!last && last.channels.facebook.account === "222" && !("account" in last.channels.threads);
+    if (!good) console.log("   ↳ accountPicker:", JSON.stringify({ st, after, last: last && last.channels }));
+    await closeComposers();
+    P8POST.channels = keep;
+    await page.evaluate(() => { ChanStatus = window.__cs5; });
+    return good;
+  });
+
+  await check("channelsAccounts", async () => {
+    // 👥 Канали: список акаунтів Threads і Сторінок (основний, «Зробити основним», «Прибрати» з
+    // попередженням про пости, що на нього чекають), Сторінки з входу Meta - «＋ Додати до бренду»
+    const keep = { th: API["GET /integrations/threads"], mt: API["GET /integrations/meta"], pages: API["GET /integrations/meta/pages"] };
+    API["GET /integrations/threads"] = { configured: true, hasToken: true, username: "olegalisio",
+      accounts: [{ userId: "901", username: "olegalisio", main: true, posts: 0 }, { userId: "902", username: "rozum.one", main: false, posts: 2 }] };
+    API["GET /integrations/meta"] = { configured: true, hasToken: true, pageName: "Oleg Stepeniev", igUsername: "olegalisio", extras: {},
+      accounts: [{ pageId: "111", pageName: "Oleg Stepeniev", igUsername: "olegalisio", main: true, posts: 0 }, { pageId: "222", pageName: "Rozum.one", igUsername: "rozum.one", main: false, posts: 0 }] };
+    API["GET /integrations/meta/pages"] = [{ id: "111", name: "Oleg Stepeniev", ig: "olegalisio", current: true, added: true },
+      { id: "222", name: "Rozum.one", ig: "rozum.one", added: true }, { id: "333", name: "Vary Servis", ig: "servisvary", added: false }];
+    accOps.length = 0;
+    await page.evaluate(async () => { selectView("settings", "channels"); await loadThreads(); await loadMeta(); });
+    await page.waitForFunction(() => document.querySelectorAll("#mtAccs .acc-row").length >= 3, undefined, { timeout: 6000 }).catch(() => {});
+    const st = await page.evaluate(() => ({
+      th: [...document.querySelectorAll("#thAccs .acc-row")].map((r) => r.textContent.replace(/\s+/g, " ").trim()),
+      add: getComputedStyle(document.querySelector("#thAdd")).display !== "none", dis: document.querySelector("#thDisconnect").textContent,
+      mt: [...document.querySelectorAll("#mtAccs .acc-row")].map((r) => r.textContent.replace(/\s+/g, " ").trim()) }));
+    if (process.env.SMOKE_SHOTS) {
+      await page.evaluate(() => document.querySelector("#thAccs").scrollIntoView({ block: "center" }));
+      await new Promise((r) => setTimeout(r, 600));
+      await page.screenshot({ path: join(HERE, "accounts-threads.png") });
+      await page.evaluate(() => document.querySelector("#mtAccs").scrollIntoView({ block: "center" }));
+      await page.screenshot({ path: join(HERE, "accounts-meta.png") });
+    }
+    await page.evaluate(() => { window.__conf = ""; window.confirm = (m) => { window.__conf = m; return true; }; });
+    await page.evaluate(() => document.querySelector('#thAccs [data-thmain="902"]').click());
+    await page.evaluate(() => document.querySelector('#thAccs [data-thrm="902"]').click());
+    await page.evaluate(() => document.querySelector('#mtAccs [data-mtadd="333"]').click());
+    await page.waitForFunction(() => true, undefined, { timeout: 100 }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 500));
+    const conf = await page.evaluate(() => window.__conf);
+    const good = st.th.length === 2 && /@olegalisio\s*основний/.test(st.th[0]) && /@rozum\.one.*2 пости чекають.*Зробити основним.*Прибрати/.test(st.th[1])
+      && st.add && st.dis === "Відключити всі"
+      && st.mt.length === 3 && /Rozum\.one.*IG @rozum\.one.*Зробити основною/.test(st.mt[1]) && /Vary Servis.*Додати до бренду/.test(st.mt[2])
+      && accOps.some((o) => o.net === "threads" && o.op === "main" && o.body.userId === "902")
+      && accOps.some((o) => o.net === "threads" && o.op === "remove" && o.body.userId === "902")
+      && accOps.some((o) => o.net === "meta" && o.op === "add" && o.body.pageId === "333")
+      && /2 пости обрали саме цей акаунт/.test(conf);
+    if (!good) console.log("   ↳ channelsAccounts:", JSON.stringify({ st, ops: accOps, conf }));
+    Object.assign(API, { "GET /integrations/threads": keep.th, "GET /integrations/meta": keep.mt, "GET /integrations/meta/pages": keep.pages });
+    await page.evaluate(async () => { window.confirm = () => true; await loadThreads(); await loadMeta(); });
     return good;
   });
 

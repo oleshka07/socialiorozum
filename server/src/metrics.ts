@@ -8,7 +8,7 @@ import { logEvent } from "./log.js";
 import * as threads from "./threads.js";
 import * as meta from "./meta.js";
 import * as tg from "./telegram.js";
-import { thValidToken } from "./publisher.js";
+import { threadsAccounts, threadsToken, metaPages, threadsAccountForRow, metaAccountForRow, accountChoices, mainAccountIds, MULTI_NETS, type Picked, type MetaPage, type ThreadsLogin } from "./accounts.js";
 import { buildAnalytics, MATURE_H, type PubRow, type FollowerRow } from "./analytics.js";
 
 const PER_TICK = 25; // постів на мережу за прохід (щоб не впертись у ліміти Graph API)
@@ -117,11 +117,12 @@ async function saveFailure(postId: string, network: string, err: string): Promis
 // на кожному проході воркера (кожні 6 год). Інакше знімок, зроблений через 20 хв після публікації,
 // висів би добу як «0 переглядів». 5 год, а не 6 - запас, щоб прохід не пропускав пост через секунди.
 const YOUNG_EVERY_H = 5;
-async function staleRows(ws: string, network: "threads" | "instagram" | "facebook", minAgeH = 24): Promise<{ post_id: string; ext: string }[]> {
-  return q<{ post_id: string; ext: string }>(
-    `select x.post_id, x.ext from (
-         select post_id, media_id as ext, created_at from threads_publish where status='sent' and $2='threads'
-         union all select post_id, external_id, created_at from meta_publish where status='sent' and channel=$2
+type StaleRow = { post_id: string; ext: string; account_id: string | null; account_name: string | null };
+async function staleRows(ws: string, network: "threads" | "instagram" | "facebook", minAgeH = 24): Promise<StaleRow[]> {
+  return q<StaleRow>(
+    `select x.post_id, x.ext, x.account_id, x.account_name from (
+         select post_id, media_id as ext, created_at, account_id, account_name from threads_publish where status='sent' and $2='threads'
+         union all select post_id, external_id, created_at, account_id, account_name from meta_publish where status='sent' and channel=$2
        ) x
        join post p on p.id=x.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
        left join post_metric pm on pm.post_id=x.post_id and pm.network=$2
@@ -141,13 +142,23 @@ async function staleRows(ws: string, network: "threads" | "instagram" | "faceboo
 const accountLevel = (m: string) => /втрачено|зачекати|access token|rate limit|too many/i.test(m);
 const noInsightsAccess = (m: string) => /дозволу|permission/i.test(m);
 
+// 👥 Кожен пост опитується тим акаунтом, яким його опубліковано (у бренді їх може бути кілька):
+// статистику чужого поста мережа не віддасть. Акаунт, якого вже нема в бренді, - збій саме цього
+// поста з людською причиною, решта йде далі.
+type AccCache<T> = Map<string, Picked<T>>;
+const accKey = (r: StaleRow) => `${r.account_id || ""}|${r.account_name || ""}`;
+
 async function collectThreads(ws: string, minAgeH: number): Promise<number> {
-  const tok = await thValidToken(ws).catch(() => null);
-  if (!tok) return 0;
   let n = 0;
+  const cache: AccCache<ThreadsLogin> = new Map(), blocked = new Set<string>();
   for (const r of await staleRows(ws, "threads", minAgeH)) {
+    const key = accKey(r);
+    if (blocked.has(key)) continue;
+    if (!cache.has(key)) cache.set(key, await threadsAccountForRow(ws, r).catch((e: any) => ({ ok: false as const, error: String(e?.message || e) })));
+    const acc = cache.get(key)!;
+    if (!acc.ok) { if (/^Threads не підключено$/.test(acc.error)) return n; await saveFailure(r.post_id, "threads", acc.error); continue; }
     try {
-      const v = await fetchMetrics(TH_SETS, (m) => threads.mediaInsights(tok.token, r.ext, m), "threads");
+      const v = await fetchMetrics(TH_SETS, (m) => threads.mediaInsights(acc.acc.token, r.ext, m), "threads");
       await saveMetric(r.post_id, "threads", {
         views: num(v.views), likes: num(v.likes), replies: num(v.replies), reposts: num(v.reposts),
         quotes: num(v.quotes), shares: num(v.shares), error: Object.keys(v).length ? null : "Threads не повернув метрик для цього поста",
@@ -155,24 +166,31 @@ async function collectThreads(ws: string, minAgeH: number): Promise<number> {
       n++;
     } catch (e: any) {
       await saveFailure(r.post_id, "threads", e?.message);
-      if (accountLevel(String(e?.message))) break;
+      if (accountLevel(String(e?.message))) blocked.add(key); // токен чи ліміт цього акаунта - решту його постів не чіпаємо
     }
   }
   return n;
 }
 
-async function collectInstagram(ws: string, token: string, minAgeH: number): Promise<number> {
-  let n = 0, insightsBlocked = "";
+async function collectInstagram(ws: string, minAgeH: number): Promise<number> {
+  let n = 0;
+  const cache: AccCache<MetaPage> = new Map(), blocked = new Set<string>(), insightsBlocked = new Map<string, string>();
   for (const r of await staleRows(ws, "instagram", minAgeH)) {
+    const key = accKey(r);
+    if (blocked.has(key)) continue;
+    if (!cache.has(key)) cache.set(key, await metaAccountForRow(ws, "instagram", r).catch((e: any) => ({ ok: false as const, error: String(e?.message || e) })));
+    const acc = cache.get(key)!;
+    if (!acc.ok) { if (/^Instagram не підключено$/.test(acc.error)) return n; await saveFailure(r.post_id, "instagram", acc.error); continue; }
+    const token = acc.acc.pageToken;
     // лайки й коментарі ПОЛЯМИ є навіть без дозволу на інсайти
     let f: Awaited<ReturnType<typeof meta.igMediaFields>> | null = null, fErr = "";
     try { f = await meta.igMediaFields(r.ext, token); } catch (e: any) { fErr = String(e?.message || ""); }
-    if (!f && accountLevel(fErr)) { await saveFailure(r.post_id, "instagram", fErr); break; }
+    if (!f && accountLevel(fErr)) { await saveFailure(r.post_id, "instagram", fErr); blocked.add(key); continue; }
     const kind = String(f?.media_product_type || f?.media_type || "FEED").toUpperCase();
-    let v: Record<string, number> | null = null, vErr = insightsBlocked;
-    if (!insightsBlocked) {
+    let v: Record<string, number> | null = null, vErr = insightsBlocked.get(key) || "";
+    if (!vErr) {
       try { v = await fetchMetrics(IG_SETS, (m) => meta.igMediaMetrics(r.ext, token, m), `instagram:${kind}`); }
-      catch (e: any) { vErr = String(e?.message || ""); if (noInsightsAccess(vErr)) insightsBlocked = vErr; }
+      catch (e: any) { vErr = String(e?.message || ""); if (noInsightsAccess(vErr)) insightsBlocked.set(key, vErr); }
     }
     if (!f && !v) { await saveFailure(r.post_id, "instagram", vErr || fErr); continue; }
     const got = v && Object.keys(v).length ? v : null;
@@ -188,21 +206,28 @@ async function collectInstagram(ws: string, token: string, minAgeH: number): Pro
   return n;
 }
 
-async function collectFacebook(ws: string, token: string, minAgeH: number): Promise<number> {
-  let n = 0, insightsBlocked = "";
+async function collectFacebook(ws: string, minAgeH: number): Promise<number> {
+  let n = 0;
+  const cache: AccCache<MetaPage> = new Map(), blocked = new Set<string>(), insightsBlocked = new Map<string, string>();
   for (const r of await staleRows(ws, "facebook", minAgeH)) {
+    const key = accKey(r);
+    if (blocked.has(key)) continue;
+    if (!cache.has(key)) cache.set(key, await metaAccountForRow(ws, "facebook", r).catch((e: any) => ({ ok: false as const, error: String(e?.message || e) })));
+    const acc = cache.get(key)!;
+    if (!acc.ok) { if (/^Facebook не підключено$/.test(acc.error)) return n; await saveFailure(r.post_id, "facebook", acc.error); continue; }
+    const token = acc.acc.pageToken;
     // відео Сторінки зберігаємо голим id відео; дописи (текст, фото, галерея) - «<сторінка>_<пост>»
     const isVideo = /^\d+$/.test(r.ext);
     let eng: Awaited<ReturnType<typeof meta.fbPostEngagement>> | null = null, eErr = "";
     try { eng = await meta.fbPostEngagement(r.ext, token, isVideo); } catch (e: any) { eErr = String(e?.message || ""); }
-    if (!eng && accountLevel(eErr)) { await saveFailure(r.post_id, "facebook", eErr); break; }
-    let v: Record<string, number> | null = null, vErr = insightsBlocked;
-    if (!insightsBlocked) {
+    if (!eng && accountLevel(eErr)) { await saveFailure(r.post_id, "facebook", eErr); blocked.add(key); continue; }
+    let v: Record<string, number> | null = null, vErr = insightsBlocked.get(key) || "";
+    if (!vErr) {
       try {
         v = isVideo
           ? await fetchMetrics(FB_VIDEO_SETS, (m) => meta.fbVideoMetrics(r.ext, token, m), "facebook:video")
           : await fetchMetrics(FB_POST_SETS, (m) => meta.fbPostMetrics(r.ext, token, m), "facebook:post");
-      } catch (e: any) { vErr = String(e?.message || ""); if (noInsightsAccess(vErr)) insightsBlocked = vErr; }
+      } catch (e: any) { vErr = String(e?.message || ""); if (noInsightsAccess(vErr)) insightsBlocked.set(key, vErr); }
     }
     if (!eng && !v) { await saveFailure(r.post_id, "facebook", vErr || eErr); continue; }
     const got = v && Object.keys(v).length ? v : null;
@@ -228,27 +253,26 @@ async function wsTimezone(ws: string): Promise<string> {
 export async function snapshotFollowers(ws: string): Promise<number> {
   const tz = await wsTimezone(ws);
   let saved = 0;
-  const put = async (network: string, value: unknown) => {
+  // 👥 account - id акаунта мережі (у двох Сторінок своя аудиторія); '' - мережа з одним акаунтом
+  const put = async (network: string, account: string, value: unknown) => {
     const v = num(value);
     if (v == null) return;
-    await q(`insert into follower_snapshot(workspace_id, network, day, followers) values($1,$2,(now() at time zone $4)::date,$3)
-             on conflict (workspace_id, network, day) do update set followers=excluded.followers, updated_at=now()`, [ws, network, v, tz]);
+    await q(`insert into follower_snapshot(workspace_id, network, account, day, followers) values($1,$2,$3,(now() at time zone $5)::date,$4)
+             on conflict (workspace_id, network, account, day) do update set followers=excluded.followers, updated_at=now()`, [ws, network, account, v, tz]);
     saved++;
   };
-  const tok = await thValidToken(ws).catch(() => null);
-  if (tok) { try { await put("threads", (await threads.userInsights(tok.token, tok.userId, ["followers_count"])).followers_count); } catch { /* без threads_manage_insights */ } }
-  const mt = await one<{ page_id: string | null; page_token: string | null; ig_user_id: string | null }>(
-    `select page_id, page_token, ig_user_id from meta_config where workspace_id=$1 and page_token is not null`, [ws]);
-  if (mt?.page_token) {
-    if (mt.ig_user_id) { try { await put("instagram", (await meta.igStats(mt.ig_user_id, mt.page_token)).followers_count); } catch { /* ignore */ } }
-    if (mt.page_id) {
-      try { const s = await meta.pageStats(mt.page_id, mt.page_token); await put("facebook", s.followers_count ?? s.fan_count); } catch { /* ignore */ }
-    }
+  for (const a of await threadsAccounts(ws)) {
+    const tok = await threadsToken(ws, a.userId).catch(() => null);
+    if (tok) { try { await put("threads", a.userId, (await threads.userInsights(tok.token, tok.userId, ["followers_count"])).followers_count); } catch { /* без threads_manage_insights */ } }
+  }
+  for (const p of await metaPages(ws)) {
+    if (p.igUserId) { try { await put("instagram", p.igUserId, (await meta.igStats(p.igUserId, p.pageToken)).followers_count); } catch { /* ignore */ } }
+    try { const s = await meta.pageStats(p.pageId, p.pageToken); await put("facebook", p.pageId, s.followers_count ?? s.fan_count); } catch { /* ignore */ }
   }
   const tc = await one<{ bot_token: string | null; channel_chat_id: string | null; group_chat_id: string | null }>(
     `select bot_token, channel_chat_id, group_chat_id from telegram_config where workspace_id=$1`, [ws]);
   const chat = tc?.channel_chat_id || tc?.group_chat_id;
-  if (tc?.bot_token && chat) { try { await put("telegram", await tg.getChatMemberCount(tc.bot_token, chat)); } catch { /* бота прибрали з каналу */ } }
+  if (tc?.bot_token && chat) { try { await put("telegram", "", await tg.getChatMemberCount(tc.bot_token, chat)); } catch { /* бота прибрали з каналу */ } }
   return saved;
 }
 
@@ -257,11 +281,8 @@ export async function snapshotFollowers(ws: string): Promise<number> {
 export async function collectWorkspace(ws: string, minAgeH = 24): Promise<{ posts: number; followers: number }> {
   let n = 0;
   n += await collectThreads(ws, minAgeH);
-  const mt = await one<{ page_token: string | null }>(`select page_token from meta_config where workspace_id=$1 and page_token is not null`, [ws]);
-  if (mt?.page_token) {
-    n += await collectInstagram(ws, mt.page_token, minAgeH);
-    n += await collectFacebook(ws, mt.page_token, minAgeH);
-  }
+  n += await collectInstagram(ws, minAgeH);
+  n += await collectFacebook(ws, minAgeH);
   const followers = await snapshotFollowers(ws);
   return { posts: n, followers };
 }
@@ -331,8 +352,14 @@ export async function analyticsFor(ws: string, days: number, net = "all") {
   let tz = (tzRow?.content || "").trim() || "Europe/Kyiv";
   try { new Intl.DateTimeFormat("en", { timeZone: tz }); } catch { tz = "Europe/Kyiv"; }
   const d = Math.max(1, Math.min(365, Math.round(days) || 90));
+  // 👥 акаунт рядка: записаний при публікації; у старих рядках Threads відомий лише нік із посилання,
+  // а без нічого - це основний акаунт (так тоді й публікувалось)
+  const mains = await mainAccountIds(ws);
   const rows = await q<PubRow>(
     `select x.post_id, x.net, x.created_at, x.permalink,
+            coalesce(x.account_id, case when x.account_name is not null and x.net='threads' then 'n:' || lower(x.account_name) end,
+                     case x.net when 'threads' then $3::text when 'facebook' then $4::text when 'instagram' then $5::text end) as account,
+            x.account_name,
             coalesce(nullif(p.channels->x.net->>'text',''), p.content, '') as text,
             coalesce(p.format,'post') as format, p.rubric, p.intent, s.origin,
             case when coalesce(p.format,'post')='story' then 'story'
@@ -342,24 +369,47 @@ export async function analyticsFor(ws: string, days: number, net = "all") {
             pm.views, pm.reach, pm.likes, pm.replies, pm.reposts, pm.quotes, pm.shares, pm.saves, pm.follows,
             pm.error as m_error, pm.fetched_at, pm.measured_at
        from (
-         (select distinct on (post_id) post_id, 'telegram'::text as net, created_at, permalink
+         (select distinct on (post_id) post_id, 'telegram'::text as net, created_at, permalink, null::text as account_id, null::text as account_name
             from telegram_publish where status='sent' order by post_id, (target <> 'channel'), created_at)
-         union all select post_id, 'threads', created_at, permalink from threads_publish where status='sent'
-         union all select post_id, channel, created_at, permalink from meta_publish where status='sent'
-         union all select post_id, 'linkedin', created_at, permalink from linkedin_publish where status='sent'
+         union all select post_id, 'threads', created_at, permalink, account_id, account_name from threads_publish where status='sent'
+         union all select post_id, channel, created_at, permalink, account_id, account_name from meta_publish where status='sent'
+         union all select post_id, 'linkedin', created_at, permalink, null, null from linkedin_publish where status='sent'
        ) x
        join post p on p.id=x.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
        left join media_asset ma on ma.id=p.media_id
        left join post_metric pm on pm.post_id=x.post_id and pm.network=x.net
       where s.workspace_id=$1 and x.created_at > now() - make_interval(days => $2::int)
-      order by x.created_at desc limit 5000`, [ws, d * 2]);
+      order by x.created_at desc limit 5000`, [ws, d * 2, mains.threads || null, mains.facebook || null, mains.instagram || null]);
   const followers = await q<FollowerRow>(
-    `select network, to_char(day,'YYYY-MM-DD') as day, followers from follower_snapshot
+    `select network, account, to_char(day,'YYYY-MM-DD') as day, followers from follower_snapshot
       where workspace_id=$1 and day >= (now() at time zone $3)::date - $2::int order by day`, [ws, d + 30, tz]);
+  // імена акаунтів для людини: підключені зараз + ніки зі старих рядків («n:@нік»)
+  const choices = await accountChoices(ws);
+  const nameOf = new Map<string, string>();
+  for (const net of MULTI_NETS) for (const a of choices[net]) nameOf.set(`${net}:${a.id}`, a.name);
+  // старий рядок, де відомий лише нік («n:@нік»), а акаунт із цим ніком уже підключено - це він
+  const idByName = new Map<string, string>();
+  for (const net of MULTI_NETS) for (const a of choices[net]) idByName.set(`${net}:n:${a.name.toLowerCase()}`, a.id);
+  for (const r of rows) if (r.account?.startsWith("n:")) r.account = idByName.get(`${r.net}:${r.account}`) || r.account;
+  for (const r of rows) {
+    if (!r.account) continue;
+    const k = `${r.net}:${r.account}`;
+    if (!nameOf.has(k)) nameOf.set(k, r.account_name || (r.account.startsWith("n:") ? r.account.slice(2) : ""));
+    r.account_name = nameOf.get(k) || r.account_name || null;
+  }
+  for (const f of followers) f.label = nameOf.get(`${f.network}:${f.account || ""}`) || undefined;
   const connected = await one<{ threads: boolean; meta: boolean; telegram: boolean; linkedin: boolean }>(
     `select exists(select 1 from threads_config where workspace_id=$1 and access_token is not null) as threads,
             exists(select 1 from meta_config where workspace_id=$1 and page_token is not null) as meta,
             exists(select 1 from telegram_config where workspace_id=$1 and bot_token is not null and coalesce(channel_chat_id, group_chat_id) is not null) as telegram,
             exists(select 1 from linkedin_config where workspace_id=$1 and access_token is not null) as linkedin`, [ws]);
-  return { ...buildAnalytics(rows, followers, { days: d, net, tz }), connected };
+  // акаунти для фільтра - лише мережі, де їх у бренді кілька (з одним фільтр «мережа» і так точний)
+  const accounts: { key: string; net: string; name: string }[] = [];
+  for (const net of MULTI_NETS) {
+    const keys = [...new Set(rows.filter((r) => r.net === net && r.account).map((r) => r.account as string))];
+    const connectedIds = choices[net].map((a) => a.id);
+    const all = [...new Set([...connectedIds, ...keys])];
+    if (all.length > 1) for (const id of all) accounts.push({ key: `${net}:${id}`, net, name: nameOf.get(`${net}:${id}`) || id });
+  }
+  return { ...buildAnalytics(rows, followers, { days: d, net, tz }), connected, accounts };
 }

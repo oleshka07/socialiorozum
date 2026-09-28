@@ -43,3 +43,11 @@ test("igExtrasRejected: відмова через співавторів чи о
     "Instagram довго обробляє зображення",
   ]) assert.equal(igExtrasRejected(m), false, m);
 });
+
+test("normCollaborators: нік акаунта, яким пост публікується, - окремо від «не схоже на нік»", () => {
+  const r = normCollaborators(["@rozum.one", "@olegalisio", "not a nick"], "rozum.one");
+  assert.deepEqual(r.ok, ["olegalisio"], "інший акаунт того ж бренду співавтором бути може");
+  assert.deepEqual(r.self, ["@rozum.one"]);
+  assert.ok(!r.bad.includes("@rozum.one"), "власний нік - не «сміття»");
+  assert.deepEqual(normCollaborators(["a"], null).self, []);
+});

@@ -20,21 +20,12 @@ import { ensurePostDigest } from "./memory.js";
 import { postMediaList } from "./slides.js";
 import { commentAfterPublish, commentFor } from "./comments.js";
 import { normCollaborators, cleanAlt } from "./igextras.js";
+import { threadsToken, threadsAccountFor, metaAccountFor, postAccount, type MetaPage, type Picked, type ThreadsLogin } from "./accounts.js";
 
-export async function thValidToken(ws: string): Promise<{ token: string; userId: string } | null> {
-  const c = await one<{ threads_user_id: string | null; access_token: string | null; token_expires_at: string | null }>(
-    `select threads_user_id, access_token, token_expires_at from threads_config where workspace_id=$1`, [ws]);
-  if (!c?.access_token || !c.threads_user_id) return null;
-  const exp = c.token_expires_at ? new Date(c.token_expires_at).getTime() : 0;
-  if (exp && exp - Date.now() < 7 * 864e5) {
-    try {
-      const r = await threads.refreshToken(c.access_token);
-      const newExp = new Date(Date.now() + r.expires_in * 1000).toISOString();
-      await q(`update threads_config set access_token=$2, token_expires_at=$3, updated_at=now() where workspace_id=$1`, [ws, r.access_token, newExp]);
-      return { token: r.access_token, userId: c.threads_user_id };
-    } catch { /* пробуємо наявним токеном */ }
-  }
-  return { token: c.access_token, userId: c.threads_user_id };
+// 👥 Акаунтів Threads у бренді може бути кілька (accounts.ts). Без userId - основний, як і раніше.
+export async function thValidToken(ws: string, userId?: string | null): Promise<{ token: string; userId: string } | null> {
+  const t = await threadsToken(ws, userId);
+  return t ? { token: t.token, userId: t.userId } : null;
 }
 
 // comment - перший коментар під щойно опублікованим постом (якщо для мережі його задано)
@@ -52,7 +43,7 @@ export const enabledNets = (ch: any): string[] => PUB_NETS.filter((k) => ch && c
 // блокував мережу для поста назавжди, а автопостер ще й звітував «↩ вже», хоча пост міг не вийти.
 const STALE_SENDING = "20 minutes";
 type PubTable = "telegram_publish" | "threads_publish" | "meta_publish" | "linkedin_publish";
-async function reservePub(table: PubTable, key: Record<string, string>, extra: Record<string, string> = {}): Promise<{ id: string } | "sent" | "busy"> {
+async function reservePub(table: PubTable, key: Record<string, string>, extra: Record<string, string | null> = {}): Promise<{ id: string } | "sent" | "busy"> {
   const kc = Object.keys(key), kv = Object.values(key);
   const cond = kc.map((c, i) => `${c}=$${i + 1}`).join(" and ");
   // Застосунок - один процес, тож «хто зараз публікує цей пост» відомо точно (inFlightPosts). Якщо
@@ -230,10 +221,12 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
   const textOf = (k: string) => (ch[k] && ch[k].text) || post.content;
   const imageUrl = imageUrls[0] || null;
   const results: PubResult[] = [];
-  const [tgc, thTok, mt, li] = await Promise.all([
+  // 👥 акаунт кожної мережі - обраний у пості (channels.<мережа>.account) або основний бренду
+  const [tgc, thAcc, fbAcc, igAcc, li] = await Promise.all([
     one<{ bot_token: string | null; channel_chat_id: string | null; group_chat_id: string | null; channel_username: string | null }>(`select bot_token, channel_chat_id, group_chat_id, channel_username from telegram_config where workspace_id=$1`, [ws]),
-    thValidToken(ws),
-    one<{ page_id: string | null; page_token: string | null; ig_user_id: string | null; ig_username: string | null; token_expires_at: string | null }>(`select page_id, page_token, ig_user_id, ig_username, token_expires_at from meta_config where workspace_id=$1`, [ws]),
+    enabled.includes("threads") ? threadsAccountFor(ws, postAccount(ch, "threads")) : Promise.resolve(null as Picked<ThreadsLogin> | null),
+    enabled.includes("facebook") ? metaAccountFor(ws, "facebook", postAccount(ch, "facebook")) : Promise.resolve(null as Picked<MetaPage> | null),
+    enabled.includes("instagram") ? metaAccountFor(ws, "instagram", postAccount(ch, "instagram")) : Promise.resolve(null as Picked<MetaPage> | null),
     one<{ member_urn: string; access_token: string; token_expires_at: string | null }>(`select member_urn, access_token, token_expires_at from linkedin_config where workspace_id=$1`, [ws]),
   ]);
   // 📸 alt-текст фото (у тому ж порядку, що images): Instagram і LinkedIn
@@ -312,7 +305,8 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
           continue;
         }
       } else if (k === "threads") {
-        if (!thTok) throw new Error("Threads не підключено");
+        if (!thAcc || !thAcc.ok) throw new Error(thAcc && !thAcc.ok ? thAcc.error : "Threads не підключено");
+        const thTok = thAcc.acc;
         const thErr = videoLimit("threads"); if (thErr) throw new Error(thErr);
         // 🧵 стратегія Threads (settings_block.threads_strategy): гілка для довгих + відкладена CTA-гілка
         const strat = await getSetting<any>(ws, "threads_strategy", {});
@@ -320,7 +314,7 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
         // гілка: явний прапорець на пості АБО авто-режим для майстер-текстів понад ліміт (500)
         const wantThread = perPost.thread === true || (strat.thread === "auto" && perPost.thread !== false && post.content.length > 500);
         // резервація ОДИН раз для всього поста (root) - гілка/ветки нижче лише розвивають цей root
-        const rv = await reservePub("threads_publish", { post_id: postId });
+        const rv = await reservePub("threads_publish", { post_id: postId }, { account_id: thTok.userId, account_name: thTok.username ? "@" + thTok.username : null });
         if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
         if (rv === "busy") throw new Error(BUSY);
         const reserved = rv;
@@ -379,16 +373,17 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
         if (delayMin > 0 && !commentFor({ ...post, channels: ch }, "threads")) {
           const cta = await threadsCtaText(ws);
           if (cta) await q(
-            `insert into threads_reply_job(workspace_id,post_id,root_media_id,reply_text,due_at)
-             values($1,$2,$3,$4, now() + ($5 || ' minutes')::interval)`,
-            [ws, postId, rootId, cta, String(delayMin)]);
+            `insert into threads_reply_job(workspace_id,post_id,root_media_id,reply_text,due_at,account_id)
+             values($1,$2,$3,$4, now() + ($5 || ' minutes')::interval, $6)`,
+            [ws, postId, rootId, cta, String(delayMin), thTok.userId]);
         }
       } else if (k === "facebook") {
-        if (!mt?.page_id || !mt.page_token) throw new Error("Facebook не підключено");
+        if (!fbAcc || !fbAcc.ok) throw new Error(fbAcc && !fbAcc.ok ? fbAcc.error : "Facebook не підключено");
+        const mt = { page_id: fbAcc.acc.pageId, page_token: fbAcc.acc.pageToken };
         // строк у meta_config - це строк токена КОРИСТУВАЧА (~60 днів); токен Сторінки, отриманий із
         // нього, не протухає. Тож заздалегідь не відмовляємо: якщо доступ справді втрачено, Meta
         // відповість помилкою 190, і людина побачить «перепідключи» (fbFetch).
-        const rv = await reservePub("meta_publish", { post_id: postId, channel: "facebook" });
+        const rv = await reservePub("meta_publish", { post_id: postId, channel: "facebook" }, { account_id: fbAcc.acc.pageId, account_name: fbAcc.acc.pageName });
         if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
         if (rv === "busy") throw new Error(BUSY);
         const reserved = rv;
@@ -409,10 +404,11 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
           }
         } catch (e: any) { await q(`delete from meta_publish where id=$1`, [reserved.id]); throw e; }
       } else if (k === "instagram") {
-        if (!mt?.ig_user_id || !mt.page_token) throw new Error("Instagram не підключено");
+        if (!igAcc || !igAcc.ok) throw new Error(igAcc && !igAcc.ok ? igAcc.error : "Instagram не підключено");
+        const mt = { ig_user_id: igAcc.acc.igUserId!, page_token: igAcc.acc.pageToken, ig_username: igAcc.acc.igUsername };
         if (!images.length && !video) throw new Error("Instagram потребує фото або відео");
         const igErr = videoLimit("instagram"); if (igErr) throw new Error(igErr);
-        const rv = await reservePub("meta_publish", { post_id: postId, channel: "instagram" });
+        const rv = await reservePub("meta_publish", { post_id: postId, channel: "instagram" }, { account_id: mt.ig_user_id, account_name: mt.ig_username ? "@" + mt.ig_username : null });
         if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
         if (rv === "busy") throw new Error(BUSY);
         const reserved = rv;
@@ -495,8 +491,9 @@ async function publishStoryToChannels(ws: string, postId: string, ch: any, onlyN
   const enabled = enabledNets(ch).filter((k) => !onlyNets || onlyNets.includes(k));
   const sentSet = new Set(await alreadySentNetworks(postId));
   const frames = await postMediaList(postId);
-  const mt = await one<{ page_id: string | null; page_token: string | null; ig_user_id: string | null; token_expires_at: string | null }>(
-    `select page_id, page_token, ig_user_id, token_expires_at from meta_config where workspace_id=$1`, [ws]);
+  // 👥 сторіс - теж з акаунта, обраного в пості (або основного)
+  const accOf = async (k: "instagram" | "facebook") => enabled.includes(k) ? metaAccountFor(ws, k, postAccount(ch, k)) : null;
+  const [igAcc, fbAcc] = await Promise.all([accOf("instagram"), accOf("facebook")]);
   const url = (f: string) => `${env.appBaseUrl}/media/${f}`;
   const results: PubResult[] = [];
   for (const k of enabled) {
@@ -504,12 +501,14 @@ async function publishStoryToChannels(ws: string, postId: string, ch: any, onlyN
     try {
       if (!STORY_NETS.includes(k)) throw new Error(`сторіс публікуються лише в Instagram і Facebook - ${NET_UA[k]} їх через API не приймає; зніми ${NET_UA[k]} із цього поста`);
       if (!frames.length) throw new Error("у сторіс немає жодного кадру - додай фото чи відео");
-      if (k === "instagram" && (!mt?.ig_user_id || !mt.page_token)) throw new Error("Instagram не підключено");
-      if (k === "facebook" && (!mt?.page_id || !mt.page_token)) throw new Error("Facebook не підключено");
+      const acc = k === "instagram" ? igAcc : fbAcc;
+      if (!acc || !acc.ok) throw new Error(acc && !acc.ok ? acc.error : `${NET_UA[k]} не підключено`);
+      const mt = acc.acc;
       // межі - ДО виклику: відео в сторіс Instagram - до 60 с (а мережа сказала б це через хвилину обробки)
       const longVid = frames.find((m) => m.kind === "video" && Number(m.duration) > 60);
       if (k === "instagram" && longVid) throw new Error(`відео в сторіс Instagram - до 60 с, а тут ${Math.round(Number(longVid.duration))} с - вріж його`);
-      const rv = await reservePub("meta_publish", { post_id: postId, channel: k });
+      const rv = await reservePub("meta_publish", { post_id: postId, channel: k },
+        k === "instagram" ? { account_id: mt.igUserId, account_name: mt.igUsername ? "@" + mt.igUsername : null } : { account_id: mt.pageId, account_name: mt.pageName });
       if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
       if (rv === "busy") throw new Error(BUSY);
       const reserved = rv;
@@ -518,13 +517,13 @@ async function publishStoryToChannels(ws: string, postId: string, ch: any, onlyN
         for (const m of frames) {
           if (k === "instagram") {
             const r = m.kind === "video"
-              ? await meta.publishStoryToInstagram(mt!.ig_user_id!, mt!.page_token!, { videoUrl: url(m.filename) })
-              : await meta.publishStoryToInstagram(mt!.ig_user_id!, mt!.page_token!, { imageUrl: url(await ensureIgSafeImage(ws, m.filename, { story: true })) });
+              ? await meta.publishStoryToInstagram(mt.igUserId!, mt.pageToken, { videoUrl: url(m.filename) })
+              : await meta.publishStoryToInstagram(mt.igUserId!, mt.pageToken, { imageUrl: url(await ensureIgSafeImage(ws, m.filename, { story: true })) });
             ids.push(r.mediaId);
           } else {
             const r = m.kind === "video"
-              ? await meta.publishVideoStoryToPage(mt!.page_id!, mt!.page_token!, url(m.filename))
-              : await meta.publishPhotoStoryToPage(mt!.page_id!, mt!.page_token!, url(m.filename));
+              ? await meta.publishVideoStoryToPage(mt.pageId, mt.pageToken, url(m.filename))
+              : await meta.publishPhotoStoryToPage(mt.pageId, mt.pageToken, url(m.filename));
             ids.push(r.postId);
           }
         }
@@ -611,23 +610,23 @@ async function publishReelToChannelsNow(ws: string, postId: string, nets: string
     if (sentSet.has(k)) { results.push({ channel: k, status: "skipped" }); continue; }
     try {
       if (k === "instagram") {
-        const mt = await one<{ page_token: string | null; ig_user_id: string | null }>(`select page_token, ig_user_id from meta_config where workspace_id=$1`, [ws]);
-        if (!mt?.ig_user_id || !mt.page_token) throw new Error("Instagram не підключено");
-        const rv = await reservePub("meta_publish", { post_id: postId, channel: "instagram" });
+        const acc = await metaAccountFor(ws, "instagram", postAccount(ch, "instagram"));
+        if (!acc.ok) throw new Error(acc.error);
+        const rv = await reservePub("meta_publish", { post_id: postId, channel: "instagram" }, { account_id: acc.acc.igUserId, account_name: acc.acc.igUsername ? "@" + acc.acc.igUsername : null });
         if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
         if (rv === "busy") throw new Error(BUSY);
         try {
-          const r = await meta.publishReelToInstagram(mt.ig_user_id, mt.page_token, videoUrl, caption);
+          const r = await meta.publishReelToInstagram(acc.acc.igUserId!, acc.acc.pageToken, videoUrl, caption);
           await q(`update meta_publish set external_id=$2, status='sent' where id=$1`, [rv.id, r.mediaId]);
         } catch (e: any) { await q(`delete from meta_publish where id=$1`, [rv.id]); throw e; }
       } else if (k === "facebook") {
-        const mt = await one<{ page_id: string | null; page_token: string | null }>(`select page_id, page_token from meta_config where workspace_id=$1`, [ws]);
-        if (!mt?.page_id || !mt.page_token) throw new Error("Facebook не підключено");
-        const rv = await reservePub("meta_publish", { post_id: postId, channel: "facebook" });
+        const acc = await metaAccountFor(ws, "facebook", postAccount(ch, "facebook"));
+        if (!acc.ok) throw new Error(acc.error);
+        const rv = await reservePub("meta_publish", { post_id: postId, channel: "facebook" }, { account_id: acc.acc.pageId, account_name: acc.acc.pageName });
         if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
         if (rv === "busy") throw new Error(BUSY);
         try {
-          const r = await meta.publishVideoToPage(mt.page_id, mt.page_token, caption, videoUrl);
+          const r = await meta.publishVideoToPage(acc.acc.pageId, acc.acc.pageToken, caption, videoUrl);
           await q(`update meta_publish set external_id=$2, status='sent', permalink=nullif($3,'') where id=$1`, [rv.id, r.id, fbVideoLink(r.id)]);
         } catch (e: any) { await q(`delete from meta_publish where id=$1`, [rv.id]); throw e; }
       } else if (k === "youtube") {

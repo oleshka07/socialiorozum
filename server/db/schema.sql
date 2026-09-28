@@ -883,3 +883,68 @@ create index if not exists idx_post_comment_due on post_comment(status, due_at);
 -- Дозволи, які людина реально надала застосунку Meta (з /me/permissions після кожного підключення).
 -- NULL = підключено до того, як ми це памʼятали: тоді просто пробуємо, а відмову перекладаємо людською.
 alter table meta_config add column if not exists granted text;
+
+-- 👥 Кілька акаунтів однієї мережі в бренді (особистий і компанії: Сторінки Facebook з їхнім Instagram,
+-- кілька профілів Threads). ОСНОВНИЙ акаунт лишається там, де й жив (meta_config / threads_config) -
+-- увесь код, що знає лише «акаунт бренду», працює з ним як раніше, а бренди з одним акаунтом не
+-- помічають нічого. Тут - лише ДОДАТКОВІ акаунти. «Зробити основним» міняє їх місцями (accounts.ts).
+-- Пост обирає акаунт у channels.<мережа>.account (id Сторінки / id Instagram / id Threads; нема = основний).
+create table if not exists meta_page (
+  workspace_id uuid not null references workspace(id) on delete cascade,
+  page_id      text not null,
+  page_name    text,
+  page_token   text not null,
+  ig_user_id   text,
+  ig_username  text,
+  added_at     timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  primary key (workspace_id, page_id)
+);
+create table if not exists threads_account (
+  workspace_id     uuid not null references workspace(id) on delete cascade,
+  threads_user_id  text not null,
+  username         text,
+  access_token     text not null,
+  token_expires_at timestamptz,
+  added_at         timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  primary key (workspace_id, threads_user_id)
+);
+-- Яким акаунтом пост опубліковано. Коментар, статистика, посилання й CTA-відповідь ідуть ТИМ САМИМ
+-- акаунтом: 28.09 бренд Олега перепідключили з @rozum.one на @olegalisio, і коментарі під постами
+-- @rozum.one впали «The requested resource does not exist» - чужий токен не бачить його постів.
+-- NULL у старих рядках = невідомо (тоді - основний акаунт, як і було).
+alter table threads_publish add column if not exists account_id text;
+alter table threads_publish add column if not exists account_name text;
+alter table meta_publish add column if not exists account_id text;
+alter table meta_publish add column if not exists account_name text;
+alter table threads_reply_job add column if not exists account_id text;
+-- старі рядки Threads: нік є в посиланні (threads.net/@нік/post/…), id - якщо це нік основного акаунта
+update threads_publish set account_name = '@' || lower(substring(permalink from 'threads\.(?:net|com)/@([^/?#]+)'))
+ where account_name is null and permalink ~ 'threads\.(net|com)/@[^/?#]+';
+update threads_publish tp set account_id = tc.threads_user_id
+  from post p, pipeline_run r, source s, threads_config tc
+ where tp.post_id = p.id and r.id = p.run_id and s.id = r.source_id and tc.workspace_id = s.workspace_id
+   and tp.account_id is null and tp.account_name is not null and tc.threads_user_id is not null
+   and lower(tp.account_name) = '@' || lower(tc.username);
+-- старі рядки Facebook: id допису «<Сторінка>_<допис>» уже містить Сторінку
+update meta_publish set account_id = split_part(external_id, '_', 1)
+ where channel = 'facebook' and account_id is null and external_id ~ '^[0-9]+_[0-9]+$';
+update meta_publish mp set account_name = mc.page_name
+  from post p, pipeline_run r, source s, meta_config mc
+ where mp.post_id = p.id and r.id = p.run_id and s.id = r.source_id and mc.workspace_id = s.workspace_id
+   and mp.channel = 'facebook' and mp.account_name is null and mp.account_id = mc.page_id and mc.page_name is not null;
+-- Підписники - по акаунту (у двох Сторінок своя аудиторія). '' - мережі з одним акаунтом (Telegram).
+alter table follower_snapshot add column if not exists account text not null default '';
+alter table follower_snapshot drop constraint if exists follower_snapshot_pkey;
+create unique index if not exists follower_snapshot_acc on follower_snapshot(workspace_id, network, account, day);
+-- знімки до цього оновлення знято з тодішнього основного акаунта - приписуємо їх йому
+update follower_snapshot fs set account = tc.threads_user_id from threads_config tc
+ where fs.account = '' and fs.network = 'threads' and tc.workspace_id = fs.workspace_id and tc.threads_user_id is not null
+   and not exists (select 1 from follower_snapshot f2 where f2.workspace_id = fs.workspace_id and f2.network = fs.network and f2.account = tc.threads_user_id and f2.day = fs.day);
+update follower_snapshot fs set account = mc.ig_user_id from meta_config mc
+ where fs.account = '' and fs.network = 'instagram' and mc.workspace_id = fs.workspace_id and mc.ig_user_id is not null
+   and not exists (select 1 from follower_snapshot f2 where f2.workspace_id = fs.workspace_id and f2.network = fs.network and f2.account = mc.ig_user_id and f2.day = fs.day);
+update follower_snapshot fs set account = mc.page_id from meta_config mc
+ where fs.account = '' and fs.network = 'facebook' and mc.workspace_id = fs.workspace_id and mc.page_id is not null
+   and not exists (select 1 from follower_snapshot f2 where f2.workspace_id = fs.workspace_id and f2.network = fs.network and f2.account = mc.page_id and f2.day = fs.day);

@@ -6,7 +6,7 @@ import { q, one } from "./db.js";
 import { logEvent } from "./log.js";
 import { canTry, failedTry, succeededTry } from "./dailytry.js";
 import * as threads from "./threads.js";
-import { thValidToken } from "./publisher.js";
+import { threadsAccountForRow } from "./accounts.js";
 import { generateThreadsTakes } from "./pipeline.js";
 import { setSetting } from "./settings.js";
 
@@ -21,8 +21,8 @@ function localParts(tz: string): { hour: number; date: string } {
 }
 
 async function processReplyJobs(): Promise<void> {
-  const jobs = await q<{ id: string; workspace_id: string; root_media_id: string; reply_text: string }>(
-    `select id, workspace_id, root_media_id, reply_text from threads_reply_job
+  const jobs = await q<{ id: string; workspace_id: string; root_media_id: string; reply_text: string; account_id: string | null }>(
+    `select id, workspace_id, root_media_id, reply_text, account_id from threads_reply_job
      where status='pending' and due_at <= now() order by due_at limit 10`);
   for (const j of jobs) {
     // забираємо джобу ДО публікації: перезапуск між публікацією й записом статусу інакше дав би
@@ -30,8 +30,10 @@ async function processReplyJobs(): Promise<void> {
     const claimed = await one(`update threads_reply_job set status='sending' where id=$1 and status='pending' returning id`, [j.id]);
     if (!claimed) continue;
     try {
-      const tok = await thValidToken(j.workspace_id);
-      if (!tok) throw new Error("Threads не підключено");
+      // відповідь у гілку - тим акаунтом, яким опубліковано сам пост (у бренді їх може бути кілька)
+      const acc = await threadsAccountForRow(j.workspace_id, { account_id: j.account_id, account_name: null });
+      if (!acc.ok) throw new Error(acc.error);
+      const tok = acc.acc;
       await threads.publish(tok.token, tok.userId, j.reply_text, undefined, j.root_media_id);
       await q(`update threads_reply_job set status='sent' where id=$1`, [j.id]);
     } catch (e: any) {

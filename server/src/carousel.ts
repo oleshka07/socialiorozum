@@ -14,6 +14,7 @@ import { q, one } from "./db.js";
 import { saveMedia, MEDIA_DIR } from "./media.js";
 import { wrapPx, textPx, ASPECT_DIM, postAspect, type Aspect } from "./images.js";
 import { setPostMediaOrder, MAX_SLIDES, SlideError } from "./slides.js";
+import { postAccount } from "./accounts.js";
 
 // ---------------------------------------------------------------------------
 // 1. Сценарій → слайди + підпис
@@ -243,12 +244,14 @@ export async function renderSlide(o: {
 
 // Підпис на кадрі: @нік мережі, у якій бренд живе (Instagram → Threads → канал Telegram), або назва
 // бренду, якщо її задали. Пошту (так зветься домашній кабінет без назви) на кадр не ставимо.
-export async function carouselHandle(ws: string): Promise<string> {
+// 👥 Якщо в пості обрано інший акаунт Instagram чи Threads (особистий / компанії) - нік саме його.
+export async function carouselHandle(ws: string, channels?: any): Promise<string> {
   const r = await one<{ ig: string | null; th: string | null; tg: string | null; title: string | null }>(
-    `select (select ig_username from meta_config where workspace_id=$1) as ig,
-            (select username from threads_config where workspace_id=$1) as th,
+    `select coalesce((select ig_username from meta_page where workspace_id=$1 and ig_user_id=$2), (select ig_username from meta_config where workspace_id=$1)) as ig,
+            coalesce((select username from threads_account where workspace_id=$1 and threads_user_id=$3), (select username from threads_config where workspace_id=$1)) as th,
             (select channel_username from telegram_config where workspace_id=$1) as tg,
-            (select nullif(btrim(title),'') from workspace where id=$1) as title`, [ws]);
+            (select nullif(btrim(title),'') from workspace where id=$1) as title`,
+    [ws, postAccount(channels, "instagram"), postAccount(channels, "threads")]);
   const h = r?.ig || r?.th || r?.tg;
   if (h) return "@" + String(h).replace(/^@/, "");
   return r?.title && !/@/.test(r.title) ? r.title.slice(0, 40) : "";
@@ -297,7 +300,7 @@ export async function renderCarousel(ws: string, postId: string, opts?: { theme?
   const useTheme: CarouselTheme = theme === "photo" && !photo ? "dark" : theme;
   const aspect: Aspect = story ? "9:16" : photo ? await postAspect(postId) : "4:5";
   const { w: W, h: H } = ASPECT_DIM[aspect];
-  const handle = await carouselHandle(ws);
+  const handle = await carouselHandle(ws, post.channels);
 
   const ids: string[] = []; const truncated: number[] = [];
   for (let i = 0; i < texts.length; i++) {

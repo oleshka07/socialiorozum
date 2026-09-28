@@ -18,7 +18,7 @@ import * as meta from "./meta.js";
 import * as threads from "./threads.js";
 import * as linkedin from "./linkedin.js";
 import { logEvent } from "./log.js";
-import { thValidToken } from "./publisher.js";
+import { metaAccountForRow, threadsAccountForRow } from "./accounts.js";
 
 export const COMMENT_NETS = ["instagram", "facebook", "linkedin", "threads"];
 // межа довжини коментаря в мережі (знаків): відповідь у Threads - це такий самий пост на 500
@@ -56,6 +56,10 @@ export function humanCommentError(net: string, msg: string): { text: string; per
   if (net === "linkedin" && /403|ACCESS_DENIED|not enough permissions|permission/i.test(m))
     return { permanent: true, text: "LinkedIn не дав застосунку дозволу коментувати від імені профілю. Коментар можна додати руками під постом." };
   if (/не підключено/i.test(m)) return { permanent: true, text: m };
+  // мережа «не бачить» пост навіть після повторів (whenVisible): його видалили в самій мережі - або
+  // (до 28.09, коли ще не памʼятали акаунт публікації) коментар ішов не тим акаунтом
+  if (/does not exist|HTTP 404|not found/i.test(m) && !TRANSIENT.test(m))
+    return { permanent: true, text: `${name} не знаходить цей пост: його могли видалити в самій мережі. Якщо пост на місці - напиши в підтримку Holos (${m.slice(0, 120)}).` };
   // ліміт, таймаут, 5xx, мережа ще «не бачить» пост - повторимо; решта (пост видалено, кривий
   // параметр) повтором не лікується, тож кажемо одразу, а людина повторить сама кнопкою
   return { permanent: !TRANSIENT.test(m), text: m.slice(0, 300) };
@@ -74,17 +78,30 @@ async function whenVisible<T>(fn: () => Promise<T>): Promise<T> {
   throw last;
 }
 
+// Яким акаунтом пост вийшов у мережу (рядок публікації). Коментар - від нього ж: інший акаунт того
+// самого бренду посту «не бачить» (28.09: «The requested resource does not exist» після того, як
+// бренд перепідключили на інший профіль Threads).
+async function publishedAs(postId: string, net: string): Promise<{ account_id: string | null; account_name: string | null }> {
+  const row = net === "threads"
+    ? await one<{ account_id: string | null; account_name: string | null }>(`select account_id, account_name from threads_publish where post_id=$1 and status='sent' order by created_at desc limit 1`, [postId])
+    : await one<{ account_id: string | null; account_name: string | null }>(`select account_id, account_name from meta_publish where post_id=$1 and channel=$2 and status='sent' order by created_at desc limit 1`, [postId, net]);
+  return row || { account_id: null, account_name: null };
+}
+
 // Одна спроба надіслати коментар у мережу. Вертає id коментаря в мережі.
-async function deliver(ws: string, net: string, target: string, text: string): Promise<string> {
+async function deliver(ws: string, net: string, target: string, text: string, postId: string): Promise<string> {
   const max = COMMENT_MAX[net] || 2000;
   if (text.length > max) throw new CommentFail(`${NET_UA[net]}: коментар довший за ${max} знаків (зараз ${text.length}) - скороти.`, true);
   if (net === "instagram" || net === "facebook") {
-    const mt = await one<{ page_token: string | null; granted: string | null }>(`select page_token, granted from meta_config where workspace_id=$1`, [ws]);
-    if (!mt?.page_token) throw new CommentFail(`${NET_UA[net]} не підключено - коментар нікуди надіслати.`, true);
-    // якщо відомо, що дозволу нема, не смикаємо Meta даремно: відповідь буде та сама відмова
-    if (mt.granted != null && !mt.granted.split(",").includes(COMMENT_PERM[net]))
+    const cfg = await one<{ page_token: string | null; granted: string | null }>(`select page_token, granted from meta_config where workspace_id=$1`, [ws]);
+    if (!cfg?.page_token) throw new CommentFail(`${NET_UA[net]} не підключено - коментар нікуди надіслати.`, true);
+    // якщо відомо, що дозволу нема, не смикаємо Meta даремно: відповідь буде та сама відмова.
+    // Дозволи - один вхід Meta на бренд, тож однакові для всіх його Сторінок.
+    if (cfg.granted != null && !cfg.granted.split(",").includes(COMMENT_PERM[net]))
       throw new CommentFail(humanCommentError(net, "permission").text, true);
-    return (await meta.commentOn(target, mt.page_token, text)).id;
+    const acc = await metaAccountForRow(ws, net, await publishedAs(postId, net));
+    if (!acc.ok) throw new CommentFail(acc.error, true);
+    return (await meta.commentOn(target, acc.acc.pageToken, text)).id;
   }
   if (net === "linkedin") {
     const li = await one<{ access_token: string | null; member_urn: string | null; token_expires_at: string | null }>(
@@ -94,8 +111,9 @@ async function deliver(ws: string, net: string, target: string, text: string): P
     return (await whenVisible(() => linkedin.comment(li.access_token!, li.member_urn!, target, text))).id;
   }
   if (net === "threads") {
-    const tok = await thValidToken(ws);
-    if (!tok) throw new CommentFail("Threads не підключено - коментар нікуди надіслати.", true);
+    const acc = await threadsAccountForRow(ws, await publishedAs(postId, net));
+    if (!acc.ok) throw new CommentFail(/не підключено$/.test(acc.error) ? "Threads не підключено - коментар нікуди надіслати." : acc.error, true);
+    const tok = acc.acc;
     // коментар у Threads - це відповідь автора під його ж постом
     return (await whenVisible(() => threads.publish(tok.token, tok.userId, text, undefined, target))).mediaId;
   }
@@ -113,7 +131,7 @@ export async function sendComment(id: string): Promise<CommentState | null> {
       returning pc.id, pc.post_id, pc.network, pc.target_id, pc.message, pc.attempts, s.workspace_id as ws`, [id]);
   if (!row) return null;
   try {
-    const extId = await deliver(row.ws, row.network, row.target_id, row.message);
+    const extId = await deliver(row.ws, row.network, row.target_id, row.message, row.post_id);
     await q(`update post_comment set status='sent', external_id=nullif($2,''), error=null, updated_at=now() where id=$1`, [id, extId || ""]);
     return { network: row.network, status: "sent", attempts: row.attempts };
   } catch (e: any) {

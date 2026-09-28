@@ -317,3 +317,41 @@ test("buildAnalytics: «замало даних» чесно каже про с�
   assert.equal(a.insights[0].key, "few");
   assert.match(a.insights[0].text, /Зараз таких 3; ще 2 свіжі пости набирають перегляди; ще 2 пости - у мережі, де поки менше 3 постів/);
 });
+
+// ---------- 👥 кілька акаунтів однієї мережі ----------
+test("buildAnalytics: у кожного акаунта мережі своя норма (особистий і компанії не змішуються)", () => {
+  seq = 0;
+  const rows = [];
+  // особистий Threads ~100 переглядів, компанія ~10 000: один масштаб зробив би всі пости особистого «слабкими»
+  for (let i = 0; i < 4; i++) rows.push(row({ ago: 3 + i, views: 100 + i * 10, account: "thu", account_name: "@me" }));
+  for (let i = 0; i < 4; i++) rows.push(row({ ago: 3 + i, views: 10000 + i * 100, account: "thr", account_name: "@company" }));
+  const a = buildAnalytics(rows, [], { days: 30, net: "all", tz: "Europe/Kyiv", now: NOW });
+  assert.ok(a.norms["threads|thu"] && a.norms["threads|thr"], JSON.stringify(a.norms));
+  assert.equal(a.norms["threads|thu"].median, median([100, 110, 120, 130]));
+  const mine = a.posts.filter((p) => p.account === "thu");
+  assert.ok(mine.every((p) => p.mult > 0.7 && p.mult < 1.3), "особисті пости - біля своєї норми, а не ×0.01: " + mine.map((p) => p.mult).join(","));
+  assert.ok(a.posts.every((p) => p.account_name), "кожен рядок несе назву акаунта");
+  // один акаунт у зрізі - ключ норми просто мережа, як і було
+  const one = buildAnalytics(rows.filter((r) => r.account === "thr"), [], { days: 30, net: "all", tz: "Europe/Kyiv", now: NOW });
+  assert.ok(one.norms.threads && !one.norms["threads|thr"], JSON.stringify(one.norms));
+});
+
+test("buildAnalytics: фільтр по акаунту і підписники окремо на акаунт", () => {
+  seq = 0;
+  const rows = [row({ views: 10, account: "thu" }), row({ views: 20, account: "thr" }), row({ net: "facebook", views: 5, account: "pg1" })];
+  const f = buildAnalytics(rows, [], { days: 30, net: "threads:thr", tz: "Europe/Kyiv", now: NOW });
+  assert.deepEqual(f.posts.map((p) => [p.net, p.account]), [["threads", "thr"]]);
+  const fol = [
+    { network: "threads", account: "thu", label: "@me", day: "2026-09-20", followers: 100 },
+    { network: "threads", account: "thu", label: "@me", day: "2026-09-25", followers: 110 },
+    { network: "threads", account: "thr", label: "@company", day: "2026-09-25", followers: 5000 },
+    { network: "telegram", account: "", day: "2026-09-25", followers: 40 },
+  ];
+  const a = buildAnalytics(rows, fol, { days: 30, net: "all", tz: "Europe/Kyiv", now: NOW });
+  assert.deepEqual(Object.keys(a.followers).sort(), ["telegram", "threads:thr", "threads:thu"]);
+  assert.equal(a.followers["threads:thu"].delta, 10);
+  assert.equal(a.followers["threads:thr"].label, "@company");
+  assert.equal(a.followers.telegram.label, null, "мережа з одним акаунтом - без підпису, як і було");
+  const t = buildAnalytics(rows, fol, { days: 30, net: "threads:thr", tz: "Europe/Kyiv", now: NOW });
+  assert.deepEqual(Object.keys(t.followers), ["threads"], "фільтр по акаунту лишає лише його ряд");
+});

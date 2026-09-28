@@ -26,8 +26,13 @@ export type PubRow = {
   m_error: string | null;
   fetched_at: string | null;  // остання СПРОБА збору (її пише й невдала)
   measured_at?: string | null; // коли мережа востаннє справді віддала цифри
+  // 👥 яким акаунтом мережі пост вийшов (у бренді їх може бути кілька: особистий і компанії);
+  // у двох акаунтів різна аудиторія, тож і норма в кожного своя
+  account?: string | null;
+  account_name?: string | null;
 };
-export type FollowerRow = { network: string; day: string; followers: number };
+// account - id акаунта мережі ('' - мережа з одним акаунтом), label - як його назвати людині
+export type FollowerRow = { network: string; day: string; followers: number; account?: string; label?: string };
 export type AnalyticsOpts = { days: number; net: string; tz: string; now?: number };
 
 export const MEASURED_NETS = ["threads", "instagram", "facebook"];   // мережі, що віддають статистику постів
@@ -287,17 +292,25 @@ export function buildSeries(cur: Enriched[], days: number, fromYmd: string, toYm
   };
 }
 
-export function buildFollowers(rows: FollowerRow[], fromYmd: string): Record<string, { points: { day: string; n: number }[]; now: number | null; delta: number | null; since: string | null }> {
-  const out: Record<string, { points: { day: string; n: number }[]; now: number | null; delta: number | null; since: string | null }> = {};
+export type FollowerSeries = { net: string; account: string; label: string | null; points: { day: string; n: number }[]; now: number | null; delta: number | null; since: string | null };
+/** Ряди підписників. Ключ - мережа; якщо в мережі кілька акаунтів - «мережа:акаунт» (у кожного своя
+ *  аудиторія, сума двох Сторінок - не ріст жодної з них). */
+export function buildFollowers(rows: FollowerRow[], fromYmd: string): Record<string, FollowerSeries> {
+  const out: Record<string, FollowerSeries> = {};
+  const accsOf = new Map<string, Set<string>>();
+  for (const r of rows) { if (!accsOf.has(r.network)) accsOf.set(r.network, new Set()); accsOf.get(r.network)!.add(r.account || ""); }
+  const keyOf = (r: FollowerRow) => ((accsOf.get(r.network)?.size || 0) > 1 ? `${r.network}:${r.account || ""}` : r.network);
   const byNet = new Map<string, FollowerRow[]>();
-  for (const r of rows) { if (!byNet.has(r.network)) byNet.set(r.network, []); byNet.get(r.network)!.push(r); }
+  for (const r of rows) { const k = keyOf(r); if (!byNet.has(k)) byNet.set(k, []); byNet.get(k)!.push(r); }
   for (const [net, list] of byNet) {
     list.sort((a, b) => a.day.localeCompare(b.day));
     const inPeriod = list.filter((x) => x.day >= fromYmd);
     const before = list.filter((x) => x.day < fromYmd).pop();
     const base = before || inPeriod[0];
     const last = list[list.length - 1];
+    const first = list[0];
     out[net] = {
+      net: first.network, account: first.account || "", label: net.includes(":") ? first.label || null : null,
       points: inPeriod.map((x) => ({ day: x.day, n: x.followers })),
       now: last ? last.followers : null,
       // дельта лише коли є з чим порівняти: один знімок - це стан, а не зміна
@@ -312,7 +325,8 @@ export function buildAnalytics(all: PubRow[], followers: FollowerRow[], o: Analy
   const now = o.now ?? Date.now();
   const days = Math.max(1, Math.min(730, Math.round(o.days)));
   const curFrom = now - days * 864e5, prevFrom = now - 2 * days * 864e5;
-  const netOk = (r: PubRow) => o.net === "all" || r.net === o.net;
+  // фільтр: «all», мережа («threads») або один акаунт мережі («threads:<акаунт>»)
+  const netOk = (r: PubRow) => o.net === "all" || r.net === o.net || `${r.net}:${r.account || ""}` === o.net;
   const inCur = (r: PubRow) => { const t = Date.parse(r.created_at); return t >= curFrom && t <= now; };
   const inPrev = (r: PubRow) => { const t = Date.parse(r.created_at); return t >= prevFrom && t < curFrom; };
   // драйвер БД віддає час обʼєктом Date - зводимо до ISO, щоб порівняння й JSON були однозначні
@@ -325,15 +339,21 @@ export function buildAnalytics(all: PubRow[], followers: FollowerRow[], o: Analy
   // «ще набирає»: цифри є, але зняті раніше, ніж пост устиг їх набрати
   const isYoung = (r: PubRow) => { if (r.views == null) return false; const h = snapAgeH(r); return h != null && h < MATURE_H; };
 
-  // норма кожної мережі - медіана «дозрілих» переглядів у цьому ж зрізі (від 3 постів)
+  // норма кожної мережі - медіана «дозрілих» переглядів у цьому ж зрізі (від 3 постів). Акаунтів
+  // однієї мережі може бути кілька (особистий і компанії) - у кожного своя аудиторія, тож і норма своя:
+  // інакше пости меншого акаунта завжди виглядали б «слабкими», а більшого - «вірусними».
+  // Мережа з одним акаунтом у зрізі - ключ просто «threads», як і було.
+  const accsOf = new Map<string, Set<string>>();
+  for (const r of cur) { if (!accsOf.has(r.net)) accsOf.set(r.net, new Set()); accsOf.get(r.net)!.add(r.account || ""); }
+  const normKey = (r: PubRow) => ((accsOf.get(r.net)?.size || 0) > 1 ? `${r.net}|${r.account || ""}` : r.net);
   const norms: Record<string, { median: number; n: number }> = {};
-  for (const net of MEASURED_NETS) {
-    const v = cur.filter((r) => r.net === net && r.views != null && !isYoung(r)).map((r) => r.views as number);
-    if (v.length >= MIN_GROUP) norms[net] = { median: Math.max(1, median(v)), n: v.length };
+  for (const key of new Set(cur.filter((r) => MEASURED_NETS.includes(r.net)).map(normKey))) {
+    const v = cur.filter((r) => normKey(r) === key && r.views != null && !isYoung(r)).map((r) => r.views as number);
+    if (v.length >= MIN_GROUP) norms[key] = { median: Math.max(1, median(v)), n: v.length };
   }
   const enriched: Enriched[] = cur.map((r) => {
     const interactions = interactionsOf(r);
-    const norm = norms[r.net];
+    const norm = norms[normKey(r)];
     const young = isYoung(r);
     return {
       ...r, interactions, young, snapH: r.views == null ? null : snapAgeH(r),
@@ -362,12 +382,13 @@ export function buildAnalytics(all: PubRow[], followers: FollowerRow[], o: Analy
     days, net: o.net, tz: o.tz, from: fromYmd, to: toYmd,
     kpi, norms, coverage,
     series: buildSeries(enriched.filter((r) => MEASURED_NETS.includes(r.net)), days, fromYmd, toYmd),
-    followers: buildFollowers(o.net === "all" ? followers : followers.filter((f) => f.network === o.net), fromYmd),
+    followers: buildFollowers(o.net === "all" ? followers : followers.filter((f) => f.network === o.net || `${f.network}:${f.account || ""}` === o.net), fromYmd),
     drivers,
     heat: buildHeat(measured),
     insights: buildInsights(measured, drivers, kpi, days),
     posts: enriched.map((r) => ({
       post_id: r.post_id, net: r.net, created_at: r.created_at, permalink: r.permalink,
+      account: r.account || null, account_name: r.account_name || null,
       title: (r.text || "").split("\n").map((l) => l.trim()).find(Boolean)?.slice(0, 110) || "",
       media: r.media_kind, format: r.format, rubric: r.rubric,
       views: r.views, reach: r.reach, likes: r.likes, replies: r.replies,

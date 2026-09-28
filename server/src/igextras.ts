@@ -19,19 +19,22 @@ const IG_USERNAME = /^[a-z0-9._]{1,30}$/;
  * на профіль, зводить до нижнього регістру (ніки в Instagram регістру не мають), відкидає
  * неможливі ніки й дублі, лишає перші 3. Власний нік акаунта (own) співавтором бути не може.
  */
-export function normCollaborators(v: unknown, own?: string | null): { ok: string[]; bad: string[]; extra: string[] } {
+// self - нік того самого акаунта, яким пост публікується: співавтором бути не може (а інший акаунт
+// того ж бренду - може: компанія публікує, особистий профіль - співавтор)
+export function normCollaborators(v: unknown, own?: string | null): { ok: string[]; bad: string[]; extra: string[]; self: string[] } {
   const raw = Array.isArray(v) ? v.map((x) => String(x ?? "")) : String(v ?? "").split(/[\s,;]+/);
   const me = String(own || "").replace(/^@/, "").toLowerCase();
-  const ok: string[] = [], bad: string[] = [], extra: string[] = [];
+  const ok: string[] = [], bad: string[] = [], extra: string[] = [], self: string[] = [];
   for (const r of raw) {
     let s = r.trim();
     if (!s) continue;
     s = s.replace(/^https?:\/\/(www\.)?instagram\.com\//i, "").replace(/[/?#].*$/, "").replace(/^@/, "").toLowerCase();
-    if (!IG_USERNAME.test(s) || s === me) { bad.push(r.trim()); continue; }
+    if (me && s === me) { self.push(r.trim()); continue; }
+    if (!IG_USERNAME.test(s)) { bad.push(r.trim()); continue; }
     if (ok.includes(s) || extra.includes(s)) continue;
     if (ok.length < IG_MAX_COLLABORATORS) ok.push(s); else extra.push(s);
   }
-  return { ok, bad, extra };
+  return { ok, bad, extra, self };
 }
 
 /** Alt-текст до відправки: без зайвих пробілів і переносів, у межі. Порожнє - без опису. */

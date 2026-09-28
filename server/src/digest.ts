@@ -9,6 +9,7 @@ import { liveSend } from "./tgbot.js";
 import { networkBenchmarks } from "./metrics.js";
 import { weekDiary } from "./diary.js";
 import * as threads from "./threads.js";
+import { threadsAccountForRow } from "./accounts.js";
 
 // «Мультиплікатор ← аналітика»: чи вистрілив хтось із нещодавніх Threads-постів (перегляди ≥1.5× середнього решти).
 // MVP на Threads (там insights найдоступніші); IG/FB додамо, коли буде збір метрик у БД.
@@ -16,8 +17,8 @@ async function findBreakout(ws: string): Promise<{ postId: string; views: number
   const cfg = await one<{ threads_user_id: string | null; access_token: string | null }>(
     `select threads_user_id, access_token from threads_config where workspace_id=$1`, [ws]);
   if (!cfg?.access_token) return null;
-  const recent = await q<{ post_id: string; media_id: string; content: string }>(
-    `select tp.post_id, tp.media_id, p.content from threads_publish tp join post p on p.id=tp.post_id
+  const recent = await q<{ post_id: string; media_id: string; content: string; account_id: string | null; account_name: string | null }>(
+    `select tp.post_id, tp.media_id, p.content, tp.account_id, tp.account_name from threads_publish tp join post p on p.id=tp.post_id
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where s.workspace_id=$1 and tp.status='sent' and tp.media_id is not null
        and tp.created_at > now() - interval '72 hours' order by tp.created_at desc limit 6`, [ws]);
@@ -25,7 +26,10 @@ async function findBreakout(ws: string): Promise<{ postId: string; views: number
   const stats: { postId: string; views: number; title: string }[] = [];
   for (const r of recent) {
     try {
-      const ins = await threads.mediaInsights(cfg.access_token, r.media_id);
+      // статистику поста віддає лише акаунт, яким його опубліковано (акаунтів у бренді може бути кілька)
+      const acc = await threadsAccountForRow(ws, r);
+      if (!acc.ok) continue;
+      const ins = await threads.mediaInsights(acc.acc.token, r.media_id);
       stats.push({ postId: r.post_id, views: ins.views || 0, title: (r.content || "").split("\n")[0].slice(0, 70) });
     } catch { /* один недоступний інсайт не валить перевірку */ }
   }

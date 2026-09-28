@@ -46,6 +46,7 @@ import { COMMENT_NETS, COMMENT_MAX, COMMENT_PERM, commentFor, commentStates, que
 import { normCollaborators, cleanAlt, IG_MAX_COLLABORATORS } from "./igextras.js";
 import { getThumb } from "./media.js";
 import sharp from "sharp";
+import { accountChoices, matchAccount, postAccount, isMultiNet, metaAccountFor, MULTI_NETS, type AccountChoice } from "./accounts.js";
 
 // ============================================================================
 // 1. ПРОТОКОЛ (чисті функції - саме вони під юнітами в test/mcp.test.mjs)
@@ -330,17 +331,56 @@ export async function applyFirstComment(postId: string, channels: any, fc: unkno
 
 /** Співавтори Instagram у channels.instagram.collaborators. Вертає рядок для відповіді. */
 async function applyCollaborators(ws: string, postId: string, channels: any, v: unknown): Promise<{ channels: any; note: string }> {
-  const own = (await one<{ ig_username: string | null }>(`select ig_username from meta_config where workspace_id=$1`, [ws]))?.ig_username;
+  // співавтором не може бути той самий акаунт, яким пост публікується (інший акаунт бренду - може:
+  // компанія публікує, а особистий профіль - співавтор)
+  const igAcc = await metaAccountFor(ws, "instagram", postAccount(channels, "instagram"));
+  const own = igAcc.ok ? igAcc.acc.igUsername : null;
   const r = normCollaborators(v, own);
   const ch = { ...(channels || {}) };
   ch.instagram = { ...(ch.instagram && typeof ch.instagram === "object" ? ch.instagram : { on: false }) };
   if (r.ok.length) ch.instagram.collaborators = r.ok; else delete ch.instagram.collaborators;
   await q(`update post set channels=$2 where id=$1`, [postId, JSON.stringify(ch)]);
-  const warn = [r.bad.length ? `не схоже на нік Instagram: ${r.bad.join(", ")}` : "", r.extra.length ? `Instagram приймає до ${IG_MAX_COLLABORATORS} - зайві @${r.extra.join(", @")} не додано` : ""].filter(Boolean);
+  const warn = [r.bad.length ? `не схоже на нік Instagram: ${r.bad.join(", ")}` : "", r.extra.length ? `Instagram приймає до ${IG_MAX_COLLABORATORS} - зайві @${r.extra.join(", @")} не додано` : "",
+    r.self.length ? `${r.self.join(", ")} - це сам акаунт, яким пост публікується, співавтором він бути не може` : ""].filter(Boolean);
   const note = (r.ok.length ? `співавтори Instagram: ${r.ok.map((u) => "@" + u).join(", ")}` : "співавторів Instagram прибрано")
     + (warn.length ? ` (⚠️ ${warn.join("; ")})` : "") + (r.ok.length && !ch.instagram.on ? " - але Instagram на пості не обрано" : "");
   return { channels: ch, note };
 }
+/** 👥 Акаунти мереж для поста (channels.<мережа>.account). Невідомий акаунт - помилка зі списком. */
+async function applyAccounts(ws: string, postId: string, channels: any, v: unknown): Promise<{ channels: any; note: string }> {
+  if (!v || typeof v !== "object" || Array.isArray(v)) throw new ToolError("accounts - обʼєкт на кшталт {\"facebook\": \"Rozum.one\", \"threads\": \"@rozum.one\"}.");
+  const choices = await accountChoices(ws);
+  const ch = { ...(channels || {}) };
+  const notes: string[] = [];
+  for (const [net, raw] of Object.entries(v as Record<string, unknown>)) {
+    if (!isMultiNet(net) || typeof raw !== "string") continue;
+    const list = choices[net];
+    ch[net] = { ...(ch[net] && typeof ch[net] === "object" ? ch[net] : { on: false }) };
+    if (!raw.trim()) { delete ch[net].account; notes.push(`${NET_LABEL[net]}: акаунт за замовчуванням${list.find((a) => a.main) ? ` (${list.find((a) => a.main)!.name})` : ""}`); continue; }
+    if (!list.length) throw new ToolError(`${NET_LABEL[net]} не підключено в цьому бренді - обирати акаунт нема з чого.`);
+    const m = matchAccount(list, raw);
+    if (!m) throw new ToolError(`${NET_LABEL[net]}: акаунта «${raw}» у бренді нема. Є: ${list.map((a) => `${a.name}${a.main ? " (основний)" : ""}`).join(", ")}.`);
+    if (m.main) delete ch[net].account; else ch[net].account = m.id;
+    notes.push(`${NET_LABEL[net]}: ${m.name}${ch[net].on ? "" : " (але мережу на пості не обрано)"}`);
+  }
+  await q(`update post set channels=$2 where id=$1`, [postId, JSON.stringify(ch)]);
+  return { channels: ch, note: notes.length ? `акаунти - ${notes.join(", ")}` : "акаунти не змінено" };
+}
+
+/** 👥 Якими акаунтами піде пост (лише мережі, де в бренді кілька акаунтів або акаунт обрано явно). */
+async function accountsLine(ws: string, channels: any, nets: string[]): Promise<string> {
+  const choices = await accountChoices(ws);
+  const parts: string[] = [];
+  for (const n of nets) {
+    if (!isMultiNet(n)) continue;
+    const list = choices[n], want = postAccount(channels, n);
+    if (list.length < 2 && !want) continue;
+    const acc = want ? list.find((a) => a.id === want) : list.find((a) => a.main) || list[0];
+    parts.push(`${NET_LABEL[n]} - ${acc ? acc.name : "⚠️ обраний акаунт більше не підключено, обери інший (accounts)"}`);
+  }
+  return parts.length ? `акаунти: ${parts.join(", ")}` : "";
+}
+
 /**
  * Опис фото по кадрах поста (у порядку кадрів). emptyClears: "" прибирає опис (update_post) чи лишає
  * наявний (attach_media - там порожній рядок модель ставить як «без опису», а кадр міг успадкувати
@@ -406,20 +446,21 @@ async function metaGranted(ws: string): Promise<string | null> {
   return (await one<{ granted: string | null }>(`select granted from meta_config where workspace_id=$1`, [ws]))?.granted ?? null;
 }
 
-async function sentMap(ids: string[]): Promise<Map<string, { net: string; link: string | null; at: string }[]>> {
-  const out = new Map<string, { net: string; link: string | null; at: string }[]>();
+async function sentMap(ids: string[]): Promise<Map<string, { net: string; link: string | null; at: string; account: string | null }[]>> {
+  const out = new Map<string, { net: string; link: string | null; at: string; account: string | null }[]>();
   if (!ids.length) return out;
-  // час відправки теж: у списках постів людина питає «коли вийшло», а не «коли я це написав»
-  const rows = await q<{ post_id: string; net: string; permalink: string | null; at: string }>(
-    `select post_id, net, max(permalink) as permalink, min(created_at) as at from (
-        select post_id, 'telegram'::text as net, permalink, created_at from telegram_publish where status='sent' and post_id=any($1)
-        union all select post_id, 'threads', permalink, created_at from threads_publish where status='sent' and post_id=any($1)
-        union all select post_id, channel, permalink, created_at from meta_publish where status='sent' and post_id=any($1)
-        union all select post_id, 'linkedin', permalink, created_at from linkedin_publish where status='sent' and post_id=any($1)
+  // час відправки теж: у списках постів людина питає «коли вийшло», а не «коли я це написав»;
+  // 👥 і яким акаунтом (у бренді їх може бути кілька)
+  const rows = await q<{ post_id: string; net: string; permalink: string | null; at: string; account: string | null }>(
+    `select post_id, net, max(permalink) as permalink, min(created_at) as at, max(account_name) as account from (
+        select post_id, 'telegram'::text as net, permalink, created_at, null::text as account_name from telegram_publish where status='sent' and post_id=any($1)
+        union all select post_id, 'threads', permalink, created_at, account_name from threads_publish where status='sent' and post_id=any($1)
+        union all select post_id, channel, permalink, created_at, account_name from meta_publish where status='sent' and post_id=any($1)
+        union all select post_id, 'linkedin', permalink, created_at, null from linkedin_publish where status='sent' and post_id=any($1)
       ) x group by post_id, net order by min(created_at)`, [ids]);
   for (const r of rows) {
     const a = out.get(r.post_id) || [];
-    a.push({ net: r.net, link: r.permalink, at: r.at });
+    a.push({ net: r.net, link: r.permalink, at: r.at, account: r.account });
     out.set(r.post_id, a);
   }
   return out;
@@ -450,6 +491,14 @@ async function accountNames(ws: string): Promise<Record<string, string>> {
   if (th?.username) out.threads = "@" + th.username.replace(/^@/, "");
   if (mt?.page_token && mt.ig_user_id && mt.ig_username) out.instagram = "@" + mt.ig_username.replace(/^@/, "");
   if (mt?.page_token && mt.page_name) out.facebook = `Сторінка «${mt.page_name}»`;
+  // 👥 кілька акаунтів однієї мережі: усі, основний першим
+  const choices = await accountChoices(ws);
+  for (const n of MULTI_NETS) {
+    const list = choices[n];
+    if (list.length < 2) continue;
+    const nm = (a: AccountChoice) => (n === "facebook" ? `«${a.name}»` : a.name);
+    out[n] = `${n === "facebook" ? "Сторінки " : ""}${list.map((a) => nm(a) + (a.main ? " - основн" + (n === "facebook" ? "а" : "ий") : "")).join(", ")}`;
+  }
   if (tgc?.channel_chat_id) out.telegram = [tgc.channel_title ? `«${tgc.channel_title}»` : "", tgc.channel_username ? "@" + tgc.channel_username.replace(/^@/, "") : ""].filter(Boolean).join(" ") || tgc.channel_chat_id;
   if (li?.display_name) out.linkedin = li.display_name;
   return out;
@@ -571,6 +620,12 @@ const FC_BY_NET_ARG = {
   additionalProperties: false,
 };
 const COLLAB_ARG = { type: "array", items: { type: "string" }, description: `Instagram: співавтори (collab) - до ${IG_MAX_COLLABORATORS} ніків (@partner). Кожен отримає запрошення, і після згоди пост зʼявиться і в його профілі. Фото, карусель і Reels; сторіс - ні. У update_post порожній масив прибирає співавторів.` };
+const ACCOUNTS_ARG = {
+  type: "object",
+  description: "Яким акаунтом мережі публікувати, якщо в бренді їх кілька (особистий і компанії): для facebook - назва Сторінки, для instagram і threads - @нік (або id з workspace_info). Порожній рядок - акаунт за замовчуванням (основний). Мережі, яких тут нема, не змінюються.",
+  properties: { facebook: { type: "string" }, instagram: { type: "string" }, threads: { type: "string" } },
+  additionalProperties: false,
+};
 const ALT_ARG = { type: "array", items: { type: "string" }, description: "Опис фото (alt-текст) для незрячих і пошуку, по одному на кадр у тому ж порядку (1-2 речення, що на фото); порожній рядок прибирає опис кадру. Іде в Instagram (фото й кадри каруселі) і LinkedIn; у відео й сторіс мережі його не приймають." };
 const FC_ARG = S("Перший коментар під постом від імені автора: посилання (у LinkedIn і Facebook воно в тексті ріже охоплення, у коментарі - ні), хештеги для Instagram, заклик. Іде одразу після публікації в Instagram, Facebook, LinkedIn і Threads (там - відповіддю автора). У Telegram і в сторіс коментаря немає. У update_post порожній рядок прибирає коментар.");
 
@@ -642,6 +697,7 @@ export const TOOLS: ToolDef[] = [
         s.primary_goal && GOAL_LABELS[s.primary_goal] ? `Головна ціль: ${GOAL_LABELS[s.primary_goal]}` : "",
         `Мова контенту: ${s.output_language || "Українська"} · Часовий пояс: ${s.timezone || "Europe/Kyiv"}`,
         `Підключені мережі: ${nets.length ? nets.map((n) => `${NET_LABEL[n]}${acc[n] ? ` (${acc[n]})` : ""}`).join(", ") : "жодної"}${off.length ? ` · не підключені: ${netList(off)}` : ""}`,
+        MULTI_NETS.some((n) => /основн/.test(acc[n] || "")) ? "👥 У мережі кілька акаунтів: пост іде основним, інший - параметр accounts у create_draft / update_post (назва Сторінки чи @нік)." : "",
         `Чернеток: ${counts?.drafts ?? 0} (затверджених ${counts?.approved ?? 0}) · Матеріалів: ${counts?.materials ?? 0} · Ідей у банку: ${counts?.ideas ?? 0} · Заплановано: ${counts?.planned ?? 0}`,
       ].filter(Boolean).join("\n");
     },
@@ -832,12 +888,13 @@ export const TOOLS: ToolDef[] = [
       return [
         `${short(p.id)} · створено ${fmtWhen(p.created_at, tz)} · ${p.review === "approved" ? "затверджено" : "чернетка"}${mediaLine(await postMediaList(p.id), p.format)}`,
         `мережі: ${enabledNets(p.channels).length ? netList(enabledNets(p.channels)) : "не обрані"}${p.rubric ? ` · рубрика: ${p.rubric}` : ""}${p.format && p.format !== "post" ? ` · формат: ${p.format}` : ""}`,
+        await accountsLine(ws, p.channels, enabledNets(p.channels).filter((n) => !sent.some((x) => x.net === n))),
         slot?.scheduled_at ? `заплановано: ${fmtWhen(slot.scheduled_at, tz)} (${SLOT_STATE[slot.status] || slot.status})` : "",
         busy.length ? (live
           ? `⏳ публікується просто зараз: ${busy.map((b) => `${NET_LABEL[b.net] || b.net} (з ${fmtWhen(b.since, tz)})`).join(", ")} - дочекайся результату`
           : `⚠️ публікацію в ${netList(busy.map((b) => b.net))} обірвано посеред роботи - наступний publish_post перейме її одразу`) : "",
         enabledNets(p.channels).length ? `публікація: ${publishPlanLine(publishPlan(p.channels, p.content))}` : "",
-        sent.length ? `опубліковано: ${sent.map((x) => `${NET_LABEL[x.net]} ${fmtWhen(x.at, tz)}${x.link ? ` ${x.link}` : ""}`).join(", ")}` : "",
+        sent.length ? `опубліковано: ${sent.map((x) => `${NET_LABEL[x.net]}${x.account ? ` (${x.account})` : ""} ${fmtWhen(x.at, tz)}${x.link ? ` ${x.link}` : ""}`).join(", ")}` : "",
         ...commentPlanLines(p, [...new Set([...enabledNets(p.channels), ...sent.map((x) => x.net)])], await commentStates(p.id), sent.map((x) => x.net), await metaGranted(ws)),
         await igExtrasLine(p),
         `\n${p.content}`,
@@ -858,6 +915,7 @@ export const TOOLS: ToolDef[] = [
       first_comment: FC_ARG,
       first_comment_by_network: FC_BY_NET_ARG,
       instagram_collaborators: COLLAB_ARG,
+      accounts: ACCOUNTS_ARG,
       approve: { type: "boolean", description: "true - одразу позначити затвердженим (готовий до календаря)." },
     },
     required: ["text"],
@@ -882,8 +940,11 @@ export const TOOLS: ToolDef[] = [
       await logEvent("info", "mcp", `чернетку створено з Claude (${text.length} симв.)`, null);
       const fc = (a.first_comment !== undefined || a.first_comment_by_network !== undefined)
         ? await applyFirstComment(post!.id, authoredChannels({}, nets, true), a.first_comment, a.first_comment_by_network) : null;
+      // акаунти - ДО співавторів: співавтором не може бути саме той акаунт, яким пост публікується
+      const accs = a.accounts !== undefined ? await applyAccounts(ws, post!.id, fc ? fc.channels : authoredChannels({}, nets, true), a.accounts) : null;
       const collab = a.instagram_collaborators !== undefined
-        ? await applyCollaborators(ws, post!.id, fc ? fc.channels : authoredChannels({}, nets, true), a.instagram_collaborators) : null;
+        ? await applyCollaborators(ws, post!.id, accs ? accs.channels : fc ? fc.channels : authoredChannels({}, nets, true), a.instagram_collaborators) : null;
+      const accLine = await accountsLine(ws, accs ? accs.channels : authoredChannels({}, nets, true), nets);
       const fcPlan = fc ? commentPlanLines({ first_comment: typeof a.first_comment === "string" ? a.first_comment : null, channels: fc.channels, format: normFormat(a.format) },
         nets, [], [], await metaGranted(ws)) : [];
       const twin = (await scheduleConflicts(ws, post!.id, null, NETS)).filter((c) => c.kind === "text");
@@ -891,6 +952,7 @@ export const TOOLS: ToolDef[] = [
       return [
         `Пост збережено: ${short(post!.id)}${a.approve === true ? " (затверджено)" : " (чернетка)"}.`,
         nets.length ? `Мережі: ${netList(nets)}.` : "Мережі не обрані - вкажи їх у publish_post або схвали в кабінеті.",
+        accLine ? `👥 ${accLine[0].toUpperCase()}${accLine.slice(1)}.` : "",
         normFormat(a.format) === "story" ? "📱 Сторіс: кожен кадр - окрема сторіс в Instagram і Facebook; підпису немає, тож думка має бути на кадрах - додай фото/відео (attach_media, типово 9:16) або намалюй кадри з тексту render_carousel." : "",
         storyOff.length ? `⚠️ Сторіс через API приймають лише Instagram і Facebook - у ${netList(storyOff)} цей пост не піде.` : "",
         notConnected.length ? `⚠️ Не підключені в кабінеті: ${netList(notConnected)} - туди публікація не піде.` : "",
@@ -912,6 +974,7 @@ export const TOOLS: ToolDef[] = [
       first_comment: FC_ARG,
       first_comment_by_network: FC_BY_NET_ARG,
       instagram_collaborators: COLLAB_ARG,
+      accounts: ACCOUNTS_ARG,
       alt_texts: ALT_ARG,
       approve: { type: "boolean", description: "true - затвердити, false - зняти затвердження." },
     },
@@ -955,6 +1018,12 @@ export const TOOLS: ToolDef[] = [
         if (late.length) done.push(`пост уже вийшов у ${netList(late)} - коментар туди не піде сам: send_first_comment`);
         if (already.length) done.push(`у ${netList(already)} перший коментар уже стоїть - новий текст туди не піде (змінити його можна лише в самій мережі)`);
       }
+      if (a.accounts !== undefined) {
+        const chNow = (await one<{ channels: any }>(`select channels from post where id=$1`, [p.id]))?.channels;
+        const sentNow = await alreadySentNetworks(p.id);
+        const late = Object.keys(a.accounts || {}).filter((n) => sentNow.includes(n));
+        done.push((await applyAccounts(ws, p.id, chNow, a.accounts)).note + (late.length ? ` (у ${netList(late)} пост уже вийшов - на той пост це не вплине)` : ""));
+      }
       if (a.instagram_collaborators !== undefined) {
         const chNow = (await one<{ channels: any }>(`select channels from post where id=$1`, [p.id]))?.channels;
         done.push((await applyCollaborators(ws, p.id, chNow, a.instagram_collaborators)).note);
@@ -969,7 +1038,7 @@ export const TOOLS: ToolDef[] = [
         // незатверджений текст не має лишатись у календарі: автопостер відправив би його в мережу
         if (!a.approve) { const n = await unschedulePost(p.id); if (n) done.push(`знято з розкладу (${n})`); }
       }
-      if (!done.length) throw new ToolError("Нічого не змінено - передай text, channels, rubric, format, first_comment, instagram_collaborators, alt_texts або approve.");
+      if (!done.length) throw new ToolError("Нічого не змінено - передай text, channels, rubric, format, first_comment, instagram_collaborators, accounts, alt_texts або approve.");
       return `${short(p.id)}: ${done.join(", ")}.`;
     },
   },
@@ -1629,7 +1698,7 @@ export const TOOLS: ToolDef[] = [
       ];
       if (k.measured) lines.push(`Перегляди: ${nf(k.views)}${vsPrev(k.views, k.viewsPrev)} · взаємодії: ${nf(k.interactions)} · залученість: ${k.er == null ? "—" : (k.er * 100).toFixed(1) + "%"} (цифри є для ${k.measured} з ${k.sends} публікацій)`);
       const fl = Object.entries(an.followers);
-      if (fl.length) lines.push(`Підписники: ${fl.map(([n, f]) => `${NET_LABEL[n] || n} ${f.now == null ? "—" : nf(f.now)}${f.delta != null ? ` (${f.delta >= 0 ? "+" : ""}${nf(f.delta)} з ${f.since})` : ""}`).join(" · ")}`);
+      if (fl.length) lines.push(`Підписники: ${fl.map(([n, f]) => `${NET_LABEL[f.net] || NET_LABEL[n] || n}${f.label ? ` ${f.label}` : ""} ${f.now == null ? "—" : nf(f.now)}${f.delta != null ? ` (${f.delta >= 0 ? "+" : ""}${nf(f.delta)} з ${f.since})` : ""}`).join(" · ")}`);
       for (const n of ["threads", "instagram", "facebook"]) {
         const c = (an.coverage as any)[n];
         if (c && c.published && !c.measured && c.error) lines.push(`⚠️ ${NET_LABEL[n]}: переглядів нема - ${oneLine(c.error, 170)}`);
@@ -1638,6 +1707,8 @@ export const TOOLS: ToolDef[] = [
       if (noPer.length) lines.push(`${netList(noPer)}: API не віддає переглядів окремих постів - там лише факт публікації.`);
       if (an.insights.length) lines.push("", "Висновки:", ...an.insights.map((i) => `- ${i.text}`));
       const withNums = an.posts.filter((p) => p.views != null || p.likes != null || p.replies != null);
+      // 👥 мережі, де в бренді кілька акаунтів, - біля поста видно, яким він вийшов (і норма в кожного своя)
+      const multi = new Set((an.accounts || []).map((x) => x.net));
       // «найсильніші»: за множником до норми мережі, а поки норми нема (менше 3 постів) - за переглядами й лайками
       const list = a.sort === "top" ? [...withNums].sort((x, y) => ((y.mult ?? -1) - (x.mult ?? -1)) || ((y.views ?? -1) - (x.views ?? -1)) || ((y.likes ?? -1) - (x.likes ?? -1))) : withNums;
       if (list.length) {
@@ -1650,7 +1721,7 @@ export const TOOLS: ToolDef[] = [
             p.er != null ? `ER ${(p.er * 100).toFixed(1)}%` : "",
             p.young ? `🕐 ще набирає (цифри за ${snapAge(p.snap_h)} після публікації)` : p.mult != null ? fmtMult(p.mult) : "",
           ].filter(Boolean).join(" · ");
-          lines.push(`${fmtWhen(p.created_at, tz)} · ${NET_LABEL[p.net] || p.net} · ${short(p.post_id)} · ${m}${p.permalink ? ` · ${p.permalink}` : ""}\n«${oneLine(p.title, 110)}»`);
+          lines.push(`${fmtWhen(p.created_at, tz)} · ${NET_LABEL[p.net] || p.net}${multi.has(p.net) && p.account_name ? ` ${p.account_name}` : ""} · ${short(p.post_id)} · ${m}${p.permalink ? ` · ${p.permalink}` : ""}\n«${oneLine(p.title, 110)}»`);
         }
       } else if (an.posts.length) lines.push("", "Цифр по постах ще нема: статистика збирається раз на добу після публікації.");
       const cost = await one<{ usd: string }>(
@@ -1701,6 +1772,7 @@ export const SERVER_INSTRUCTIONS = [
   "Відео: власні відео автора - list_media з kind: \"video\" → attach_media з одним id; публікується як Reels в Instagram, відео у Facebook, Threads, Telegram (до 50 МБ) і LinkedIn, а текст поста - підпис. Відео з комп'ютера заливає та сама media_upload_link (великі файли - частинами).",
   "Сторіс: create_draft з format: \"story\" і мережами instagram/facebook (інші сторіс через API не приймають) → кадри через attach_media (фото й відео разом, фото ріжуться 9:16) або render_carousel з рядками «Кадр 1: …»; кожен кадр - окрема сторіс, підпису немає.",
   "Якщо кабінетів кілька (list_workspaces), спершу переконайся, що активний саме той бренд: перемкни switch_workspace або передай workspace у виклику. Кожна відповідь називає кабінет у першому рядку - звіряйся з ним перед публікацією.",
+  "У бренді буває кілька акаунтів однієї мережі (особистий і компанії - workspace_info їх перелічує): пост без вибору йде основним, інший - accounts у create_draft / update_post (назва Сторінки чи @нік). Пиши текст голосом того акаунта, яким він піде.",
   "Файл з інтернету (пряме посилання) чи невеликий файл у base64 - upload_media; папка з компʼютера - media_upload_link.",
   "Календар: schedule_post відмовить, якщо в ту саму мережу майже в той самий час уже стоїть пост або такий текст уже є (свідомо - force: true); прибрати з календаря - unschedule_post, чернетку назавжди - delete_post (опубліковане не видаляється). publish_post, що відповів «триває у фоні», не повторюй - результат у get_post.",
   "Перший коментар (посилання, хештеги, заклик окремо від тексту): first_comment у create_draft / update_post, свій для мережі - first_comment_by_network; іде сам одразу після публікації в Instagram, Facebook, LinkedIn і Threads (у Telegram і сторіс - ні). Посилання в тексті LinkedIn і Facebook ріже охоплення - краще в перший коментар. Дописали коментар після публікації - send_first_comment.",
