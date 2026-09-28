@@ -1,8 +1,8 @@
 name: beta-check
 
 # Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ, нічого не змінює й не перезапускає.
-# 28.09 вечір: токен колишнього спільного бота відкликано. Хто на проді й беті публікує в Telegram через
-# спільного бота (без власного) і скільки людей зі спільним ботом у DM - кого це зачепило.
+# 28.09 після деплою 9b177a7 (коментарі в одному місці): версія, таблиця, журнал. Плюс форма поля токена
+# бота в кабінетах беті (без значення) і Telegram на проді - для відповіді Олегу про бота.
 
 on:
   push:
@@ -13,7 +13,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Who relies on the shared Telegram bot (read-only)
+      - name: Beta after 9b177a7 + Telegram config shape (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -22,29 +22,40 @@ jobs:
           command_timeout: 5m
           script: |
             mask() { sed -E -e 's/([A-Za-z0-9._%+-]{1,3})[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+)/\1***@\2/g' \
-                            -e 's/[0-9]{6,}:[A-Za-z0-9_-]{30,}/<bot-token>/g' -e 's/[0-9a-fA-F]{24,}/<hex>/g'; }
-            echo "зараз $(date -u +%d.%m\ %H:%M) UTC"
-            for d in "${{ secrets.APP_DIR }}" "${{ secrets.APP_DIR }}-beta"; do
-              echo; echo "=================== $d · HEAD $(git -C "$d" rev-parse --short HEAD) ==================="
-              cd "$d/server" || continue
-              docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -v ON_ERROR_STOP=0' <<'SQL' 2>&1 | mask
+                            -e 's/[0-9]{6,}:[A-Za-z0-9_-]{30,}/<bot-token>/g' -e 's/[0-9a-fA-F]{24,}/<hex>/g' \
+                            -e 's/EAA[A-Za-z0-9]{20,}/<meta-token>/g' -e 's/TH[A-Za-z0-9]{40,}/<th-token>/g'; }
+            B="${{ secrets.APP_DIR }}-beta"
+            echo "зараз $(date -u +%d.%m\ %H:%M) UTC · beta HEAD $(git -C "$B" rev-parse --short HEAD) · prod HEAD $(git -C "${{ secrets.APP_DIR }}" rev-parse --short HEAD)"
+            echo "beta health: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/health) · inbox без входу: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/api/comments/inbox)"
+            cd "$B/server"
+            echo "контейнер: $(docker compose ps app --format '{{.Status}}')"
+            echo "у контейнері: app.js openComments=$(docker compose exec -T app sh -c 'grep -c "function openComments" public/app.js') · inbox.js=$(docker compose exec -T app sh -c 'ls dist/inbox.js 2>/dev/null | wc -l') · list_comments=$(docker compose exec -T app sh -c 'grep -c list_comments dist/mcp.js')"
+            echo "--- журнал застосунку після старту: помилки й попередження ---"
+            docker compose logs --since 15m --no-log-prefix app 2>&1 | grep -vE '^\{"level":30' | grep -iE 'error|warn|fail|помилк' | mask | cut -c1-220 | tail -15
+            docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -v ON_ERROR_STOP=0' <<'SQL' 2>&1 | mask
             set session characteristics as transaction read only;
-            \echo === Telegram у всіх кабінетах: чий бот, канал, скільки вийшло за 30 днів, скільки чекає в календарі ===
-            select coalesce(w.title, w.name) brand,
-                   case when c.bot_token is null then 'спільний' else 'bot ' || split_part(c.bot_token, ':', 1) end bot,
-                   coalesce(c.channel_title, case when c.channel_chat_id is null then '-' else 'без назви' end) channel,
-                   (select count(*) from telegram_chat t where t.workspace_id=w.id) extra_chats,
-                   (select count(*) from telegram_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
-                     where s.workspace_id=w.id and tp.status='sent' and tp.created_at > now() - interval '30 days') sent_30d,
-                   (select to_char(max(tp.created_at) at time zone 'Europe/Prague','DD.MM HH24:MI') from telegram_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
-                     where s.workspace_id=w.id and tp.status='sent') last_sent,
-                   (select count(*) from schedule_slot sl join post p on p.id=sl.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
-                     where s.workspace_id=w.id and sl.status='planned' and sl.scheduled_at > now() and coalesce(sl.channels, p.channels)->'telegram'->>'on' = 'true') planned_tg
-              from telegram_config c join workspace w on w.id=c.workspace_id order by 2, 1;
-            \echo === люди, підключені до бота в DM (tg_owner), за кабінетами ===
-            select coalesce(w.title, w.name) brand, case when c.bot_token is null then 'спільний' else 'власний' end via, count(*) people,
-                   to_char(max(o.created_at) at time zone 'Europe/Prague','DD.MM HH24:MI') last_connected
-              from tg_owner o join workspace w on w.id=o.workspace_id left join telegram_config c on c.workspace_id=w.id
-             group by 1, 2 order by 3 desc;
+            \echo === таблиця comment_reply ===
+            select to_regclass('comment_reply') as tbl, (select count(*) from comment_reply) as rows;
+            \echo === журнал за 15 хв (warn/error) ===
+            select to_char(created_at at time zone 'Europe/Prague','HH24:MI:SS') t, level, scope, left(regexp_replace(message,'\s+',' ','g'),150) msg
+              from app_log where created_at > now() - interval '15 minutes' and level in ('warn','error') order by created_at desc limit 12;
+            \echo === форма поля токена бота в кабінетах беті (значення не показується) ===
+            select coalesce(w.title, w.name) brand, c.bot_token is null as is_null, length(c.bot_token) len,
+                   left(c.bot_token, 1) = '-' as starts_dash, position(':' in coalesce(c.bot_token,'')) colon_at,
+                   coalesce(c.bot_token,'') ~ '^[0-9]{5,15}:[A-Za-z0-9_-]{30,}$' as looks_like_token,
+                   to_char(c.updated_at at time zone 'Europe/Prague','DD.MM HH24:MI') changed
+              from telegram_config c join workspace w on w.id=c.workspace_id order by 1;
             SQL
-            done
+            echo; echo "=================== прод: Telegram у кабінетах ==================="
+            cd "${{ secrets.APP_DIR }}/server"
+            docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -v ON_ERROR_STOP=0' <<'SQL' 2>&1 | mask
+            set session characteristics as transaction read only;
+            select coalesce(w.title, w.name) brand,
+                   case when c.bot_token is null then 'спільний (null)' when length(c.bot_token) < 20 then 'дивне значення' else 'bot ' || split_part(c.bot_token, ':', 1) end bot,
+                   coalesce(c.channel_title, case when c.channel_chat_id is null then '-' else 'без назви' end) channel,
+                   (select count(*) from telegram_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+                     where s.workspace_id=w.id and tp.status='sent') sent_all,
+                   (select to_char(max(tp.created_at) at time zone 'Europe/Prague','DD.MM HH24:MI') from telegram_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+                     where s.workspace_id=w.id and tp.status='sent') last_sent
+              from telegram_config c join workspace w on w.id=c.workspace_id order by 1;
+            SQL
