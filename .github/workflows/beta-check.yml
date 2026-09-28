@@ -1,7 +1,8 @@
 name: beta-check
 
 # Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ, нічого не змінює й не перезапускає.
-# 28.09 після деплою 7ecd670: у threads_publish одна резервація 'sending' - чия, коли й що про неї в журналі.
+# 28.09 вечір: Олег поставив @holos_rozum_bot в адмінці проду, пробував бота на беті - «не підключився».
+# Що саме збережено на кожному інстансі (лише назви ключів), що каже журнал бота і куди Telegram шле апдейти.
 
 on:
   push:
@@ -12,29 +13,49 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Beta - whose Threads reservation is stuck in sending (read-only)
+      - name: Telegram bots on prod and beta (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 4m
+          command_timeout: 5m
           script: |
             mask() { sed -E -e 's/([A-Za-z0-9._%+-]{1,3})[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+)/\1***@\2/g' \
-                            -e 's/EAA[A-Za-z0-9]{20,}/<meta-token>/g' -e 's/TH[A-Za-z0-9]{40,}/<th-token>/g'; }
-            echo "beta HEAD $(git -C "${{ secrets.APP_DIR }}-beta" rev-parse --short HEAD) | зараз $(date -u +%H:%M) UTC"
-            echo "health: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/health)"
-            cd "${{ secrets.APP_DIR }}-beta/server" && docker compose ps app --format '{{.Status}}'
-            docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -v ON_ERROR_STOP=0' <<'SQL' 2>&1 | mask
+                            -e 's/[0-9]{6,}:[A-Za-z0-9_-]{30,}/<bot-token>/g' -e 's/[0-9a-fA-F]{24,}/<hex>/g' \
+                            -e 's/EAA[A-Za-z0-9]{20,}/<meta-token>/g' -e 's/TH[A-Za-z0-9]{40,}/<th-token>/g' \
+                            -e 's#/api/webhooks/telegram/[A-Za-z0-9_-]{16,}#/api/webhooks/telegram/<shared-secret>#g'; }
+            echo "зараз $(date -u +%d.%m\ %H:%M) UTC"
+            for d in "${{ secrets.APP_DIR }}" "${{ secrets.APP_DIR }}-beta"; do
+              echo; echo "=================== $d · HEAD $(git -C "$d" rev-parse --short HEAD) ==================="
+              cd "$d/server" || continue
+              echo "контейнер: $(docker compose ps app --format '{{.Status}}')"
+              echo "--- журнал застосунку: рядки бота (12 год) ---"
+              docker compose logs --since 12h --no-log-prefix app 2>&1 | grep -E '\[tgbot\]|власний бот|спільний бот|Спільний бот' | mask | cut -c1-260 | tail -25
+              echo "--- вхідні вебхуки Telegram за 12 год (кількість за видом адреси) ---"
+              docker compose logs --since 12h --no-log-prefix app 2>&1 | grep -o '"url":"/api/webhooks/telegram/[^"]*"' \
+                | sed -E -e 's#telegram/bot/([0-9]+)#telegram/bot/\1#' -e 's#telegram/[A-Za-z0-9_-]{16,}"#telegram/<shared-secret>"#' | sort | uniq -c
+              echo "--- останні 4 вебхуки (час у мс epoch, статус - у наступному рядку журналу) ---"
+              docker compose logs --since 12h --no-log-prefix app 2>&1 | grep -E 'webhooks/telegram' | mask | grep -o '"time":[0-9]*\|"url":"[^"]*"\|"statusCode":[0-9]*' | paste -sd' ' | tr ' ' '\n' | tail -12
+              docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -v ON_ERROR_STOP=0' <<'SQL' 2>&1 | mask
             set session characteristics as transaction read only;
-            \echo === незавершені резервації Threads: чиї й коли ===
-            select left(tp.post_id::text,8) post, coalesce(w.title, w.name) brand, coalesce(tp.account_id,'-') acc, coalesce(tp.account_name,'-') acc_name,
-                   to_char(tp.created_at at time zone 'Europe/Prague','DD.MM HH24:MI') created, tp.media_id,
-                   (select count(*) from threads_publish t2 where t2.post_id=tp.post_id and t2.status='sent') sent_rows,
-                   p.review, left(regexp_replace(p.content,'\s+',' ','g'),60) content
-              from threads_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id join workspace w on w.id=s.workspace_id
-             where tp.status='sending';
-            \echo === журнал про цей пост ===
-            select to_char(l.created_at at time zone 'Europe/Prague','DD.MM HH24:MI:SS') t, l.level, l.scope, left(regexp_replace(l.message,'\s+',' ','g'),160) msg
-              from app_log l where l.meta::text like '%' || (select post_id::text from threads_publish where status='sending' limit 1) || '%' order by l.created_at desc limit 10;
+            \echo === ключі з адмінки (лише назви, без значень) ===
+            select name, to_char(updated_at at time zone 'Europe/Prague','DD.MM HH24:MI') changed, updated_by from app_secret order by updated_at desc;
+            \echo === журнал: адмінка й бот (12 год, час Праги) ===
+            select to_char(l.created_at at time zone 'Europe/Prague','DD.MM HH24:MI:SS') t, l.level, l.scope, left(regexp_replace(l.message,'\s+',' ','g'),170) msg
+              from app_log l where l.created_at > now() - interval '12 hours' and l.scope in ('admin','tgbot','telegram','tg')
+             order by l.created_at desc limit 30;
+            \echo === Telegram у кабінетах Олега: чий бот (id бота - публічний), канал, власник у Telegram, коди підключення ===
+            select coalesce(w.title, w.name) brand,
+                   case when c.bot_token is null then '-' else 'bot ' || split_part(c.bot_token, ':', 1) end bot, coalesce(c.channel_title,'-') channel,
+                   to_char(c.updated_at at time zone 'Europe/Prague','DD.MM HH24:MI') cfg_changed,
+                   (select count(*) from tg_owner o where o.workspace_id=w.id) owners,
+                   (select to_char(max(o.created_at) at time zone 'Europe/Prague','DD.MM HH24:MI') from tg_owner o where o.workspace_id=w.id) owner_at,
+                   (select count(*) from tg_connect t where t.workspace_id=w.id) codes,
+                   (select to_char(max(t.created_at) at time zone 'Europe/Prague','DD.MM HH24:MI') from tg_connect t where t.workspace_id=w.id) code_at,
+                   (select bool_or(t.tg_user_id is not null) from tg_connect t where t.workspace_id=w.id) code_used
+              from workspace w join workspace_member m on m.workspace_id=w.id join app_user u on u.id=m.user_id
+              left join telegram_config c on c.workspace_id=w.id
+             where u.email ilike 'o.stepeniev%' order by 1;
             SQL
+            done
