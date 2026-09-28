@@ -1,9 +1,9 @@
 name: beta-check
 
 # Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ, нічого не змінює й не перезапускає.
-# 28.09: Олег додав адреси beta.holos.rozum.one в Meta, Threads, LinkedIn і Google. Перевіряємо те, що
-# можна перевірити без входу в акаунт: яким Google-клієнтом входить бета і чи приймає ВІН нові адреси
-# (діалог Google без входу: signin/oauth/error = адресу не додано), плюс журнал спроб підключення на беті.
+# 28.09, 14:40 UTC: Олег переніс адреси беті в правильний Google-клієнт «ROZUM Web» (Systemator).
+# Перевіряємо без входу в акаунт, чи клієнт беті вже приймає beta.holos (signin/oauth/error = ще ні),
+# і журнал спроб підключення на беті з 14:00 UTC.
 
 on:
   push:
@@ -54,13 +54,13 @@ jobs:
                 done
               done
             fi
-            echo; echo "=== журнал підключень на беті (6 год, час Праги) ==="
+            echo; echo "=== журнал підключень на беті (з 14:00 UTC, час Праги) ==="
             cd "${{ secrets.APP_DIR }}-beta/server" && docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -v ON_ERROR_STOP=0' <<'SQL' 2>&1 | mask
             set session characteristics as transaction read only;
             select to_char(l.created_at at time zone 'Europe/Prague','DD.MM HH24:MI:SS') as t, l.level, l.scope,
                    left(regexp_replace(l.message,'\s+',' ','g'),150) as msg, l.meta->>'code' as code, u.email
               from app_log l left join app_user u on u.id = l.user_id
-             where l.created_at > now() - interval '6 hours'
+             where l.created_at > date_trunc('day', now() at time zone 'UTC') at time zone 'UTC' + interval '14 hours'
                and l.scope in ('meta','threads','linkedin','google','gdrive','youtube','auth','oauth')
              order by l.created_at desc limit 40;
             SQL
