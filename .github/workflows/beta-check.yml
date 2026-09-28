@@ -1,7 +1,7 @@
 name: beta-check
 
 # Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ, нічого не змінює й не перезапускає.
-# 29.09: бета після ba242e4 (♻️ вічнозелена черга) - версія, здоров'я, таблиці, і що черга запропонує в кабінетах Олега.
+# 29.09: бета після 5a42944 (🔗 короткі посилання й сторінка в біо) - версія, здоров'я, таблиці, публічні адреси без PIN.
 
 on:
   push:
@@ -12,7 +12,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Beta after evergreen deploy (read-only)
+      - name: Beta after links deploy (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -24,26 +24,27 @@ jobs:
             echo "зараз $(date -u +%d.%m\ %H:%M) UTC · beta HEAD $(git -C "$B" rev-parse --short HEAD)"
             echo "health: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/health)"
             cd "$B/server" && echo "контейнер: $(docker compose ps app --format '{{.Status}}')"
-            echo "маркери: app.js renderEvergreen=$(docker compose exec -T app grep -c renderEvergreen /app/public/app.js) · tdEvergreen=$(docker compose exec -T app grep -c tdEvergreen /app/public/app.js) · dist evergreen=$(docker compose exec -T app ls /app/dist/evergreen.js /app/dist/evergreen-plan.js 2>/dev/null | wc -l)"
+            echo "маркери: app.js loadLinks=$(docker compose exec -T app grep -c 'function loadLinks' /app/public/app.js) · app.html linksPanel=$(docker compose exec -T app grep -c linksPanel /app/public/app.html) · dist links=$(docker compose exec -T app ls /app/dist/links.js /app/dist/linkutil.js 2>/dev/null | wc -l)"
+            echo "--- публічні адреси через nginx, БЕЗ PIN (очікуємо 404 на невідоме, а не сторінку PIN) ---"
+            for u in /s/NoSuch12 /@nobody-here-1; do
+              code=$(curl -s -o /tmp/lk.html -w '%{http_code}' "https://beta.holos.rozum.one$u"); echo "$u → $code · $(grep -o 'Такого посилання нема\|Такої сторінки нема\|PIN' /tmp/lk.html | head -1)"
+            done
+            echo "/app без PIN → $(curl -s https://beta.holos.rozum.one/app | grep -c 'placeholder=\"PIN\"') (1 = сторінка PIN, як і було)"
+            echo "/api/links без PIN → $(curl -s -o /dev/null -w '%{http_code}' https://beta.holos.rozum.one/api/links) (401 = закрито)"
+            echo "стара адреса беті /s/NoSuch12 → $(curl -s -o /dev/null -w '%{http_code}' https://beta.socialio.rozum.one/s/NoSuch12) (404 = працює як була, без переадресації)"
+            echo "/privacy: $(curl -s https://beta.holos.rozum.one/privacy | grep -c 'Short links and bio page') рядок про короткі посилання"
             JS=$(cat <<'EOF'
             const { q } = await import('/app/dist/db.js');
-            const { evergreenView } = await import('/app/dist/evergreen.js');
-            const mask = (s) => String(s || '').replace(/[^\s@]+@[^\s@]+/g, '<пошта>');
-            const t = await q(`select (select count(*) from information_schema.tables where table_name in ('evergreen_item','evergreen_run'))::int as tabs,
-                                      (select count(*) from information_schema.columns where table_name='post' and column_name='repeat_of')::int as col,
-                                      (select count(*) from evergreen_item)::int as items, (select count(*) from settings_block where key='evergreen')::int as settings`);
-            console.log('таблиці:', JSON.stringify(t[0]));
-            const mine = await q(`select w.id, coalesce(nullif(w.title,''), '(без назви)') as title from workspace w join workspace_member m on m.workspace_id=w.id
-                                   join app_user u on u.id=m.user_id where lower(u.email)=lower($1) order by w.created_at`, ['o.stepeniev@swipescape.eu']);
-            for (const w of mine) {
-              const v = await evergreenView(w.id);
-              console.log(`\n=== #${w.id.slice(0, 8)} «${mask(w.title)}» · черга ${v.settings.on ? 'увімкнена' : 'вимкнена'} · у бібліотеці ${v.items.length} · найближчих повторів ${v.upcoming.length}`);
-              console.log(`  хіти (×${v.settings.minMult} і більше), які черга додасть сама: ${v.hits.length}`);
-              for (const h of v.hits.slice(0, 6)) console.log(`   ×${h.mult.toFixed(2)} «${mask(h.title).slice(0, 70)}»`);
-            }
+            const t = await q(`select (select count(*) from information_schema.tables where table_name in ('short_link','short_link_day','bio_page','bio_page_day'))::int as tabs,
+                                      (select count(*) from pg_indexes where indexname='uq_short_link_src')::int as uq,
+                                      (select count(*) from short_link)::int as links, (select count(*) from bio_page)::int as bios,
+                                      (select count(*) from settings_block where key='links')::int as settings`);
+            console.log('таблиці й дані:', JSON.stringify(t[0]));
+            const fk = await q(`select confdeltype from pg_constraint where conrelid='short_link'::regclass and contype='f' and confrelid='post'::regclass`);
+            console.log('short_link → post при видаленні:', fk.map((r) => r.confdeltype === 'c' ? 'cascade' : r.confdeltype).join(','));
             process.exit(0);
             EOF
             )
-            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -60
+            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -20
             echo "--- журнал беті після рестарту (помилки й попередження) ---"
             docker compose logs --since 15m app 2>&1 | grep -iE "error|warn|exception" | grep -v "DeprecationWarning" | tail -15
