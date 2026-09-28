@@ -41,6 +41,7 @@ export type BestTime = {
   worst: BtWindow | null;
   times: string[];             // «HH:MM» для календаря; порожньо - календар бере час зі стратегії
   text: string;                // людською, для кабінету й конектора
+  show: boolean;               // чи показувати рядок людині (дубль мережі чи акаунт без поради - ні)
 };
 
 const NET_UA: Record<string, string> = { threads: "Threads", instagram: "Instagram", facebook: "Facebook" };
@@ -84,10 +85,11 @@ export function windowTime(minutes: number[], w: { from: number; to: number }): 
   return hhmm(Math.max(lo, Math.min(hi, m)));
 }
 
-function one(key: string, net: string, account: string | null, accountName: string | null, posts: { minute: number; mult: number }[]): BestTime {
+type BtOne = BestTime & { usual?: string };   // usual - вікно, де майже всі пости (коли порівнювати нема з чим)
+function one(key: string, net: string, account: string | null, accountName: string | null, posts: { minute: number; mult: number }[]): BtOne {
   const n = posts.length;
   const who = `${NET_UA[net] || net}${accountName ? " " + accountName : ""}`;
-  const base = { key, net, account, accountName, n, best: [] as BtWindow[], worst: null as BtWindow | null, times: [] as string[] };
+  const base = { key, net, account, accountName, n, best: [] as BtWindow[], worst: null as BtWindow | null, times: [] as string[], show: true };
   const wins: BtWindow[] = [];
   for (const w of BT_WINDOWS) {
     const inW = posts.filter((p) => windowOf(p.minute).key === w.key);
@@ -101,7 +103,7 @@ function one(key: string, net: string, account: string | null, accountName: stri
   if (solid.length < 2) {
     const usual = (solid[0] || [...wins].sort((a, b) => b.n - a.n)[0]);
     const suggest = usual && BT_WINDOWS.find((w) => w.key === usual.key)!.from < 15 ? "18-21" : "9-12";
-    return { ...base, ready: false,
+    return { ...base, ready: false, usual: usual?.label,
       text: `${who}: майже всі пости виходили ${usual ? `о ${usual.label}` : "в один і той самий час"} - порівняти нема з чим. Постав 3-4 пости в інший час (наприклад, о ${suggest}), і Holos покаже, коли краще.` };
   }
   const ranked = [...solid].sort((a, b) => b.score - a.score || b.n - a.n);
@@ -123,25 +125,48 @@ function one(key: string, net: string, account: string | null, accountName: stri
  */
 export function bestTimes(posts: BtPost[], tz: string): BestTime[] {
   const out: BestTime[] = [];
+  const strip = ({ usual, ...b }: BtOne): BestTime => (void usual, b);
   for (const net of BT_NETS) {
     const rows = posts.filter((p) => p.net === net && p.media !== "story");
     if (!rows.length) continue;
     const measured = rows.filter((p) => p.mult != null && Number.isFinite(p.mult)).map((p) => ({ ...p, minute: localMinute(p.created_at, tz), mult: p.mult as number }));
-    out.push(one(net, net, null, null, measured));
+    const all = one(net, net, null, null, measured);
     const accs = [...new Set(rows.map((p) => p.account || ""))];
-    if (accs.length > 1)
-      for (const a of accs) {
-        const name = rows.find((p) => (p.account || "") === a)?.account_name || null;
-        out.push(one(`${net}:${a}`, net, a, name, measured.filter((p) => (p.account || "") === a)));
+    const accItems: BtOne[] = accs.length > 1
+      ? accs.map((a) => one(`${net}:${a}`, net, a, rows.find((p) => (p.account || "") === a)?.account_name || null, measured.filter((p) => (p.account || "") === a)))
+      : [];
+    // усі пости зі статистикою - одного акаунта: рядок мережі повторив би його слово в слово, тож
+    // людині показуємо рядок акаунта (у ньому видно, чиї це пости), а мережа лишається для календаря
+    const sole = accItems.find((x) => x.n > 0 && x.n === all.n);
+    if (sole) all.show = false;
+    const src = sole ? `час ${sole.accountName || "іншого акаунта"}` : `спільний час акаунтів ${NET_UA[net] || net}`;
+    for (const x of accItems) {
+      // акаунт без своєї поради: календар ставить його пости в час мережі разом (див. pickTimes) - і так і пишемо
+      const pooled = !x.ready && all.times.length > 0;
+      if (pooled) {
+        const who = `${NET_UA[net] || net}${x.accountName ? " " + x.accountName : ""}`;
+        const why = x.usual ? `майже всі пости виходили о ${x.usual} - порівняти нема з чим`
+          : x.n ? `поки ${postsWord(x.n)} зі статистикою (дозрілі, від 2 діб), а для своєї поради треба ${BT_MIN_POSTS}`
+          : "своїх постів зі статистикою ще нема";
+        x.text = `${who}: ${why} - тож календар ставить його пости в ${src}: ${all.times.join(" і ")}.`
+          + (x.usual ? "" : ` Свій час Holos порахує сам, щойно набереться ${BT_MIN_POSTS}.`);
       }
+      x.show = x === sole || x.ready || pooled;
+    }
+    out.push(strip(all), ...accItems.map(strip));
   }
   return out;
 }
 
-/** Який час ставити посту в мережу: акаунта (якщо по ньому досить даних), інакше мережі разом. */
-export function timesFor(items: BestTime[], net: string, account?: string | null): string[] {
+/**
+ * Який час ставити посту в мережу. Акаунт, по якому досить даних, - його власний висновок (навіть
+ * «час не впливає»: тоді порожньо, і календар бере час зі стратегії). Акаунт без своєї поради чи пост
+ * без акаунта - час мережі разом (pooled: true).
+ */
+export function pickTimes(items: BestTime[], net: string, account?: string | null): { times: string[]; item: BestTime | null; pooled: boolean } {
   const acc = account != null ? items.find((b) => b.key === `${net}:${account}`) : null;
-  if (acc && acc.times.length) return acc.times;
-  const all = items.find((b) => b.key === net);
-  return all ? all.times : [];
+  if (acc && acc.ready) return { times: acc.times, item: acc, pooled: false };
+  const all = items.find((b) => b.key === net) || null;
+  return { times: all ? all.times : [], item: all, pooled: !!acc };
 }
+export const timesFor = (items: BestTime[], net: string, account?: string | null): string[] => pickTimes(items, net, account).times;

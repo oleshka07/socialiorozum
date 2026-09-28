@@ -31,7 +31,7 @@ import { publishPostToChannels, alreadySentNetworks, reelSentNetworks, closeSlot
 import { scheduleConflicts, describeConflicts, schedulable } from "./schedule.js";
 import { startJob, getJob } from "./jobs.js";
 import { analyticsFor, bestTimesFor } from "./metrics.js";
-import { timesFor } from "./besttime.js";
+import { pickTimes } from "./besttime.js";
 import { fmtMult } from "./analytics.js";
 import { publicFetch } from "./netguard.js";
 import { saveMediaFile, MEDIA_DIR } from "./media.js";
@@ -681,12 +681,18 @@ const ASPECT_ARG = { type: "string", enum: ASPECTS, description: "Формат: 
 async function nextBestTime(ws: string, p: { id: string; channels: any }, nets: string[], tz: string, force: boolean): Promise<{ at: Date | null; why: string; note: string }> {
   const { items } = await bestTimesFor(ws);
   const mains = await mainAccountIds(ws);
-  let chosen = "", list: string[] = [];
+  let chosen = "", list: string[] = [], whose = "";
   for (const n of nets) {
     const accs = postAccounts(p.channels, n);
     const acc = accs.length === 1 ? accs[0] : accs.length ? null : ((mains as any)[n] || null);
-    const t = timesFor(items, n, acc);
-    if (t.length) { chosen = n; list = t; break; }
+    const pk = pickTimes(items, n, acc);
+    if (pk.times.length) {
+      chosen = n; list = pk.times;
+      // чий це час: свій акаунта, а якщо в акаунта своєї поради ще нема - мережі разом (так і кажемо)
+      const own = pk.item?.accountName || items.find((b) => b.key === `${n}:${acc}`)?.accountName || "";
+      whose = pk.pooled ? `${own ? ` ${own}` : ""} (своєї статистики ще замало - беру час мережі разом)` : own ? ` ${own}` : "";
+      break;
+    }
   }
   if (!chosen) {
     const why = nets.filter((n) => ["threads", "instagram", "facebook"].includes(n)).map((n) => items.find((b) => b.key === n)?.text || `${NET_LABEL[n]}: постів зі статистикою ще нема.`);
@@ -700,7 +706,7 @@ async function nextBestTime(ws: string, p: { id: string; channels: any }, nets: 
       const c = zonedToUtc(day.getUTCFullYear(), day.getUTCMonth() + 1, day.getUTCDate(), h, m, tz);
       if (c.getTime() < Date.now() + 15 * 60 * 1000) continue;
       if (!force && (await scheduleConflicts(ws, p.id, c, nets)).length) continue;
-      return { at: c, why: "", note: `⏰ ${NET_LABEL[chosen]}: найкращий час з твоєї статистики - ${list.join(" і ")}.` };
+      return { at: c, why: "", note: `⏰ ${NET_LABEL[chosen]}${whose}: найкращий час з твоєї статистики - ${list.join(" і ")}.` };
     }
   }
   return { at: null, note: "", why: `Найближчого тижня найкращі години ${NET_LABEL[chosen]} (${list.join(", ")}) уже зайняті іншими постами. Назви час сам або force: true.` };
@@ -1843,7 +1849,7 @@ export const TOOLS: ToolDef[] = [
       if (noPer.length) lines.push(`${netList(noPer)}: API не віддає переглядів окремих постів - там лише факт публікації.`);
       if (an.insights.length) lines.push("", "Висновки:", ...an.insights.map((i) => `- ${i.text}`));
       // ⏰ найкращий час - за пів року (за коротший період дозрілих постів зазвичай замало)
-      const bt = (await bestTimesFor(ws)).items.filter((b) => (net === "all" || b.net === net) && (b.account == null || b.ready));
+      const bt = (await bestTimesFor(ws)).items.filter((b) => (net === "all" || b.net === net) && b.show !== false);
       if (bt.length) lines.push("", "⏰ Найкращий час публікації (за пів року, за «×нормою» дозрілих постів; schedule_post з at: \"best\" ставить саме туди):", ...bt.map((b) => `- ${b.text}`));
       const withNums = an.posts.filter((p) => p.views != null || p.likes != null || p.replies != null);
       // 👥 мережі, де в бренді кілька акаунтів, - біля поста видно, яким він вийшов (і норма в кожного своя)

@@ -1,7 +1,7 @@
 // ⏰ Найкращий час з власних даних: правила, на яких календар ставить пости.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { bestTimes, timesFor, localMinute, windowOf, shrunk, windowTime, BT_MIN_POSTS } from "../dist/besttime.js";
+import { bestTimes, timesFor, pickTimes, localMinute, windowOf, shrunk, windowTime, BT_MIN_POSTS } from "../dist/besttime.js";
 
 const TZ = "Europe/Prague";
 // пост о HH:MM за Прагою (28.09 - літній час, UTC+2) з множником m
@@ -99,6 +99,56 @@ test("кілька акаунтів: свій час у кожного, а де 
   assert.deepEqual(timesFor(items, "threads", "a"), a.times);
   assert.deepEqual(timesFor(items, "threads", "b"), items.find((x) => x.key === "threads").times);   // замало в @b - спільний
   assert.deepEqual(timesFor(items, "instagram", "x"), []);                                         // нема даних мережі
+  // @b без своєї поради: рядок каже, що календар бере спільний час акаунтів мережі
+  assert.equal(b.show, true);
+  assert.match(b.text, /тож календар ставить його пости в спільний час акаунтів Threads: /);
+  assert.equal(items.find((x) => x.key === "threads").show, true);   // пости двох акаунтів - рядок мережі не дубль
+});
+
+test("усі пости зі статистикою - одного акаунта: рядок мережі не дублюється, інший акаунт знає, чий час бере", () => {
+  const posts = [
+    ...[0, 10, 20, 30, 40, 50].map((m) => post(19, m, 2, { account: "r", account_name: "@rozum.one" })),
+    ...[0, 10, 20, 30, 40, 50].map((m) => post(9, m, 0.7, { account: "r", account_name: "@rozum.one" })),
+    post(12, 0, null, { account: "o", account_name: "@olegalisio" }),                           // свіжий - без множника
+  ];
+  const items = bestTimes(posts, TZ);
+  const all = items.find((x) => x.key === "threads"), r = items.find((x) => x.key === "threads:r"), o = items.find((x) => x.key === "threads:o");
+  assert.equal(all.show, false);                 // слово в слово як @rozum.one
+  assert.equal(r.show, true);
+  assert.deepEqual(r.times, all.times);
+  assert.equal(o.n, 0);
+  assert.equal(o.show, true);
+  assert.match(o.text, /^Threads @olegalisio: своїх постів зі статистикою ще нема - тож календар ставить його пости в час @rozum\.one: 19:/);
+  const pk = pickTimes(items, "threads", "o");
+  assert.equal(pk.pooled, true);
+  assert.deepEqual(pk.times, all.times);
+  assert.equal(pickTimes(items, "threads", "r").pooled, false);
+});
+
+test("один акаунт має всі пости, але їх замало - видно рядок цього акаунта, а не мережі", () => {
+  const fb = (m, mult, account, name) => post(10, m, mult, { net: "facebook", account, account_name: name });
+  const items = bestTimes([...Array.from({ length: 8 }, (_, i) => fb(i * 5, 1, "p1", "Oleg Stepeniev")), fb(0, null, "p2", "Rozum.one")], TZ);
+  const shown = items.filter((x) => x.show);
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0].key, "facebook:p1");
+  assert.match(shown[0].text, /^Facebook Oleg Stepeniev: поки 8 постів/);
+  assert.deepEqual(timesFor(items, "facebook", "p2"), []);
+});
+
+test("акаунт зі своїм висновком «час не впливає» не бере чужий час мережі", () => {
+  const posts = [
+    ...Array.from({ length: 6 }, (_, i) => post(9, i * 5, 1, { account: "a", account_name: "@a" })),
+    ...Array.from({ length: 6 }, (_, i) => post(19, i * 5, 1.02, { account: "a", account_name: "@a" })),
+    ...Array.from({ length: 6 }, (_, i) => post(19, i * 5, 3, { account: "b", account_name: "@b" })),
+    ...Array.from({ length: 6 }, (_, i) => post(9, i * 5, 0.5, { account: "b", account_name: "@b" })),
+  ];
+  const items = bestTimes(posts, TZ);
+  const a = items.find((x) => x.key === "threads:a");
+  assert.equal(a.ready, true);
+  assert.deepEqual(a.times, []);
+  assert.ok(items.find((x) => x.key === "threads").times.length);   // мережа разом має найкращий час
+  assert.deepEqual(timesFor(items, "threads", "a"), []);             // але @a - свій висновок: час зі стратегії
+  assert.equal(pickTimes(items, "threads", "a").pooled, false);
 });
 
 test("мережі без статистики постів (Telegram, LinkedIn) не з'являються", () => {

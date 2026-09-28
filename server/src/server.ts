@@ -1696,8 +1696,9 @@ app.get("/api/analytics/posts", async (req: any) => {
 // ?fresh=1 - перерахувати зараз, а не з 10-хв памʼяті.
 app.get("/api/best-times", async (req: any) => {
   const ws = req.user.workspace_id;
-  const [bt, auto] = await Promise.all([bestTimesFor(ws, String(req.query?.fresh || "") === "1"), bestTimeAuto(ws)]);
-  return { auto, tz: bt.tz, items: bt.items };
+  const [bt, auto, mains] = await Promise.all([bestTimesFor(ws, String(req.query?.fresh || "") === "1"), bestTimeAuto(ws), mainAccountIds(ws)]);
+  // mains - щоб композер і «Ритм каналів» брали час так само, як календар: пост без вибору акаунта йде основним
+  return { auto, tz: bt.tz, items: bt.items, mains };
 });
 
 // «Оновити статистику зараз»: воркер ходить по метрики раз на 6 год, а людина, що щойно

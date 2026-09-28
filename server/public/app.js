@@ -676,8 +676,12 @@ function renderFmtFact(mix){
 // показати й підставити. Акаунт: один обраний у пості - його час (якщо по ньому досить даних), інакше мережі.
 async function loadBestTimes(fresh){ if(!fresh&&BestT&&Date.now()-BestTAt<300000) return BestT;
   BestT=await api('/best-times'+(fresh?'?fresh=1':'')); BestTAt=Date.now(); return BestT; }
+// так само, як календар (pickTimes у besttime.ts): акаунт зі своїм висновком - його час (порожньо = «час не
+// впливає», береться час стратегії), акаунт без поради чи пост без акаунта - час мережі разом.
+// acc === undefined - пост без вибору акаунта: іде основним акаунтом мережі
 function bestTimesFor(net,acc){ const items=(BestT&&BestT.items)||[];
-  const a=acc?items.find(b=>b.key===net+':'+acc):null; if(a&&a.times&&a.times.length) return a.times;
+  if(acc===undefined) acc=(BestT&&BestT.mains&&BestT.mains[net])||null;
+  const a=acc?items.find(b=>b.key===net+':'+acc):null; if(a&&a.ready) return a.times||[];
   const all=items.find(b=>b.key===net); return (all&&all.times)||[]; }
 // найближчий майбутній (≥ через 15 хв) із найкращих часів, у поясі кабінету; у межах дня - спершу найкращий
 function nextBestLocal(times){ const now=Date.now();
@@ -699,7 +703,7 @@ async function renderRhythm(){
   const btHead=bt?'<label id="rhBestRow" style="display:flex;gap:8px;align-items:center;font-size:12.5px;padding:0 0 8px;border-bottom:1px solid var(--line);cursor:pointer" title="Для мереж без свого ритму: календар бере годину, у яку твої пости в цій мережі набирають найбільше переглядів (порівняння з твоєю ж нормою за пів року)">'
     +'<input type="checkbox" id="rhBestAuto"'+(bt.auto?' checked':'')+'> <b>⏰ Найкращий час з моєї статистики</b><span style="color:var(--faint);font-size:11.5px">- мережі без свого ритму отримують свою найкращу годину</span></label>':'';
   box.innerHTML=btHead+nets.map(n=>{ const k=n[0], r=rh[k]||null, custom=!!r;
-    const bestT=bt&&bt.auto&&!custom?bestTimesFor(k,null):[];
+    const bestT=bt&&bt.auto&&!custom?bestTimesFor(k):[];   // що отримає пост без вибору акаунта
     const times=(r&&(Array.isArray(r.times)?r.times:(r.time?[r.time]:[])))||[];
     return '<div style="padding:7px 0;border-bottom:1px solid var(--line)" data-net="'+k+'">'
       +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
@@ -753,7 +757,7 @@ async function renderRhythm(){
 }
 // ⏰ Аналітика: найкращий час по мережах (і акаунтах, де їх кілька й даних досить) - завжди за пів року
 function anBestPanel(a){ const net=String(a.net||'all').split(':')[0];
-  const items=(a.best||[]).filter(b=>(net==='all'||b.net===net)&&(b.account==null||b.ready)); if(!items.length) return '';
+  const items=(a.best||[]).filter(b=>(net==='all'||b.net===net)&&b.show!==false); if(!items.length) return '';
   return '<div class="panel" id="anBest"><div class="vz-head"><div class="vz-title">⏰ Найкращий час публікації</div>'
     +'<span class="vz-sub">за пів року, «×норма» постів старших за 2 доби; '+(a.bestAuto?'AI-розподіл календаря ставить пости саме сюди':'AI-розподіл зараз бере час зі стратегії')+'</span>'
     +'<button class="ghost vz-toggle" id="anBestToggle">'+(a.bestAuto?'Не ставити в календар':'Ставити в календар')+'</button></div>'
@@ -2893,7 +2897,7 @@ async function openComposer(postId, opts){
   // ⏰ найкращий час з власної статистики: перша обрана мережа, по якій даних досить (кнопка - лише коли є що радити)
   loadBestTimes().then(()=>{ const bb=ov.querySelector('#cmpBest'); if(bb&&((BestT&&BestT.items)||[]).some(x=>x.times&&x.times.length)) bb.style.display=''; }).catch(()=>{});
   ov.querySelector('#cmpBest').onclick=()=>{ const on=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!netDone(k));
-    for(const k of on){ const acc=(C[k].accounts||[]).length===1?C[k].accounts[0]:null; const ts=bestTimesFor(k,acc); if(!ts.length) continue;
+    for(const k of on){ const accs=C[k].accounts||[]; const ts=bestTimesFor(k,accs.length===1?accs[0]:accs.length?null:undefined); if(!ts.length) continue;
       const nb=nextBestLocal(ts); if(!nb) continue;
       ov.querySelector('#cmpDate').value=nb.date; ov.querySelector('#cmpTime').value=nb.time;
       setMsg('⏰ '+(AN_LABEL[k]||k)+': найкращий час з твоєї статистики - '+ts.join(', '),'var(--brand)'); return; }

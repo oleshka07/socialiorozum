@@ -341,12 +341,18 @@ const CM_ITEMS = [
 const cmDone = new Set(), cmCalls = [];
 // ⏰ найкращий час з власних даних: заглушка СТАНОВА - перемикач пишеться й читається назад
 const BT_ITEMS = [
-  { key: "threads", net: "threads", account: null, accountName: null, n: 14, ready: true, times: ["19:30"],
+  // усі пости Threads зі статистикою - @rozum.one: рядок мережі (show: false) лишається лише для календаря
+  { key: "threads", net: "threads", account: null, accountName: null, n: 14, ready: true, times: ["19:30"], show: false,
     best: [{ key: "w18", label: "18-21", n: 6, median: 1.4, score: 1.29, time: "19:30" }], worst: { key: "w9", label: "9-12", n: 6, median: 0.6, score: 0.71, time: "09:30" },
     text: "Threads: найкраще о 18-21 - ×1.4 від твоєї норми (6 постів); найслабше о 9-12 - ×0.6 (6 постів). Найкращий час для постів - 19:30." },
-  { key: "threads:thu", net: "threads", account: "thu", accountName: "@olegalisio", n: 3, ready: false, times: [], best: [], worst: null,
-    text: "Threads @olegalisio: поки 3 пости зі статистикою - для поради треба 10." },
-  { key: "instagram", net: "instagram", account: null, accountName: null, n: 12, ready: true, times: [], best: [], worst: null,
+  { key: "threads:thr", net: "threads", account: "thr", accountName: "@rozum.one", n: 14, ready: true, times: ["19:30"], show: true,
+    best: [{ key: "w18", label: "18-21", n: 6, median: 1.4, score: 1.29, time: "19:30" }], worst: { key: "w9", label: "9-12", n: 6, median: 0.6, score: 0.71, time: "09:30" },
+    text: "Threads @rozum.one: найкраще о 18-21 - ×1.4 від твоєї норми (6 постів); найслабше о 9-12 - ×0.6 (6 постів). Найкращий час для постів - 19:30." },
+  { key: "threads:thu", net: "threads", account: "thu", accountName: "@olegalisio", n: 0, ready: false, times: [], best: [], worst: null, show: true,
+    text: "Threads @olegalisio: своїх постів зі статистикою ще нема - тож календар ставить його пости в час @rozum.one: 19:30. Свій час Holos порахує сам, щойно набереться 10." },
+  { key: "facebook:p2", net: "facebook", account: "p2", accountName: "Rozum.one", n: 0, ready: false, times: [], best: [], worst: null, show: false,
+    text: "Facebook Rozum.one: поки 0 постів зі статистикою (дозрілі, від 2 діб) - для поради треба 10. Holos порахує сам, щойно їх набереться." },
+  { key: "instagram", net: "instagram", account: null, accountName: null, n: 12, ready: true, times: [], best: [], worst: null, show: true,
     text: "Instagram: час публікації майже не впливає (2 вікна доби з 12 постів, різниця менша за 10%) - став, коли зручно." },
 ];
 let btAuto = true;
@@ -421,7 +427,7 @@ function handleApi(method, path, body) {
     return { jobId: "job-an" };
   }
   if (path.startsWith("/tg/")) return handleTg(method, path.slice(3), body);
-  if (method === "GET" && path.startsWith("/best-times")) return { auto: btAuto, tz: "Europe/Kyiv", items: BT_ITEMS };
+  if (method === "GET" && path.startsWith("/best-times")) return { auto: btAuto, tz: "Europe/Kyiv", items: BT_ITEMS, mains: { threads: "thu", instagram: "ig1", facebook: "p1" } };
   if (method === "PUT" && path === "/settings/best_time_auto") { btAuto = String(body?.content) !== "0"; btPuts.push(String(body?.content)); return { ok: true }; }
   if (method === "POST" && path === "/schedule/auto") return { ok: true, count: 3, bestTime: btAuto ? { threads: ["19:30"] } : {} };
   if (method === "GET" && path.startsWith("/comments/inbox")) return cmInbox(path);
@@ -1603,8 +1609,8 @@ const run = async () => {
   });
 
   await check("bestAnalytics", async () => {
-    // ⏰ панель найкращого часу в Аналітиці: мережі з порадою й чесне «не впливає»; акаунт без даних не
-    // засмічує; перемикач пише налаштування й панель чесно каже, звідки календар бере час
+    // ⏰ панель найкращого часу в Аналітиці: мережі з порадою й чесне «не впливає»; дубль мережі й акаунт
+    // без даних не засмічують; перемикач пише налаштування й панель чесно каже, звідки календар бере час
     await page.waitForSelector("#anBest", { timeout: 8000 });
     const st0 = await page.evaluate(() => ({ items: [...document.querySelectorAll("#anBest li")].map((l) => l.innerText), sub: document.querySelector("#anBest .vz-sub").innerText, btn: document.querySelector("#anBestToggle").innerText }));
     if (process.env.SMOKE_SHOTS) { const el = await page.$("#anBest"); await el.scrollIntoViewIfNeeded(); await el.screenshot({ path: join(HERE, "best-analytics.png") }); }
@@ -1613,7 +1619,11 @@ const run = async () => {
     const st1 = await page.evaluate(() => ({ sub: document.querySelector("#anBest .vz-sub").innerText, btn: document.querySelector("#anBestToggle").innerText }));
     await page.evaluate(() => document.querySelector("#anBestToggle").click());
     await page.waitForFunction(() => /ставить пости саме сюди/.test((document.querySelector("#anBest .vz-sub") || {}).textContent || ""), undefined, { timeout: 8000 });
-    const good = st0.items.length === 2 && /Найкращий час для постів - 19:30/.test(st0.items[0]) && /майже не впливає/.test(st0.items[1]) && !st0.items.some((t) => /@olegalisio/.test(t))
+    // показано рівно те, що сервер позначив show: @rozum.one з порадою, @olegalisio - чий час бере календар,
+    // Instagram - «не впливає»; рядок мережі-дубль і акаунт без жодних даних - ні
+    const good = st0.items.length === 3 && /^⏰\s*Threads @rozum\.one: .*Найкращий час для постів - 19:30/.test(st0.items[0])
+      && /@olegalisio: .*календар ставить його пости в час @rozum\.one: 19:30/.test(st0.items[1]) && /майже не впливає/.test(st0.items[2])
+      && !st0.items.some((t) => /^\S*\s*Threads: |Rozum\.one: поки/.test(t))
       && /ставить пости саме сюди/.test(st0.sub) && /Не ставити/.test(st0.btn) && /зі стратегії/.test(st1.sub) && /Ставити в календар/.test(st1.btn)
       && btPuts.slice(-2).join(",") === "0,1" && btAuto === true;
     if (!good) console.log("   ↳ bestAnalytics:", JSON.stringify({ st0, st1, btPuts }));
