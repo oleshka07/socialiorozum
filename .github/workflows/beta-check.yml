@@ -1,9 +1,9 @@
 name: beta-check
 
 # Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ, нічого не змінює й не перезапускає.
-# 28.09, 14:40 UTC: Олег переніс адреси беті в правильний Google-клієнт «ROZUM Web» (Systemator).
-# Перевіряємо без входу в акаунт, чи клієнт беті вже приймає beta.holos (signin/oauth/error = ще ні),
-# і журнал спроб підключення на беті з 14:00 UTC.
+# 28.09, 14:45 UTC: Google для беті вже приймає адреси; Олег щойно підключив Threads на беті й тисне
+# «Дозволити статистику» (Meta). Дивимось, чим закінчився колбек Meta і які дозволи Meta реально дала
+# (meta_config.granted - лише назви дозволів, без токенів).
 
 on:
   push:
@@ -63,6 +63,15 @@ jobs:
              where l.created_at > date_trunc('day', now() at time zone 'UTC') at time zone 'UTC' + interval '14 hours'
                and l.scope in ('meta','threads','linkedin','google','gdrive','youtube','auth','oauth')
              order by l.created_at desc limit 40;
+            select w.title, mc.page_name, mc.ig_username, mc.granted,
+                   to_char(mc.updated_at at time zone 'Europe/Prague','DD.MM HH24:MI') as meta_upd,
+                   tc.username as threads, to_char(tc.updated_at at time zone 'Europe/Prague','DD.MM HH24:MI') as th_upd
+              from workspace w
+              join workspace_member m on m.workspace_id = w.id
+              join app_user u on u.id = m.user_id
+              left join meta_config mc on mc.workspace_id = w.id
+              left join threads_config tc on tc.workspace_id = w.id
+             where u.email like 'o.stepeniev%';
             SQL
             echo; echo "=== nginx (прод і бета разом): підключення й повернення (сьогодні) ==="
             for f in /var/log/nginx/access.log; do
