@@ -911,9 +911,9 @@ async function handleCallback(cbq: any, tokenOverride?: string): Promise<void> {
       if (!post) { await tg.sendMessage(token, chatId, "Пост не знайдено."); return; }
       const fresh = await repeatVariant(ws, post.content);
       const np = await one<{ id: string }>(
-        `insert into post(run_id, stage, content, image_prompt, rubric, media_id, channels)
-         values($1,'final',$2,$3,$4,$5,$6::jsonb) returning id`,
-        [post.run_id, fresh, post.image_prompt, post.rubric, post.media_id, JSON.stringify({ threads: { on: true } })]);
+        `insert into post(run_id, stage, content, image_prompt, rubric, media_id, channels, repeat_of)
+         values($1,'final',$2,$3,$4,$5,$6::jsonb,$7) returning id`,
+        [post.run_id, fresh, post.image_prompt, post.rubric, post.media_id, JSON.stringify({ threads: { on: true } }), postId]);
       const when = new Date(Date.now() + 48 * 3600e3);
       await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [np!.id, when.toISOString()]);
       const tz = (await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='timezone'`, [ws]))?.content || "Europe/Kyiv";

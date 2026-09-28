@@ -32,6 +32,8 @@ import { scheduleConflicts, describeConflicts, schedulable } from "./schedule.js
 import { startJob, getJob } from "./jobs.js";
 import { analyticsFor, bestTimesFor } from "./metrics.js";
 import { pickTimes } from "./besttime.js";
+import { evergreenView, saveEgSettings, addEvergreen, removeEvergreen, makeRepeat, evergreenRunFor, type EgView } from "./evergreen.js";
+import type { EgSettings } from "./evergreen-plan.js";
 import { fmtMult } from "./analytics.js";
 import { publicFetch } from "./netguard.js";
 import { saveMediaFile, MEDIA_DIR } from "./media.js";
@@ -712,6 +714,40 @@ async function nextBestTime(ws: string, p: { id: string; channels: any }, nets: 
   return { at: null, note: "", why: `Найближчого тижня найкращі години ${NET_LABEL[chosen]} (${list.join(", ")}) уже зайняті іншими постами. Назви час сам або force: true.` };
 }
 
+// ♻️ вічнозелена черга: рядок у get_post і стан для інструмента evergreen
+async function evergreenLine(postId: string, tz: string): Promise<string> {
+  const [eg, rep] = await Promise.all([
+    one<{ status: string; note: string | null; last_at: string | null }>(`select status, note, last_at from evergreen_item where post_id=$1`, [postId]),
+    one<{ repeat_of: string | null }>(`select repeat_of from post where id=$1`, [postId]),
+  ]);
+  if (rep?.repeat_of) return `♻️ повтор хіта ${short(rep.repeat_of)}`;
+  if (!eg) return "";
+  return eg.status === "active"
+    ? `♻️ у вічнозеленій черзі${eg.last_at ? ` (останній повтор - ${fmtWhen(eg.last_at, tz)})` : ""}`
+    : `♻️ не повторюється: ${eg.note || "прибрано з черги"}`;
+}
+const egSettingsLine = (s: EgSettings) =>
+  `${s.on ? "увімкнено" : "вимкнено"} · ${s.perWeek} ${s.perWeek === 1 ? "повтор" : s.perWeek < 5 ? "повтори" : "повторів"} на тиждень · той самий пост не частіше ніж раз на ${s.gapWeeks} тиж., до ${s.maxRepeats} разів · ` +
+  `${s.fresh ? "свіжий перший рядок (дешева модель, копійки)" : "дослівно, без AI"} · ${s.autoAdd ? `хіти від ×${s.minMult.toFixed(1)} норми додаються самі` : "хіти додаєш сам (add)"}`;
+function egState(v: EgView, tz: string): string {
+  const day = (iso: string) => fmtWhen(iso, tz);
+  const act = v.items.filter((i) => i.status === "active"), off = v.items.filter((i) => i.status !== "active");
+  const lines = [`♻️ Вічнозелена черга: ${egSettingsLine(v.settings)}. Цього тижня створено повторів: ${v.weekUsed} з ${v.settings.perWeek}.`];
+  lines.push(v.upcoming.length ? "Найближчі повтори (скасувати - delete_post, поправити - update_post):" : "Найближчих повторів у календарі нема.");
+  for (const u of v.upcoming) lines.push(`- ${short(u.id)} ${day(u.at)} · ${netList(u.nets)} · «${oneLine(u.title, 80)}» (повтор ${short(u.of)})`);
+  lines.push(act.length ? `Бібліотека (${act.length}):` : "Бібліотека порожня - додай пост (action: add) або дочекайся хітів.");
+  for (const i of act.slice(0, 20))
+    lines.push(`- ${short(i.postId)}${i.bestMult != null ? ` ×${i.bestMult.toFixed(1)}` : ""} · повторів ${i.repeats}/${v.settings.maxRepeats}` +
+      `${i.repeats >= v.settings.maxRepeats ? " (вичерпано)" : i.nextAt ? ` · наступний не раніше ${day(i.nextAt)}` : ""} · ${i.nets.length ? netList(i.nets) : "-"}` +
+      `${i.addedBy === "auto" ? " · хіт" : ""} · «${oneLine(i.title, 80)}»`);
+  if (off.length) {
+    lines.push(`Не повторюються (${off.length}):`);
+    for (const i of off.slice(0, 10)) lines.push(`- ${short(i.postId)} «${oneLine(i.title, 60)}» - ${i.note || "прибрано"}`);
+  }
+  if (v.hits.length) lines.push("Хіти, яких ще нема в черзі (action: add):", ...v.hits.map((h) => `- ${short(h.postId)} ×${h.mult.toFixed(1)} «${oneLine(h.title, 80)}»`));
+  return lines.join("\n");
+}
+
 export const TOOLS: ToolDef[] = [
   {
     name: "list_workspaces",
@@ -977,6 +1013,7 @@ export const TOOLS: ToolDef[] = [
         ...commentPlanLines(p, [...new Set([...enabledNets(p.channels), ...sent.map((x) => x.net)])], await commentStates(p.id), [...new Set(sent.map((x) => x.net))], await metaGranted(ws),
           await pubAccountNames(p.id)),
         await igExtrasLine(p),
+        await evergreenLine(p.id, tz),
         `\n${p.content}`,
         variants.length ? `\nВерсії під мережі:\n${variants.join("\n")}` : "",
       ].filter(Boolean).join("\n");
@@ -1057,11 +1094,19 @@ export const TOOLS: ToolDef[] = [
       accounts: ACCOUNTS_ARG,
       alt_texts: ALT_ARG,
       approve: { type: "boolean", description: "true - затвердити, false - зняти затвердження." },
+      evergreen: { type: "boolean", description: "true - додати опублікований пост у вічнозелену чергу (повертатиметься через тижні зі свіжим першим рядком), false - прибрати звідти." },
     },
     required: ["id"],
     run: async (ws, a) => {
       const p = await findPost(ws, a.id);
       const done: string[] = [];
+      if (typeof a.evergreen === "boolean") {
+        if (a.evergreen) {
+          const r = await addEvergreen(ws, p.id, "user");
+          if (!r.ok) throw new ToolError(`${short(p.id)}: ${r.error}.`);
+          done.push(r.state === "already" ? "уже у вічнозеленій черзі" : `у вічнозеленій черзі${r.postId !== p.id ? ` (оригінал ${short(r.postId)})` : ""}`);
+        } else done.push((await removeEvergreen(ws, p.id)) ? "прибрано з вічнозеленої черги" : "у вічнозеленій черзі його не було");
+      }
       if (a.format !== undefined) {
         const f = normFormat(a.format);
         await q(`update post set format=$2 where id=$1`, [p.id, f]);
@@ -1118,7 +1163,7 @@ export const TOOLS: ToolDef[] = [
         // незатверджений текст не має лишатись у календарі: автопостер відправив би його в мережу
         if (!a.approve) { const n = await unschedulePost(p.id); if (n) done.push(`знято з розкладу (${n})`); }
       }
-      if (!done.length) throw new ToolError("Нічого не змінено - передай text, channels, rubric, format, first_comment, instagram_collaborators, accounts, alt_texts або approve.");
+      if (!done.length) throw new ToolError("Нічого не змінено - передай text, channels, rubric, format, first_comment, instagram_collaborators, accounts, alt_texts, approve або evergreen.");
       return `${short(p.id)}: ${done.join(", ")}.`;
     },
   },
@@ -1648,6 +1693,60 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "evergreen",
+    title: "Вічнозелена черга",
+    description: "Хіти (пости, що зайшли краще за звичайні) повертаються через кілька тижнів новим постом зі свіжим першим рядком, у найкращий час - щоб їх побачили нові підписники. Без action - стан: чи увімкнено, найближчі повтори, бібліотека й хіти, яких у ній ще нема. action: on / off - увімкнути чи вимкнути; settings - змінити налаштування (per_week, gap_weeks, max_repeats, fresh, auto_add, min_mult); add / remove - додати пост у чергу чи прибрати; repeat_now - поставити повтор поста на найближчий добрий час. Повтор стає в календар щонайменше за добу (repeat_now - за годину), тож людина встигає його побачити й скасувати (delete_post). Свіжий перший рядок пише дешева модель кабінету (копійки); пост, прив'язаний до дати чи події, сам зникає з черги з поясненням.",
+    properties: {
+      action: S("Що зробити (необовʼязково; без нього - лише стан).", { enum: ["on", "off", "settings", "add", "remove", "repeat_now"] }),
+      id: S("Id поста для add / remove / repeat_now."),
+      per_week: N("Скільки повторів на тиждень (1-7).", { minimum: 1, maximum: 7 }),
+      gap_weeks: N("Той самий пост - не частіше ніж раз на N тижнів (2-26).", { minimum: 2, maximum: 26 }),
+      max_repeats: N("Скільки разів повторювати один пост (1-10).", { minimum: 1, maximum: 10 }),
+      fresh: { type: "boolean", description: "true (типово) - свіжий перший рядок і перевірка, чи пост не прив'язаний до дати; false - дослівно, без AI." },
+      auto_add: { type: "boolean", description: "true (типово) - хіти додаються в чергу самі." },
+      min_mult: { type: "number", description: "Поріг хіта: у скільки разів більше переглядів за звичайні пости (1.2-5, типово 1.5).", minimum: 1.2, maximum: 5 },
+    },
+    run: async (ws, a) => {
+      const tz = await wsTz(ws);
+      const act = String(a.action || "");
+      const out: string[] = [];
+      const patch: Partial<EgSettings> = {};
+      if (act === "on") patch.on = true;
+      if (act === "off") patch.on = false;
+      if (a.per_week !== undefined) patch.perWeek = Number(a.per_week);
+      if (a.gap_weeks !== undefined) patch.gapWeeks = Number(a.gap_weeks);
+      if (a.max_repeats !== undefined) patch.maxRepeats = Number(a.max_repeats);
+      if (typeof a.fresh === "boolean") patch.fresh = a.fresh;
+      if (typeof a.auto_add === "boolean") patch.autoAdd = a.auto_add;
+      if (a.min_mult !== undefined) patch.minMult = Number(a.min_mult);
+      if (Object.keys(patch).length) {
+        const s2 = await saveEgSettings(ws, patch);
+        out.push(`Збережено: ${egSettingsLine(s2)}.`);
+        if (s2.on && act === "on") await evergreenRunFor(ws);
+      } else if (act === "settings") throw new ToolError("Для settings передай хоч одне: per_week, gap_weeks, max_repeats, fresh, auto_add, min_mult.");
+      if (act === "add" || act === "remove" || act === "repeat_now") {
+        if (!a.id) throw new ToolError(`Для ${act} потрібен id поста.`);
+        const p = await findPost(ws, a.id);
+        if (act === "remove") out.push((await removeEvergreen(ws, p.id)) ? `${short(p.id)} прибрано з черги - сам не повернеться.` : `${short(p.id)} у черзі не було.`);
+        else {
+          const r = await addEvergreen(ws, p.id, "user");
+          if (!r.ok) throw new ToolError(`${short(p.id)}: ${r.error}.`);
+          if (act === "add") out.push(r.state === "already" ? `${short(r.postId)} уже в черзі.` : `${short(r.postId)} додано в чергу${r.postId !== p.id ? ` (це оригінал поста ${short(p.id)})` : ""}.`);
+          else {
+            const m = await makeRepeat(ws, r.postId, { manual: true, leadH: 1 });
+            if (!m.ok) {
+              if (m.off) await q(`update evergreen_item set status='off', note=$2 where post_id=$1`, [r.postId, m.why]);
+              throw new ToolError(`Повтор ${short(r.postId)} не поставлено: ${m.why}.`);
+            }
+            out.push(`♻️ Повтор ${short(m.repeatId)} поставлено на ${fmtWhen(m.at, tz)} у ${netList(m.nets)} (оригінал ${short(r.postId)}). Глянь текст: get_post; скасувати - delete_post.`);
+          }
+        }
+      }
+      out.push(egState(await evergreenView(ws), tz));
+      return out.join("\n");
+    },
+  },
+  {
     name: "send_first_comment",
     title: "Дослати перший коментар",
     description: "Поставити перший коментар під постом, який УЖЕ опубліковано: коментар дописали після публікації, раніше не було дозволу або він не вийшов. Можна одразу передати новий текст (text). Іде в Instagram, Facebook, LinkedIn і Threads - туди, куди пост уже вийшов і де коментаря ще нема; другого коментаря не буде. Для ще не опублікованого поста нічого робити не треба: коментар піде сам одразу після публікації.",
@@ -1924,6 +2023,7 @@ export const SERVER_INSTRUCTIONS = [
   "Перший коментар (посилання, хештеги, заклик окремо від тексту): first_comment у create_draft / update_post, свій для мережі - first_comment_by_network; іде сам одразу після публікації в Instagram, Facebook, LinkedIn і Threads (у Telegram і сторіс - ні). Посилання в тексті LinkedIn і Facebook ріже охоплення - краще в перший коментар. Дописали коментар після публікації - send_first_comment.",
   "Instagram: опис фото для незрячих і пошуку (alt-текст) - alt_text в attach_media або alt_texts в update_post (ти бачиш мініатюри - опиши, що на фото, 1-2 речення; іде і в LinkedIn); співавтори (collab, до 3 ніків) - instagram_collaborators у create_draft / update_post.",
   "Статистика постів (перегляди, лайки, відповіді, репости, підписники, що працює) - analytics.",
+  "Хіти можна повертати через тижні зі свіжим першим рядком - evergreen (вічнозелена черга; повтори стають у календар за добу, їх видно й можна скасувати).",
   "Факти не вигадуй: бери їх з list_materials / get_material або питай автора.",
   "Перед публікацією показуй текст людині - опублікований пост відкликати не можна.",
 ].join(" ");

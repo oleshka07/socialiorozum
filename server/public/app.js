@@ -155,12 +155,14 @@ function renderViewActions(v){
   // попапами лишились лише панелі Плану, які справді потрібні раз на кілька днів.
   const btns=isPlan
     ? [['skeletonHost','📋 Скелет','Згенерувати скелет плану: горизонт, темп, теми'],
-       ['rhythmHost','📡 Ритм каналів','Дні/час/формати публікацій по мережах']]
+       ['rhythmHost','📡 Ритм каналів','Дні/час/формати публікацій по мережах'],
+       ['evergreenHost','♻️ Вічнозелене','Хіти повертаються через тижні новим постом зі свіжим першим рядком']]
     : [];
   btns.forEach(([hostId,label,tip])=>{
     const b=document.createElement('button'); b.className='ghost'; b.title=tip; b.textContent=label;
     b.style.cssText='padding:6px 12px;font-size:12.5px';
-    b.onclick=()=>openPop(b,hostId,label.replace(/^\S+\s/,''));
+    b.id='ph_'+hostId;
+    b.onclick=()=>{ openPop(b,hostId,label.replace(/^\S+\s/,'')); if(hostId==='evergreenHost'&&PopOpen&&PopOpen.hostId===hostId) renderEvergreen(); };
     box.appendChild(b);
   });
 }
@@ -884,6 +886,19 @@ async function loadToday(){
         +'<button class="ghost tdFix" data-post="'+f.post_id+'" data-slot="'+f.id+'" style="padding:5px 11px;font-size:12px;flex:none">Відкрити й повторити</button></div>').join('')
       +'</div>'
     : '';
+  // ♻️ повтори хітів найближчих днів: видно за добу - можна відкрити й поправити або скасувати
+  const egNext=((t.evergreen||{}).next)||[];
+  const egHtml=egNext.length
+    ? '<div class="panel" id="tdEvergreen" style="margin:0 0 16px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><div style="font-weight:700;font-size:14px">♻️ Повертаються хіти</div>'
+      +'<span class="qh" title="Вічнозелена черга: пости, що добре зайшли, виходять знову - новим постом зі свіжим першим рядком. Налаштування - Публікація → План і ритм → ♻️ Вічнозелене.">?</span></div>'
+      +egNext.map(x=>'<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)">'
+        +'<b style="font-size:12.5px;min-width:86px;font-variant-numeric:tabular-nums">'+locDate(x.at).slice(8,10)+'.'+locDate(x.at).slice(5,7)+' '+locHM(x.at)+'</b>'
+        +'<span style="font-size:14px">'+chanIcons(Object.fromEntries((x.nets||[]).map(n=>[n,{on:true}])))+'</span>'
+        +'<span style="flex:1;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(x.title||'')+'</span>'
+        +'<button class="ghost tdEg" data-post="'+x.id+'" data-act="open" style="padding:4px 10px;font-size:12px;flex:none">✍ Відкрити</button>'
+        +'<button class="ghost tdEg" data-post="'+x.id+'" data-act="cancel" style="padding:4px 10px;font-size:12px;flex:none;color:var(--danger)" title="Скасувати цей повтор">✕</button></div>').join('')
+      +'</div>'
+    : '';
   const fm=t.freshMaterials||{};
   // 🔀 воркфлоу-лійка (підглянуто в конкурентів): Новини → Чернетки → Опубліковано, клікабельно
   const funnel=[
@@ -913,7 +928,7 @@ async function loadToday(){
     ['✈️ Вчора вийшло', String(t.publishedYesterday||0), 'публікацій · клік = аналітика'],
     ['💡 Ідеї в банку', String(t.ideas||0), 'клік = відкрити'],
   ].filter(Boolean);
-  w.innerHTML=funnelHtml+qsHtml+failHtml
+  w.innerHTML=funnelHtml+qsHtml+failHtml+egHtml
     +'<div class="stat-grid" style="margin-bottom:16px">'+tiles.map((s,i)=>'<div class="stat tdTile" data-tile="'+i+'" style="cursor:pointer"><div class="l">'+s[0]+'</div><div class="v" style="font-size:21px">'+s[1]+'</div><div class="d">'+s[2]+'</div></div>').join('')+'</div>'
     +'<div class="grid2" style="align-items:start">'
       +'<div class="panel" style="margin:0"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="font-weight:700;font-size:14.5px">📤 Сьогодні виходить</div><button class="ghost" id="tdCal" style="margin-left:auto;padding:5px 11px;font-size:12px">🗓 Календар</button></div>'+slots+'</div>'
@@ -928,6 +943,10 @@ async function loadToday(){
     +chanHtml;
   // дії
   w.querySelectorAll('.tdFn').forEach(el=>el.onclick=()=>funnel[+el.dataset.fn][3]());
+  w.querySelectorAll('.tdEg').forEach(b=>b.onclick=async()=>{ const id=b.dataset.post;
+    if(b.dataset.act==='open'){ openComposer(id); return; }
+    if(!confirm('Скасувати цей повтор? Пост-оригінал лишається у вічнозеленій черзі й повернеться після паузи.')) return;
+    b.disabled=true; try{ await api('/posts/'+id,{method:'DELETE'}); flash('Повтор скасовано'); loadToday(); }catch(e){ b.disabled=false; flash('⚠ '+e.message); } });
   w.querySelectorAll('.tdChan').forEach(el=>el.onclick=(ev)=>{ ev.stopPropagation(); selectView('settings'); setSTab('channels'); });
   w.querySelectorAll('.qsGo').forEach(b=>b.onclick=()=>qsSteps[+b.dataset.i][5]());
   w.querySelectorAll('.tdRow').forEach(r=>r.onclick=()=>openComposer(r.dataset.post,{scheduledAt:r.dataset.at,slotId:r.dataset.slot}));
@@ -1243,6 +1262,78 @@ function drawAnCharts(){
   const h=$('anHeat'); if(h) chartHeat(h,AnData.heat);
 }
 
+// ---- ♻️ Вічнозелена черга: хіти повертаються через тижні новим постом зі свіжим першим рядком ----
+// Повтор стає в календар за добу до виходу (видно тут, у «Сьогодні» й календарі - можна поправити чи
+// скасувати). Налаштування й бібліотека - /api/evergreen; правила «що й коли» - evergreen-plan.ts.
+async function renderEvergreen(note,color){
+  const box=$('egBody'); if(!box) return;
+  let v; try{ v=await api('/evergreen'); }catch(e){ box.innerHTML='<div class="hint">⚠ '+esc(e.message)+'</div>'; return; }
+  const s=v.settings;
+  const day=(iso)=>{ const d=locDate(iso); return d.slice(8,10)+'.'+d.slice(5,7); };
+  const when=(iso)=>day(iso)+' '+locHM(iso);
+  const act=v.items.filter(i=>i.status==='active'), off=v.items.filter(i=>i.status!=='active');
+  const num=(k,val,min,max,w)=>'<input class="txt egNum" data-k="'+k+'" type="number" value="'+val+'" min="'+min+'" max="'+max+'" step="'+(k==='minMult'?'0.1':'1')+'" style="width:'+(w||54)+'px;display:inline-block;padding:4px 7px;font-size:12px">';
+  const row='display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);font-size:12.5px';
+  const cut='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+  box.innerHTML=
+    '<label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer"><input type="checkbox" id="egOn"'+(s.on?' checked':'')+'> <b>Повертати хіти</b>'
+      +'<span class="qh" title="Пост, що зайшов краще за звичайні, через кілька тижнів виходить знову - новим постом зі свіжим першим рядком, у найкращий час. Його побачать ті, хто підписався пізніше. Повтор стає в календар за добу до виходу: видно в «Сьогодні» й календарі, можна поправити чи скасувати.">?</span></label>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;font-size:12px;color:var(--muted);margin:10px 0 6px">'
+      +'<span>'+num('perWeek',s.perWeek,1,7)+' на тиждень</span>'
+      +'<span>той самий пост - раз на '+num('gapWeeks',s.gapWeeks,2,26)+' тиж.</span>'
+      +'<span>до '+num('maxRepeats',s.maxRepeats,1,10)+' разів</span></div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:12px;color:var(--muted)">'
+      +'<label style="cursor:pointer"><input type="checkbox" id="egFresh"'+(s.fresh?' checked':'')+'> свіжий перший рядок <span class="qh" title="Дешева модель кабінету переписує лише перший рядок (інший кут, та сама суть) і перевіряє, чи пост не прив\'язаний до дати чи акції, що минула. Копійки за повтор. Без цього - дослівний повтор (LinkedIn може відхилити однаковий текст).">?</span></label>'
+      +'<label style="cursor:pointer"><input type="checkbox" id="egAuto"'+(s.autoAdd?' checked':'')+'> хіти додаються самі, від ×</label>'+num('minMult',s.minMult.toFixed(1),1.2,5,58)+'<span>норми</span></div>'
+    +'<div style="font-size:12px;color:var(--faint);margin:8px 0 4px">Цього тижня створено повторів: <b>'+v.weekUsed+'</b> з '+s.perWeek+'.</div>'
+    +(v.upcoming.length?'<div class="cm-h" style="margin-top:8px">Найближчі повтори</div>'+v.upcoming.map(u=>
+      '<div class="egRow" data-rep="'+u.id+'" style="'+row+'"><b style="min-width:82px;font-variant-numeric:tabular-nums">'+when(u.at)+'</b>'
+      +'<span style="'+cut+'" title="'+esc(u.title)+'">'+esc(u.title)+'</span><span style="color:var(--faint);font-size:11.5px">'+u.nets.map(n=>AN_LABEL[n]||n).join(', ')+'</span>'
+      +'<button class="ghost" data-eg="open" style="padding:3px 8px;font-size:11.5px" title="Відкрити й поправити">✍</button>'
+      +'<button class="ghost" data-eg="cancel" style="padding:3px 8px;font-size:11.5px;color:var(--danger)" title="Скасувати цей повтор">✕</button></div>').join(''):'')
+    +'<div class="cm-h" style="margin-top:10px">У черзі'+(act.length?' ('+act.length+')':'')+'</div>'
+    +(act.length?act.map(i=>{
+        const next=i.repeats>=s.maxRepeats?'усі повтори вже були':i.nextAt?(Date.parse(i.nextAt)<=Date.now()?'готовий до повтору':'наступний з '+day(i.nextAt)):'';
+        return '<div class="egRow" data-item="'+i.postId+'" style="'+row+';flex-wrap:wrap">'
+          +'<span style="'+cut+';min-width:150px" title="'+esc(i.title)+'">'+esc(i.title)+'</span>'
+          +(i.bestMult!=null?'<b style="color:var(--brand)" title="найкраща «×норма» цього поста">'+fmtX(i.bestMult)+'</b>':'')
+          +'<span style="color:var(--faint);font-size:11.5px">'+i.repeats+'/'+s.maxRepeats+(next?' · '+next:'')+'</span>'
+          +(i.repeats<s.maxRepeats?'<button class="ghost" data-eg="now" style="padding:3px 8px;font-size:11.5px" title="Поставити повтор на найближчий добрий час (не раніше ніж за годину)">♻️ Зараз</button>':'')
+          +'<button class="icon" data-eg="rm" title="Прибрати з черги">✕</button></div>'; }).join('')
+      :'<div class="hint" style="margin:4px 0 8px">Порожньо. '+(s.autoAdd?'Хіти зʼявляться тут самі, щойно пост набере '+fmtX(s.minMult)+' від твоєї норми (статистика постів, старших за 2 доби).':'Додай пост кнопкою «＋ У чергу» нижче чи в меню ⋯ на картці опублікованого поста.')+'</div>')
+    +(v.hits.length?'<div class="cm-h" style="margin-top:10px">Хіти, яких ще нема в черзі</div>'+v.hits.map(h=>
+      '<div class="egRow" data-hit="'+h.postId+'" style="'+row+'"><span style="'+cut+'" title="'+esc(h.title)+'">'+esc(h.title)+'</span>'
+      +'<b style="color:var(--brand)">'+fmtX(h.mult)+'</b><button class="ghost" data-eg="add" style="padding:3px 8px;font-size:11.5px">＋ У чергу</button></div>').join(''):'')
+    +(off.length?'<details style="margin-top:10px"><summary style="font-size:12px;color:var(--muted);cursor:pointer">Не повторюються ('+off.length+')</summary>'+off.map(i=>
+      '<div class="egRow" data-item="'+i.postId+'" style="'+row+';font-size:12px"><span style="flex:1;min-width:0"><span style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(i.title)+'</span>'
+      +'<span style="color:var(--faint)">'+esc(i.note||'прибрано')+'</span></span>'
+      +'<button class="ghost" data-eg="force" style="padding:3px 8px;font-size:11.5px" title="Повертати все одно (без перевірки на дату)">↺ Повертати</button></div>').join('')+'</details>':'')
+    +'<div id="egMsg" style="font-size:12px;color:var(--muted);margin-top:8px"></div>';
+  const msg=(t,c)=>{ const m=$('egMsg'); if(m){ m.textContent=t; m.style.color=c||'var(--muted)'; } };
+  if(note) msg(note,color);
+  const save=async(patch,after)=>{ try{ await api('/evergreen/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)}); if(after) renderEvergreen('збережено ✓','var(--brand)'); else msg('збережено ✓','var(--brand)'); }catch(e){ msg('⚠ '+e.message,'var(--danger)'); } };
+  $('egOn').onchange=()=>save({on:$('egOn').checked},true);
+  $('egFresh').onchange=()=>save({fresh:$('egFresh').checked});
+  $('egAuto').onchange=()=>save({autoAdd:$('egAuto').checked},true);
+  box.querySelectorAll('.egNum').forEach(inp=>inp.onchange=()=>save({[inp.dataset.k]:Number(inp.value)},inp.dataset.k==='minMult'||inp.dataset.k==='maxRepeats'));
+  box.querySelectorAll('[data-eg]').forEach(b=>b.onclick=async()=>{
+    const r=b.closest('.egRow'), a=b.dataset.eg, id=r&&(r.dataset.item||r.dataset.rep||r.dataset.hit);
+    if(!id) return;
+    if(a==='open'){ closePop(); openComposer(id); return; }
+    if(a==='cancel'&&!confirm('Скасувати цей повтор? Пост-оригінал лишається в черзі й повернеться після паузи.')) return;
+    b.disabled=true;
+    try{
+      let done='';
+      if(a==='cancel'){ await api('/posts/'+id,{method:'DELETE'}); done='повтор скасовано'; }
+      if(a==='rm'){ await api('/evergreen/'+id,{method:'DELETE'}); done='прибрано з черги'; }
+      if(a==='add'){ await api('/evergreen/'+id,{method:'POST'}); done='додано в чергу ✓'; }
+      if(a==='force'){ await api('/evergreen/'+id+'/force',{method:'POST'}); done='знову в черзі ✓'; }
+      if(a==='now'){ msg('♻️ пишу свіжий перший рядок і шукаю час…'); const x=await api('/evergreen/'+id+'/repeat',{method:'POST'}); done='♻️ повтор поставлено на '+when(x.at); }
+      if(a==='cancel'||a==='now'){ try{ await loadStudioPosts(); }catch(_){ } try{ await loadPublish(); }catch(_){ } }
+      renderEvergreen(done,'var(--brand)');
+    }catch(e){ msg('⚠ '+e.message,'var(--danger)'); b.disabled=false; }
+  });
+}
 async function loadAnalytics(){
   const box=$('analyticsBox'); if(!box) return;
   try{ const s=JSON.parse(localStorage.getItem('kg_an')||'{}'); if(AN_PERIODS.some(p=>p[0]===s.days)) AnState.days=s.days; if(s.net) AnState.net=s.net; }catch(e){ /* немає сховища - типові */ }
@@ -1991,7 +2082,10 @@ function renderStudio(){
     const fcSet=!!(p.first_comment&&p.first_comment.trim())||FC_NETS.some(k=>p.channels&&p.channels[k]&&typeof p.channels[k].first_comment==='string'&&p.channels[k].first_comment.trim());
     const fcTag=(p.comment&&p.comment.failed)?'<span class="ptag" data-a="composer" style="cursor:pointer;color:var(--danger);border-color:var(--danger)" title="Перший коментар не вийшов - відкрий пост: там причина і «Надіслати коментар»">💬 ⚠</span>'
       :(fcSet||(p.comment&&p.comment.sent))?'<span class="ptag" title="'+((p.comment&&p.comment.sent)?'Перший коментар уже під постом':'Є перший коментар - піде одразу після публікації')+'">💬'+((p.comment&&p.comment.sent)?' ✓':'')+'</span>':'';
-    const tags=fmTag+fcTag+(im?'<span class="ptag" title="Намір поста: '+im[2]+'">'+im[0]+' '+im[1]+'</span>':'')+(p.rubric?'<span class="ptag">🏷 '+esc(p.rubric)+'</span>':'')+(p.source_origin&&p.source_origin!=='manual'?'<span class="ptag">'+(ORIGIN_LABEL[p.source_origin]||esc(p.source_origin))+'</span>':'');
+    // ♻️ вічнозелена черга: оригінал у черзі / сам пост - повтор хіта
+    const egTag=p.repeat_of?'<span class="ptag" title="Повтор хіта з вічнозеленої черги: той самий пост зі свіжим першим рядком">♻️ повтор</span>'
+      :p.evergreen==='active'?'<span class="ptag" title="У вічнозеленій черзі: повертатиметься через кілька тижнів зі свіжим першим рядком">♻️ у черзі</span>':'';
+    const tags=egTag+fmTag+fcTag+(im?'<span class="ptag" title="Намір поста: '+im[2]+'">'+im[0]+' '+im[1]+'</span>':'')+(p.rubric?'<span class="ptag">🏷 '+esc(p.rubric)+'</span>':'')+(p.source_origin&&p.source_origin!=='manual'?'<span class="ptag">'+(ORIGIN_LABEL[p.source_origin]||esc(p.source_origin))+'</span>':'');
     // 🛡 бейджі автоперевірок (settings_block.qa_gates) - показуються ЛИШЕ якщо перевірка знайшла слабке місце
     const qa=p.qa||{}; const qaBad=[];
     if(qa.director&&qa.director!=='yes') qaBad.push(['qad','🎯 '+(qa.director==='no'?'Директор: не веде до цілі':'Директор: частково веде до цілі')]);
@@ -2131,6 +2225,11 @@ function openCardMenu(p, btn, card){
     ['🔥','5 кутів продовження','ідеї-продовження теми → Банк ідей',()=>developPost(id)],
     ['⧉','Копіювати текст','',()=>postAction(card,id,'copy')],
   ];
+  // ♻️ опублікований оригінал (не повтор, не сторіс) - у вічнозелену чергу чи з неї
+  if((p.sent||[]).length&&!p.repeat_of&&p.format!=='story'){
+    if(p.evergreen==='active') freq.push(['♻️','Прибрати з вічнозеленої черги','більше не повертатиметься',()=>evergreenToggle(id,false)]);
+    else freq.push(['♻️','Повертати цей пост','вічнозелена черга: через кілька тижнів - знову, зі свіжим першим рядком',()=>evergreenToggle(id,true)]);
+  }
   // розширені - у складеному блоці
   const G=[];
   G.push(['Покращити',[['🎯','Перевірка Директора','чи веде пост до твоєї цілі',()=>directorCheck(id)],['📖','Сторителлінг','12 прийомів - чи чіпляє і тримає до кінця',()=>storytellingCheck(id)]]]);
@@ -2139,7 +2238,7 @@ function openCardMenu(p, btn, card){
     dev.push(['🔁','Повторити хіт (через 48 год)','дубль зі свіжим гачком - покажеться іншій аудиторії',()=>repeatHit(id)]);
     dev.push(['🧵','Розгорнути в гілку','тейк → повний пост, поїде гілкою в Threads',()=>expandToThread(id)]);
   }
-  if(PRO) dev.push(['♻️','Розтиражувати під канали','варіанти під кожну мережу (COPE)',()=>openAtomize(id)]);
+  if(PRO) dev.push(['🧩','Розтиражувати під канали','варіанти під кожну мережу (COPE)',()=>openAtomize(id)]);
   G.push(['Розвинути',dev]);
   if(PRO&&(isReelScript||p.reel_video)){ const reel=[];
     if(isReelScript) reel.push(['🎞','Зібрати відео','озвучка + кліпи + монтаж, 1-3 хв',()=>reelVideoRun(id)]);
@@ -2166,6 +2265,12 @@ function openCardMenu(p, btn, card){
   m.querySelectorAll('.cm-i[data-f]').forEach(b=>b.onclick=()=>{ close(); freq[+b.dataset.f][3](); });
   m.querySelectorAll('.cm-i[data-g]').forEach(b=>b.onclick=()=>{ const g=G.find(x=>x[0]===b.dataset.g); close(); if(g) g[1][+b.dataset.i][3](); });
 }
+async function evergreenToggle(id,on){
+  try{
+    if(on){ const r=await api('/evergreen/'+id,{method:'POST'}); flash(r.state==='already'?'♻️ Пост уже у вічнозеленій черзі':'♻️ У вічнозеленій черзі - налаштування в Публікація → План і ритм → ♻️ Вічнозелене'); }
+    else { await api('/evergreen/'+id,{method:'DELETE'}); flash('Прибрано з вічнозеленої черги'); }
+    await loadStudioPosts();
+  }catch(e){ flash('⚠ '+e.message); } }
 // 🔁 «тест → масштаб»: повтор хіта зі свіжим гачком через 48 год (тільки Threads)
 async function repeatHit(id){ if(!confirm('🔁 Створити копію зі свіжим гачком і запланувати в Threads через 48 годин?\n\nПрактика: вдалий пост через 2 доби показується вже іншій аудиторії.')) return;
   aiBusy('🔁 Переписую гачок і планую повтор…');
@@ -2214,10 +2319,10 @@ function rememberVoiceRule(instruction){
 async function openAtomize(postId){
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
   ov.innerHTML='<div class="modal-card" style="max-width:760px;max-height:86vh;overflow:auto;padding:20px">'
-    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">♻️ Розтиражувати пост</b><button class="icon" id="atX" style="margin-left:auto">✕</button></div>'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">🧩 Розтиражувати пост</b><button class="icon" id="atX" style="margin-left:auto">✕</button></div>'
     +'<div class="hint">Витягаємо «атоми» з поста й робимо нативні варіанти для кожного каналу (свій гачок під кожен).</div>'
     +'<div class="btnrow" style="margin:10px 0;flex-wrap:wrap">'+['telegram','instagram','threads','facebook'].map(c=>'<label class="rchip"><input type="checkbox" class="atCh" value="'+c+'" checked> '+(CP_LABEL[c]||c)+'</label>').join('')+'</div>'
-    +'<div class="btnrow"><button class="primary" id="atGen">♻️ Згенерувати</button><span id="atMsg" style="font-size:12px;color:var(--muted)"></span></div>'
+    +'<div class="btnrow"><button class="primary" id="atGen">🧩 Згенерувати</button><span id="atMsg" style="font-size:12px;color:var(--muted)"></span></div>'
     +'<div id="atView" class="out" style="margin-top:12px"></div>'
     +'</div>';
   document.body.appendChild(ov);
@@ -3250,7 +3355,7 @@ function renderCal(){
       const movable=(st==='planned'||st==='failed');
       const ch=document.createElement('div'); ch.className='pchip'+(st==='failed'?' failed':'')+(st==='posted'?' posted':'');
       ch.title=(s.result||(st==='planned'?'заплановано':st))+(movable?' · тягни на інший день':'');
-      ch.innerHTML='<b>'+time+icon+'</b> '+chanIcons(s.channels)+' '+esc((s.content||'').replace(/\n+/g,' ').slice(0,maxTxt))
+      ch.innerHTML='<b>'+time+icon+'</b> '+(s.repeat_of?'<span title="Повтор хіта з вічнозеленої черги">♻️</span> ':'')+chanIcons(s.channels)+' '+esc((s.content||'').replace(/\n+/g,' ').slice(0,maxTxt))
         +(st!=='posted'?'<span class="pchip-x" data-del="'+s.id+'" title="Прибрати з календаря" style="float:right;margin-left:4px;padding:0 4px;border-radius:4px;color:var(--faint);cursor:pointer">✕</span>':'');
       // перетягування запланованого чіпа на інший день (час зберігається)
       if(movable){ ch.draggable=true; ch.addEventListener('dragstart',ev=>{ ev.dataTransfer.setData('text/plain','slot:'+s.id+':'+time); }); }
@@ -3335,7 +3440,7 @@ function renderWeekGrid(wrap, days, byDay, todayIso){
       const movable=(st==='planned'||st==='failed');
       const ch=document.createElement('div'); ch.className='pchip'+(st==='failed'?' failed':'')+(st==='posted'?' posted':'');
       ch.title=(s.result||(st==='planned'?'заплановано':st))+(movable?' · тягни на інший день/час':'');
-      ch.innerHTML='<b>'+time+icon+'</b> '+chanIcons(s.channels)+' '+esc((s.content||'').replace(/\n+/g,' ').slice(0,60))
+      ch.innerHTML='<b>'+time+icon+'</b> '+(s.repeat_of?'<span title="Повтор хіта з вічнозеленої черги">♻️</span> ':'')+chanIcons(s.channels)+' '+esc((s.content||'').replace(/\n+/g,' ').slice(0,60))
         +(st!=='posted'?'<span class="pchip-x" data-del="'+s.id+'" title="Прибрати з календаря" style="float:right;margin-left:4px;padding:0 4px;border-radius:4px;color:var(--faint);cursor:pointer">✕</span>':'');
       const [hh,mm]=time.split(':').map(Number);
       let top=(hh*60+mm)/60*HPX;

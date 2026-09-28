@@ -1020,3 +1020,29 @@ create table if not exists comment_reply (
   created_at   timestamptz not null default now(),
   primary key (workspace_id, network, comment_id)
 );
+-- ♻️ Вічнозелена черга: пости, що добре зайшли, повертаються через тижні новим постом зі свіжим першим
+-- рядком (evergreen.ts). evergreen_item - бібліотека оригіналів: active | off (з причиною: людина
+-- прибрала, прив'язаний до дати, акаунтів уже нема); force - людина сказала «повертати все одно».
+-- evergreen_run - кожен створений повтор: лишається й тоді, коли людина повтор скасувала (тижневий
+-- ліміт рахує саме створені). post.repeat_of - чий повтор цей пост.
+alter table post add column if not exists repeat_of uuid references post(id) on delete set null;
+create table if not exists evergreen_item (
+  post_id      uuid primary key references post(id) on delete cascade,
+  workspace_id uuid not null references workspace(id) on delete cascade,
+  added_by     text not null default 'user',    -- user | auto (хіт ×норми)
+  status       text not null default 'active',  -- active | off
+  note         text,                             -- чому off
+  force        boolean not null default false,
+  last_at      timestamptz,                      -- на коли поставлено останній повтор
+  created_at   timestamptz not null default now()
+);
+create index if not exists idx_evergreen_item_ws on evergreen_item(workspace_id, status);
+create table if not exists evergreen_run (
+  id           uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspace(id) on delete cascade,
+  item_post_id uuid references post(id) on delete cascade,
+  repeat_id    uuid references post(id) on delete set null,
+  at           timestamptz,
+  created_at   timestamptz not null default now()
+);
+create index if not exists idx_evergreen_run_ws on evergreen_run(workspace_id, created_at);

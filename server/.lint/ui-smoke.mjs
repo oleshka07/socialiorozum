@@ -80,7 +80,7 @@ const POSTS = [
   {
     id: P2, content: "Затверджений пост про ціни", review: "approved",
     channels: { telegram: { on: true }, instagram: { on: true } }, rubric: "Освіта", source_origin: "manual",
-    format: "post", intent: "sale", sent: [], links: {},
+    format: "post", intent: "sale", sent: [], links: {}, repeat_of: "egA",
   },
   {
     id: P3, content: "Цей уже опублікований у Telegram", review: "approved",
@@ -144,6 +144,7 @@ const API = {
   "GET /bank": [{ id: P2, content: "Затверджений пост про ціни", source_title: "нотатка", sent: false }],
   "GET /schedule": [
     { id: "sl1", post_id: P1, scheduled_at: iso(0, 9), status: "planned", content: "Слайд 1: чому підрядники зникають", channels: null },
+    { id: "sl2", post_id: "egR1", scheduled_at: iso(1, 15), status: "planned", content: "Свіжий гачок про ті самі 3 помилки", channels: null, repeat_of: "egA" },
   ],
   "GET /today": {
     slots: [{ id: "sl1", post_id: P1, scheduled_at: iso(0, 9), status: "planned", channels: { telegram: { on: true } }, title: "Слайд 1: чому підрядники зникають", result: null }],
@@ -158,6 +159,7 @@ const API = {
     publishedYesterday: 1,
     publishedToday: 1,
     netToday: { telegram: 1 },
+    evergreen: { on: true, next: [{ id: "egR1", of: "egA", at: iso(1, 17), title: "Свіжий гачок про ті самі 3 помилки", nets: ["threads", "telegram"] }] },
   },
   "POST /brand/context-check-result": {
     score: 5, promptChars: 9200,
@@ -415,6 +417,38 @@ function anFollowers() {
 }
 const AN_FOLLOW = anFollowers();
 
+// ♻️ вічнозелена черга: СТАНОВА заглушка - перевірки доводять «натиснув → збереглось → видно»
+const EG = {
+  settings: { on: false, perWeek: 2, gapWeeks: 6, maxRepeats: 3, fresh: true, autoAdd: true, minMult: 1.5 },
+  items: [
+    { postId: "egA", title: "3 помилки, які коштують готелю гостей", addedBy: "auto", status: "active", note: null, force: false, bestMult: 3.2,
+      repeats: 1, firstSentAt: iso(-60, 17), lastAt: iso(1, 17), nextAt: iso(43, 17), nets: ["threads", "telegram"] },
+    { postId: "egB", title: "Акція до 30.09: знижка 20%", addedBy: "auto", status: "off", note: "прив'язаний до дати чи події: акція з дедлайном", force: false,
+      bestMult: 4, repeats: 0, firstSentAt: iso(-20, 10), lastAt: null, nextAt: null, nets: ["instagram"] },
+  ],
+  upcoming: [{ id: "egR1", of: "egA", at: iso(1, 17), title: "Свіжий гачок про ті самі 3 помилки", nets: ["threads", "telegram"] }],
+  hits: [{ postId: "egH", title: "Чому готелі губляться в пошуку", mult: 2.1 }],
+};
+const egCalls = [];
+function egView() { return { settings: EG.settings, tz: "Europe/Kyiv", weekUsed: 1, items: EG.items, upcoming: EG.upcoming, hits: EG.hits }; }
+function handleEvergreen(method, path, body) {
+  if (method === "GET" && path === "/evergreen") return egView();
+  if (method === "PUT" && path.startsWith("/evergreen/settings")) { Object.assign(EG.settings, body || {}); egCalls.push({ k: "settings", body }); return { ok: true, settings: EG.settings }; }
+  const m = /^\/evergreen\/([\w-]+)(?:\/(force|repeat))?$/.exec(path);
+  if (!m) return null;
+  const [, id, act] = m;
+  egCalls.push({ k: act || method, id });
+  if (method === "DELETE") { const it = EG.items.find((x) => x.postId === id); if (it) { it.status = "off"; it.note = "прибрано з черги"; }
+    const sp = POSTS.find((x) => x.id === id); if (sp) sp.evergreen = "off"; return { ok: true }; }
+  if (act === "force") { const it = EG.items.find((x) => x.postId === id); if (it) { it.status = "active"; it.note = null; it.force = true; } return { ok: true }; }
+  if (act === "repeat") { EG.upcoming.push({ id: "egR2", of: id, at: iso(2, 9), title: "Повтор", nets: ["threads"] }); return { ok: true, repeatId: "egR2", at: iso(2, 9), nets: ["threads"] }; }
+  // додати: хіт чи опублікований пост зі Студії
+  const hit = EG.hits.find((h) => h.postId === id);
+  if (hit) { EG.hits = EG.hits.filter((h) => h !== hit); EG.items.unshift({ postId: id, title: hit.title, addedBy: "user", status: "active", note: null, force: false, bestMult: hit.mult, repeats: 0, firstSentAt: iso(-30, 10), lastAt: null, nextAt: iso(-1, 10), nets: ["threads"] }); }
+  const sp = POSTS.find((x) => x.id === id); if (sp) sp.evergreen = "active";
+  return { ok: true, state: "added", postId: id };
+}
+
 function handleApi(method, path, body) {
   if (method === "GET" && path.startsWith("/analytics/posts")) {
     const qp = new URL(path, "http://x").searchParams;
@@ -427,6 +461,8 @@ function handleApi(method, path, body) {
     return { jobId: "job-an" };
   }
   if (path.startsWith("/tg/")) return handleTg(method, path.slice(3), body);
+  if (path.startsWith("/evergreen")) { const r = handleEvergreen(method, path, body); if (r) return r; }
+  if (method === "DELETE" && /^\/posts\/egR\d$/.test(path)) { egCalls.push({ k: "cancel", id: path.split("/")[2] }); EG.upcoming = EG.upcoming.filter((u) => u.id !== path.split("/")[2]); return { ok: true }; }
   if (method === "GET" && path.startsWith("/best-times")) return { auto: btAuto, tz: "Europe/Kyiv", items: BT_ITEMS, mains: { threads: "thu", instagram: "ig1", facebook: "p1" } };
   if (method === "PUT" && path === "/settings/best_time_auto") { btAuto = String(body?.content) !== "0"; btPuts.push(String(body?.content)); return { ok: true }; }
   if (method === "POST" && path === "/schedule/auto") return { ok: true, count: 3, bestTime: btAuto ? { threads: ["19:30"] } : {} };
@@ -2551,6 +2587,89 @@ const run = async () => {
     const m = await page.evaluate(() => document.querySelector("#pubMsg").textContent);
     const good = /⏰ Threads о 19:30 - найкращий час з твоєї статистики/.test(m);
     if (!good) console.log("   ↳ bestDistribute:", m);
+    return good;
+  });
+
+  await check("egPanel", async () => {
+    // ♻️ панель у «План і ритм»: вимкнено → увімкнув (PUT), додав хіт, «повертати все одно», «♻️ Зараз»
+    await closeComposers();
+    await page.evaluate(() => { selectView("publish"); setPTab("plan"); });
+    await page.waitForSelector("#ph_evergreenHost", { timeout: 8000 });
+    await page.evaluate(() => document.querySelector("#ph_evergreenHost").click());
+    await page.waitForSelector(".popov #egOn", { timeout: 8000 });
+    const st0 = await page.evaluate(() => ({ on: document.querySelector("#egOn").checked, up: document.querySelectorAll('.popov .egRow[data-rep]').length,
+      items: [...document.querySelectorAll('.popov .egRow[data-item]')].filter((r) => !r.closest("details")).map((r) => r.innerText), hits: document.querySelectorAll('.popov .egRow[data-hit]').length,
+      off: /Не повторюються \(1\)/.test(document.querySelector(".popov").innerText) }));
+    if (process.env.SMOKE_SHOTS) { await page.evaluate(() => { document.querySelector(".popov details").open = true; }); await page.waitForTimeout(400); await page.screenshot({ path: join(HERE, "evergreen-panel.png") }); }
+    await page.evaluate(() => { const c = document.querySelector("#egOn"); c.checked = true; c.dispatchEvent(new Event("change")); });
+    await page.waitForFunction(() => /збережено/.test((document.querySelector("#egMsg") || {}).textContent || ""), undefined, { timeout: 8000 });
+    await page.evaluate(() => document.querySelector('.popov .egRow[data-hit="egH"] [data-eg="add"]').click());
+    await page.waitForFunction(() => document.querySelector('.popov .egRow[data-item="egH"]'), undefined, { timeout: 8000 });
+    await page.evaluate(() => document.querySelector('.popov .egRow[data-item="egB"] [data-eg="force"]').click());
+    await page.waitForFunction(() => /знову в черзі/.test((document.querySelector("#egMsg") || {}).textContent || ""), undefined, { timeout: 8000 });
+    await page.evaluate(() => document.querySelector('.popov .egRow[data-item="egH"] [data-eg="now"]').click());
+    await page.waitForFunction(() => /повтор поставлено на/.test((document.querySelector("#egMsg") || {}).textContent || ""), undefined, { timeout: 8000 });
+    const st1 = await page.evaluate(() => ({ up: document.querySelectorAll('.popov .egRow[data-rep]').length }));
+    await page.evaluate(() => closePop());
+    const good = st0.on === false && st0.up === 1 && st0.items.length === 1 && /×3\.2/.test(st0.items[0]) && /1\/3/.test(st0.items[0]) && st0.hits === 1 && st0.off
+      && EG.settings.on === true && egCalls.some((c) => c.k === "POST" && c.id === "egH") && egCalls.some((c) => c.k === "force" && c.id === "egB")
+      && egCalls.some((c) => c.k === "repeat" && c.id === "egH") && st1.up === 2;
+    if (!good) console.log("   ↳ egPanel:", JSON.stringify({ st0, st1, calls: egCalls, on: EG.settings.on }));
+    return good;
+  });
+
+  await check("egToday", async () => {
+    // «Сьогодні»: повтор хіта видно за добу, ✕ скасовує (видаляє повтор-копію)
+    await page.evaluate(() => { selectView("today"); });
+    await page.waitForSelector("#tdEvergreen .tdEg", { timeout: 8000 });
+    const txt = await page.evaluate(() => document.querySelector("#tdEvergreen").innerText);
+    await page.evaluate(() => document.querySelector('#tdEvergreen .tdEg[data-act="cancel"]').click());
+    for (let i = 0; i < 30 && !egCalls.some((c) => c.k === "cancel"); i++) await page.waitForTimeout(100);
+    const good = /Повертаються хіти/.test(txt) && /Свіжий гачок/.test(txt) && egCalls.some((c) => c.k === "cancel" && c.id === "egR1");
+    if (!good) console.log("   ↳ egToday:", JSON.stringify({ txt, calls: egCalls }));
+    return good;
+  });
+
+  await check("egStudio", async () => {
+    // Студія: повтор позначено «♻️ повтор»; опублікований оригінал через ⋯ - у чергу, і тег «♻️ у черзі»
+    // фільтри Студії могли лишитись від попередніх перевірок (формат, рубрика) - скидаємо
+    await page.evaluate(() => { selectView("create"); setCTab("posts"); StudioFilter = "all"; StudioRubric = ""; StudioFormat = ""; StudioOrigin = ""; renderStudio(); });
+    await page.waitForSelector('.pcard[data-post="' + P2 + '"]', { timeout: 8000 });
+    const p2 = await page.$$eval('.pcard[data-post="' + P2 + '"] .ptag', (a) => a.map((x) => x.textContent));
+    // опубліковані живуть у вкладці «✈️ Опубліковані»
+    await page.evaluate(() => { StudioFilter = "published"; renderStudio(); });
+    await page.waitForSelector('.pcard[data-post="' + P3 + '"]', { timeout: 8000 });
+    await page.evaluate((id) => document.querySelector('.pcard[data-post="' + id + '"] [data-a="menu"]').click(), P3);
+    await page.waitForSelector(".cardmenu .cm-i", { timeout: 6000 });
+    const item = await page.evaluate(() => [...document.querySelectorAll(".cardmenu .cm-i")].map((b) => b.innerText).find((t) => /Повертати цей пост/.test(t)) || "");
+    await page.evaluate(() => [...document.querySelectorAll(".cardmenu .cm-i")].find((b) => /Повертати цей пост/.test(b.innerText)).click());
+    await page.waitForFunction((id) => [...document.querySelectorAll('.pcard[data-post="' + id + '"] .ptag')].some((x) => /у черзі/.test(x.textContent)), P3, { timeout: 8000 });
+    // той самий пункт тепер - «Прибрати з черги»; прибрали - тег зник
+    await page.evaluate((id) => document.querySelector('.pcard[data-post="' + id + '"] [data-a="menu"]').click(), P3);
+    await page.waitForSelector(".cardmenu .cm-i", { timeout: 6000 });
+    const rmItem = await page.evaluate(() => [...document.querySelectorAll(".cardmenu .cm-i")].map((b) => b.innerText).find((t) => /Прибрати з вічнозеленої черги/.test(t)) || "");
+    await page.evaluate(() => [...document.querySelectorAll(".cardmenu .cm-i")].find((b) => /Прибрати з вічнозеленої черги/.test(b.innerText)).click());
+    await page.waitForFunction((id) => ![...document.querySelectorAll('.pcard[data-post="' + id + '"] .ptag')].some((x) => /у черзі/.test(x.textContent)), P3, { timeout: 8000 });
+    // неопублікований пост (P2) - пункту нема
+    await page.evaluate(() => { StudioFilter = "all"; renderStudio(); });
+    await page.waitForSelector('.pcard[data-post="' + P2 + '"]', { timeout: 8000 });
+    await page.evaluate((id) => document.querySelector('.pcard[data-post="' + id + '"] [data-a="menu"]').click(), P2);
+    await page.waitForSelector(".cardmenu .cm-i", { timeout: 6000 });
+    const p2menu = await page.evaluate(() => [...document.querySelectorAll(".cardmenu .cm-i")].map((b) => b.innerText).join("|"));
+    await page.evaluate(() => document.querySelectorAll(".cardmenu,.cardmenu-bg").forEach((x) => x.remove()));
+    const good = p2.some((t) => /♻️ повтор/.test(t)) && /вічнозелена черга/.test(item) && egCalls.some((c) => c.k === "POST" && c.id === P3)
+      && rmItem && egCalls.some((c) => c.k === "DELETE" && c.id === P3) && !/♻️/.test(p2menu);
+    if (!good) console.log("   ↳ egStudio:", JSON.stringify({ p2, item, rmItem, p2menu, calls: egCalls }));
+    return good;
+  });
+
+  await check("egCalendar", async () => {
+    // календар: слот повтору з ♻️
+    await page.evaluate(() => { selectView("publish"); setPTab("cal"); });
+    await page.waitForFunction(() => [...document.querySelectorAll(".pchip")].some((c) => /Свіжий гачок/.test(c.textContent)), undefined, { timeout: 8000 });
+    const chips = await page.$$eval(".pchip", (a) => a.map((x) => x.textContent));
+    const good = chips.some((t) => /♻️/.test(t) && /Свіжий гачок/.test(t)) && chips.some((t) => /підрядники/.test(t) && !/♻️/.test(t));
+    if (!good) console.log("   ↳ egCalendar:", JSON.stringify(chips));
     return good;
   });
 

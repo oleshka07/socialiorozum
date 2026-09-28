@@ -53,7 +53,7 @@ import { startComments, commentStates, queueMissingComments, processDue as proce
 import { collectInbox, replyToComment, skipComment, isInboxNet, inboxDrafts, INBOX_NETS, type InboxNet } from "./inbox.js";
 import { cleanAlt } from "./igextras.js";
 import { BRAND, legacyHosts, legacyRedirect } from "./brand.js";
-import { getSettingText } from "./settings.js";
+import { getSettingText, getSetting } from "./settings.js";
 import { runAbTest, modelCatalog, abSpend } from "./abtest.js";
 import { contextReview, contextIssueCount, suggestFieldFix } from "./context-check.js";
 import { generateImageForPost, imageProviders, imageCosts, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto, appendCroppedSlide } from "./images.js";
@@ -64,6 +64,8 @@ import { chat } from "./openrouter.js";
 import { threadsToken, threadsAccounts, saveThreadsLogin, setMainThreads, removeThreadsAccount, metaPages, saveMetaLogin, addMetaPage, setMainPage, removeMetaPage, accountChoices, postsUsingAccount, metaAccountForRow, threadsAccountForRow,
   mainAccountIds, telegramTargets, isAccNet, postAccounts } from "./accounts.js";
 import { timesFor } from "./besttime.js";
+import { normEg } from "./evergreen-plan.js";
+import { evergreenView, saveEgSettings, addEvergreen, removeEvergreen, forceEvergreen, makeRepeat, evergreenRunFor, startEvergreen } from "./evergreen.js";
 import { handleBody, wantsSse, sseEncode, resolveToken, mcpTokenFor, issueMcpToken, revokeMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
 import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember, deleteBrand, workspaceTitle } from "./workspaces.js";
 import { postMediaList, mediaCounts, setPostMediaOrder, setPostVideo, appendPostMedia, removePostMedia, promoteIfCoverless, healCoverless, SlideError, MAX_SLIDES, altToOriginal } from "./slides.js";
@@ -1264,9 +1266,9 @@ app.post("/api/posts/:postId/repeat", async (req: any, reply) => {
     const hours = Math.max(1, Math.min(168, Number(req.body?.hours) || 48));
     // дубль їде лише в Threads (там повтор іншій аудиторії - валідована практика; інші мережі дублікати не люблять)
     const np = await one<{ id: string }>(
-      `insert into post(run_id, stage, content, image_prompt, rubric, media_id, channels)
-       values($1,'final',$2,$3,$4,$5,$6::jsonb) returning id`,
-      [post.run_id, fresh, post.image_prompt, post.rubric, post.media_id, JSON.stringify({ threads: { on: true } })]);
+      `insert into post(run_id, stage, content, image_prompt, rubric, media_id, channels, repeat_of)
+       values($1,'final',$2,$3,$4,$5,$6::jsonb,$7) returning id`,
+      [post.run_id, fresh, post.image_prompt, post.rubric, post.media_id, JSON.stringify({ threads: { on: true } }), req.params.postId]);
     const when = new Date(Date.now() + hours * 3600e3).toISOString();
     await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [np!.id, when]);
     return { ok: true, id: np!.id, scheduledAt: when };
@@ -1597,8 +1599,16 @@ app.get("/api/today", async (req: any) => {
   for (let i = set.has(today) ? 0 : 1; i < 60; i++) { if (set.has(dayStr(i))) streak++; else break; }
   const netTodayMap: Record<string, number> = {};
   for (const r of netToday) netTodayMap[r.net] = r.n;
+  // ♻️ повтори хітів найближчих 3 днів - людина бачить їх за добу й може скасувати чи поправити
+  const egOn = normEg(await getSetting<unknown>(ws, "evergreen", {})).on;
+  const egNext = await q<{ id: string; of: string; at: string; title: string; ch: any }>(
+    `select p.id, p.repeat_of as of, ss.scheduled_at as at, left(regexp_replace(p.content,'\\s+',' ','g'), 90) as title, coalesce(ss.channels, p.channels) as ch
+       from schedule_slot ss join post p on p.id=ss.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+      where s.workspace_id=$1 and ss.status='planned' and p.repeat_of is not null and ss.scheduled_at < now() + interval '3 days'
+      order by ss.scheduled_at limit 5`, [ws]);
   return {
     date: today,
+    evergreen: { on: egOn, next: egNext.map((x) => ({ id: x.id, of: x.of, at: x.at, title: x.title, nets: enabledNets(x.ch) })) },
     slots, drafts, draftsTotal: draftsCount?.n || 0, ideas: ideas?.n || 0,
     nextSlot: nextSlot || null,
     threads: (thConn?.n || 0) > 0 ? { streak, postedToday: set.has(today) } : null,
@@ -1699,6 +1709,43 @@ app.get("/api/best-times", async (req: any) => {
   const [bt, auto, mains] = await Promise.all([bestTimesFor(ws, String(req.query?.fresh || "") === "1"), bestTimeAuto(ws), mainAccountIds(ws)]);
   // mains - щоб композер і «Ритм каналів» брали час так само, як календар: пост без вибору акаунта йде основним
   return { auto, tz: bt.tz, items: bt.items, mains };
+});
+
+// ♻️ Вічнозелена черга: бібліотека хітів, налаштування, найближчі повтори (evergreen.ts)
+app.get("/api/evergreen", async (req: any) => evergreenView(req.user.workspace_id));
+app.put("/api/evergreen/settings", async (req: any) => {
+  const ws = req.user.workspace_id;
+  const b = req.body || {};
+  const patch: Record<string, unknown> = {};
+  for (const k of ["on", "perWeek", "gapWeeks", "maxRepeats", "fresh", "autoAdd", "minMult"]) if (b[k] !== undefined) patch[k] = b[k];
+  const settings = await saveEgSettings(ws, patch as any);
+  // увімкнули - перший прохід одразу (у фоні: він може кликати модель; ?wait=1 - дочекатись)
+  if (settings.on) { const run = evergreenRunFor(ws); if (String(req.query?.wait || "") === "1") await run; }
+  return { ok: true, settings };
+});
+app.post("/api/evergreen/:postId", async (req: any, reply) => {
+  const r = await addEvergreen(req.user.workspace_id, req.params.postId, "user");
+  return r.ok ? r : reply.code(400).send({ error: r.error });
+});
+app.delete("/api/evergreen/:postId", async (req: any, reply) => {
+  const ok = await removeEvergreen(req.user.workspace_id, req.params.postId);
+  return ok ? { ok: true } : reply.code(404).send({ error: "цього поста нема у вічнозеленій черзі" });
+});
+app.post("/api/evergreen/:postId/force", async (req: any, reply) => {
+  const ok = await forceEvergreen(req.user.workspace_id, req.params.postId);
+  return ok ? { ok: true } : reply.code(404).send({ error: "цього поста нема у вічнозеленій черзі" });
+});
+// «Поставити повтор зараз»: найближчий добрий час (щонайменше за годину), без тижневого ліміту й паузи
+app.post("/api/evergreen/:postId/repeat", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const add = await addEvergreen(ws, req.params.postId, "user");
+  if (!add.ok) return reply.code(400).send({ error: add.error });
+  const r = await makeRepeat(ws, add.postId, { manual: true, leadH: 1 });
+  if (!r.ok) {
+    if (r.off) await q(`update evergreen_item set status='off', note=$2 where post_id=$1`, [add.postId, r.why]);
+    return reply.code(409).send({ error: r.why });
+  }
+  return r;
 });
 
 // «Оновити статистику зараз»: воркер ходить по метрики раз на 6 год, а людина, що щойно
@@ -3277,9 +3324,11 @@ app.get("/api/bank", async (req: any) => {
 // усі фінальні пости воркспейсу (Студія/Інбокс - глобальний список, НЕ привʼязаний до активного джерела)
 // + sent: у які мережі пост УЖЕ опубліковано (іконки на картці + фільтр «Опубліковані»)
 app.get("/api/posts/studio", async (req: any) => {
-  const rows = await q<any>(`select p.id, p.content, p.review, p.channels, p.rubric, p.intent, p.reel_video, p.format, p.qa, p.first_comment, src.origin as source_origin, ma.filename as media_filename, ma.kind as media_kind, ma.duration as media_duration, p.created_at, src.title as source_title
+  const rows = await q<any>(`select p.id, p.content, p.review, p.channels, p.rubric, p.intent, p.reel_video, p.format, p.qa, p.first_comment, src.origin as source_origin, ma.filename as media_filename, ma.kind as media_kind, ma.duration as media_duration, p.created_at, src.title as source_title,
+                   p.repeat_of, eg.status as evergreen
             from post p join pipeline_run r on r.id=p.run_id join source src on src.id=r.source_id
             left join media_asset ma on ma.id=p.media_id
+            left join evergreen_item eg on eg.post_id=p.id
             where src.workspace_id=$1 and p.stage='final' and (p.review is null or p.review <> 'archived')
             order by p.created_at desc`, [req.user.workspace_id]);
   const ids = rows.map((r: any) => r.id);
@@ -3330,7 +3379,7 @@ app.delete("/api/posts/:postId", async (req: any, reply) => {
 });
 
 app.get("/api/schedule", async (req: any) => {
-  return q(`select ss.id, ss.scheduled_at, ss.status, ss.result, p.id as post_id, p.content, coalesce(ss.channels, p.channels) as channels
+  return q(`select ss.id, ss.scheduled_at, ss.status, ss.result, p.id as post_id, p.content, coalesce(ss.channels, p.channels) as channels, p.repeat_of
             from schedule_slot ss
               left join plan_item pi on pi.id=ss.plan_item_id
               join post p on p.id = coalesce(ss.post_id, pi.post_id)
@@ -4584,6 +4633,7 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then(async (addr) => {
   startDiary();
   startThreadsAuto();
   startComments();
+  startEvergreen();     // ♻️ вічнозелена черга (працює лише в кабінетах, де її увімкнули)
   startMeetingPull();   // погодинна звірка з хмарою власного транскрибатора
   initTelegramBot();
   refreshOwnBotWebhooks().catch(() => {});
