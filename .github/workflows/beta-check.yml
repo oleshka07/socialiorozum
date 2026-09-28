@@ -1,7 +1,7 @@
 name: beta-check
 
 # Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ, нічого не змінює й не перезапускає.
-# 28.09: бета після a5d8892 (⏰ найкращий час) - версія, здоров'я, і що «⏰» порахує для кабінетів Олега.
+# 29.09: бета після 36125ce (⏰ без дубля мережі) - версія, здоров'я, і що «⏰» покаже в кабінетах Олега.
 
 on:
   push:
@@ -12,7 +12,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Beta after best-time deploy (read-only)
+      - name: Beta after best-time refinement (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -36,7 +36,7 @@ jobs:
               const r = await bestTimesFor(w.id);
               console.log(`\n=== #${w.id.slice(0, 8)} «${mask(w.title)}» (${w.role}) · пояс ${r.tz} · ставити в календар: ${(await bestTimeAuto(w.id)) ? 'так' : 'ні'}`);
               if (!r.items.length) console.log('  (жодної мережі зі статистикою постів)');
-              for (const i of r.items) console.log(`  [${i.key.replace(/:(.{6}).*$/, ':…$1')}] n=${i.n} ready=${i.ready} times=${JSON.stringify(i.times)}\n    ${mask(i.text)}`);
+              for (const i of r.items) console.log(`  [${i.key.replace(/:(.{6}).*$/, ':…$1')}] n=${i.n} ready=${i.ready} show=${i.show} times=${JSON.stringify(i.times)}\n    ${mask(i.text)}`);
             }
             const all = await q(`select id from workspace`);
             let withData = 0, ready = 0, timed = 0;
