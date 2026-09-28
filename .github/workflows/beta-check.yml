@@ -1,9 +1,9 @@
 name: beta-check
 
 # Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ, нічого не змінює й не перезапускає.
-# 28.09: Олег надіслав скрін нового пояснення «Meta не прийняла адресу цього сайту (beta.holos.rozum.one)».
-# Питання: де саме були спроби підключення за останні 12 год - лише на беті чи й на проді, і чи дійшло
-# щось до колбека (журнал app_log + nginx).
+# 28.09: Олег додав адреси beta.holos.rozum.one в Meta, Threads, LinkedIn і Google. Перевіряємо те, що
+# можна перевірити без входу в акаунт: яким Google-клієнтом входить бета і чи приймає ВІН нові адреси
+# (діалог Google без входу: signin/oauth/error = адресу не додано), плюс журнал спроб підключення на беті.
 
 on:
   push:
@@ -14,36 +14,61 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Connect attempts (read-only)
+      - name: Beta redirects (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 3m
+          command_timeout: 4m
           script: |
             mask() { sed -E -e 's/([A-Za-z0-9._%+-]{1,3})[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+)/\1***@\2/g' \
                             -e 's/[0-9a-fA-F]{24,}/<hex>/g' -e 's/[0-9]{6,}:[A-Za-z0-9_-]{30,}/<bot-token>/g' \
                             -e 's/EAA[A-Za-z0-9]{20,}/<meta-token>/g' -e 's/TH[A-Za-z0-9]{40,}/<th-token>/g' \
                             -e 's/((^|[?&])(code|state|access_token|client_secret)=)[^&" ]+/\1<x>/g'; }
-            echo "prod HEAD $(git -C "${{ secrets.APP_DIR }}" rev-parse --short HEAD) | beta HEAD $(git -C "${{ secrets.APP_DIR }}-beta" rev-parse --short HEAD)"
-            for d in "${{ secrets.APP_DIR }}" "${{ secrets.APP_DIR }}-beta"; do
-            echo; echo "=================== журнал підключень: $d (12 год, час Праги) ==================="
-            cd "$d/server" || continue
-            docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -v ON_ERROR_STOP=0' <<'SQL' 2>&1 | mask
+            enc() { printf '%s' "$1" | sed -e 's/%/%25/g' -e 's/:/%3A/g' -e 's#/#%2F#g' -e 's/?/%3F/g' -e 's/=/%3D/g' -e 's/&/%26/g'; }
+            short() { echo "$1" | sed -E 's/^([0-9]+)-[a-z0-9]+(\.apps\.googleusercontent\.com)$/\1-…\2/'; }
+            UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36'
+            T=$(mktemp -d)
+            echo "prod HEAD $(git -C "${{ secrets.APP_DIR }}" rev-parse --short HEAD) | beta HEAD $(git -C "${{ secrets.APP_DIR }}-beta" rev-parse --short HEAD) | зараз $(date -u +%H:%M) UTC"
+            echo "=== Google: яким клієнтом входять прод і бета ==="
+            GP=$(curl -sS -m 15 -D - -o /dev/null https://holos.rozum.one/api/auth/google | grep -i '^location:' | tr -d '\r')
+            CIDP=$(echo "$GP" | grep -oE 'client_id=[^&]+' | head -1 | cut -d= -f2)
+            J=$(mktemp)
+            curl -sS -m 15 -c $J -o /dev/null -H 'content-type: application/json' -d '{"pin":"2345"}' https://beta.holos.rozum.one/beta-pin
+            GB=$(curl -sS -m 15 -b $J -D - -o /dev/null https://beta.holos.rozum.one/api/auth/google | grep -i '^location:' | tr -d '\r')
+            CIDB=$(echo "$GB" | grep -oE 'client_id=[^&]+' | head -1 | cut -d= -f2)
+            rm -f $J
+            echo "прод: $(short "$CIDP")"
+            echo "бета: $(short "$CIDB") $( [ -n "$CIDB" ] && [ "$CIDB" = "$CIDP" ] && echo '(той самий клієнт, що на проді)' || echo '(ІНШИЙ клієнт)')"
+            echo "бета шле redirect_uri: $(echo "$GB" | grep -oE 'redirect_uri=[^&]+' | head -1)"
+            if [ -n "$CIDB" ]; then
+              for R in https://beta.holos.rozum.one https://beta.socialio.rozum.one https://holos.rozum.one https://example.org; do
+                for P in /api/auth/google/callback /api/integrations/gdrive/callback /api/integrations/youtube/callback; do
+                  U="https://accounts.google.com/o/oauth2/v2/auth?client_id=$CIDB&redirect_uri=$(enc "$R$P")&response_type=code&scope=openid&state=diag"
+                  curl -sS -m 20 -A "$UA" -H 'Accept-Language: en-US,en;q=0.9' -D $T/h -o $T/b "$U" >/dev/null 2>&1 || true
+                  L=$(grep -i '^location:' $T/h | head -1 | tr -d '\r' | grep -oE 'accounts\.google\.com/[a-zA-Z0-9/_.-]+' | head -1)
+                  V="?"; echo "$L" | grep -q 'signin/oauth/error' && V="НЕ ПРИЙМАЄ"; echo "$L" | grep -qE 'signin/identifier|v3/signin' && V="приймає"
+                  if [ "$V" = "?" ]; then V="? $(head -1 $T/h | tr -d '\r') $L $(grep -oE 'redirect_uri_mismatch|invalid_client|deleted_client' $T/b | head -1)"; fi
+                  echo "  клієнт беті ← $R$P: $V"
+                done
+              done
+            fi
+            echo; echo "=== журнал підключень на беті (6 год, час Праги) ==="
+            cd "${{ secrets.APP_DIR }}-beta/server" && docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -v ON_ERROR_STOP=0' <<'SQL' 2>&1 | mask
             set session characteristics as transaction read only;
             select to_char(l.created_at at time zone 'Europe/Prague','DD.MM HH24:MI:SS') as t, l.level, l.scope,
                    left(regexp_replace(l.message,'\s+',' ','g'),150) as msg, l.meta->>'code' as code, u.email
               from app_log l left join app_user u on u.id = l.user_id
-             where l.created_at > now() - interval '12 hours'
-               and l.scope in ('meta','threads','linkedin','google','gdrive','youtube','oauth')
+             where l.created_at > now() - interval '6 hours'
+               and l.scope in ('meta','threads','linkedin','google','gdrive','youtube','auth','oauth')
              order by l.created_at desc limit 40;
             SQL
-            done
-            echo; echo "=================== nginx: підключення й повернення (12 год) ==================="
-            for f in /var/log/nginx/access.log /var/log/nginx/access.log.1; do
+            echo; echo "=== nginx (прод і бета разом): підключення й повернення (сьогодні) ==="
+            for f in /var/log/nginx/access.log; do
               [ -r "$f" ] || continue
               grep -hE '/api/(integrations/(meta|threads|linkedin|gdrive|youtube)/(connect|callback)|auth/google)' "$f" 2>/dev/null \
-                | grep -E "$(date -u +%d/%b/%Y)|$(date -u -d '12 hours ago' +%d/%b/%Y)" \
-                | sed -E 's/^([0-9]+\.[0-9]+)\.[0-9]+\.[0-9]+/\1.x.x/' | mask | cut -c1-240 | tail -20
+                | grep "$(date -u +%d/%b/%Y)" \
+                | sed -E 's/^([0-9]+\.[0-9]+)\.[0-9]+\.[0-9]+/\1.x.x/' | mask | cut -c1-240 | tail -25
             done
+            rm -rf $T
