@@ -65,6 +65,8 @@ import { threadsToken, threadsAccounts, saveThreadsLogin, setMainThreads, remove
   mainAccountIds, telegramTargets, isAccNet, postAccounts } from "./accounts.js";
 import { timesFor } from "./besttime.js";
 import { normEg } from "./evergreen-plan.js";
+import { linkSettings, saveLinkSettings, bioOf, saveBio, renderBio, resolveShort, countClick, linkStats, shortFor, shortUrl } from "./links.js";
+import { isBot } from "./linkutil.js";
 import { evergreenView, saveEgSettings, addEvergreen, removeEvergreen, forceEvergreen, makeRepeat, evergreenRunFor, startEvergreen } from "./evergreen.js";
 import { handleBody, wantsSse, sseEncode, resolveToken, mcpTokenFor, issueMcpToken, revokeMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
 import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember, deleteBrand, workspaceTitle } from "./workspaces.js";
@@ -198,6 +200,8 @@ document.getElementById('p').addEventListener('keydown',e=>{if(e.key==='Enter')g
     if (url === "/tgapp" || url.startsWith("/api/tg/")) return;
     // MCP: клієнт - сервер Claude, кукі й PIN там взяти ніде; доступ дає токен у самій адресі
     if (url === "/mcp" || url.startsWith("/mcp/")) return;
+    // 🔗 короткі посилання й сторінка в біо - для аудиторії в мережах: у неї PIN нема
+    if (url.startsWith("/s/") || url.startsWith("/@")) return;
     if (req.cookies?.[PIN_COOKIE] === pinToken) return;
     if (url.startsWith("/api/")) return reply.code(401).send({ error: "beta: потрібен PIN" });
     return reply.type("text/html").send(pinPage);
@@ -1709,6 +1713,40 @@ app.get("/api/best-times", async (req: any) => {
   const [bt, auto, mains] = await Promise.all([bestTimesFor(ws, String(req.query?.fresh || "") === "1"), bestTimeAuto(ws), mainAccountIds(ws)]);
   // mains - щоб композер і «Ритм каналів» брали час так само, як календар: пост без вибору акаунта йде основним
   return { auto, tz: bt.tz, items: bt.items, mains };
+});
+
+// 🔗 Короткі посилання з UTM і лічильником + сторінка «посилання в біо» (links.ts). Перехід і сторінка -
+// публічні (аудиторія в мережах не має ні входу, ні PIN); рахуємо лише людей: GET і не бот-прев'юшник.
+const notFoundPage = (t: string) => `<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${t}</title></head><body style="font:16px system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;color:#555"><div style="text-align:center"><p>${t}</p><p><a href="/">Holos</a></p></div></body></html>`;
+app.get("/s/:code", async (req: any, reply) => {
+  const url = await resolveShort(String(req.params.code || ""));
+  if (!url) return reply.code(404).type("text/html").send(notFoundPage("Такого посилання нема"));
+  if (req.method === "GET" && !isBot(req.headers["user-agent"])) await countClick(req.params.code).catch(() => { /* лічильник не важливіший за перехід */ });
+  reply.header("cache-control", "no-store").header("x-robots-tag", "noindex");
+  return reply.redirect(url, 302);
+});
+app.get("/@:slug", async (req: any, reply) => {
+  const html = await renderBio(String(req.params.slug || ""), req.method === "GET" && !isBot(req.headers["user-agent"]));
+  if (!html) return reply.code(404).type("text/html").send(notFoundPage("Такої сторінки нема"));
+  reply.header("cache-control", "no-cache");
+  return reply.type("text/html").send(html);
+});
+app.get("/api/links", async (req: any) => {
+  const ws = req.user.workspace_id;
+  const [settings, bio, stats] = await Promise.all([linkSettings(ws), bioOf(ws), linkStats(ws, Number(req.query?.days) || 30)]);
+  return { settings, bio, stats };
+});
+app.put("/api/links/settings", async (req: any) => ({ ok: true, settings: await saveLinkSettings(req.user.workspace_id, req.body || {}) }));
+app.put("/api/links/bio", async (req: any, reply) => {
+  const r = await saveBio(req.user.workspace_id, req.body || {});
+  return r.ok ? r : reply.code(400).send({ error: r.error });
+});
+app.post("/api/links/shorten", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const code = await shortFor(ws, String(req.body?.url || ""), { kind: "manual", title: req.body?.title || null,
+    utm: (await linkSettings(ws)).utm ? { utm_source: String(req.body?.source || "holos").slice(0, 40), utm_medium: "social", utm_campaign: "holos" } : null });
+  if (!code) return reply.code(400).send({ error: "Потрібна повна адреса з https://" });
+  return { ok: true, code, short: shortUrl(code) };
 });
 
 // ♻️ Вічнозелена черга: бібліотека хітів, налаштування, найближчі повтори (evergreen.ts)

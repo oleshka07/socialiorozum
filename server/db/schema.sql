@@ -1046,3 +1046,46 @@ create table if not exists evergreen_run (
   created_at   timestamptz not null default now()
 );
 create index if not exists idx_evergreen_run_ws on evergreen_run(workspace_id, created_at);
+-- 🔗 Короткі посилання з UTM і лічильником переходів (links.ts): одне на пост × мережу × адресу (для
+-- сторінки в біо й ручних - на адресу). Рахуємо лише людей (боти-прев'юшники - ні), без IP і будь-яких
+-- даних відвідувача - лише скільки переходів за день. Пост видалили (його можна видалити, лише поки
+-- він ніде не вийшов) - його посилання теж.
+create table if not exists short_link (
+  code          text primary key,
+  workspace_id  uuid not null references workspace(id) on delete cascade,
+  url           text not null,                   -- куди веде (з UTM)
+  source_url    text not null,                   -- як написано в пості чи на сторінці
+  post_id       uuid references post(id) on delete cascade,
+  network       text,                            -- threads | telegram | facebook | linkedin | bio
+  kind          text not null default 'post',    -- post | bio | manual
+  title         text,
+  clicks        int not null default 0,
+  last_click_at timestamptz,
+  created_at    timestamptz not null default now()
+);
+create unique index if not exists uq_short_link_src on short_link(workspace_id, kind, coalesce(post_id::text, ''), coalesce(network, ''), source_url);
+create index if not exists idx_short_link_post on short_link(post_id);
+create table if not exists short_link_day (
+  code   text not null references short_link(code) on delete cascade,
+  day    date not null,
+  clicks int not null default 0,
+  primary key (code, day)
+);
+-- Сторінка «посилання в біо» (holos.rozum.one/@slug): одна на кабінет; перегляди - за днями
+create table if not exists bio_page (
+  workspace_id uuid primary key references workspace(id) on delete cascade,
+  enabled      boolean not null default false,
+  slug         text unique,
+  title        text,
+  bio          text,
+  links        jsonb not null default '[]'::jsonb,
+  show_posts   boolean not null default true,
+  views        int not null default 0,
+  updated_at   timestamptz not null default now()
+);
+create table if not exists bio_page_day (
+  workspace_id uuid not null references workspace(id) on delete cascade,
+  day          date not null,
+  views        int not null default 0,
+  primary key (workspace_id, day)
+);

@@ -34,6 +34,7 @@ import { analyticsFor, bestTimesFor } from "./metrics.js";
 import { pickTimes } from "./besttime.js";
 import { evergreenView, saveEgSettings, addEvergreen, removeEvergreen, makeRepeat, evergreenRunFor, type EgView } from "./evergreen.js";
 import type { EgSettings } from "./evergreen-plan.js";
+import { linkSettings, saveLinkSettings, bioOf, saveBio, linkStats, shortFor, shortUrl } from "./links.js";
 import { fmtMult } from "./analytics.js";
 import { publicFetch } from "./netguard.js";
 import { saveMediaFile, MEDIA_DIR } from "./media.js";
@@ -1747,6 +1748,61 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "links",
+    title: "Короткі посилання і сторінка в біо",
+    description: "Посилання з постів - короткі з UTM-мітками й лічильником переходів (коли ввімкнено, при публікації це робиться саме: у тексті й першому коментарі, крім Instagram, де посилання не клікаються), сторінка «посилання в біо» (адреса /@назва: кнопки на сайти й останні пости) і скільки разів куди переходили (лише люди, боти-прев'юшники не рахуються). Без action - стан: налаштування, сторінка, переходи за період (days) по мережах і топ посилань. action: shorten (url, title) - коротке посилання вручну; settings (auto, utm); bio (enabled, slug, title, bio, links: [{title, url, emoji}], show_posts) - змінити сторінку (передане замінює, решта лишається).",
+    properties: {
+      action: S("Що зробити (необовʼязково).", { enum: ["shorten", "settings", "bio"] }),
+      url: S("Для shorten: повна адреса з https://."),
+      title: S("Для shorten: підпис (необовʼязково). Для bio: назва на сторінці."),
+      auto: { type: "boolean", description: "settings: скорочувати посилання в постах при публікації." },
+      utm: { type: "boolean", description: "settings: додавати UTM-мітки (utm_source = мережа, utm_medium = social, utm_campaign = holos)." },
+      enabled: { type: "boolean", description: "bio: сторінка відкрита." },
+      slug: S("bio: адреса сторінки (3-30 латинських літер, цифр, «.», «-», «_»)."),
+      bio: S("bio: короткий текст про бренд (до 300 символів)."),
+      links: { type: "array", description: "bio: кнопки сторінки по порядку (до 20; замінює список).", items: { type: "object", properties: { title: S("Текст кнопки."), url: S("Адреса з https://."), emoji: S("Емодзі перед текстом (необовʼязково).") }, required: ["url"] } },
+      show_posts: { type: "boolean", description: "bio: показувати останні пости плитками." },
+      days: N("За скільки днів рахувати переходи (типово 30).", { minimum: 1, maximum: 365 }),
+    },
+    run: async (ws, a) => {
+      const act = String(a.action || "");
+      const out: string[] = [];
+      if (act === "shorten") {
+        const s0 = await linkSettings(ws);
+        const code = await shortFor(ws, String(a.url || ""), { kind: "manual", title: str(a.title, 120) || null, utm: s0.utm ? { utm_source: "holos", utm_medium: "social", utm_campaign: "holos" } : null });
+        if (!code) throw new ToolError("Потрібна повна адреса з https:// (наприклад https://rozum.one/audit).");
+        out.push(`Коротке посилання: ${shortUrl(code)} → ${String(a.url).trim()}. Переходи видно тут же (links) і в кабінеті.`);
+      }
+      if (act === "settings") {
+        if (typeof a.auto !== "boolean" && typeof a.utm !== "boolean") throw new ToolError("Для settings передай auto та/або utm.");
+        const st = await saveLinkSettings(ws, { auto: a.auto, utm: a.utm });
+        out.push(`Збережено: короткі посилання в постах - ${st.auto ? "так" : "ні"}, UTM - ${st.utm ? "так" : "ні"}.`);
+      }
+      if (act === "bio") {
+        const patch: Record<string, unknown> = {};
+        if (typeof a.enabled === "boolean") patch.enabled = a.enabled;
+        if (a.slug !== undefined) patch.slug = a.slug;
+        if (a.title !== undefined) patch.title = a.title;
+        if (a.bio !== undefined) patch.bio = a.bio;
+        if (a.links !== undefined) patch.links = a.links;
+        if (typeof a.show_posts === "boolean") patch.showPosts = a.show_posts;
+        if (!Object.keys(patch).length) throw new ToolError("Для bio передай хоч одне: enabled, slug, title, bio, links, show_posts.");
+        const r = await saveBio(ws, patch as any);
+        if (!r.ok) throw new ToolError(r.error);
+        out.push(`Сторінку збережено${r.bio.enabled && r.bio.url ? `: ${r.bio.url}` : " (поки закрита)"}.`);
+      }
+      const [st, bio, stats] = await Promise.all([linkSettings(ws), bioOf(ws), linkStats(ws, Number(a.days) || 30)]);
+      const nets = Object.entries(stats.byNet).sort((x, y) => y[1] - x[1]).map(([n, c]) => `${NET_LABEL[n] || (n === "bio" ? "сторінка в біо" : n)} ${c}`);
+      out.push(`🔗 Короткі посилання в постах: ${st.auto ? "так" : "ні"} (UTM - ${st.utm ? "так" : "ні"}).`);
+      out.push(bio.enabled && bio.url ? `📇 Сторінка в біо: ${bio.url} - «${bio.title}», кнопок ${bio.links.length}${bio.showPosts ? ", з останніми постами" : ""}; переглядів за ${stats.days} дн.: ${stats.bioViews}.`
+        : bio.slug ? `📇 Сторінка в біо: /@${bio.slug} - закрита (action: bio, enabled: true).` : "📇 Сторінки в біо ще нема (action: bio, slug, title, links).");
+      out.push(`Переходи за ${stats.days} дн.: ${stats.total}${nets.length ? ` (${nets.join(", ")})` : ""}.`);
+      const top = stats.top.filter((x) => x.total > 0).slice(0, 10);
+      if (top.length) out.push("Топ посилань:", ...top.map((x) => `- ${x.short} → ${x.source}${x.postTitle ? ` (пост «${oneLine(x.postTitle, 60)}»)` : x.title ? ` (${oneLine(x.title, 60)})` : ""} · ${NET_LABEL[x.network || ""] || (x.network === "bio" ? "сторінка в біо" : "вручну")}: ${x.clicks} за період, ${x.total} усього`));
+      return out.join("\n");
+    },
+  },
+  {
     name: "send_first_comment",
     title: "Дослати перший коментар",
     description: "Поставити перший коментар під постом, який УЖЕ опубліковано: коментар дописали після публікації, раніше не було дозволу або він не вийшов. Можна одразу передати новий текст (text). Іде в Instagram, Facebook, LinkedIn і Threads - туди, куди пост уже вийшов і де коментаря ще нема; другого коментаря не буде. Для ще не опублікованого поста нічого робити не треба: коментар піде сам одразу після публікації.",
@@ -1950,6 +2006,8 @@ export const TOOLS: ToolDef[] = [
       // ⏰ найкращий час - за пів року (за коротший період дозрілих постів зазвичай замало)
       const bt = (await bestTimesFor(ws)).items.filter((b) => (net === "all" || b.net === net) && b.show !== false);
       if (bt.length) lines.push("", "⏰ Найкращий час публікації (за пів року, за «×нормою» дозрілих постів; schedule_post з at: \"best\" ставить саме туди):", ...bt.map((b) => `- ${b.text}`));
+      const lk = await linkStats(ws, days);
+      if (lk.total || lk.bioViews) lines.push("", `🔗 Переходи за короткими посиланнями за ${lk.days} дн.: ${lk.total}${Object.keys(lk.byNet).length ? ` (${Object.entries(lk.byNet).map(([n, c]) => `${NET_LABEL[n] || (n === "bio" ? "сторінка в біо" : n)} ${c}`).join(", ")})` : ""}${lk.bioViews ? `; сторінку в біо переглянули ${lk.bioViews}` : ""} - деталі: links.`);
       const withNums = an.posts.filter((p) => p.views != null || p.likes != null || p.replies != null);
       // 👥 мережі, де в бренді кілька акаунтів, - біля поста видно, яким він вийшов (і норма в кожного своя)
       const multi = new Set((an.accounts || []).map((x) => x.net));
@@ -2024,6 +2082,7 @@ export const SERVER_INSTRUCTIONS = [
   "Instagram: опис фото для незрячих і пошуку (alt-текст) - alt_text в attach_media або alt_texts в update_post (ти бачиш мініатюри - опиши, що на фото, 1-2 речення; іде і в LinkedIn); співавтори (collab, до 3 ніків) - instagram_collaborators у create_draft / update_post.",
   "Статистика постів (перегляди, лайки, відповіді, репости, підписники, що працює) - analytics.",
   "Хіти можна повертати через тижні зі свіжим першим рядком - evergreen (вічнозелена черга; повтори стають у календар за добу, їх видно й можна скасувати).",
+  "Посилання в постах можна робити короткими з лічильником переходів і UTM, а для біо - сторінка з кнопками й останніми постами - links.",
   "Факти не вигадуй: бери їх з list_materials / get_material або питай автора.",
   "Перед публікацією показуй текст людині - опублікований пост відкликати не можна.",
 ].join(" ");

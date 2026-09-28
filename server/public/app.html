@@ -1385,6 +1385,32 @@ html.review-on #owl{display:none!important}
           <div class="fld" style="margin-top:10px"><label class="fl">Твоя адреса конектора - це як пароль, нікому не давай</label><div style="display:flex;gap:8px"><input class="txt" id="mcpUrl" readonly placeholder="(ще не створена)" style="font-size:12px"><button class="ghost" type="button" id="mcpCopy">Копіювати</button></div></div>
           <div class="btnrow" style="margin-top:8px;flex-wrap:wrap"><button class="primary" id="mcpCreate">Створити адресу</button><button class="ghost" type="button" id="mcpHow">📖 Як підключити</button><button class="ghost" type="button" id="mcpRevoke" style="display:none">Відключити</button><span id="mcpMsg" style="font-size:12px;color:var(--muted)"></span></div>
         </div>
+        <!-- 🔗 короткі посилання з UTM і лічильником + сторінка «посилання в біо» (holos.rozum.one/@адреса) -->
+        <div class="panel" id="linksPanel">
+          <div class="ph">🔗 Посилання і сторінка в біо</div>
+          <div class="hint">Скільки разів переходили за посиланнями з твоїх постів і з якої мережі - і одна сторінка для біо Instagram чи Threads: кнопки на твої сайти й останні пости. Рахуємо лише переходи людей (боти, що малюють прев'ю, - ні) і не зберігаємо про них жодних даних.</div>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px;font-size:13px">
+            <label style="cursor:pointer"><input type="checkbox" id="lkAuto"> Робити посилання в постах короткими - з лічильником переходів <span class="qh" title="При публікації посилання в тексті й першому коментарі замінюються на коротке holos.rozum.one/s/… - воно веде туди ж і рахує переходи окремо для кожної мережі. Instagram - ні: там посилання не клікаються. У мережі буде видно адресу Holos, а не твою.">?</span></label>
+            <label style="cursor:pointer"><input type="checkbox" id="lkUtm"> Додавати UTM-мітки (Google Analytics побачить, з якої мережі й поста прийшли) <span class="qh" title="utm_source = мережа, utm_medium = social, utm_campaign = holos, utm_content = пост. Мітки, які ти вже поставив у посилання сам, не чіпаємо.">?</span></label>
+          </div>
+          <div id="lkStats" style="margin-top:12px"></div>
+          <div style="font-weight:700;font-size:13.5px;margin:16px 0 6px">📇 Сторінка в біо</div>
+          <label style="cursor:pointer;font-size:13px"><input type="checkbox" id="bioOn"> Сторінка відкрита</label>
+          <div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap;font-size:13px"><span id="bioBase" style="color:var(--muted)">holos.rozum.one/@</span><input id="bioSlug" class="txt" style="width:180px;display:inline-block;padding:6px 9px" placeholder="rozum" maxlength="30">
+            <a id="bioOpen" class="ghost" target="_blank" rel="noopener" style="display:none;padding:5px 10px;font-size:12px;text-decoration:none">Відкрити ↗</a><button class="ghost" id="bioCopy" style="display:none;padding:5px 10px;font-size:12px">⧉ Копіювати</button></div>
+          <input id="bioTitle" class="txt" style="margin-top:8px" placeholder="Назва (бренд чи твоє ім'я)" maxlength="80">
+          <textarea id="bioText" class="txt" rows="2" style="margin-top:6px" placeholder="Коротко: хто ти і що робиш (до 300 символів)" maxlength="300"></textarea>
+          <div id="bioLinks" style="display:flex;flex-direction:column;gap:6px;margin-top:8px"></div>
+          <div class="btnrow" style="margin-top:8px;flex-wrap:wrap;align-items:center">
+            <button class="ghost" id="bioAdd" style="padding:6px 11px;font-size:12.5px">＋ Посилання</button>
+            <label style="cursor:pointer;font-size:12.5px;color:var(--muted)"><input type="checkbox" id="bioPosts"> показувати останні пости</label>
+            <button class="primary" id="bioSave" style="margin-left:auto">Зберегти сторінку</button>
+          </div>
+          <div id="bioMsg" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
+          <div style="font-weight:700;font-size:13.5px;margin:16px 0 6px">✂️ Скоротити посилання вручну</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap"><input id="lkUrl" class="txt" style="flex:1;min-width:220px" placeholder="https://…"><button class="ghost" id="lkShorten">Скоротити</button></div>
+          <div id="lkShortOut" style="font-size:12.5px;margin-top:6px"></div>
+        </div>
         <div id="toolsGdriveHost"></div>
         <div id="toolsTransHost"></div>
       </section>

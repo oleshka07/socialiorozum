@@ -19,6 +19,7 @@ import * as threads from "./threads.js";
 import * as linkedin from "./linkedin.js";
 import { logEvent } from "./log.js";
 import { metaAccountForRow, threadsAccountForRow } from "./accounts.js";
+import { linkifySafe } from "./links.js";
 
 export const COMMENT_NETS = ["instagram", "facebook", "linkedin", "threads"];
 // межа довжини коментаря в мережі (знаків): відповідь у Threads - це такий самий пост на 500
@@ -158,11 +159,12 @@ export async function commentStates(postId: string): Promise<CommentState[]> {
  *  коментаря нема (не задано, Telegram, сторіс). */
 export async function commentAfterPublish(postId: string, net: string, targetId: string, account = ""): Promise<CommentState | null> {
   if (!targetId) return null;
-  const post = await one<{ first_comment: string | null; channels: any; format: string | null }>(
-    `select first_comment, channels, format from post where id=$1`, [postId]);
+  const post = await one<{ first_comment: string | null; channels: any; format: string | null; ws: string }>(
+    `select p.first_comment, p.channels, p.format, s.workspace_id as ws from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where p.id=$1`, [postId]);
   if (!post) return null;
-  const text = commentFor(post, net);
-  if (!text) return null;
+  const raw = commentFor(post, net);
+  if (!raw) return null;
+  const text = await linkifySafe(post.ws, postId, net, raw, COMMENT_MAX[net]);   // 🔗 посилання в коментарі - теж короткі (коли ввімкнено)
   const ins = await one<{ id: string }>(
     `insert into post_comment(post_id, network, account, target_id, message) values($1,$2,$3,$4,$5)
      on conflict (post_id, network, account) do nothing returning id`, [postId, net, account, targetId, text]);
@@ -188,8 +190,9 @@ export async function queueMissingComments(ws: string, postId: string): Promise<
   const add = (l: string[], n: string) => { if (!l.includes(n)) l.push(n); };
   for (const t of targets) {
     if (!COMMENT_NETS.includes(t.net)) continue;
-    const text = commentFor(post, t.net);
-    if (!text) { add(out.none, t.net); continue; }
+    const raw = commentFor(post, t.net);
+    if (!raw) { add(out.none, t.net); continue; }
+    const text = await linkifySafe(ws, postId, t.net, raw, COMMENT_MAX[t.net]);
     const cur = await commentState(postId, t.net, t.acc);
     if (cur?.status === "sent") { add(out.sent, t.net); continue; }
     if (cur?.status === "sending") { add(out.busy, t.net); continue; }

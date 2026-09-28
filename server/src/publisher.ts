@@ -22,6 +22,7 @@ import { commentAfterPublish, commentFor } from "./comments.js";
 import { normCollaborators, cleanAlt } from "./igextras.js";
 import { threadsToken, threadsAccountFor, metaAccountFor, postAccount, postAccounts, telegramTargets, accountChoices, threadsAccounts,
   mainAccountIds, isAccNet, type MetaPage, type ThreadsLogin, type TgTarget } from "./accounts.js";
+import { linkifySafe } from "./links.js";
 
 // 👥 Акаунтів Threads у бренді може бути кілька (accounts.ts). Без userId - основний, як і раніше.
 export async function thValidToken(ws: string, userId?: string | null): Promise<{ token: string; userId: string } | null> {
@@ -316,7 +317,12 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
       await logEvent("warn", "publish", `авто-адаптація не вдалась (їде майстер-текст): ${e.message}`, { ws, postId });
     }
   }
-  const textOf = (k: string) => (ch[k] && ch[k].text) || post.content;
+  const baseText = (k: string) => (ch[k] && ch[k].text) || post.content;
+  // 🔗 посилання в тексті → короткі з UTM і лічильником (коли людина це ввімкнула; Instagram - ні, там
+  // вони не клікаються). Збій - текст як був: посилання в пості важливіше за лічильник
+  const linked: Record<string, string> = {};
+  for (const k of pendingNets) linked[k] = await linkifySafe(ws, postId, k, baseText(k));
+  const textOf = (k: string) => linked[k] ?? baseText(k);
   const imageUrl = imageUrls[0] || null;
   const results: PubResult[] = [];
   const li = enabled.includes("linkedin")
@@ -415,7 +421,7 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
         try {
           if (wantThread) {
             // гілка пакує ПОВНИЙ майстер-текст (а не скорочену 500-символьну версію) - у цьому її сенс
-            const parts = thParts ??= await threadsSplit(ws, post.content, perPost.number !== false);
+            const parts = thParts ??= await Promise.all((await threadsSplit(ws, post.content, perPost.number !== false)).map((t) => linkifySafe(ws, postId, "threads", t)));
             // карусель - у першому пості гілки (root), відповіді лишаються текстовими
             const first = video
               ? await threads.publishVideo(thTok.token, thTok.userId, parts[0], videoUrl)

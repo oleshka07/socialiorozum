@@ -233,7 +233,7 @@ function selectView(v,tab){
   if(v==='publish'){ loadPublish(); loadPlan(); }
   if(v==='create') loadStudioPosts();
   if(v==='settings'){ loadAccount(); loadPlans(); }
-  if(v==='tools') loadAbTest(); // каталог моделей тягнеться раз (див. _abReady)
+  if(v==='tools'){ loadAbTest(); loadLinks(); } // каталог моделей тягнеться раз (див. _abReady)
   if(typeof loadTasks==='function') loadTasks();
   curView=v; if(typeof renderTaskStrip==='function') renderTaskStrip(v);
   // вкладку застосовуємо ПІСЛЯ перемикання розділу (setXTab покладеться на curView), і лише якщо
@@ -4059,6 +4059,60 @@ if($('wsTitleSave')) $('wsTitleSave').onclick=async()=>{
     flash('Назву збережено'); loadWorkspaces(); }catch(e){ flash('⚠ '+e.message); }
 };
 
+// ---- 🔗 Посилання і сторінка в біо: короткі посилання з лічильником переходів + holos.rozum.one/@адреса ----
+const lkPlural=(n,a,b,c)=>{ const m10=n%10,m100=n%100; return m10===1&&m100!==11?a:(m10>=2&&m10<=4&&(m100<10||m100>=20)?b:c); };
+const lkNet=(n)=>n==='bio'?'сторінка в біо':(AN_LABEL[n]||n||'вручну');
+let BioRows=[];
+function renderBioRows(){
+  const box=$('bioLinks'); if(!box) return;
+  box.innerHTML=BioRows.map((l,i)=>'<div class="bioRow" data-i="'+i+'" style="display:flex;gap:6px;align-items:center">'
+    +'<input class="txt bioE" value="'+esc(l.emoji||'')+'" placeholder="🔗" maxlength="4" style="width:48px;padding:6px 8px;text-align:center">'
+    +'<input class="txt bioT" value="'+esc(l.title||'')+'" placeholder="Назва кнопки" maxlength="80" style="flex:1;min-width:110px;padding:6px 9px">'
+    +'<input class="txt bioU" value="'+esc(l.url||'')+'" placeholder="https://…" style="flex:2;min-width:150px;padding:6px 9px">'
+    +'<button class="icon bioX" title="Прибрати">✕</button></div>').join('')
+    ||'<div class="hint" style="margin:0">Кнопок ще нема - «＋ Посилання»: сайт, запис, прайс, Telegram-канал…</div>';
+  box.querySelectorAll('.bioRow').forEach(r=>{ const i=+r.dataset.i;
+    r.querySelector('.bioE').oninput=(e)=>{ BioRows[i].emoji=e.target.value; };
+    r.querySelector('.bioT').oninput=(e)=>{ BioRows[i].title=e.target.value; };
+    r.querySelector('.bioU').oninput=(e)=>{ BioRows[i].url=e.target.value; };
+    r.querySelector('.bioX').onclick=()=>{ BioRows.splice(i,1); renderBioRows(); }; });
+}
+async function loadLinks(){
+  if(!$('linksPanel')) return;
+  let r; try{ r=await api('/links'); }catch(e){ $('lkStats').innerHTML='<div class="hint">⚠ '+esc(e.message)+'</div>'; return; }
+  $('lkAuto').checked=!!r.settings.auto; $('lkUtm').checked=!!r.settings.utm;
+  const st=r.stats, b=r.bio;
+  const nets=Object.entries(st.byNet||{}).sort((x,y)=>y[1]-x[1]);
+  const where=(u)=>{ try{ const x=new URL(u); return x.hostname.replace(/^www\./,'')+(x.pathname.length>1?x.pathname:''); }catch(e){ return u; } };
+  const rows=(st.top||[]).filter(x=>x.total>0||x.kind!=='bio').slice(0,12);
+  $('lkStats').innerHTML='<div style="font-size:13px"><b>'+st.total+'</b> '+lkPlural(st.total,'перехід','переходи','переходів')+' за '+st.days+' днів'
+      +(nets.length?' · '+nets.map(([n,c])=>esc(lkNet(n))+' '+c).join(' · '):'')
+      +(b.enabled?' · сторінку в біо переглянули '+st.bioViews+' '+lkPlural(st.bioViews,'раз','рази','разів'):'')+'</div>'
+    +(rows.length?'<div style="margin-top:6px">'+rows.map(x=>'<div class="lkRow" style="display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line);font-size:12.5px;flex-wrap:wrap">'
+        +'<code style="font-size:11.5px">/s/'+esc(x.code)+'</code><button class="icon lkCp" data-u="'+esc(x.short)+'" title="Копіювати коротке посилання">⧉</button>'
+        +'<span style="flex:1;min-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(x.url)+'">→ '+esc(where(x.source))+(x.postTitle?' <span style="color:var(--faint)">· «'+esc(x.postTitle)+'»</span>':x.title?' <span style="color:var(--faint)">· '+esc(x.title)+'</span>':'')+'</span>'
+        +'<span style="color:var(--faint);font-size:11.5px">'+esc(lkNet(x.network))+'</span>'
+        +'<b title="за '+st.days+' днів · усього '+x.total+'">'+x.clicks+'</b></div>').join('')+'</div>'
+      :'<div class="hint" style="margin:4px 0 0">'+(r.settings.auto?'Коротких посилань ще нема - зʼявляться з першим постом, де є посилання.':'Увімкни короткі посилання вище - і тут буде видно, куди переходять і з якої мережі.')+'</div>');
+  $('lkStats').querySelectorAll('.lkCp').forEach(x=>x.onclick=()=>{ try{ navigator.clipboard.writeText(x.dataset.u); flash('Скопійовано'); }catch(e){} });
+  $('bioBase').textContent=location.host+'/@';
+  $('bioOn').checked=!!b.enabled; $('bioSlug').value=b.slug||''; $('bioTitle').value=b.title||''; $('bioText').value=b.bio||''; $('bioPosts').checked=b.showPosts!==false;
+  BioRows=(b.links||[]).map(l=>({ id:l.id, title:l.title, url:l.url, emoji:l.emoji||'' })); renderBioRows();
+  const url=b.enabled&&b.slug?location.origin+'/@'+b.slug:'';
+  $('bioOpen').style.display=url?'':'none'; $('bioCopy').style.display=url?'':'none'; if(url){ $('bioOpen').href=url; $('bioCopy').onclick=()=>{ try{ navigator.clipboard.writeText(url); flash('Адресу скопійовано - встав її в біо'); }catch(e){} }; }
+}
+if($('lkAuto')){
+  const saveLk=async()=>{ try{ await api('/links/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({auto:$('lkAuto').checked,utm:$('lkUtm').checked})}); flash('Збережено'); loadLinks(); }catch(e){ flash('⚠ '+e.message); } };
+  $('lkAuto').onchange=saveLk; $('lkUtm').onchange=saveLk;
+  $('bioAdd').onclick=()=>{ if(BioRows.length>=20){ flash('До 20 посилань'); return; } BioRows.push({title:'',url:'',emoji:''}); renderBioRows(); const r=$('bioLinks').lastElementChild; if(r&&r.querySelector) r.querySelector('.bioT').focus(); };
+  $('bioSave').onclick=async()=>{ const m=$('bioMsg'); m.style.color='var(--muted)'; m.textContent='зберігаю…';
+    try{ await api('/links/bio',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ enabled:$('bioOn').checked, slug:$('bioSlug').value, title:$('bioTitle').value, bio:$('bioText').value, showPosts:$('bioPosts').checked, links:BioRows })});
+      await loadLinks(); m.style.color='var(--brand)'; m.textContent=$('bioOn').checked?'✓ збережено - сторінка відкрита за адресою '+location.host+'/@'+$('bioSlug').value.trim().toLowerCase().replace(/^@/,''):'✓ збережено (сторінка поки закрита)'; }
+    catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
+  $('lkShorten').onclick=async()=>{ const o=$('lkShortOut'); try{ const r=await api('/links/shorten',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:$('lkUrl').value})});
+      o.innerHTML='<code>'+esc(r.short)+'</code> <button class="ghost" id="lkOutCp" style="padding:3px 9px;font-size:12px">⧉ Копіювати</button>'; $('lkOutCp').onclick=()=>{ try{ navigator.clipboard.writeText(r.short); flash('Скопійовано'); }catch(e){} }; loadLinks(); }
+    catch(e){ o.innerHTML='<span style="color:var(--danger)">⚠ '+esc(e.message)+'</span>'; } };
+}
 // ---------- 🔌 MCP: кабінет як інструмент Claude ----------
 // Адреса конектора = пароль від кабінету, тому: показуємо лише власнику, копіюємо кнопкою (щоб не
 // виділяли мишкою й не губили символ), перевипуск через підтвердження - стара адреса мре одразу.

@@ -449,6 +449,35 @@ function handleEvergreen(method, path, body) {
   return { ok: true, state: "added", postId: id };
 }
 
+// 🔗 Посилання і сторінка в біо: стан заглушки + журнал викликів (перевірки linksPanel/linksBio)
+const LK = {
+  settings: { auto: true, utm: true },
+  bio: { enabled: true, slug: "kemp.carlsbad", title: "Kemp Carlsbad", bio: "Глемпінг біля Карлових Вар", showPosts: true, views: 5, url: "http://x/@kemp.carlsbad",
+    links: [{ id: "a1b2c3", title: "Забронювати", url: "https://rozum.one/glamp", emoji: "🏕" }, { id: "d4e5f6", title: "Instagram", url: "https://instagram.com/kemp.carlsbad", emoji: "" }] },
+  stats: { days: 30, total: 3, byNet: { threads: 2, bio: 1 }, bioViews: 5,
+    top: [{ code: "Th1abcd", short: "http://x/s/Th1abcd", url: "https://rozum.one/glamp?utm_source=threads", source: "https://rozum.one/glamp", title: null, network: "threads", kind: "post", postId: "p1", postTitle: "Відкрили запис на осінь", clicks: 2, total: 2 },
+      { code: "Bio1234", short: "http://x/s/Bio1234", url: "https://rozum.one/glamp?utm_source=bio", source: "https://rozum.one/glamp", title: "Забронювати", network: "bio", kind: "bio", postId: null, postTitle: null, clicks: 1, total: 1 },
+      { code: "Bio9999", short: "http://x/s/Bio9999", url: "https://instagram.com/kemp.carlsbad?utm_source=bio", source: "https://instagram.com/kemp.carlsbad", title: "Instagram", network: "bio", kind: "bio", postId: null, postTitle: null, clicks: 0, total: 0 }] },
+};
+const lkCalls = [];
+function handleLinks(method, path, body) {
+  if (method === "GET" && path.startsWith("/links") && !path.startsWith("/links/")) return { settings: LK.settings, bio: LK.bio, stats: LK.stats };
+  if (method === "PUT" && path === "/links/settings") { lkCalls.push({ k: "settings", body }); Object.assign(LK.settings, body || {}); return { ok: true, settings: LK.settings }; }
+  if (method === "PUT" && path === "/links/bio") {
+    lkCalls.push({ k: "bio", body });
+    const slug = String(body?.slug || "").trim().toLowerCase().replace(/^@/, "");
+    if (!/^[a-z0-9][a-z0-9._-]{1,28}[a-z0-9]$/.test(slug)) return { __status: 400, error: "Адреса сторінки: 3-30 латинських літер чи цифр, можна «.», «-» і «_» посередині" };
+    LK.bio = { ...LK.bio, enabled: !!body.enabled, slug, title: body.title, bio: body.bio, showPosts: body.showPosts !== false,
+      links: (body.links || []).filter((l) => l.title || l.url).map((l, i) => ({ id: l.id || "n" + i, title: l.title, url: l.url, emoji: l.emoji || "" })) };
+    return { ok: true, bio: LK.bio };
+  }
+  if (method === "POST" && path === "/links/shorten") {
+    lkCalls.push({ k: "shorten", body });
+    return /^https?:\/\/[^/]+\.[a-z]/i.test(String(body?.url || "")) ? { ok: true, code: "Man5678", short: "http://x/s/Man5678" } : { __status: 400, error: "Потрібна повна адреса з https://" };
+  }
+  return null;
+}
+
 function handleApi(method, path, body) {
   if (method === "GET" && path.startsWith("/analytics/posts")) {
     const qp = new URL(path, "http://x").searchParams;
@@ -462,6 +491,7 @@ function handleApi(method, path, body) {
   }
   if (path.startsWith("/tg/")) return handleTg(method, path.slice(3), body);
   if (path.startsWith("/evergreen")) { const r = handleEvergreen(method, path, body); if (r) return r; }
+  if (path.startsWith("/links")) { const r = handleLinks(method, path, body); if (r) return r; }
   if (method === "DELETE" && /^\/posts\/egR\d$/.test(path)) { egCalls.push({ k: "cancel", id: path.split("/")[2] }); EG.upcoming = EG.upcoming.filter((u) => u.id !== path.split("/")[2]); return { ok: true }; }
   if (method === "GET" && path.startsWith("/best-times")) return { auto: btAuto, tz: "Europe/Kyiv", items: BT_ITEMS, mains: { threads: "thu", instagram: "ig1", facebook: "p1" } };
   if (method === "PUT" && path === "/settings/best_time_auto") { btAuto = String(body?.content) !== "0"; btPuts.push(String(body?.content)); return { ok: true }; }
@@ -2670,6 +2700,52 @@ const run = async () => {
     const chips = await page.$$eval(".pchip", (a) => a.map((x) => x.textContent));
     const good = chips.some((t) => /♻️/.test(t) && /Свіжий гачок/.test(t)) && chips.some((t) => /підрядники/.test(t) && !/♻️/.test(t));
     if (!good) console.log("   ↳ egCalendar:", JSON.stringify(chips));
+    return good;
+  });
+
+  await check("linksPanel", async () => {
+    // 🔗 Інструменти → «Посилання і сторінка в біо»: переходи по мережах, топ без «порожніх» кнопок біо,
+    // поля сторінки заповнені з сервера, «Відкрити» веде на /@адресу; вимкнути скорочення - PUT
+    await closeComposers();
+    await page.evaluate(() => selectView("tools"));
+    await page.waitForFunction(() => /переходи/.test((document.querySelector("#lkStats") || {}).textContent || ""), undefined, { timeout: 8000 });
+    const st = await page.evaluate(() => ({ stats: document.querySelector("#lkStats").innerText, rows: document.querySelectorAll("#lkStats .lkRow").length,
+      auto: document.querySelector("#lkAuto").checked, utm: document.querySelector("#lkUtm").checked, slug: document.querySelector("#bioSlug").value,
+      title: document.querySelector("#bioTitle").value, on: document.querySelector("#bioOn").checked, links: document.querySelectorAll("#bioLinks .bioRow").length,
+      open: getComputedStyle(document.querySelector("#bioOpen")).display !== "none" ? document.querySelector("#bioOpen").getAttribute("href") : "" }));
+    if (process.env.SMOKE_SHOTS) { const el = await page.$("#linksPanel"); await el.scrollIntoViewIfNeeded(); await page.waitForTimeout(300); await el.screenshot({ path: join(HERE, "links-panel.png") }); }
+    await page.evaluate(() => { const c = document.querySelector("#lkAuto"); c.checked = false; c.dispatchEvent(new Event("change")); });
+    for (let i = 0; i < 40 && !lkCalls.some((c) => c.k === "settings"); i++) await page.waitForTimeout(100);
+    const good = /3 переходи за 30 днів/.test(st.stats) && /Threads 2/.test(st.stats) && /сторінка в біо 1/.test(st.stats) && /переглянули 5 разів/.test(st.stats)
+      && st.rows === 2 && /Відкрили запис на осінь/.test(st.stats) && st.auto && st.utm && st.slug === "kemp.carlsbad" && st.title === "Kemp Carlsbad" && st.on && st.links === 2
+      && /\/@kemp\.carlsbad$/.test(st.open) && lkCalls.some((c) => c.k === "settings" && c.body.auto === false && c.body.utm === true);
+    if (!good) console.log("   ↳ linksPanel:", JSON.stringify({ st, calls: lkCalls }));
+    return good;
+  });
+
+  await check("linksBio", async () => {
+    // сторінка в біо: ＋ кнопка, ✕ прибрати, збереження несе все по порядку; крива адреса - людська відмова;
+    // ручне скорочення показує коротке посилання
+    await page.evaluate(() => document.querySelector("#bioAdd").click());
+    await page.waitForFunction(() => document.querySelectorAll("#bioLinks .bioRow").length === 3, undefined, { timeout: 6000 });
+    await page.evaluate(() => { const r = document.querySelectorAll("#bioLinks .bioRow")[2];
+      const set = (sel, v) => { const i = r.querySelector(sel); i.value = v; i.dispatchEvent(new Event("input")); };
+      set(".bioE", "💶"); set(".bioT", "Прайс"); set(".bioU", "https://rozum.one/price");
+      document.querySelectorAll("#bioLinks .bioRow")[1].querySelector(".bioX").click(); });
+    await page.waitForFunction(() => document.querySelectorAll("#bioLinks .bioRow").length === 2, undefined, { timeout: 6000 });
+    await page.evaluate(() => { document.querySelector("#bioSlug").value = "bad slug"; document.querySelector("#bioSave").click(); });
+    await page.waitForFunction(() => /⚠/.test((document.querySelector("#bioMsg") || {}).textContent || ""), undefined, { timeout: 6000 });
+    const err = await page.evaluate(() => document.querySelector("#bioMsg").textContent);
+    await page.evaluate(() => { document.querySelector("#bioSlug").value = "Kemp.Glamp"; document.querySelector("#bioSave").click(); });
+    await page.waitForFunction(() => /✓ збережено/.test((document.querySelector("#bioMsg") || {}).textContent || ""), undefined, { timeout: 6000 });
+    const okMsg = await page.evaluate(() => document.querySelector("#bioMsg").textContent);
+    const saved = lkCalls.filter((c) => c.k === "bio").pop()?.body || {};
+    await page.evaluate(() => { document.querySelector("#lkUrl").value = "https://rozum.one/audit"; document.querySelector("#lkShorten").click(); });
+    await page.waitForFunction(() => /Man5678/.test((document.querySelector("#lkShortOut") || {}).textContent || ""), undefined, { timeout: 6000 });
+    const good = /латинських/.test(err) && /kemp\.glamp/.test(okMsg) && saved.enabled === true && saved.showPosts === true
+      && JSON.stringify((saved.links || []).map((l) => [l.emoji, l.title, l.url])) === JSON.stringify([["🏕", "Забронювати", "https://rozum.one/glamp"], ["💶", "Прайс", "https://rozum.one/price"]])
+      && lkCalls.some((c) => c.k === "shorten" && c.body.url === "https://rozum.one/audit");
+    if (!good) console.log("   ↳ linksBio:", JSON.stringify({ err, okMsg, saved, calls: lkCalls.map((c) => c.k) }));
     return good;
   });
 
