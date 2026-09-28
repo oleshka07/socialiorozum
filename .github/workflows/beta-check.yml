@@ -1,8 +1,8 @@
 name: beta-check
 
 # Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ, нічого не змінює й не перезапускає.
-# 28.09 вечір: Олег поставив @holos_rozum_bot в адмінці проду, пробував бота на беті - «не підключився».
-# Що саме збережено на кожному інстансі (лише назви ключів), що каже журнал бота і куди Telegram шле апдейти.
+# 28.09 вечір: токен колишнього спільного бота відкликано. Хто на проді й беті публікує в Telegram через
+# спільного бота (без власного) і скільки людей зі спільним ботом у DM - кого це зачепило.
 
 on:
   push:
@@ -13,7 +13,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Telegram bots on prod and beta (read-only)
+      - name: Who relies on the shared Telegram bot (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -22,40 +22,29 @@ jobs:
           command_timeout: 5m
           script: |
             mask() { sed -E -e 's/([A-Za-z0-9._%+-]{1,3})[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+)/\1***@\2/g' \
-                            -e 's/[0-9]{6,}:[A-Za-z0-9_-]{30,}/<bot-token>/g' -e 's/[0-9a-fA-F]{24,}/<hex>/g' \
-                            -e 's/EAA[A-Za-z0-9]{20,}/<meta-token>/g' -e 's/TH[A-Za-z0-9]{40,}/<th-token>/g' \
-                            -e 's#/api/webhooks/telegram/[A-Za-z0-9_-]{16,}#/api/webhooks/telegram/<shared-secret>#g'; }
+                            -e 's/[0-9]{6,}:[A-Za-z0-9_-]{30,}/<bot-token>/g' -e 's/[0-9a-fA-F]{24,}/<hex>/g'; }
             echo "зараз $(date -u +%d.%m\ %H:%M) UTC"
             for d in "${{ secrets.APP_DIR }}" "${{ secrets.APP_DIR }}-beta"; do
               echo; echo "=================== $d · HEAD $(git -C "$d" rev-parse --short HEAD) ==================="
               cd "$d/server" || continue
-              echo "контейнер: $(docker compose ps app --format '{{.Status}}')"
-              echo "--- журнал застосунку: рядки бота (12 год) ---"
-              docker compose logs --since 12h --no-log-prefix app 2>&1 | grep -E '\[tgbot\]|власний бот|спільний бот|Спільний бот' | mask | cut -c1-260 | tail -25
-              echo "--- вхідні вебхуки Telegram за 12 год (кількість за видом адреси) ---"
-              docker compose logs --since 12h --no-log-prefix app 2>&1 | grep -o '"url":"/api/webhooks/telegram/[^"]*"' \
-                | sed -E -e 's#telegram/bot/([0-9]+)#telegram/bot/\1#' -e 's#telegram/[A-Za-z0-9_-]{16,}"#telegram/<shared-secret>"#' | sort | uniq -c
-              echo "--- останні 4 вебхуки (час у мс epoch, статус - у наступному рядку журналу) ---"
-              docker compose logs --since 12h --no-log-prefix app 2>&1 | grep -E 'webhooks/telegram' | mask | grep -o '"time":[0-9]*\|"url":"[^"]*"\|"statusCode":[0-9]*' | paste -sd' ' | tr ' ' '\n' | tail -12
               docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -v ON_ERROR_STOP=0' <<'SQL' 2>&1 | mask
             set session characteristics as transaction read only;
-            \echo === ключі з адмінки (лише назви, без значень) ===
-            select name, to_char(updated_at at time zone 'Europe/Prague','DD.MM HH24:MI') changed, updated_by from app_secret order by updated_at desc;
-            \echo === журнал: адмінка й бот (12 год, час Праги) ===
-            select to_char(l.created_at at time zone 'Europe/Prague','DD.MM HH24:MI:SS') t, l.level, l.scope, left(regexp_replace(l.message,'\s+',' ','g'),170) msg
-              from app_log l where l.created_at > now() - interval '12 hours' and l.scope in ('admin','tgbot','telegram','tg')
-             order by l.created_at desc limit 30;
-            \echo === Telegram у кабінетах Олега: чий бот (id бота - публічний), канал, власник у Telegram, коди підключення ===
+            \echo === Telegram у всіх кабінетах: чий бот, канал, скільки вийшло за 30 днів, скільки чекає в календарі ===
             select coalesce(w.title, w.name) brand,
-                   case when c.bot_token is null then '-' else 'bot ' || split_part(c.bot_token, ':', 1) end bot, coalesce(c.channel_title,'-') channel,
-                   to_char(c.updated_at at time zone 'Europe/Prague','DD.MM HH24:MI') cfg_changed,
-                   (select count(*) from tg_owner o where o.workspace_id=w.id) owners,
-                   (select to_char(max(o.created_at) at time zone 'Europe/Prague','DD.MM HH24:MI') from tg_owner o where o.workspace_id=w.id) owner_at,
-                   (select count(*) from tg_connect t where t.workspace_id=w.id) codes,
-                   (select to_char(max(t.created_at) at time zone 'Europe/Prague','DD.MM HH24:MI') from tg_connect t where t.workspace_id=w.id) code_at,
-                   (select bool_or(t.tg_user_id is not null) from tg_connect t where t.workspace_id=w.id) code_used
-              from workspace w join workspace_member m on m.workspace_id=w.id join app_user u on u.id=m.user_id
-              left join telegram_config c on c.workspace_id=w.id
-             where u.email ilike 'o.stepeniev%' order by 1;
+                   case when c.bot_token is null then 'спільний' else 'bot ' || split_part(c.bot_token, ':', 1) end bot,
+                   coalesce(c.channel_title, case when c.channel_chat_id is null then '-' else 'без назви' end) channel,
+                   (select count(*) from telegram_chat t where t.workspace_id=w.id) extra_chats,
+                   (select count(*) from telegram_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+                     where s.workspace_id=w.id and tp.status='sent' and tp.created_at > now() - interval '30 days') sent_30d,
+                   (select to_char(max(tp.created_at) at time zone 'Europe/Prague','DD.MM HH24:MI') from telegram_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+                     where s.workspace_id=w.id and tp.status='sent') last_sent,
+                   (select count(*) from schedule_slot sl join post p on p.id=sl.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+                     where s.workspace_id=w.id and sl.status='planned' and sl.scheduled_at > now() and coalesce(sl.channels, p.channels)->'telegram'->>'on' = 'true') planned_tg
+              from telegram_config c join workspace w on w.id=c.workspace_id order by 2, 1;
+            \echo === люди, підключені до бота в DM (tg_owner), за кабінетами ===
+            select coalesce(w.title, w.name) brand, case when c.bot_token is null then 'спільний' else 'власний' end via, count(*) people,
+                   to_char(max(o.created_at) at time zone 'Europe/Prague','DD.MM HH24:MI') last_connected
+              from tg_owner o join workspace w on w.id=o.workspace_id left join telegram_config c on c.workspace_id=w.id
+             group by 1, 2 order by 3 desc;
             SQL
             done
