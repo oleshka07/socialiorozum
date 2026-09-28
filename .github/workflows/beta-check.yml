@@ -1,8 +1,8 @@
 name: beta-check
 
 # Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ, нічого не змінює й не перезапускає.
-# 28.09, після деплою «кілька акаунтів однієї мережі» (cace3c4): чи лягла міграція, як заповнились
-# акаунти в старих рядках публікацій, і повні id постів із невдалими коментарями Threads.
+# 28.09 вечір: Олег позначив картку «кілька акаунтів» виконаною - що саме зроблено в його брендах на беті
+# (які акаунти додано, що опубліковано, як пішли коментарі) і чи визначились старі пости Threads.
 
 on:
   push:
@@ -13,7 +13,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Beta multi-account (read-only)
+      - name: Beta - Oleg's brands after multi-account check (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -28,28 +28,48 @@ jobs:
             cd "${{ secrets.APP_DIR }}-beta/server" && docker compose ps app --format '{{.Status}}'
             docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -v ON_ERROR_STOP=0' <<'SQL' 2>&1 | mask
             set session characteristics as transaction read only;
-            \echo === нові таблиці й колонки ===
-            select to_regclass('meta_page') meta_page, to_regclass('threads_account') threads_account,
-                   (select count(*) from information_schema.columns where table_name='follower_snapshot' and column_name='account') fs_account,
-                   (select count(*) from pg_constraint where conname='follower_snapshot_pkey') old_pkey,
-                   (select count(*) from pg_indexes where indexname='follower_snapshot_acc') new_uq;
-            \echo === акаунти в рядках публікацій (по брендах) ===
-            select coalesce(w.title, w.name) brand, 'threads' net, tp.account_id, tp.account_name, count(*)
-              from threads_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id join workspace w on w.id=s.workspace_id
-             where tp.status='sent' group by 1,2,3,4
+            \echo === бренди Олега: акаунти Threads (основний + додаткові) ===
+            select coalesce(w.title, w.name) brand, 'main' as kind, tc.username, tc.token_expires_at::date exp
+              from workspace w join threads_config tc on tc.workspace_id=w.id
+             where w.id in (select m.workspace_id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%')
             union all
-            select coalesce(w.title, w.name), mp.channel, mp.account_id, mp.account_name, count(*)
-              from meta_publish mp join post p on p.id=mp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id join workspace w on w.id=s.workspace_id
-             where mp.status='sent' group by 1,2,3,4
-             order by 1,2,5 desc;
-            \echo === невдалі коментарі Threads: повні id постів ===
-            select p.id, pc.status, left(pc.error,80) err, tp.account_name
-              from post_comment pc join post p on p.id=pc.post_id
-              left join threads_publish tp on tp.post_id=p.id and tp.status='sent'
-             where pc.network='threads' and pc.status='failed';
-            \echo === знімки підписників по акаунтах ===
-            select network, account, count(*) from follower_snapshot group by 1,2 order by 1,2;
-            \echo === журнал з моменту деплою (помилки/попередження) ===
-            select to_char(created_at at time zone 'Europe/Prague','HH24:MI:SS') t, level, scope, left(regexp_replace(message,'\s+',' ','g'),150) msg
-              from app_log where created_at > now() - interval '20 minutes' and level in ('error','warn') order by created_at desc limit 20;
+            select coalesce(w.title, w.name), 'extra', ta.username, ta.token_expires_at::date
+              from workspace w join threads_account ta on ta.workspace_id=w.id
+             where w.id in (select m.workspace_id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%')
+             order by 1, 2 desc;
+            \echo === бренди Олега: Сторінки Facebook та їхній Instagram ===
+            select coalesce(w.title, w.name) brand, 'main' as kind, mc.page_name, mc.ig_username, right(mc.page_id,4) page
+              from workspace w join meta_config mc on mc.workspace_id=w.id
+             where w.id in (select m.workspace_id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%')
+            union all
+            select coalesce(w.title, w.name), 'extra', mp.page_name, mp.ig_username, right(mp.page_id,4)
+              from workspace w join meta_page mp on mp.workspace_id=w.id
+             where w.id in (select m.workspace_id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%')
+             order by 1, 2 desc;
+            \echo === публікації в брендах Олега за останні 6 год (Прага) ===
+            select to_char(x.created_at at time zone 'Europe/Prague','DD.MM HH24:MI') t, coalesce(w.title, w.name) brand, left(p.id::text,8) post, x.net, coalesce(x.acc,'-') acc, x.status
+              from (select post_id, 'threads'::text net, account_name acc, status, created_at from threads_publish
+                    union all select post_id, channel, account_name, status, created_at from meta_publish
+                    union all select post_id, 'telegram', target, status, created_at from telegram_publish
+                    union all select post_id, 'linkedin', null, status, created_at from linkedin_publish) x
+              join post p on p.id=x.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id join workspace w on w.id=s.workspace_id
+             where x.created_at > now() - interval '6 hours'
+               and w.id in (select m.workspace_id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%')
+             order by x.created_at;
+            \echo === перші коментарі в брендах Олега, змінені за 6 год ===
+            select to_char(pc.updated_at at time zone 'Europe/Prague','DD.MM HH24:MI') t, left(p.id::text,8) post, pc.network, pc.status, pc.attempts, left(coalesce(pc.error,''),120) err
+              from post_comment pc join post p on p.id=pc.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+             where pc.updated_at > now() - interval '6 hours'
+               and s.workspace_id in (select m.workspace_id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%')
+             order by pc.updated_at;
+            \echo === старі пости Threads без акаунта (після «＋ Додати акаунт» сервіс мав визначити) ===
+            select coalesce(w.title, w.name) brand, count(*) filter (where tp.account_id is null) no_id, count(*) filter (where tp.account_id is null and tp.account_name is null) no_name, count(*) total
+              from threads_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id join workspace w on w.id=s.workspace_id
+             where tp.status='sent' and w.id in (select m.workspace_id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%')
+             group by 1;
+            \echo === журнал беті за 6 год: акаунти, підключення, публікація, коментарі ===
+            select to_char(created_at at time zone 'Europe/Prague','DD.MM HH24:MI:SS') t, level, scope, left(regexp_replace(message,'\s+',' ','g'),170) msg
+              from app_log where created_at > now() - interval '6 hours'
+               and (scope in ('threads','meta','comment','publish','accounts','telegram') or level in ('error','warn'))
+             order by created_at desc limit 40;
             SQL
