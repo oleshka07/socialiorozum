@@ -90,3 +90,18 @@ test("humanCommentError: мережа не бачить пост навіть п
   assert.match(r.text, /Threads не знаходить цей пост/);
   assert.match(r.text, /does not exist/, "оригінал мережі лишається в дужках - для підтримки");
 });
+
+test("commentPlanLines: пост у двох Сторінках - стан коментаря під кожною, з назвою", () => {
+  const post = { first_comment: "Деталі: https://rozum.one", channels: { facebook: { on: true, accounts: ["pg1", "pg2"] } } };
+  const names = { "facebook:pg1": "Oleg Stepeniev", "facebook:pg2": "Rozum.one" };
+  const lines = commentPlanLines(post, ["facebook"],
+    [{ network: "facebook", account: "pg1", status: "sent" }, { network: "facebook", account: "pg2", status: "failed", error: "немає дозволу" }],
+    ["facebook"], null, (net, acc) => names[`${net}:${acc}`] || null);
+  const fb = lines.find((l) => l.startsWith("— Facebook"));
+  assert.match(fb, /Oleg Stepeniev ✓/);
+  assert.match(fb, /Rozum\.one ⚠️ не вийшов: немає дозволу/);
+  assert.match(fb, /send_first_comment/, "підказка, як повторити");
+  // одна публікація - як і раніше, без назв
+  const one = commentPlanLines(post, ["facebook"], [{ network: "facebook", account: "pg1", status: "sent" }], ["facebook"], null, (net, acc) => names[`${net}:${acc}`] || null);
+  assert.equal(one.find((l) => l.startsWith("— Facebook")), "— Facebook: ✓ надіслано");
+});

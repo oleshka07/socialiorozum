@@ -3,7 +3,7 @@
 // повторити з force (кабінет питає підтвердження) або обрати інший час / інший текст.
 import { q, one } from "./db.js";
 import { enabledNets } from "./publisher.js";
-import { mainAccountIds, netKey, postAccount } from "./accounts.js";
+import { mainAccountIds, netKey, postAccounts } from "./accounts.js";
 
 export type Conflict = { kind: "time" | "text"; postId: string; at: string | null; nets: string[]; state: string };
 
@@ -17,7 +17,9 @@ export async function scheduleConflicts(ws: string, postId: string, at: Date | n
   // компанії в один час - це не дубль (акаунтів однієї мережі в бренді може бути кілька)
   const mains = await mainAccountIds(ws);
   const mine = await one<{ channels: any }>(`select channels from post where id=$1`, [postId]);
-  const myKeys = new Map(nets.map((n) => [netKey(n, postAccount(mine?.channels, n), mains), n]));
+  // ключі «мережа|акаунт» поста: кожен обраний галочкою акаунт (без вибору - за замовчуванням)
+  const keysOf = (ch: any, n: string) => { const ids = postAccounts(ch, n); return (ids.length ? ids : [null]).map((a) => netKey(n, a, mains)); };
+  const myKeys = new Map(nets.flatMap((n) => keysOf(mine?.channels, n).map((k) => [k, n] as const)));
   if (at) {
     const rows = await q<{ post_id: string; scheduled_at: string; pch: any; sch: any }>(
       `select ss.post_id, ss.scheduled_at, p.channels as pch, ss.channels as sch
@@ -28,7 +30,7 @@ export async function scheduleConflicts(ws: string, postId: string, at: Date | n
         order by ss.scheduled_at`, [ws, postId, at.toISOString()]);
     for (const r of rows) {
       const eff = enabledNets(r.pch).filter((n) => !r.sch || (r.sch[n] && r.sch[n].on));
-      const both = eff.filter((n) => myKeys.has(netKey(n, postAccount(r.pch, n), mains)));
+      const both = eff.filter((n) => keysOf(r.pch, n).some((k) => myKeys.has(k)));
       if (both.length) out.push({ kind: "time", postId: r.post_id, at: new Date(r.scheduled_at).toISOString(), nets: both, state: "planned" });
     }
   }
@@ -38,7 +40,7 @@ export async function scheduleConflicts(ws: string, postId: string, at: Date | n
      select p2.id,
             (select min(ss.scheduled_at) from schedule_slot ss where ss.post_id=p2.id and ss.status='planned') as slot_at,
             (select array_agg(distinct x.net || '|' || coalesce(x.acc, '')) from (
-               select 'telegram' as net, null::text as acc from telegram_publish where post_id=p2.id and status='sent'
+               select 'telegram' as net, chat_id as acc from telegram_publish where post_id=p2.id and status='sent'
                union all select 'threads', account_id from threads_publish where post_id=p2.id and status='sent'
                union all select channel, account_id from meta_publish where post_id=p2.id and status='sent'
                union all select 'linkedin', null from linkedin_publish where post_id=p2.id and status='sent') x) as sent_nets

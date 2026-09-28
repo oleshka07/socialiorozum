@@ -20,7 +20,8 @@ import { ensurePostDigest } from "./memory.js";
 import { postMediaList } from "./slides.js";
 import { commentAfterPublish, commentFor } from "./comments.js";
 import { normCollaborators, cleanAlt } from "./igextras.js";
-import { threadsToken, threadsAccountFor, metaAccountFor, postAccount, type MetaPage, type Picked, type ThreadsLogin } from "./accounts.js";
+import { threadsToken, threadsAccountFor, metaAccountFor, postAccount, postAccounts, telegramTargets, accountChoices, threadsAccounts,
+  mainAccountIds, isAccNet, type MetaPage, type ThreadsLogin, type TgTarget } from "./accounts.js";
 
 // 👥 Акаунтів Threads у бренді може бути кілька (accounts.ts). Без userId - основний, як і раніше.
 export async function thValidToken(ws: string, userId?: string | null): Promise<{ token: string; userId: string } | null> {
@@ -29,7 +30,12 @@ export async function thValidToken(ws: string, userId?: string | null): Promise<
 }
 
 // comment - перший коментар під щойно опублікованим постом (якщо для мережі його задано)
-export type PubResult = { channel: string; status: "sent" | "error" | "skipped"; error?: string; note?: string; comment?: { status: string; error?: string } };
+// account - id акаунта мережі (Сторінки, профілю, каналу), accountName - його імʼя, коли в публікації
+// акаунтів цієї мережі кілька (тоді «Facebook ✓» мало б бути сказано про кожну Сторінку окремо)
+export type PubResult = { channel: string; account?: string; accountName?: string; status: "sent" | "error" | "skipped"; error?: string; note?: string; comment?: { status: string; error?: string } };
+/** «Facebook», а коли акаунтів мережі в публікації кілька - «Facebook (Rozum.one)». */
+export const pubLabel = (r: Pick<PubResult, "channel" | "accountName">, names: Record<string, string> = {}): string =>
+  `${names[r.channel] || r.channel}${r.accountName ? ` (${r.accountName})` : ""}`;
 
 // Мережі, у які сервіс реально публікує. У `post.channels` бувають службові ключі (manual_adapt,
 // reel_caption) і сміття на кшталт «all» із майстер-плану: без цього фільтра такий ключ пролітав
@@ -51,13 +57,21 @@ async function reservePub(table: PubTable, key: Record<string, string>, extra: R
   // вбив запит посеред роботи. Переймаємо одразу, а не через 20 хв - раніше саме ці 20 хв людина
   // бачила «пост саме зараз публікується» і не могла повторити (фідбек тестера).
   const orphan = (inFlightPosts.get(key.post_id) || 0) <= 1;
-  const stale = await q<{ id: string }>(
-    `delete from ${table} where ${cond} and status='sending' and (${orphan ? "true" : "false"} or created_at < now() - interval '${STALE_SENDING}') returning id`, kv);
+  // та сама незавершена публікація, записана ДО «раз на акаунт мережі» (давній код): у Threads/Meta -
+  // рядок без акаунта (нові резервації його мають завжди), у Telegram - роль 'channel'/'group' того ж
+  // чату. Без цього така сирота лишалась би «публікується просто зараз» назавжди.
+  const legacy = table === "threads_publish" && key.account_id ? { sql: `post_id=$1 and account_id is null`, vals: [key.post_id] }
+    : table === "meta_publish" && key.account_id ? { sql: `post_id=$1 and channel=$2 and account_id is null`, vals: [key.post_id, key.channel] }
+    : table === "telegram_publish" && extra.chat_id ? { sql: `post_id=$1 and chat_id=$2 and target in ('channel','group')`, vals: [key.post_id, extra.chat_id] }
+    : null;
+  const staleWhen = `status='sending' and (${orphan ? "true" : "false"} or created_at < now() - interval '${STALE_SENDING}')`;
+  const stale = await q<{ id: string }>(`delete from ${table} where ${cond} and ${staleWhen} returning id`, kv);
+  if (legacy) stale.push(...await q<{ id: string }>(`delete from ${table} where ${legacy.sql} and ${staleWhen} returning id`, legacy.vals));
   if (stale.length) await logEvent("warn", "publish", `${table}: перейнято завислу резервацію (попередню публікацію обірвав перезапуск або збій)`, { postId: key.post_id });
   const cols = [...kc, ...Object.keys(extra)], vals = [...kv, ...Object.values(extra)];
   const r = await one<{ id: string }>(
     `insert into ${table}(${cols.join(",")},status) values(${vals.map((_, i) => `$${i + 1}`).join(",")},'sending')
-     on conflict (${kc.join(",")}) do nothing returning id`, vals);
+     on conflict do nothing returning id`, vals);
   if (r) return r;
   const cur = await one<{ status: string }>(`select status from ${table} where ${cond}`, kv);
   return cur?.status === "sent" ? "sent" : "busy";
@@ -70,10 +84,13 @@ const BUSY = "у цю мережу пост саме зараз публікує
  * не має тихо скасовувати завтрашню публікацію.
  */
 export async function closeSlotsIfDone(postId: string, reason: string): Promise<boolean> {
-  const post = await one<{ channels: any }>(`select channels from post where id=$1`, [postId]);
+  const post = await one<{ channels: any; ws: string }>(
+    `select p.channels, s.workspace_id as ws from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where p.id=$1`, [postId]);
   const enabled = enabledNets(post?.channels);
-  const sent = new Set(await alreadySentNetworks(postId));
-  if (!enabled.length || enabled.some((k) => !sent.has(k))) return false;
+  if (!post || !enabled.length) return false;
+  // «усі обрані» - кожен обраний акаунт кожної мережі (дві Сторінки - обидві мають отримати пост)
+  const [keys, sent] = await Promise.all([targetKeys(post.ws, post.channels, enabled), sentAccountKeys(post.ws, postId)]);
+  if (keys.some((k) => !sent.has(k))) return false;
   await q(`update schedule_slot set status='posted', result=$2, updated_at=now() where post_id=$1 and status='planned'`, [postId, reason]);
   await q(`update plan_slot set status='published' where post_id=$1 and status in ('drafted','approved','scheduled')`, [postId]);
   return true;
@@ -90,7 +107,83 @@ async function threadsCtaText(ws: string): Promise<string | null> {
   return `Обіцяні деталі - тут: ${v}`;
 }
 
-// Мережі, куди пост УЖЕ відправлено (status='sent') — щоб не публікувати вдруге (публікація один раз на мережу).
+// 👥 Куди саме піде пост: «мережа + акаунт» на кожну обрану галочкою Сторінку, профіль, канал. Без
+// вибору - акаунт за замовчуванням (у Telegram - основні канал і група). Акаунт, якого вже нема в
+// бренді, - одиниця з помилкою: людська відмова саме для нього, решта йде.
+type Unit = { k: string; id: string | null; name: string | null; error?: string; th?: ThreadsLogin; meta?: MetaPage; tg?: TgTarget; tgToken?: string };
+async function publishUnits(ws: string, ch: any, nets: string[]): Promise<Unit[]> {
+  const units: Unit[] = [];
+  let tgt: Awaited<ReturnType<typeof telegramTargets>> | null = null;
+  for (const k of nets) {
+    const ids = postAccounts(ch, k);
+    if (k === "threads") {
+      for (const id of ids.length ? ids : [null]) {
+        const a = await threadsAccountFor(ws, id);
+        units.push(a.ok ? { k, id: a.acc.userId, name: a.acc.username ? "@" + a.acc.username : a.acc.userId, th: a.acc } : { k, id, name: null, error: a.error });
+      }
+    } else if (k === "facebook" || k === "instagram") {
+      for (const id of ids.length ? ids : [null]) {
+        const a = await metaAccountFor(ws, k, id);
+        if (!a.ok) { units.push({ k, id, name: null, error: a.error }); continue; }
+        units.push(k === "facebook"
+          ? { k, id: a.acc.pageId, name: a.acc.pageName, meta: a.acc }
+          : { k, id: a.acc.igUserId, name: a.acc.igUsername ? "@" + a.acc.igUsername : a.acc.igUserId, meta: a.acc });
+      }
+    } else if (k === "telegram") {
+      tgt ??= await telegramTargets(ws);
+      if (!tgt.token) { units.push({ k, id: null, name: null, error: "Telegram не підключено" }); continue; }
+      const list = ids.length ? ids : tgt.targets.filter((t) => t.main).map((t) => t.id);
+      if (!list.length) { units.push({ k, id: null, name: null, error: "Не вказано канал/групу" }); continue; }
+      for (const id of list) {
+        const t = tgt.targets.find((x) => x.id === id);
+        units.push(t ? { k, id: t.id, name: t.name, tg: { ...t }, tgToken: tgt.token }
+          : { k, id, name: null, error: "обраний для поста канал Telegram більше не підключено до бренду - відкрий пост і обери інший (або додай його знову: Налаштування → Канали → Telegram)" });
+      }
+    } else units.push({ k, id: null, name: null });
+  }
+  return units;
+}
+
+/** Ключі «мережа|акаунт», куди пост має піти (без токенів) - щоб знати, чи вже все надіслано. */
+export async function targetKeys(ws: string, ch: any, nets: string[]): Promise<string[]> {
+  const choices = await accountChoices(ws);
+  const out: string[] = [];
+  for (const k of nets) {
+    if (!isAccNet(k)) { out.push(`${k}|`); continue; }
+    const ids = postAccounts(ch, k);
+    if (ids.length) { out.push(...ids.map((id) => `${k}|${id}`)); continue; }
+    const mains = choices[k].filter((a) => a.main).map((a) => a.id);
+    if (!mains.length) out.push(`${k}|`);
+    else out.push(...(k === "telegram" ? mains : mains.slice(0, 1)).map((id) => `${k}|${id}`));
+  }
+  return out;
+}
+
+/** Куди пост уже вийшов: ключі «мережа|акаунт». Рядки до галочок без акаунта - акаунт за замовчуванням
+ *  (у Threads - за ніком із посилання, якщо такий акаунт є в бренді). */
+export async function sentAccountKeys(ws: string, postId: string): Promise<Set<string>> {
+  const [tgRows, thRows, mtRows, li] = await Promise.all([
+    q<{ chat_id: string | null }>(`select chat_id from telegram_publish where post_id=$1 and status='sent'`, [postId]),
+    q<{ account_id: string | null; account_name: string | null }>(`select account_id, account_name from threads_publish where post_id=$1 and status='sent'`, [postId]),
+    q<{ channel: string; account_id: string | null }>(`select channel, account_id from meta_publish where post_id=$1 and status='sent'`, [postId]),
+    one<{ n: number }>(`select count(*)::int n from linkedin_publish where post_id=$1 and status='sent'`, [postId]),
+  ]);
+  const out = new Set<string>();
+  for (const r of tgRows) out.add(`telegram|${r.chat_id || ""}`);
+  if ((li?.n || 0) > 0) out.add("linkedin|");
+  const legacy = thRows.some((r) => !r.account_id) || mtRows.some((r) => !r.account_id);
+  const [mains, th] = legacy ? await Promise.all([mainAccountIds(ws), threadsAccounts(ws)]) : [null, []];
+  for (const r of thRows) {
+    let acc = r.account_id;
+    if (!acc && r.account_name) acc = th.find((a) => "@" + a.username.toLowerCase() === r.account_name!.toLowerCase())?.userId || null;
+    out.add(`threads|${acc || mains?.threads || ""}`);
+  }
+  for (const r of mtRows) out.add(`${r.channel}|${r.account_id || (mains ? (mains as any)[r.channel] || "" : "")}`);
+  return out;
+}
+
+// Мережі, куди пост УЖЕ відправлено (status='sent') хоч одним акаунтом — для позначок «опубліковано»
+// (картка, бот, Mini App). Що саме з обраних акаунтів ще не отримало пост - sentAccountKeys/targetKeys.
 export async function alreadySentNetworks(postId: string): Promise<string[]> {
   const [tgSent, thSent, metaSent, liSent] = await Promise.all([
     one<{ n: number }>(`select count(*)::int as n from telegram_publish where post_id=$1 and status='sent'`, [postId]),
@@ -196,7 +289,11 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
   };
   const ch = post.channels || {};
   const enabled = enabledNets(ch).filter((k) => !onlyNets || onlyNets.includes(k));
-  const sentSet = new Set(await alreadySentNetworks(postId));
+  // 👥 куди саме: пара «мережа + акаунт» на кожну обрану галочкою Сторінку, профіль чи канал (без
+  // вибору - акаунт за замовчуванням, у Telegram - основні канал і група, як і було). Публікація -
+  // один раз на акаунт мережі: друга Сторінка отримує пост, навіть якщо перша вже має його.
+  const [units, sentKeys] = await Promise.all([publishUnits(ws, ch, enabled), sentAccountKeys(ws, postId)]);
+  const isSent = (u: Unit) => sentKeys.has(`${u.k}|${u.id || ""}`);
   // «Створи один раз - сервіс сам перепакує»: мережі без власної версії тексту адаптуються
   // автоматично перед відправкою (один LLM-виклик на всі відсутні; при збої - майстер-текст як раніше).
   // Покриває і плановий автопостер, і публікацію з бота - не лише кнопку «Підлаштувати» в композері.
@@ -205,7 +302,8 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
   // переписувались при публікації - і прев'ю в композері брехало (фідбек Олега «підлаштувало всюди,
   // а мені подобався мій перший текст»).
   const manual = ch.manual_adapt === true;
-  const missing = manual ? [] : enabled.filter((k) => !sentSet.has(k) && !(ch[k] && String(ch[k].text || "").trim()));
+  const pendingNets = [...new Set(units.filter((u) => !isSent(u)).map((u) => u.k))];
+  const missing = manual ? [] : pendingNets.filter((k) => !(ch[k] && String(ch[k].text || "").trim()));
   if (missing.length) {
     try {
       const variants = await adaptForChannels(ws, post.content, missing, (post as any).intent || undefined);
@@ -221,108 +319,103 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
   const textOf = (k: string) => (ch[k] && ch[k].text) || post.content;
   const imageUrl = imageUrls[0] || null;
   const results: PubResult[] = [];
-  // 👥 акаунт кожної мережі - обраний у пості (channels.<мережа>.account) або основний бренду
-  const [tgc, thAcc, fbAcc, igAcc, li] = await Promise.all([
-    one<{ bot_token: string | null; channel_chat_id: string | null; group_chat_id: string | null; channel_username: string | null }>(`select bot_token, channel_chat_id, group_chat_id, channel_username from telegram_config where workspace_id=$1`, [ws]),
-    enabled.includes("threads") ? threadsAccountFor(ws, postAccount(ch, "threads")) : Promise.resolve(null as Picked<ThreadsLogin> | null),
-    enabled.includes("facebook") ? metaAccountFor(ws, "facebook", postAccount(ch, "facebook")) : Promise.resolve(null as Picked<MetaPage> | null),
-    enabled.includes("instagram") ? metaAccountFor(ws, "instagram", postAccount(ch, "instagram")) : Promise.resolve(null as Picked<MetaPage> | null),
-    one<{ member_urn: string; access_token: string; token_expires_at: string | null }>(`select member_urn, access_token, token_expires_at from linkedin_config where workspace_id=$1`, [ws]),
-  ]);
+  const li = enabled.includes("linkedin")
+    ? await one<{ member_urn: string; access_token: string; token_expires_at: string | null }>(`select member_urn, access_token, token_expires_at from linkedin_config where workspace_id=$1`, [ws])
+    : null;
   // 📸 alt-текст фото (у тому ж порядку, що images): Instagram і LinkedIn
   const alts = video ? [] : mediaList.filter((m) => m.kind === "image").map((m) => cleanAlt(m.alt_text));
-  for (const k of enabled) {
-    if (sentSet.has(k)) { results.push({ channel: k, status: "skipped" }); continue; } // уже опубліковано в цю мережу
+  // скільки акаунтів мережі в цій публікації: коли кілька, результат називає акаунт
+  const perNet = new Map<string, number>();
+  for (const u of units) perNet.set(u.k, (perNet.get(u.k) || 0) + 1);
+  // гілка Threads ріжеться моделлю ОДИН раз: у кількох акаунтах Threads - та сама серія, без зайвого виклику
+  let thParts: string[] | null = null;
+  for (const u of units) {
+    const k = u.k;
+    const who: Pick<PubResult, "account" | "accountName"> = { ...(u.id ? { account: u.id } : {}), ...((perNet.get(k) || 0) > 1 && u.name ? { accountName: u.name } : {}) };
+    if (isSent(u)) { results.push({ channel: k, ...who, status: "skipped" }); continue; } // уже опубліковано цим акаунтом
     // id щойно опублікованого поста в мережі - під ним піде перший коментар (Telegram коментарів не має)
     let target = "";
     let note = "";   // пост вийшов, але щось із доповнень ні (співавтори, alt-текст) - людина має знати
     try {
+      if (u.error) throw new Error(u.error);
       if (k === "telegram") {
-        if (!tgc?.bot_token) throw new Error("Telegram не підключено");
-        let any = false, already = false, tailErr = "";
+        const t = u.tg!, token = u.tgToken!;
         const cap = textOf(k);
-        const sentChats = new Set<string>(); // один фізичний чат не отримує пост двічі (channel==group → дубль)
-        for (const [t, chat] of [["channel", tgc.channel_chat_id], ["group", tgc.group_chat_id]] as const) {
-          if (!chat) continue;
-          if (sentChats.has(chat)) continue; // той самий chat_id в обох полях → пропускаємо повтор
-          sentChats.add(chat);
-          // атомарна резервація ПЕРЕД викликом Telegram - захист від гонки (подвійний клік, збіг
-          // ручної публікації з автопостом). Хтось інший уже зарезервував/надіслав цю ціль → пропускаємо.
-          const rv = await reservePub("telegram_publish", { post_id: postId, target: t }, { chat_id: chat });
-          if (rv === "sent") { already = true; continue; }
-          if (rv === "busy") throw new Error(BUSY);
-          const reserved = rv;
-          try {
-            let r: { message_id: number };
-            // текст довший за підпис (1024) іде окремим повідомленням ПІСЛЯ медіа. Якщо впаде саме він -
-            // медіа вже в каналі: резервацію НЕ звільняємо (інакше повтор задублював би альбом), а кажемо прямо
-            const tail = async () => {
-              if (cap.length <= 1024) return;
-              try { await tg.sendMessage(tgc.bot_token!, chat, cap); } catch (e: any) { tailErr = e.message; }
-            };
-            const vErr = videoLimit("telegram");
-            if (vErr) throw new Error(vErr);
-            if (video) {
-              // за адресою Telegram тягне лише до 20 МБ; більше (до 50) - надсилаємо файл самі
-              const src = videoSize <= tg.TG_VIDEO_URL_MAX ? { url: videoUrl } : { file: await readFile(videoPath), name: video.filename };
-              r = await tg.sendVideo(tgc.bot_token, chat, src, cap.length <= 1024 ? cap : "", video);
-              await tail();
-            } else if (carousel) {
-              // альбом: підпис на першому кадрі; довший за 1024 - окремим повідомленням під альбомом
-              const msgs = await tg.sendMediaGroup(tgc.bot_token, chat, imageUrls, cap.length <= 1024 ? cap : "");
-              r = msgs[0];
-              await tail();
-            } else if (imageUrl) {
-              r = await tg.sendPhoto(tgc.bot_token, chat, imageUrl, cap.length <= 1024 ? cap : "");
-              await tail(); // підпис > ліміту Telegram → текст окремо
-            } else {
-              r = await tg.sendMessage(tgc.bot_token, chat, cap);
-            }
-            // @username каналу потрібен для гарного лінка t.me/<name>/<id>. Тягнемо ОДИН раз і
-            // кешуємо в telegram_config: далі публікації обходяться без цього запиту.
-            if (t === "channel" && tgc.channel_username == null) {
-              try {
-                const info = await tg.getChat(tgc.bot_token, chat);
-                tgc.channel_username = info.username || "";
-                await q(`update telegram_config set channel_username=$2 where workspace_id=$1`, [ws, tgc.channel_username]);
-              } catch { tgc.channel_username = ""; } // не вийшло - лишиться лінк t.me/c/<internal>/<id>
-            }
-            await q(`update telegram_publish set message_id=$2, status='sent', permalink=nullif($3,'') where id=$1`,
-              [reserved.id, r.message_id, tgLink(chat, r.message_id, t === "channel" ? tgc.channel_username : null)]);
-            any = true;
-          } catch (e: any) {
-            await q(`delete from telegram_publish where id=$1`, [reserved.id]); // звільняємо резервацію - можна повторити пізніше
-            throw e;
+        // атомарна резервація ПЕРЕД викликом Telegram - захист від гонки (подвійний клік, збіг ручної
+        // публікації з автопостом). Ключ - сам чат (chat:<id>), а не роль «канал/група»: основний канал
+        // бренду може змінитись (прибрали - основним став додатковий), і давній ключ 'channel' від
+        // попереднього каналу вважав би новий «уже опублікованим». Давні рядки 'channel'/'group'
+        // лишаються й читаються за chat_id (sentAccountKeys) - тож повтору туди не буде.
+        const rv = await reservePub("telegram_publish", { post_id: postId, target: `chat:${t.id}` }, { chat_id: t.id });
+        if (rv === "sent") { results.push({ channel: k, ...who, status: "skipped" }); continue; }
+        if (rv === "busy") throw new Error(BUSY);
+        const reserved = rv;
+        let tailErr = "";
+        try {
+          let r: { message_id: number };
+          // текст довший за підпис (1024) іде окремим повідомленням ПІСЛЯ медіа. Якщо впаде саме він -
+          // медіа вже в каналі: резервацію НЕ звільняємо (інакше повтор задублював би альбом), а кажемо прямо
+          const tail = async () => {
+            if (cap.length <= 1024) return;
+            try { await tg.sendMessage(token, t.id, cap); } catch (e: any) { tailErr = e.message; }
+          };
+          const vErr = videoLimit("telegram");
+          if (vErr) throw new Error(vErr);
+          if (video) {
+            // за адресою Telegram тягне лише до 20 МБ; більше (до 50) - надсилаємо файл самі
+            const src = videoSize <= tg.TG_VIDEO_URL_MAX ? { url: videoUrl } : { file: await readFile(videoPath), name: video.filename };
+            r = await tg.sendVideo(token, t.id, src, cap.length <= 1024 ? cap : "", video);
+            await tail();
+          } else if (carousel) {
+            // альбом: підпис на першому кадрі; довший за 1024 - окремим повідомленням під альбомом
+            const msgs = await tg.sendMediaGroup(token, t.id, imageUrls, cap.length <= 1024 ? cap : "");
+            r = msgs[0];
+            await tail();
+          } else if (imageUrl) {
+            r = await tg.sendPhoto(token, t.id, imageUrl, cap.length <= 1024 ? cap : "");
+            await tail(); // підпис > ліміту Telegram → текст окремо
+          } else {
+            r = await tg.sendMessage(token, t.id, cap);
           }
-        }
-        if (!any) {
-          if (already) { results.push({ channel: k, status: "skipped" }); continue; }
-          throw new Error("Не вказано канал/групу");
+          // @username каналу потрібен для гарного лінка t.me/<name>/<id>. Тягнемо ОДИН раз і кешуємо
+          // (основний канал - у telegram_config, додатковий - у telegram_chat); група - лінк t.me/c/…
+          if (t.kind !== "group" && t.username == null) {
+            try {
+              const info = await tg.getChat(token, t.id);
+              t.username = info.username || "";
+              if (t.kind === "channel") await q(`update telegram_config set channel_username=$2 where workspace_id=$1`, [ws, t.username]);
+              else await q(`update telegram_chat set username=$3 where workspace_id=$1 and chat_id=$2`, [ws, t.id, t.username]);
+            } catch { t.username = ""; } // не вийшло - лишиться лінк t.me/c/<internal>/<id>
+          }
+          await q(`update telegram_publish set message_id=$2, status='sent', permalink=nullif($3,'') where id=$1`,
+            [reserved.id, r.message_id, tgLink(t.id, r.message_id, t.kind !== "group" ? t.username : null)]);
+        } catch (e: any) {
+          await q(`delete from telegram_publish where id=$1`, [reserved.id]); // звільняємо резервацію - можна повторити пізніше
+          throw e;
         }
         if (tailErr) {
           await logEvent("warn", "publish", `Telegram: медіа вийшло, а текст окремим повідомленням - ні: ${tailErr}`, { ws, postId });
-          results.push({ channel: k, status: "sent", note: `медіа вийшло, а довгий текст окремим повідомленням - ні (${tailErr}); допиши його в канал вручну` });
+          results.push({ channel: k, ...who, status: "sent", note: `медіа вийшло, а довгий текст окремим повідомленням - ні (${tailErr}); допиши його в канал вручну` });
           continue;
         }
       } else if (k === "threads") {
-        if (!thAcc || !thAcc.ok) throw new Error(thAcc && !thAcc.ok ? thAcc.error : "Threads не підключено");
-        const thTok = thAcc.acc;
+        const thTok = u.th!;
         const thErr = videoLimit("threads"); if (thErr) throw new Error(thErr);
         // 🧵 стратегія Threads (settings_block.threads_strategy): гілка для довгих + відкладена CTA-гілка
         const strat = await getSetting<any>(ws, "threads_strategy", {});
         const perPost = ch[k] || {};
         // гілка: явний прапорець на пості АБО авто-режим для майстер-текстів понад ліміт (500)
         const wantThread = perPost.thread === true || (strat.thread === "auto" && perPost.thread !== false && post.content.length > 500);
-        // резервація ОДИН раз для всього поста (root) - гілка/ветки нижче лише розвивають цей root
-        const rv = await reservePub("threads_publish", { post_id: postId }, { account_id: thTok.userId, account_name: thTok.username ? "@" + thTok.username : null });
-        if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
+        // резервація ОДИН раз для всього поста цього акаунта (root) - гілка/ветки нижче лише розвивають цей root
+        const rv = await reservePub("threads_publish", { post_id: postId, account_id: thTok.userId }, { account_name: thTok.username ? "@" + thTok.username : null });
+        if (rv === "sent") { results.push({ channel: k, ...who, status: "skipped" }); continue; }
         if (rv === "busy") throw new Error(BUSY);
         const reserved = rv;
         let rootId: string;
         try {
           if (wantThread) {
             // гілка пакує ПОВНИЙ майстер-текст (а не скорочену 500-символьну версію) - у цьому її сенс
-            const parts = await threadsSplit(ws, post.content, perPost.number !== false);
+            const parts = thParts ??= await threadsSplit(ws, post.content, perPost.number !== false);
             // карусель - у першому пості гілки (root), відповіді лишаються текстовими
             const first = video
               ? await threads.publishVideo(thTok.token, thTok.userId, parts[0], videoUrl)
@@ -331,7 +424,7 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
               : await threads.publish(thTok.token, thTok.userId, parts[0], imageUrl || undefined);
             rootId = first.mediaId;
             // root УЖЕ в мережі → фіксуємо sent ОДРАЗУ: якщо якась ветка впаде, повторна публікація
-            // не задублює root (дедуп «раз на мережу» побачить sent)
+            // не задублює root (дедуп «раз на акаунт» побачить sent)
             await q(`update threads_publish set media_id=$2, status='sent' where id=$1`, [reserved.id, rootId]);
             let prev = rootId;
             for (const part of parts.slice(1)) {
@@ -378,13 +471,13 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
             [ws, postId, rootId, cta, String(delayMin), thTok.userId]);
         }
       } else if (k === "facebook") {
-        if (!fbAcc || !fbAcc.ok) throw new Error(fbAcc && !fbAcc.ok ? fbAcc.error : "Facebook не підключено");
-        const mt = { page_id: fbAcc.acc.pageId, page_token: fbAcc.acc.pageToken };
+        const acc = u.meta!;
+        const mt = { page_id: acc.pageId, page_token: acc.pageToken };
         // строк у meta_config - це строк токена КОРИСТУВАЧА (~60 днів); токен Сторінки, отриманий із
         // нього, не протухає. Тож заздалегідь не відмовляємо: якщо доступ справді втрачено, Meta
         // відповість помилкою 190, і людина побачить «перепідключи» (fbFetch).
-        const rv = await reservePub("meta_publish", { post_id: postId, channel: "facebook" }, { account_id: fbAcc.acc.pageId, account_name: fbAcc.acc.pageName });
-        if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
+        const rv = await reservePub("meta_publish", { post_id: postId, channel: "facebook", account_id: acc.pageId }, { account_name: acc.pageName });
+        if (rv === "sent") { results.push({ channel: k, ...who, status: "skipped" }); continue; }
         if (rv === "busy") throw new Error(BUSY);
         const reserved = rv;
         try {
@@ -404,12 +497,12 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
           }
         } catch (e: any) { await q(`delete from meta_publish where id=$1`, [reserved.id]); throw e; }
       } else if (k === "instagram") {
-        if (!igAcc || !igAcc.ok) throw new Error(igAcc && !igAcc.ok ? igAcc.error : "Instagram не підключено");
-        const mt = { ig_user_id: igAcc.acc.igUserId!, page_token: igAcc.acc.pageToken, ig_username: igAcc.acc.igUsername };
+        const acc = u.meta!;
+        const mt = { ig_user_id: acc.igUserId!, page_token: acc.pageToken, ig_username: acc.igUsername };
         if (!images.length && !video) throw new Error("Instagram потребує фото або відео");
         const igErr = videoLimit("instagram"); if (igErr) throw new Error(igErr);
-        const rv = await reservePub("meta_publish", { post_id: postId, channel: "instagram" }, { account_id: mt.ig_user_id, account_name: mt.ig_username ? "@" + mt.ig_username : null });
-        if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
+        const rv = await reservePub("meta_publish", { post_id: postId, channel: "instagram", account_id: mt.ig_user_id }, { account_name: mt.ig_username ? "@" + mt.ig_username : null });
+        if (rv === "sent") { results.push({ channel: k, ...who, status: "skipped" }); continue; }
         if (rv === "busy") throw new Error(BUSY);
         const reserved = rv;
         try {
@@ -440,7 +533,7 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
         if (li.token_expires_at && new Date(li.token_expires_at).getTime() < Date.now())
           throw new Error("Токен LinkedIn протух (живе 60 днів) - перепідключи у Налаштування → Канали");
         const rv = await reservePub("linkedin_publish", { post_id: postId });
-        if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
+        if (rv === "sent") { results.push({ channel: k, ...who, status: "skipped" }); continue; }
         if (rv === "busy") throw new Error(BUSY);
         const reserved = rv;
         try {
@@ -457,18 +550,19 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
         } catch (e: any) { await q(`delete from linkedin_publish where id=$1`, [reserved.id]); throw e; }
       }
       // 💬 перший коментар: пост уже в мережі, тож збій коментаря НЕ робить публікацію помилковою -
-      // він окремим станом поруч (повтор - воркер або кнопка «Надіслати коментар»)
+      // він окремим станом поруч (повтор - воркер або кнопка «Надіслати коментар»). Під кожною
+      // публікацією свій: пост на двох Сторінках - два коментарі, кожен від своєї Сторінки.
       let cm: { status: string; error?: string } | undefined;
       if (target) {
         try {
-          const st = await commentAfterPublish(postId, k, target);
+          const st = await commentAfterPublish(postId, k, target, isAccNet(k) ? u.id || "" : "");
           if (st) cm = { status: st.status, ...(st.error ? { error: st.error } : {}) };
         } catch (e: any) {
           await logEvent("warn", "comment", `перший коментар не поставлено в чергу: ${e.message}`, { ws, postId });
         }
       }
-      results.push({ channel: k, status: "sent", ...(cm ? { comment: cm } : {}), ...(note ? { note } : {}) });
-    } catch (e: any) { results.push({ channel: k, status: "error", error: e.message }); }
+      results.push({ channel: k, ...who, status: "sent", ...(cm ? { comment: cm } : {}), ...(note ? { note } : {}) });
+    } catch (e: any) { results.push({ channel: k, ...who, status: "error", error: e.message }); }
   }
   // 🧠 памʼять контенту: щойно опублікований пост дистилюється в структурований артефакт (гачок,
   // теза, цифри, заклик), який далі читає генерація - щоб наступні пости не повторювали те саме.
@@ -489,27 +583,29 @@ export const STORY_NETS = ["instagram", "facebook"];
 const NET_UA: Record<string, string> = { telegram: "Telegram", threads: "Threads", linkedin: "LinkedIn", instagram: "Instagram", facebook: "Facebook" };
 async function publishStoryToChannels(ws: string, postId: string, ch: any, onlyNets?: string[]): Promise<PubResult[]> {
   const enabled = enabledNets(ch).filter((k) => !onlyNets || onlyNets.includes(k));
-  const sentSet = new Set(await alreadySentNetworks(postId));
   const frames = await postMediaList(postId);
-  // 👥 сторіс - теж з акаунта, обраного в пості (або основного)
-  const accOf = async (k: "instagram" | "facebook") => enabled.includes(k) ? metaAccountFor(ws, k, postAccount(ch, k)) : null;
-  const [igAcc, fbAcc] = await Promise.all([accOf("instagram"), accOf("facebook")]);
+  // 👥 сторіс - з кожного обраного акаунта (або основного), як і звичайний пост
+  const [units, sentKeys] = await Promise.all([publishUnits(ws, ch, enabled.filter((k) => STORY_NETS.includes(k))), sentAccountKeys(ws, postId)]);
+  // мережі без сторіс - одна чесна відмова на мережу, без жодного запиту
+  for (const k of enabled) if (!STORY_NETS.includes(k)) units.push({ k, id: null, name: null, error: `сторіс публікуються лише в Instagram і Facebook - ${NET_UA[k]} їх через API не приймає; зніми ${NET_UA[k]} із цього поста` });
+  const perNet = new Map<string, number>();
+  for (const u of units) perNet.set(u.k, (perNet.get(u.k) || 0) + 1);
   const url = (f: string) => `${env.appBaseUrl}/media/${f}`;
   const results: PubResult[] = [];
-  for (const k of enabled) {
-    if (sentSet.has(k)) { results.push({ channel: k, status: "skipped" }); continue; }
+  for (const u of units) {
+    const k = u.k;
+    const who: Pick<PubResult, "account" | "accountName"> = { ...(u.id ? { account: u.id } : {}), ...((perNet.get(k) || 0) > 1 && u.name ? { accountName: u.name } : {}) };
+    if (u.id && sentKeys.has(`${k}|${u.id}`)) { results.push({ channel: k, ...who, status: "skipped" }); continue; }
     try {
-      if (!STORY_NETS.includes(k)) throw new Error(`сторіс публікуються лише в Instagram і Facebook - ${NET_UA[k]} їх через API не приймає; зніми ${NET_UA[k]} із цього поста`);
+      if (u.error) throw new Error(u.error);
       if (!frames.length) throw new Error("у сторіс немає жодного кадру - додай фото чи відео");
-      const acc = k === "instagram" ? igAcc : fbAcc;
-      if (!acc || !acc.ok) throw new Error(acc && !acc.ok ? acc.error : `${NET_UA[k]} не підключено`);
-      const mt = acc.acc;
+      const mt = u.meta!;
       // межі - ДО виклику: відео в сторіс Instagram - до 60 с (а мережа сказала б це через хвилину обробки)
       const longVid = frames.find((m) => m.kind === "video" && Number(m.duration) > 60);
       if (k === "instagram" && longVid) throw new Error(`відео в сторіс Instagram - до 60 с, а тут ${Math.round(Number(longVid.duration))} с - вріж його`);
-      const rv = await reservePub("meta_publish", { post_id: postId, channel: k },
-        k === "instagram" ? { account_id: mt.igUserId, account_name: mt.igUsername ? "@" + mt.igUsername : null } : { account_id: mt.pageId, account_name: mt.pageName });
-      if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
+      const rv = await reservePub("meta_publish", { post_id: postId, channel: k, account_id: (k === "instagram" ? mt.igUserId : mt.pageId)! },
+        { account_name: k === "instagram" ? (mt.igUsername ? "@" + mt.igUsername : null) : mt.pageName });
+      if (rv === "sent") { results.push({ channel: k, ...who, status: "skipped" }); continue; }
       if (rv === "busy") throw new Error(BUSY);
       const reserved = rv;
       const ids: string[] = [];
@@ -533,12 +629,12 @@ async function publishStoryToChannels(ws: string, postId: string, ch: any, onlyN
         // скільки вийшло - решту кадрів людина додасть окремою сторіс
         await q(`update meta_publish set external_id=$2, status='sent' where id=$1`, [reserved.id, ids.join(",")]);
         await logEvent("warn", "story", `${NET_UA[k]}: опубліковано ${ids.length} з ${frames.length} кадрів сторіс, далі збій: ${e.message}`, { ws, postId });
-        results.push({ channel: k, status: "error", error: `опубліковано ${ids.length} з ${frames.length} кадрів, далі збій: ${e.message}` });
+        results.push({ channel: k, ...who, status: "error", error: `опубліковано ${ids.length} з ${frames.length} кадрів, далі збій: ${e.message}` });
         continue;
       }
       await q(`update meta_publish set external_id=$2, status='sent' where id=$1`, [reserved.id, ids.join(",")]);
-      results.push({ channel: k, status: "sent" });
-    } catch (e: any) { results.push({ channel: k, status: "error", error: e.message }); }
+      results.push({ channel: k, ...who, status: "sent" });
+    } catch (e: any) { results.push({ channel: k, ...who, status: "error", error: e.message }); }
   }
   if (results.some((r) => r.status === "sent")) void ensurePostDigest(ws, postId).catch(() => {});
   return results;
@@ -612,7 +708,7 @@ async function publishReelToChannelsNow(ws: string, postId: string, nets: string
       if (k === "instagram") {
         const acc = await metaAccountFor(ws, "instagram", postAccount(ch, "instagram"));
         if (!acc.ok) throw new Error(acc.error);
-        const rv = await reservePub("meta_publish", { post_id: postId, channel: "instagram" }, { account_id: acc.acc.igUserId, account_name: acc.acc.igUsername ? "@" + acc.acc.igUsername : null });
+        const rv = await reservePub("meta_publish", { post_id: postId, channel: "instagram", account_id: acc.acc.igUserId! }, { account_name: acc.acc.igUsername ? "@" + acc.acc.igUsername : null });
         if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
         if (rv === "busy") throw new Error(BUSY);
         try {
@@ -622,7 +718,7 @@ async function publishReelToChannelsNow(ws: string, postId: string, nets: string
       } else if (k === "facebook") {
         const acc = await metaAccountFor(ws, "facebook", postAccount(ch, "facebook"));
         if (!acc.ok) throw new Error(acc.error);
-        const rv = await reservePub("meta_publish", { post_id: postId, channel: "facebook" }, { account_id: acc.acc.pageId, account_name: acc.acc.pageName });
+        const rv = await reservePub("meta_publish", { post_id: postId, channel: "facebook", account_id: acc.acc.pageId }, { account_name: acc.acc.pageName });
         if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
         if (rv === "busy") throw new Error(BUSY);
         try {

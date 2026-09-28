@@ -67,6 +67,8 @@ const chunkPuts = [];
 const videoCalls = [];
 const chanSaves = [];   // що композер зберіг як мережі поста (POST /posts/:id/channels)
 const accOps = [];      // 👥 дії з акаунтами в Каналах (додати / основний / прибрати)
+const tgOps = [];       // 📣 канали Telegram у Каналах (додати / прибрати)
+let P8STATE = null;     // стан публікації P8 для перевірок «вийшло не в усі акаунти»
 
 const POSTS = [
   {
@@ -197,7 +199,8 @@ const API = {
   "GET /sources/recent": [],
   "GET /sources/rss": { feeds: [] },
   "GET /lead-magnets": { magnets: [] },
-  "GET /integrations/telegram": { channelChatId: "-1001234567890", groupChatId: "", hasToken: true, sharedBot: true, sharedDm: false, channelTitle: "Мій канал", bot: "holos_rozum_bot", formerBot: "R_Socialio_bot" },
+  "GET /integrations/telegram": { channelChatId: "-1001234567890", groupChatId: "", hasToken: true, sharedBot: true, sharedDm: false, channelTitle: "Мій канал", bot: "holos_rozum_bot", formerBot: "R_Socialio_bot",
+    chats: [{ id: "-1001234567890", name: "Мій канал", main: true, kind: "channel", username: "mychan", posts: 0 }, { id: "-1002", name: "Канал компанії", main: false, kind: "extra", username: "", posts: 2 }] },
   "GET /integrations/threads": { connected: true, username: "brand" },
   "GET /integrations/meta": { connected: false },
   "GET /integrations/linkedin": { connected: false, available: false },
@@ -474,8 +477,14 @@ function handleApi(method, path, body) {
   }
   m = /^\/posts\/([0-9a-f-]+)\/publish-state$/.exec(path);
   if (m) {
+    if (m[1] === P8 && P8STATE) return P8STATE;
     if (m[1] === P4 || m[1] === P5 || m[1] === P7 || m[1] === P8) return { sent: [], links: {}, comments: [] };
-    if (m[1] === P9) return { sent: ["instagram", "linkedin"], links: { instagram: "https://www.instagram.com/p/X9/" }, comments: FC9.comments };
+    if (m[1] === P9) {
+      // як справжній сервер: кожна публікація окремо (sentTo) зі станом свого коментаря
+      const cs = (n) => { const c = FC9.comments.find((x) => x.network === n); return c ? { status: c.status, error: c.error || null, due_at: null } : null; };
+      return { sent: ["instagram", "linkedin"], links: { instagram: "https://www.instagram.com/p/X9/" }, comments: FC9.comments,
+        sentTo: [{ net: "instagram", account: "", name: null, link: "https://www.instagram.com/p/X9/", comment: cs("instagram") }, { net: "linkedin", account: "", name: null, link: null, comment: cs("linkedin") }] };
+    }
     const p = POSTS.find((x) => x.id === m[1]) || POSTS[0];
     return { sent: p.sent || [], links: p.links || {} };
   }
@@ -485,6 +494,8 @@ function handleApi(method, path, body) {
   if (method === "POST" && m) return { ok: true, channels: { telegram: { on: true, text: "TG-версія" }, threads: { on: true, text: "TH-версія" } } };
   m = /^\/posts\/([0-9a-f-]+)\/channels$/.exec(path);
   if (method === "POST" && m) { chanSaves.push({ id: m[1], channels: body && body.channels }); return { ok: true }; }
+  m = /^\/integrations\/telegram\/chats(\/remove)?$/.exec(path);
+  if (method === "POST" && m) { tgOps.push({ op: m[1] ? "remove" : "add", body }); return { ok: true, result: m[1] ? "extra" : "added", posts: 2, chat: { id: "-1003", name: "Новий канал" }, chats: [] }; }
   m = /^\/integrations\/(threads|meta)\/accounts(?:\/(main|remove))?$/.exec(path);
   if (method === "POST" && m) { accOps.push({ net: m[1], op: m[2] || "add", body }); return { ok: true, result: "extra", posts: 0 }; }
   m = /^\/media\/([\w-]+)\/alt$/.exec(path);
@@ -2156,38 +2167,110 @@ const run = async () => {
   });
 
   await check("accountPicker", async () => {
-    // 👥 кілька акаунтів однієї мережі (особистий і компанії): вибір акаунта лише для мереж, де їх 2+;
-    // прев'ю підписане обраним акаунтом; основний = без account у збереженому; акаунт, якого вже нема
-    // в бренді, - червоним, а не тихо основним
-    await page.evaluate(() => { window.__cs5 = JSON.parse(JSON.stringify(ChanStatus)); ChanStatus.facebook = true; ChanStatus.threads = true; ChanStatus.instagram = true;
+    // 👥 кілька акаунтів однієї мережі (особистий і компанії) і кілька каналів Telegram: ГАЛОЧКИ -
+    // пост одразу в кілька. Рядок лише для мереж, де акаунтів 2+; прев'ю підписане першим акаунтом і
+    // каже, куди ще піде; вибір «як за замовчуванням» не зберігається; прибраний із бренду - червоним
+    await page.evaluate(() => { window.__cs5 = JSON.parse(JSON.stringify(ChanStatus)); ChanStatus.facebook = true; ChanStatus.threads = true; ChanStatus.instagram = true; ChanStatus.telegram = true;
       ChanStatus.accounts = { facebook: [{ id: "111", name: "Oleg Stepeniev", main: true }, { id: "222", name: "Rozum.one", main: false }],
         instagram: [{ id: "igu", name: "@olegalisio", main: true }],
-        threads: [{ id: "901", name: "@olegalisio", main: true }, { id: "902", name: "@rozum.one", main: false }] }; });
+        threads: [{ id: "901", name: "@olegalisio", main: true }, { id: "902", name: "@rozum.one", main: false }],
+        telegram: [{ id: "-1001", name: "Мій канал", main: true }, { id: "-1002", name: "Канал компанії", main: false }] }; });
     const keep = JSON.parse(JSON.stringify(P8POST.channels));
-    P8POST.channels = { facebook: { on: true }, threads: { on: true, account: "999" }, instagram: { on: true } };
+    P8POST.channels = { facebook: { on: true }, threads: { on: true, account: "999" }, instagram: { on: true }, telegram: { on: true } };
     const head = (net) => { const l = [...document.querySelectorAll("#cmpPrev .pv-label")].find((x) => x.textContent === net); let n = l && l.nextElementSibling; while (n && !n.classList.contains("phone")) n = n.nextElementSibling; return n ? n.querySelector(".phone-h .phone-user").textContent : null; };
     await closeComposers();
     await page.evaluate((id) => openComposer(id), P8);
-    await page.waitForSelector(".cmp-ov #cmpAccs select", { timeout: 6000 });
-    const st = await page.evaluate((h) => { const head = eval(h); return {
-      sels: [...document.querySelectorAll("#cmpAccs select")].map((x) => x.dataset.acc + "=" + x.value + (x.classList.contains("bad") ? "(bad)" : "")).join("|"),
-      fb: head("Facebook"), ig: head("Instagram") }; }, head.toString());
-    await page.evaluate(() => {
-      const f = document.querySelector('#cmpAccs select[data-acc="facebook"]'); f.value = "222"; f.dispatchEvent(new Event("change"));
-      const t = document.querySelector('#cmpAccs select[data-acc="threads"]'); t.value = "901"; t.dispatchEvent(new Event("change")); });
-    const after = await page.evaluate((h) => { const head = eval(h); return { fb: head("Facebook"), th: head("Threads"), bad: !!document.querySelector("#cmpAccs select.bad") }; }, head.toString());
+    await page.waitForSelector(".cmp-ov #cmpAccs .accchk", { timeout: 6000 });
+    const rows = () => page.evaluate(() => Object.fromEntries([...document.querySelectorAll("#cmpAccs .accrow")].map((r) => [r.querySelector(".acclab").textContent,
+      [...r.querySelectorAll(".accchk")].map((b) => b.textContent.replace(/\s+/g, " ").trim() + (b.classList.contains("bad") ? "(bad)" : ""))])));
+    const st = await rows();
+    const pv0 = await page.evaluate((h) => { const head = eval(h); return { fb: head("Facebook"), ig: head("Instagram"), tg: head("Telegram") }; }, head.toString());
+    const click = (net, txt) => page.evaluate(([n, t]) => { const b = [...document.querySelectorAll(`#cmpAccs .accchk[data-acct="${n}"]`)].find((x) => x.textContent.includes(t)); if (b) b.click(); return !!b; }, [net, txt]);
+    await click("facebook", "Rozum.one");            // + компанія
+    await click("threads", "прибрано");              // зняли прибраний - пост піде основним
+    await click("threads", "@rozum.one");            // + компанія
+    await click("telegram", "Канал компанії");       // + другий канал
+    const st2 = await rows();
+    const pv = await page.evaluate(() => [...document.querySelectorAll("#cmpPrev .pv-accs")].map((x) => x.textContent));
     if (process.env.SMOKE_SHOTS) { await new Promise((r) => setTimeout(r, 900)); await page.screenshot({ path: join(HERE, "accounts-composer.png") }); }
     chanSaves.length = 0;
     await page.evaluate(() => document.querySelector("#cmpSave").click());
     await page.waitForFunction(() => /збережено/.test((document.querySelector(".cmp-ov #cmpMsg") || {}).textContent || ""), undefined, { timeout: 6000 }).catch(() => {});
     const last = chanSaves[chanSaves.length - 1];
-    const good = st.sels === "facebook=111|threads=999(bad)" && st.fb === "Oleg Stepeniev" && st.ig === "olegalisio"
-      && after.fb === "Rozum.one" && after.th === "olegalisio" && !after.bad
-      && !!last && last.channels.facebook.account === "222" && !("account" in last.channels.threads);
-    if (!good) console.log("   ↳ accountPicker:", JSON.stringify({ st, after, last: last && last.channels }));
+    // зняти особисту - лишиться компанія; зняти й її - не можна (остання галочка), лише повідомлення
+    await click("facebook", "Oleg Stepeniev");
+    await click("facebook", "Rozum.one");
+    const lastMsg = await page.evaluate(() => document.querySelector(".cmp-ov #cmpMsg").textContent);
+    chanSaves.length = 0;
+    await page.evaluate(() => document.querySelector("#cmpSave").click());
+    await page.waitForFunction(() => /збережено/.test((document.querySelector(".cmp-ov #cmpMsg") || {}).textContent || ""), undefined, { timeout: 6000 }).catch(() => {});
+    const last2 = chanSaves[chanSaves.length - 1];
+    const good = JSON.stringify(st) === JSON.stringify({ "Facebook:": ["☑ Oleg Stepeniev основна", "☐ Rozum.one"], "Threads:": ["☐ @olegalisio основний", "☐ @rozum.one", "☑ ⚠ акаунт …999 - прибрано з бренду(bad)"], "Telegram · канали:": ["☑ Мій канал основний", "☐ Канал компанії"] })
+      && pv0.fb === "Oleg Stepeniev" && pv0.ig === "olegalisio" && pv0.tg === "Мій канал"
+      && JSON.stringify(st2["Facebook:"]) === JSON.stringify(["☑ Oleg Stepeniev основна", "☑ Rozum.one"]) && JSON.stringify(st2["Threads:"]) === JSON.stringify(["☑ @olegalisio основний", "☑ @rozum.one"])
+      && pv.some((x) => /піде від: Oleg Stepeniev · Rozum\.one/.test(x)) && pv.some((x) => /у канали: Мій канал · Канал компанії/.test(x))
+      && !!last && JSON.stringify(last.channels.facebook.accounts) === '["111","222"]' && JSON.stringify(last.channels.threads.accounts) === '["901","902"]' && !("account" in last.channels.threads)
+      && JSON.stringify(last.channels.telegram.accounts) === '["-1001","-1002"]' && !last.channels.instagram.accounts
+      && /має лишитись/.test(lastMsg) && !!last2 && JSON.stringify(last2.channels.facebook.accounts) === '["222"]';
+    if (!good) console.log("   ↳ accountPicker:", JSON.stringify({ st, pv0, st2, pv, last: last && last.channels, lastMsg, last2: last2 && last2.channels.facebook }));
     await closeComposers();
     P8POST.channels = keep;
     await page.evaluate(() => { ChanStatus = window.__cs5; });
+    return good;
+  });
+
+  await check("accountPartial", async () => {
+    // 👥 пост уже вийшов особистою Сторінкою, а обрано дві: особиста - ✓ з посиланням (зняти не можна),
+    // компанія - ще попереду; мережа «◐» (не вся), публікація йде; зняли компанію - мережа ✓
+    await page.evaluate(() => { window.__cs6 = JSON.parse(JSON.stringify(ChanStatus)); ChanStatus.facebook = true;
+      ChanStatus.accounts = { facebook: [{ id: "111", name: "Oleg Stepeniev", main: true }, { id: "222", name: "Rozum.one", main: false }], instagram: [], threads: [], telegram: [] }; });
+    const keep = JSON.parse(JSON.stringify(P8POST.channels));
+    P8POST.channels = { facebook: { on: true, accounts: ["111", "222"] } };
+    P8STATE = { sent: ["facebook"], links: { facebook: "https://www.facebook.com/111/posts/1" }, accounts: { facebook: "Oleg Stepeniev" },
+      comments: [{ network: "facebook", account: "111", status: "sent" }],
+      sentTo: [{ net: "facebook", account: "111", name: "Oleg Stepeniev", link: "https://www.facebook.com/111/posts/1", comment: { status: "sent", error: null, due_at: null } }] };
+    await closeComposers();
+    await page.evaluate((id) => openComposer(id), P8);
+    await page.waitForSelector(".cmp-ov #cmpAccs .accchk.sent", { timeout: 6000 });
+    const st = await page.evaluate(() => ({
+      chip: document.querySelector('#cmpChips .netchip[data-net="facebook"]').textContent.trim(),
+      chipDis: document.querySelector('#cmpChips .netchip[data-net="facebook"]').disabled,
+      accs: [...document.querySelectorAll("#cmpAccs .accchk")].map((b) => b.textContent.replace(/\s+/g, " ").trim() + (b.classList.contains("sent") ? "(sent)" : "")),
+      link: (document.querySelector("#cmpAccs .accchk.sent a") || {}).href || "",
+      pv: (document.querySelector("#cmpPrev .pv-accs") || {}).textContent || "",
+      cnt: !!document.querySelector("#cmpPrev .cmp-cnt"),
+      fcSend: !!document.querySelector("#cmpFcSend") }));
+    await page.evaluate(() => { const b = [...document.querySelectorAll('#cmpAccs .accchk[data-acct="facebook"]')].find((x) => x.textContent.includes("Rozum.one")); b.click(); });
+    const st2 = await page.evaluate(() => ({ chip: document.querySelector('#cmpChips .netchip[data-net="facebook"]').textContent.trim(), sel: document.querySelectorAll("#cmpAccs .accchk").length }));
+    const good = st.chip === "◐ Facebook" && st.chipDis && JSON.stringify(st.accs) === JSON.stringify(["✓ Oleg Stepeniev ↗(sent)", "☑ Rozum.one"]) && /facebook\.com\/111/.test(st.link)
+      && /✓ Oleg Stepeniev ↗ · Rozum\.one/.test(st.pv) && st.cnt && !st.fcSend && st2.chip === "✓ Facebook";
+    if (!good) console.log("   ↳ accountPartial:", JSON.stringify({ st, st2 }));
+    await closeComposers();
+    P8POST.channels = keep; P8STATE = null;
+    await page.evaluate(() => { ChanStatus = window.__cs6; });
+    return good;
+  });
+
+  await check("tgChats", async () => {
+    // 📣 Канали → Telegram: список каналів бренду (основний позначено, скільки постів чекають),
+    // «＋ Додати канал» за @назвою, «Прибрати» з попередженням про пости; «Через бота» - лише коли DM бота живі
+    tgOps.length = 0;
+    await page.evaluate(async () => { selectView("settings", "channels"); await loadTelegram(); });
+    await page.waitForFunction(() => document.querySelectorAll("#tgChats .acc-row").length === 2, undefined, { timeout: 6000 }).catch(() => {});
+    const st = await page.evaluate(() => ({ rows: [...document.querySelectorAll("#tgChats .acc-row")].map((r) => [...r.children].map((c) => c.textContent).join(" ").replace(/\s+/g, " ").trim()),
+      box: getComputedStyle(document.querySelector("#tgChatsBox")).display !== "none", via: getComputedStyle(document.querySelector("#tgChatViaBot")).display }));
+    if (process.env.SMOKE_SHOTS) { await page.evaluate(() => document.querySelector("#tgChatsBox").scrollIntoView({ block: "center" })); await new Promise((r) => setTimeout(r, 500)); await page.screenshot({ path: join(HERE, "tg-chats.png") }); }
+    await page.evaluate(() => { document.querySelector("#tgChatIn").value = "@newchan"; document.querySelector("#tgChatAdd").click(); });
+    await page.waitForFunction(() => /додано/.test(document.querySelector("#tgChatMsg").textContent), undefined, { timeout: 6000 }).catch(() => {});
+    const msg = await page.evaluate(() => document.querySelector("#tgChatMsg").textContent);
+    await page.evaluate(() => { window.__conf = ""; window.confirm = (m) => { window.__conf = m; return true; }; document.querySelector('#tgChats [data-tgrm="-1002"]').click(); });
+    await new Promise((r) => setTimeout(r, 500));
+    const conf = await page.evaluate(() => window.__conf);
+    const good = st.box && st.rows.length === 2 && /^Мій канал канал · @mychan основний/.test(st.rows[0]) && /Канал компанії канал.*2 пости чекають на нього.*Прибрати/.test(st.rows[1])
+      && st.via === "none" && /✓ «Новий канал» додано/.test(msg)
+      && tgOps.some((o) => o.op === "add" && o.body.chat === "@newchan") && tgOps.some((o) => o.op === "remove" && o.body.chatId === "-1002")
+      && /Прибрати «Канал компанії»/.test(conf) && /2 пости обрали саме цей канал/.test(conf);
+    if (!good) console.log("   ↳ tgChats:", JSON.stringify({ st, msg, conf, ops: tgOps }));
     return good;
   });
 

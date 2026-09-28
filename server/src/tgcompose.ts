@@ -13,7 +13,7 @@ import { getSetting, setSetting } from "./settings.js";
 import { saveMedia } from "./media.js";
 import { postMediaList, setPostMediaOrder, setPostVideo, MAX_SLIDES } from "./slides.js";
 import { appendCroppedSlide } from "./images.js";
-import { publishPostToChannels, enabledNets, closeSlotsIfDone, alreadySentNetworks, PUB_NETS, unschedulePost } from "./publisher.js";
+import { publishPostToChannels, enabledNets, closeSlotsIfDone, alreadySentNetworks, PUB_NETS, unschedulePost, type PubResult } from "./publisher.js";
 import { rewritePost } from "./pipeline.js";
 import { logEvent } from "./log.js";
 
@@ -242,16 +242,18 @@ export async function publishNow(ws: string, postId: string): Promise<string> {
   const nets = enabledNets(p.channels);
   if (!nets.length) return "⚠️ Спершу обери хоч один канал.";
   const res = await publishPostToChannels(ws, postId);
-  const ok = res.filter((r) => r.status === "sent").map((r) => niceNet(r.channel));
-  const skip = res.filter((r) => r.status === "skipped").map((r) => niceNet(r.channel));
+  // кілька акаунтів мережі в пості (дві Сторінки, два канали) - результат називає кожен
+  const lbl = (r: PubResult) => niceNet(r.channel) + (r.accountName ? ` (${r.accountName})` : "");
+  const ok = res.filter((r) => r.status === "sent").map(lbl);
+  const skip = res.filter((r) => r.status === "skipped").map(lbl);
   const err = res.filter((r) => r.status === "error");
-  const notes = res.filter((r) => r.note).map((r) => `${niceNet(r.channel)}: ${r.note}`);
+  const notes = res.filter((r) => r.note).map((r) => `${lbl(r)}: ${r.note}`);
   // погасити запланований слот, якщо публікуємо руками раніше часу - але лише коли вийшло в УСІ
   // обрані мережі: збій «зараз» не має тихо скасовувати завтрашню публікацію
   await closeSlotsIfDone(postId, "опубліковано з бота");
   let out = ok.length ? `✅ Опубліковано: ${ok.join(", ")}` : "";
   if (skip.length) out += `${out ? "\n" : ""}↩️ Пропущено (вже публікувалось): ${skip.join(", ")}`;
-  if (err.length) out += `${out ? "\n" : ""}⚠️ Не вийшло: ${err.map((e) => `${niceNet(e.channel)} - ${e.error}`).join("; ")}`;
+  if (err.length) out += `${out ? "\n" : ""}⚠️ Не вийшло: ${err.map((e) => `${lbl(e)} - ${e.error}`).join("; ")}`;
   if (notes.length) out += `${out ? "\n" : ""}ℹ️ ${notes.join("; ")}`;
   return out || "Нічого не відправлено.";
 }

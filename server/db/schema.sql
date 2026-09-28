@@ -575,14 +575,9 @@ delete from telegram_publish where id in (
   select id from (select id, row_number() over (partition by post_id, target order by created_at, id) rn from telegram_publish) t where rn > 1
 );
 create unique index if not exists uq_tgpub_post_target on telegram_publish(post_id, target);
-delete from threads_publish where id in (
-  select id from (select id, row_number() over (partition by post_id order by created_at, id) rn from threads_publish) t where rn > 1
-);
-create unique index if not exists uq_thpub_post on threads_publish(post_id);
-delete from meta_publish where id in (
-  select id from (select id, row_number() over (partition by post_id, channel order by created_at, id) rn from meta_publish) t where rn > 1
-);
-create unique index if not exists uq_metapub_post_channel on meta_publish(post_id, channel);
+-- Threads і Meta: «раз на мережу» став «раз на акаунт мережі» (кілька Сторінок чи профілів одним
+-- постом) - дедуп і унікальні індекси для них нижче, після колонки account_id. Колишні «раз на пост»
+-- тут не створюємо й не чистимо: вони стерли б законну другу публікацію того ж поста в інший акаунт.
 delete from linkedin_publish where id in (
   select id from (select id, row_number() over (partition by post_id order by created_at, id) rn from linkedin_publish) t where rn > 1
 );
@@ -948,3 +943,66 @@ update follower_snapshot fs set account = mc.ig_user_id from meta_config mc
 update follower_snapshot fs set account = mc.page_id from meta_config mc
  where fs.account = '' and fs.network = 'facebook' and mc.workspace_id = fs.workspace_id and mc.page_id is not null
    and not exists (select 1 from follower_snapshot f2 where f2.workspace_id = fs.workspace_id and f2.network = fs.network and f2.account = mc.page_id and f2.day = fs.day);
+-- 👥 Один пост - кілька акаунтів однієї мережі (галочки в композері, запит Олега 28.09: «обрати
+-- одразу і одну Сторінку, і другу»). Пост обирає акаунти в channels.<мережа>.accounts (масив id;
+-- старе одиночне account теж читається). Публікація, перший коментар і статистика - окремо на кожен
+-- акаунт, тож «раз на мережу» стає «раз на акаунт мережі». Старі рядки без акаунта мають ключ ''.
+drop index if exists uq_thpub_post;
+drop index if exists uq_metapub_post_channel;
+delete from threads_publish where id in (
+  select id from (select id, row_number() over (partition by post_id, coalesce(account_id, '') order by created_at, id) rn from threads_publish) t where rn > 1
+);
+create unique index if not exists uq_thpub_post_acc on threads_publish(post_id, (coalesce(account_id, '')));
+delete from meta_publish where id in (
+  select id from (select id, row_number() over (partition by post_id, channel, coalesce(account_id, '') order by created_at, id) rn from meta_publish) t where rn > 1
+);
+create unique index if not exists uq_metapub_post_ch_acc on meta_publish(post_id, channel, (coalesce(account_id, '')));
+-- перший коментар і метрики: ключ - акаунт публікації (coalesce(account_id,'') її рядка)
+alter table post_comment add column if not exists account text not null default '';
+alter table post_comment drop constraint if exists post_comment_post_id_network_key;
+create unique index if not exists uq_post_comment_acc on post_comment(post_id, network, account);
+alter table post_metric add column if not exists account text not null default '';
+alter table post_metric drop constraint if exists post_metric_pkey;
+create unique index if not exists uq_post_metric_acc on post_metric(post_id, network, account);
+-- рядки до цього оновлення (одна публікація на мережу) - ключ її акаунта, коли він відомий і
+-- публікація в мережу рівно одна; повтор нічого не міняє
+update post_comment pc set account = x.acc
+  from (select post_id, 'threads'::text as net, min(account_id) as acc from threads_publish where status='sent' group by post_id
+         having count(*) = 1 and min(account_id) is not null
+        union all
+        select post_id, channel, min(account_id) from meta_publish where status='sent' group by post_id, channel
+         having count(*) = 1 and min(account_id) is not null) x
+ where pc.account = '' and pc.post_id = x.post_id and pc.network = x.net
+   and not exists (select 1 from post_comment c2 where c2.post_id = pc.post_id and c2.network = pc.network and c2.account = x.acc);
+update post_metric pm set account = x.acc
+  from (select post_id, 'threads'::text as net, min(account_id) as acc from threads_publish where status='sent' group by post_id
+         having count(*) = 1 and min(account_id) is not null
+        union all
+        select post_id, channel, min(account_id) from meta_publish where status='sent' group by post_id, channel
+         having count(*) = 1 and min(account_id) is not null) x
+ where pm.account = '' and pm.post_id = x.post_id and pm.network = x.net
+   and not exists (select 1 from post_metric m2 where m2.post_id = pm.post_id and m2.network = pm.network and m2.account = x.acc);
+-- 📣 Кілька каналів і груп Telegram у бренді. Основні канал і група лишаються в telegram_config,
+-- тут - додаткові (той самий бот має бути в них адміном). Пост обирає їх у channels.telegram.accounts
+-- (chat_id); без вибору - основні канал і група, як і було.
+create table if not exists telegram_chat (
+  workspace_id uuid not null references workspace(id) on delete cascade,
+  chat_id      text not null,
+  title        text,
+  username     text,
+  added_at     timestamptz not null default now(),
+  primary key (workspace_id, chat_id)
+);
+-- «＋ Додати канал» через бота: код підключення памʼятає, що канал треба ДОДАТИ, а не замінити основний
+alter table tg_connect add column if not exists mode text not null default 'main';
+-- підписники Telegram - по каналу (chat_id): знімки до цього - основного каналу (чи групи)
+update follower_snapshot fs set account = coalesce(tc.channel_chat_id, tc.group_chat_id) from telegram_config tc
+ where fs.account = '' and fs.network = 'telegram' and tc.workspace_id = fs.workspace_id and coalesce(tc.channel_chat_id, tc.group_chat_id) is not null
+   and not exists (select 1 from follower_snapshot f2 where f2.workspace_id = fs.workspace_id and f2.network = fs.network
+                   and f2.account = coalesce(tc.channel_chat_id, tc.group_chat_id) and f2.day = fs.day);
+-- Публікація в Telegram тепер памʼятається за самим чатом (chat:<id>), а не за роллю «канал/група»:
+-- давні рядки без chat_id (якщо такі лишились) - за тодішньою роллю, інакше пост вийшов би туди вдруге
+update telegram_publish tp set chat_id = case tp.target when 'channel' then tc.channel_chat_id else tc.group_chat_id end
+  from post p join pipeline_run r on r.id = p.run_id join source s on s.id = r.source_id
+       join telegram_config tc on tc.workspace_id = s.workspace_id
+ where tp.post_id = p.id and tp.chat_id is null and tp.target in ('channel', 'group');

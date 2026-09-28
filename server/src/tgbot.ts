@@ -9,7 +9,7 @@ import * as tg from "./telegram.js";
 import { logEvent } from "./log.js";
 import { touchWorkspaceActive } from "./auth.js";
 import { generatePostsOnePass, buildLiteSkeleton, rewritePost, suggestDevelopment, reelsScript, sliceToReels, extractIdeasFromText, repeatVariant, generateThreadsTakes } from "./pipeline.js";
-import { publishPostToChannels, PUB_NETS } from "./publisher.js";
+import { publishPostToChannels, PUB_NETS, pubLabel } from "./publisher.js";
 import { sendDigestNow } from "./digest.js";
 import { isDiaryPending, appendDiaryText, attachDiaryMedia, attachMediaToEntry, diaryPhotoTarget, transcribeVoice, skipDiaryToday, sendDiaryNow, weekDiaryText } from "./diary.js";
 import { cabinetPostLink } from "./permalink.js";
@@ -231,7 +231,8 @@ export async function switchSharedBot(prevToken: string): Promise<string> {
 // і про це треба казати, а не видавати посилання, яке нікуди не веде.
 export const sharedBotDmWorks = (): boolean => !!env.telegram.botToken && !env.beta.telegramWebhookOff;
 
-export async function createConnectLink(workspaceId: string, userId?: string): Promise<string> {
+// mode 'add' - «＋ Додати канал»: канал, чий пост перешлють боту, ДОДАЄТЬСЯ до бренду (основний лишається)
+export async function createConnectLink(workspaceId: string, userId?: string, mode: "main" | "add" = "main"): Promise<string> {
   const token = await wsBotToken(workspaceId);
   if (!token) throw new Error("Спільний бот не налаштований на сервері");
   // Найкоштовніша частина цього фіксу: раніше кнопка мовчки видавала t.me-посилання, код якого
@@ -244,14 +245,14 @@ export async function createConnectLink(workspaceId: string, userId?: string): P
   if (token !== env.telegram.botToken) { try { username = (await tg.getMe(token)).username || username; } catch { /* фолбек на спільного */ } }
   const code = randomBytes(8).toString("hex");
   await q(`delete from tg_connect where workspace_id=$1`, [workspaceId]); // один активний код на воркспейс
-  await q(`insert into tg_connect(code, workspace_id, created_by) values($1,$2,$3)`, [code, workspaceId, userId ?? null]);
+  await q(`insert into tg_connect(code, workspace_id, created_by, mode) values($1,$2,$3,$4)`, [code, workspaceId, userId ?? null, mode]);
   return `https://t.me/${username}?start=${code}`;
 }
 
 async function attachChannel(fromId: number, chatId: number, title: string, token: string): Promise<string> {
   const row = token !== env.telegram.botToken
-    ? await one<{ workspace_id: string }>(`select t.workspace_id from tg_connect t join telegram_config c on c.workspace_id=t.workspace_id and c.bot_token=$2 where t.tg_user_id=$1 order by t.created_at desc limit 1`, [fromId, token])
-    : await one<{ workspace_id: string }>(`select workspace_id from tg_connect where tg_user_id=$1 order by created_at desc limit 1`, [fromId]);
+    ? await one<{ workspace_id: string; mode: string }>(`select t.workspace_id, t.mode from tg_connect t join telegram_config c on c.workspace_id=t.workspace_id and c.bot_token=$2 where t.tg_user_id=$1 order by t.created_at desc limit 1`, [fromId, token])
+    : await one<{ workspace_id: string; mode: string }>(`select workspace_id, mode from tg_connect where tg_user_id=$1 order by created_at desc limit 1`, [fromId]);
   if (!row) return "Спершу відкрий посилання підключення з кабінету Holos (кнопка «Підключити наш бот»).";
   // перевіряємо членство ТИМ ботом, якому переслали пост (власний або спільний); id бота = префікс токена
   const botId = Number(token.split(":")[0]) || BOT_ID;
@@ -259,6 +260,20 @@ async function attachChannel(fromId: number, chatId: number, title: string, toke
   try { member = await tg.getChatMember(token, String(chatId), botId); }
   catch { return "Не бачу цього каналу. Додай мене адміном у канал і спробуй ще раз."; }
   if (!["administrator", "creator"].includes(member.status)) return "Додай мене АДМІНОМ у канал (з правом публікувати), тоді перешли пост ще раз.";
+  // 📣 «＋ Додати канал»: основний канал лишається, цей - ще один у бренді (тим самим ботом)
+  if (row.mode === "add") {
+    const cur = await one<{ channel_chat_id: string | null; group_chat_id: string | null; bot_token: string | null }>(
+      `select channel_chat_id, group_chat_id, bot_token from telegram_config where workspace_id=$1`, [row.workspace_id]);
+    if (cur?.channel_chat_id && cur.bot_token === token) {
+      const id = String(chatId);
+      if (id !== cur.channel_chat_id && id !== cur.group_chat_id)
+        await q(`insert into telegram_chat(workspace_id, chat_id, title) values($1,$2,$3)
+                 on conflict (workspace_id, chat_id) do update set title=excluded.title`, [row.workspace_id, id, title || null]);
+      await q(`delete from tg_connect where workspace_id=$1`, [row.workspace_id]);
+      await logEvent("info", "tgbot", `канал додано до бренду: ${title || chatId}`);
+      return `✅ Канал «${title || chatId}» додано до бренду. У композері під Telegram тепер можна обрати, у які канали піде пост.`;
+    }
+  }
   await q(`insert into telegram_config(workspace_id, bot_token, channel_chat_id, channel_title, updated_at)
            values($1,$2,$3,$4,now())
            on conflict (workspace_id) do update set bot_token=excluded.bot_token, channel_chat_id=excluded.channel_chat_id, channel_title=excluded.channel_title,
@@ -1051,12 +1066,13 @@ async function handleCallback(cbq: any, tokenOverride?: string): Promise<void> {
       // стара кнопка могла лишитись у чаті після перепідключення до іншого бренду - лише свій пост
       if (!(await cmp.loadPost(ws, postId))) { await tg.answerCallbackQuery(token, cbq.id, "Пост не знайдено"); return; }
       await tg.answerCallbackQuery(token, cbq.id, "Публікую…");
-      await q(`update post set channels = coalesce(channels, '{}'::jsonb) || '{"telegram":{"on":true}}'::jsonb where id=$1`, [postId]);
+      // вмикаємо Telegram, не чіпаючи решти його налаштувань (обрані канали, свій текст)
+      await q(`update post set channels = jsonb_set(coalesce(channels, '{}'::jsonb), '{telegram}', coalesce(channels->'telegram', '{}'::jsonb) || '{"on":true}'::jsonb) where id=$1`, [postId]);
       const results = await publishPostToChannels(ws, postId);
-      const ok = results.filter((r) => r.status === "sent").map((r) => r.channel);
+      const ok = results.filter((r) => r.status === "sent").map((r) => pubLabel(r));
       const err = results.filter((r) => r.status === "error");
       if (ok.length) await tg.sendMessage(token, chatId, "✈️ Опубліковано: " + ok.join(", "));
-      else await tg.sendMessage(token, chatId, "⚠️ Не вдалося: " + (err.map((e) => `${e.channel} — ${e.error}`).join("; ") || "немає підключеного каналу") + ".\nПідключи канал: додай мене АДМІНОМ у свій канал і перешли сюди пост із нього.");
+      else await tg.sendMessage(token, chatId, "⚠️ Не вдалося: " + (err.map((e) => `${pubLabel(e)} — ${e.error}`).join("; ") || "немає підключеного каналу") + ".\nПідключи канал: додай мене АДМІНОМ у свій канал і перешли сюди пост із нього.");
       return;
     }
     await tg.answerCallbackQuery(token, cbq.id);

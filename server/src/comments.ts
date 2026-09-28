@@ -36,7 +36,9 @@ export function commentFor(post: { first_comment?: string | null; channels?: any
   return String(typeof own === "string" ? own : post.first_comment || "").trim();
 }
 
-export type CommentState = { network: string; status: "pending" | "sending" | "sent" | "failed"; error?: string | null; attempts?: number; due_at?: string | null };
+// account - акаунт публікації (id Сторінки, Instagram, профілю Threads; '' - мережа з одним акаунтом чи
+// публікація до того, як ми памʼятали акаунт): пост на двох Сторінках має два коментарі, по одному під кожною
+export type CommentState = { network: string; account?: string; status: "pending" | "sending" | "sent" | "failed"; error?: string | null; attempts?: number; due_at?: string | null };
 
 class CommentFail extends Error { constructor(msg: string, public permanent: boolean) { super(msg); } }
 
@@ -81,15 +83,15 @@ async function whenVisible<T>(fn: () => Promise<T>): Promise<T> {
 // Яким акаунтом пост вийшов у мережу (рядок публікації). Коментар - від нього ж: інший акаунт того
 // самого бренду посту «не бачить» (28.09: «The requested resource does not exist» після того, як
 // бренд перепідключили на інший профіль Threads).
-async function publishedAs(postId: string, net: string): Promise<{ account_id: string | null; account_name: string | null }> {
+async function publishedAs(postId: string, net: string, account: string): Promise<{ account_id: string | null; account_name: string | null }> {
   const row = net === "threads"
-    ? await one<{ account_id: string | null; account_name: string | null }>(`select account_id, account_name from threads_publish where post_id=$1 and status='sent' order by created_at desc limit 1`, [postId])
-    : await one<{ account_id: string | null; account_name: string | null }>(`select account_id, account_name from meta_publish where post_id=$1 and channel=$2 and status='sent' order by created_at desc limit 1`, [postId, net]);
-  return row || { account_id: null, account_name: null };
+    ? await one<{ account_id: string | null; account_name: string | null }>(`select account_id, account_name from threads_publish where post_id=$1 and status='sent' and coalesce(account_id,'')=$2 order by created_at desc limit 1`, [postId, account])
+    : await one<{ account_id: string | null; account_name: string | null }>(`select account_id, account_name from meta_publish where post_id=$1 and channel=$2 and status='sent' and coalesce(account_id,'')=$3 order by created_at desc limit 1`, [postId, net, account]);
+  return row || { account_id: account || null, account_name: null };
 }
 
 // Одна спроба надіслати коментар у мережу. Вертає id коментаря в мережі.
-async function deliver(ws: string, net: string, target: string, text: string, postId: string): Promise<string> {
+async function deliver(ws: string, net: string, target: string, text: string, postId: string, account: string): Promise<string> {
   const max = COMMENT_MAX[net] || 2000;
   if (text.length > max) throw new CommentFail(`${NET_UA[net]}: коментар довший за ${max} знаків (зараз ${text.length}) - скороти.`, true);
   if (net === "instagram" || net === "facebook") {
@@ -99,7 +101,7 @@ async function deliver(ws: string, net: string, target: string, text: string, po
     // Дозволи - один вхід Meta на бренд, тож однакові для всіх його Сторінок.
     if (cfg.granted != null && !cfg.granted.split(",").includes(COMMENT_PERM[net]))
       throw new CommentFail(humanCommentError(net, "permission").text, true);
-    const acc = await metaAccountForRow(ws, net, await publishedAs(postId, net));
+    const acc = await metaAccountForRow(ws, net, await publishedAs(postId, net, account));
     if (!acc.ok) throw new CommentFail(acc.error, true);
     return (await meta.commentOn(target, acc.acc.pageToken, text)).id;
   }
@@ -111,7 +113,7 @@ async function deliver(ws: string, net: string, target: string, text: string, po
     return (await whenVisible(() => linkedin.comment(li.access_token!, li.member_urn!, target, text))).id;
   }
   if (net === "threads") {
-    const acc = await threadsAccountForRow(ws, await publishedAs(postId, net));
+    const acc = await threadsAccountForRow(ws, await publishedAs(postId, net, account));
     if (!acc.ok) throw new CommentFail(/не підключено$/.test(acc.error) ? "Threads не підключено - коментар нікуди надіслати." : acc.error, true);
     const tok = acc.acc;
     // коментар у Threads - це відповідь автора під його ж постом
@@ -123,17 +125,17 @@ async function deliver(ws: string, net: string, target: string, text: string, po
 /** Надіслати один коментар із черги. Забирає рядок атомарно (pending або «зависле» sending, яке
  *  обірвав перезапуск), тож два процеси чи два натискання не надішлють його двічі. */
 export async function sendComment(id: string): Promise<CommentState | null> {
-  const row = await one<{ id: string; post_id: string; network: string; target_id: string; message: string; attempts: number; ws: string }>(
+  const row = await one<{ id: string; post_id: string; network: string; account: string; target_id: string; message: string; attempts: number; ws: string }>(
     `update post_comment pc set status='sending', attempts=pc.attempts+1, updated_at=now()
        from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
       where pc.id=$1 and p.id=pc.post_id
         and (pc.status='pending' or (pc.status='sending' and pc.updated_at < now() - interval '10 minutes'))
-      returning pc.id, pc.post_id, pc.network, pc.target_id, pc.message, pc.attempts, s.workspace_id as ws`, [id]);
+      returning pc.id, pc.post_id, pc.network, pc.account, pc.target_id, pc.message, pc.attempts, s.workspace_id as ws`, [id]);
   if (!row) return null;
   try {
-    const extId = await deliver(row.ws, row.network, row.target_id, row.message, row.post_id);
+    const extId = await deliver(row.ws, row.network, row.target_id, row.message, row.post_id, row.account);
     await q(`update post_comment set status='sent', external_id=nullif($2,''), error=null, updated_at=now() where id=$1`, [id, extId || ""]);
-    return { network: row.network, status: "sent", attempts: row.attempts };
+    return { network: row.network, account: row.account, status: "sent", attempts: row.attempts };
   } catch (e: any) {
     const h = e instanceof CommentFail ? { text: e.message, permanent: e.permanent } : humanCommentError(row.network, String(e?.message || e));
     const retry = !h.permanent && row.attempts < MAX_ATTEMPTS;
@@ -141,20 +143,20 @@ export async function sendComment(id: string): Promise<CommentState | null> {
     await q(`update post_comment set status=$2, error=$3, due_at=coalesce($4::timestamptz, due_at), updated_at=now() where id=$1`,
       [id, retry ? "pending" : "failed", h.text.slice(0, 400), due]);
     await logEvent("warn", "comment", `${NET_UA[row.network] || row.network}: перший коментар не вийшов${retry ? " (повторимо)" : ""}: ${h.text}`, { postId: row.post_id });
-    return { network: row.network, status: retry ? "pending" : "failed", error: h.text, attempts: row.attempts, due_at: due };
+    return { network: row.network, account: row.account, status: retry ? "pending" : "failed", error: h.text, attempts: row.attempts, due_at: due };
   }
 }
 
-export async function commentState(postId: string, net: string): Promise<CommentState | null> {
-  return one<CommentState>(`select network, status, error, attempts, due_at from post_comment where post_id=$1 and network=$2`, [postId, net]);
+export async function commentState(postId: string, net: string, account = ""): Promise<CommentState | null> {
+  return one<CommentState>(`select network, account, status, error, attempts, due_at from post_comment where post_id=$1 and network=$2 and account=$3`, [postId, net, account]);
 }
 export async function commentStates(postId: string): Promise<CommentState[]> {
-  return q<CommentState>(`select network, status, error, attempts, due_at from post_comment where post_id=$1 order by network`, [postId]);
+  return q<CommentState>(`select network, account, status, error, attempts, due_at from post_comment where post_id=$1 order by network, created_at`, [postId]);
 }
 
 /** Після того як пост вийшов у мережу: коментар у чергу й одразу спроба. null - для цієї мережі
  *  коментаря нема (не задано, Telegram, сторіс). */
-export async function commentAfterPublish(postId: string, net: string, targetId: string): Promise<CommentState | null> {
+export async function commentAfterPublish(postId: string, net: string, targetId: string, account = ""): Promise<CommentState | null> {
   if (!targetId) return null;
   const post = await one<{ first_comment: string | null; channels: any; format: string | null }>(
     `select first_comment, channels, format from post where id=$1`, [postId]);
@@ -162,10 +164,10 @@ export async function commentAfterPublish(postId: string, net: string, targetId:
   const text = commentFor(post, net);
   if (!text) return null;
   const ins = await one<{ id: string }>(
-    `insert into post_comment(post_id, network, target_id, message) values($1,$2,$3,$4)
-     on conflict (post_id, network) do nothing returning id`, [postId, net, targetId, text]);
-  if (!ins) return commentState(postId, net); // коментар уже є (попередня публікація) - не дублюємо
-  return (await sendComment(ins.id)) || commentState(postId, net);
+    `insert into post_comment(post_id, network, account, target_id, message) values($1,$2,$3,$4,$5)
+     on conflict (post_id, network, account) do nothing returning id`, [postId, net, account, targetId, text]);
+  if (!ins) return commentState(postId, net, account); // коментар уже є (попередня публікація) - не дублюємо
+  return (await sendComment(ins.id)) || commentState(postId, net, account);
 }
 
 /**
@@ -178,23 +180,25 @@ export async function queueMissingComments(ws: string, postId: string): Promise<
       where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
   const out = { queued: [] as string[], sent: [] as string[], none: [] as string[], busy: [] as string[] };
   if (!post) return out;
-  const targets = await q<{ net: string; target: string }>(
-    `select 'threads'::text as net, media_id as target from threads_publish where post_id=$1 and status='sent' and media_id is not null
-     union all select channel, external_id from meta_publish where post_id=$1 and status='sent' and external_id is not null and position(',' in external_id)=0
-     union all select 'linkedin', external_id from linkedin_publish where post_id=$1 and status='sent' and coalesce(external_id,'')<>''`, [postId]);
+  // кожна публікація - свій коментар (пост на двох Сторінках - під кожною)
+  const targets = await q<{ net: string; target: string; acc: string }>(
+    `select 'threads'::text as net, media_id as target, coalesce(account_id,'') as acc from threads_publish where post_id=$1 and status='sent' and media_id is not null
+     union all select channel, external_id, coalesce(account_id,'') from meta_publish where post_id=$1 and status='sent' and external_id is not null and position(',' in external_id)=0
+     union all select 'linkedin', external_id, '' from linkedin_publish where post_id=$1 and status='sent' and coalesce(external_id,'')<>''`, [postId]);
+  const add = (l: string[], n: string) => { if (!l.includes(n)) l.push(n); };
   for (const t of targets) {
     if (!COMMENT_NETS.includes(t.net)) continue;
     const text = commentFor(post, t.net);
-    if (!text) { out.none.push(t.net); continue; }
-    const cur = await commentState(postId, t.net);
-    if (cur?.status === "sent") { out.sent.push(t.net); continue; }
-    if (cur?.status === "sending") { out.busy.push(t.net); continue; }
+    if (!text) { add(out.none, t.net); continue; }
+    const cur = await commentState(postId, t.net, t.acc);
+    if (cur?.status === "sent") { add(out.sent, t.net); continue; }
+    if (cur?.status === "sending") { add(out.busy, t.net); continue; }
     await q(
-      `insert into post_comment(post_id, network, target_id, message) values($1,$2,$3,$4)
-       on conflict (post_id, network) do update set message=excluded.message, target_id=excluded.target_id,
+      `insert into post_comment(post_id, network, account, target_id, message) values($1,$2,$3,$4,$5)
+       on conflict (post_id, network, account) do update set message=excluded.message, target_id=excluded.target_id,
          status='pending', attempts=0, error=null, due_at=now(), updated_at=now()
-       where post_comment.status in ('pending','failed')`, [postId, t.net, t.target, text]);
-    out.queued.push(t.net);
+       where post_comment.status in ('pending','failed')`, [postId, t.net, t.acc, t.target, text]);
+    add(out.queued, t.net);
   }
   return out;
 }

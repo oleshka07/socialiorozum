@@ -175,10 +175,19 @@
   .acc-row button{font-size:12px;padding:5px 9px}
   .acc-row.avail{border-style:dashed}
   .acc-h{font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--faint);margin-top:6px}
-  #cmpAccs{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 10px}
-  #cmpAccs label{font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:5px}
-  #cmpAccs select{width:auto;padding:5px 8px;font-size:12.5px;max-width:220px}
-  #cmpAccs select.bad{border-color:var(--danger);color:var(--danger)}
+  #cmpAccs{display:flex;flex-direction:column;gap:6px;margin:0 0 10px}
+  #cmpAccs .accrow{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  #cmpAccs .acclab{font-size:12px;color:var(--muted);margin-right:2px}
+  #cmpAccs .accchk{font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink2);cursor:pointer;display:inline-flex;gap:4px;align-items:center;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #cmpAccs .accchk.on{border-color:var(--brand);color:var(--brand);font-weight:700}
+  #cmpAccs .accchk small{font-weight:500;color:var(--faint);font-size:10.5px}
+  #cmpAccs .accchk.sent{border-color:var(--brand);color:var(--brand);cursor:default;background:transparent}
+  #cmpAccs .accchk.sent a{color:inherit;text-decoration:none;font-weight:700}
+  #cmpAccs .accchk.bad{border-color:var(--danger);color:var(--danger)}
+  #cmpAccs .acchint{font-size:11px;color:var(--faint)}
+  .pv-accs{font-size:11.5px;color:var(--muted);text-align:center;margin:-2px 0 8px;line-height:1.5}
+  .pv-accs a{color:var(--brand);font-weight:700;text-decoration:none}
+  .pv-accs b{color:var(--brand)}
   .netgrp{display:inline-flex;align-items:stretch}
   .netgrp .netchip{border-top-right-radius:0;border-bottom-right-radius:0}
   .netgrp .netseg{font-size:12px;padding:6px 8px;border:1px solid var(--line2);border-left:none;border-top-right-radius:9px;border-bottom-right-radius:9px;background:transparent;color:var(--muted);cursor:pointer}
@@ -1150,6 +1159,13 @@ html.review-on #owl{display:none!important}
             <div id="tgSharedOff" class="hint" style="display:none;border:1px dashed var(--line);border-radius:10px;padding:9px 11px;margin:8px 0;color:var(--danger)">⚠️ У цьому середовищі спільний бот <b>не приймає повідомлень</b>: його вебхук закріплений за основним сервісом, інакше бета забрала б бота в прода. Публікація в уже підключений канал працює, а підключення через бота й DM-фічі - ні. Рішення: свій бот у «⚙️ Розширені налаштування» (@BotFather → /newbot → токен сюди) - він одразу візьме на себе всі DM-фічі саме тут.</div>
             <div class="btnrow"><button class="primary" id="tgConnectBot">🤖 Підключити наш бот</button><span id="tgConnMsg" style="font-size:12px;color:var(--muted)"></span></div>
             <div id="tgBotSteps" style="display:none;font-size:13px;color:var(--ink2);margin-top:6px;line-height:1.7"></div>
+            <div style="border-top:1px solid var(--line);margin:12px 0 2px"></div>
+          </div>
+          <div id="tgChatsBox" style="display:none;margin:8px 0 4px">
+            <div class="hint" style="margin-bottom:6px">📣 <b>Канали й групи бренду</b> - куди публікує бот. Пост без вибору йде в основні, інші обираєш галочками в композері (можна в кілька одразу).</div>
+            <div id="tgChats" style="display:flex;flex-direction:column;gap:6px"></div>
+            <div class="btnrow" style="margin-top:8px;flex-wrap:wrap"><input class="txt" id="tgChatIn" placeholder="@назва_каналу або t.me/назва" style="max-width:250px"><button class="ghost" id="tgChatAdd">＋ Додати канал</button><button class="ghost" id="tgChatViaBot" style="display:none" title="Для приватного каналу без @назви: бот дасть посилання, а ти перешлеш йому будь-який пост каналу">＋ Через бота</button><span id="tgChatMsg" style="font-size:12px;color:var(--muted)"></span></div>
+            <div class="hint" style="margin-top:4px">Спершу додай бота <b>адміністратором</b> у новий канал (з правом публікувати) - інакше Telegram не пустить його туди писати.</div>
             <div style="border-top:1px solid var(--line);margin:12px 0 2px"></div>
           </div>
           <details class="disc" style="margin-top:6px">

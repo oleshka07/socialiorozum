@@ -1,6 +1,6 @@
 import { q, one } from "./db.js";
 import { logEvent } from "./log.js";
-import { publishPostToChannels, isStopping } from "./publisher.js";
+import { publishPostToChannels, isStopping, pubLabel } from "./publisher.js";
 import { publishQuestions } from "./pipeline.js";
 
 // тексти тимчасових збоїв (людські - з humanTgError/humanMetaError/humanNetError - і сирі мережеві)
@@ -34,9 +34,10 @@ async function tick(): Promise<void> {
       const only = slot.channels ? Object.keys(slot.channels).filter((k) => slot.channels[k] && slot.channels[k].on) : undefined;
       const results = await publishPostToChannels(slot.workspace_id, slot.post_id, only && only.length ? only : undefined);
       const anyOk = results.some((r) => r.status === "sent");
-      const ok = results.filter((r) => r.status === "sent").map((r) => r.channel).join(", ");
-      const skip = results.filter((r) => r.status === "skipped").map((r) => r.channel).join(", ");
-      const err = results.filter((r) => r.status === "error").map((r) => `${r.channel}: ${r.error}`).join("; ");
+      // pubLabel: «facebook (Rozum.one)», коли в пості кілька акаунтів мережі
+      const ok = results.filter((r) => r.status === "sent").map((r) => pubLabel(r)).join(", ");
+      const skip = results.filter((r) => r.status === "skipped").map((r) => pubLabel(r)).join(", ");
+      const err = results.filter((r) => r.status === "error").map((r) => `${pubLabel(r)}: ${r.error}`).join("; ");
       // «пропущено» (мережа вже опублікована) — це НЕ помилка: слот вважається виконаним, якщо є хоч один sent або лише skipped без помилок
       const benign = !err && (anyOk || !!skip);
       // тимчасовий збій (ліміт мережі, таймаут, 5xx, перезапуск) - не вирок: повторюємо до 3 разів через

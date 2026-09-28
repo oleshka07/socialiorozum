@@ -400,20 +400,21 @@ function fcBlock(p) {
   if (p.format === 'story') return '';
   const cs = p.comments || [];
   const st = cs.map((c) => {
-    const n = NETNAME[c.network] || c.network;
+    // пост вийшов кількома акаунтами мережі - коментар під кожним, і підписуємо, під яким
+    const n = (NETNAME[c.network] || c.network) + (c.name ? ' · ' + esc(c.name) : '');
     if (c.status === 'sent') return '<span class="pill ok">💬 ' + n + ' ✓</span>';
     if (c.status === 'failed') return '<span class="pill bad" title="' + esc(c.error || '') + '">💬 ' + n + ': не вийшов</span>';
     return '<span class="pill warn">💬 ' + n + ': надсилається…</span>';
   }).join(' ');
   const errs = cs.filter((c) => c.status === 'failed' && c.error).map((c) => '<div class="hint">⚠️ ' + esc(c.error) + '</div>').join('');
   // дописали коментар після публікації або він не вийшов - дослати в ті мережі, куди пост уже пішов
-  const sentFc = (p.sent || []).filter((k) => FC_NETS.includes(k));
-  const missing = sentFc.filter((k) => !cs.some((c) => c.network === k && (c.status === 'sent' || c.status === 'sending')));
+  const missing = p.fcMissing ? p.fcMissing.map((x) => (NETNAME[x.network] || x.network) + (x.name ? ' · ' + x.name : ''))
+    : (p.sent || []).filter((k) => FC_NETS.includes(k)).filter((k) => !cs.some((c) => c.network === k && (c.status === 'sent' || c.status === 'sending'))).map((k) => NETNAME[k] || k);
   return '<div class="fclab">💬 Перший коментар</div>'
     + '<textarea class="fc" id="efc" placeholder="Необовʼязково: посилання, хештеги чи заклик - зʼявиться першим коментарем під постом">' + esc(p.first_comment || '') + '</textarea>'
     + '<div class="hint">Instagram, Facebook, LinkedIn, Threads. У Telegram коментар не йде.</div>'
     + (st ? '<div class="meta">' + st + '</div>' : '') + errs
-    + (missing.length ? '<button class="go ghost" id="aFc">💬 Надіслати коментар (' + missing.map((k) => NETNAME[k] || k).join(', ') + ')</button>' : '');
+    + (missing.length ? '<button class="go ghost" id="aFc">💬 Надіслати коментар (' + esc(missing.join(', ')) + ')</button>' : '');
 }
 async function sendComment() {
   await saveText();
@@ -425,7 +426,7 @@ async function sendComment() {
     for (let i = 0; i < 6; i++) {
       await new Promise((r) => setTimeout(r, 1500));
       const fresh = await api('/post/' + cur.id);
-      cur.comments = fresh.comments || [];
+      cur.comments = fresh.comments || []; cur.fcMissing = fresh.fcMissing;
       if (!cur.comments.some((c) => c.status === 'sending' || (c.status === 'pending' && !c.error))) break;
     }
     haptic('success'); drawEditor();

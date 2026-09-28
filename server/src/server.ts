@@ -49,7 +49,7 @@ import { scheduleConflicts, describeConflicts } from "./schedule.js";
 import { briefMismatch, brandTextOf } from "./textkind.js";
 import { startDiary } from "./diary.js";
 import { startThreadsAuto } from "./threads-auto.js";
-import { startComments, commentStates, queueMissingComments, processDue as processDueComments } from "./comments.js";
+import { startComments, commentStates, queueMissingComments, processDue as processDueComments, COMMENT_NETS } from "./comments.js";
 import { cleanAlt } from "./igextras.js";
 import { BRAND, legacyHosts, legacyRedirect } from "./brand.js";
 import { getSettingText } from "./settings.js";
@@ -60,7 +60,8 @@ import { secretStatuses, setSecret, clearSecret, refreshSecrets } from "./secret
 import { kieCatalog, kieCredits, kieReady } from "./kie.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook, sharedBotDmWorks, hookSecret, sameSecret, ownBotToken, refreshOwnBotWebhooks, initHookBase, sharedHookKind, looksLikeBotToken, switchSharedBot, loadFormerShared, isFormerShared, formerBotName, sharedTokens, liveSharedTokens } from "./tgbot.js";
 import { chat } from "./openrouter.js";
-import { threadsToken, threadsAccounts, saveThreadsLogin, setMainThreads, removeThreadsAccount, metaPages, saveMetaLogin, addMetaPage, setMainPage, removeMetaPage, accountChoices, postsUsingAccount, metaAccountForRow, threadsAccountForRow } from "./accounts.js";
+import { threadsToken, threadsAccounts, saveThreadsLogin, setMainThreads, removeThreadsAccount, metaPages, saveMetaLogin, addMetaPage, setMainPage, removeMetaPage, accountChoices, postsUsingAccount, metaAccountForRow, threadsAccountForRow,
+  mainAccountIds, telegramTargets, isAccNet } from "./accounts.js";
 import { handleBody, wantsSse, sseEncode, resolveToken, mcpTokenFor, issueMcpToken, revokeMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
 import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember, deleteBrand, workspaceTitle } from "./workspaces.js";
 import { postMediaList, mediaCounts, setPostMediaOrder, setPostVideo, appendPostMedia, removePostMedia, promoteIfCoverless, healCoverless, SlideError, MAX_SLIDES, altToOriginal } from "./slides.js";
@@ -1141,8 +1142,14 @@ async function postPermalinks(ws: string, postId: string): Promise<Record<string
       `select id, channel, external_id, permalink, account_id, account_name from meta_publish where post_id=$1 and status='sent'`, [postId]),
     q<{ id: string; external_id: string | null; permalink: string | null }>(
       `select id, external_id, permalink from linkedin_publish where post_id=$1 and status='sent'`, [postId]),
-    one<{ channel_username: string | null }>(`select channel_username from telegram_config where workspace_id=$1`, [ws]),
+    one<{ channel_username: string | null; channel_chat_id: string | null }>(`select channel_username, channel_chat_id from telegram_config where workspace_id=$1`, [ws]),
   ]);
+  // @назва чату для гарного лінка: основний канал - у telegram_config, додаткові - у telegram_chat
+  const tgNames = tg.some((r) => !r.permalink)
+    ? new Map((await q<{ chat_id: string; username: string | null }>(`select chat_id, username from telegram_chat where workspace_id=$1`, [ws])).map((x) => [x.chat_id, x.username]))
+    : new Map<string, string | null>();
+  const tgUser = (r: { chat_id: string | null; target: string }) =>
+    r.target === "channel" || (r.chat_id && r.chat_id === tgc?.channel_chat_id) ? tgc?.channel_username : tgNames.get(r.chat_id || "") ?? null;
   // тип-юніон, а не string: імʼя таблиці підставляється в SQL, тож звужуємо його на рівні компілятора,
   // щоб тут ніколи не могло опинитись значення із запиту
   type PubTable = "telegram_publish" | "threads_publish" | "meta_publish" | "linkedin_publish";
@@ -1151,7 +1158,7 @@ async function postPermalinks(ws: string, postId: string): Promise<Record<string
   };
   for (const r of tg) {
     let url = r.permalink || "";
-    if (!url) { url = tgLink(r.chat_id || "", r.message_id, r.target === "channel" ? tgc?.channel_username : null); if (url) await heal("telegram_publish", r.id, url); }
+    if (!url) { url = tgLink(r.chat_id || "", r.message_id, tgUser(r)); if (url) await heal("telegram_publish", r.id, url); }
     if (url && !out.telegram) out.telegram = url;
   }
   for (const r of mt) {
@@ -1187,17 +1194,40 @@ async function postPermalinks(ws: string, postId: string): Promise<Record<string
   return out;
 }
 
+// 👥 Куди саме пост уже вийшов: мережа + акаунт (id і назва) + посилання на цю публікацію. Композер
+// ставить ✓ на галочку саме цього акаунта, а решту обраних ще можна опублікувати. Рядки до галочок без
+// акаунта - акаунт за замовчуванням (у Threads - за ніком із посилання).
+type SentTo = { net: string; account: string; name: string | null; link: string | null; comment: { status: string; error: string | null; due_at: string | null } | null };
+async function sentTo(ws: string, postId: string): Promise<SentTo[]> {
+  const rows = await q<{ net: string; acc: string | null; name: string | null; link: string | null }>(
+    `select 'telegram'::text as net, chat_id as acc, null::text as name, permalink as link, created_at from telegram_publish where post_id=$1 and status='sent'
+     union all select 'threads', account_id, account_name, permalink, created_at from threads_publish where post_id=$1 and status='sent'
+     union all select channel, account_id, account_name, permalink, created_at from meta_publish where post_id=$1 and status='sent'
+     union all select 'linkedin', null, null, permalink, created_at from linkedin_publish where post_id=$1 and status='sent'
+     order by 5`, [postId]);
+  const legacy = rows.some((r) => isAccNet(r.net) && !r.acc);
+  const [mains, th, tgt, cms] = await Promise.all([legacy ? mainAccountIds(ws) : null, legacy ? threadsAccounts(ws) : [], telegramTargets(ws), commentStates(postId)]);
+  return rows.map((r) => {
+    let acc = r.acc;
+    if (!acc && r.net === "threads" && r.name) acc = th.find((a) => "@" + a.username.toLowerCase() === r.name!.toLowerCase())?.userId || null;
+    if (!acc && mains && isAccNet(r.net)) acc = mains[r.net] || null;
+    const name = r.name || (r.net === "telegram" ? tgt.targets.find((t) => t.id === r.acc)?.name || null : null);
+    // 💬 перший коментар саме під ЦІЄЮ публікацією (коментар живе за тим, як акаунт записано в рядку)
+    const cs = cms.find((c) => c.network === r.net && c.account === (r.acc || ""));
+    return { net: r.net, account: acc || "", name, link: r.link, comment: cs ? { status: cs.status, error: cs.error ?? null, due_at: cs.due_at ?? null } : null };
+  });
+}
+
 // стан публікації поста: у які мережі вже відправлено (для композера — блокуємо повторну відправку)
 app.get("/api/posts/:postId/publish-state", async (req: any, reply) => {
   const ws = req.user.workspace_id;
   if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
   const sent = await alreadySentNetworks(req.params.postId);
-  // 👥 яким акаунтом пост вийшов у мережу (імʼя) - композер показує це біля мережі
-  const accs = await q<{ net: string; name: string | null }>(
-    `select 'threads'::text as net, account_name as name from threads_publish where post_id=$1 and status='sent'
-     union all select channel, account_name from meta_publish where post_id=$1 and status='sent'`, [req.params.postId]);
-  return { sent, links: await postPermalinks(ws, req.params.postId), comments: await commentStates(req.params.postId),
-    accounts: Object.fromEntries(accs.filter((a) => a.name).map((a) => [a.net, a.name])) };
+  const links = await postPermalinks(ws, req.params.postId); // заодно доліковує посилання старих рядків
+  const to = await sentTo(ws, req.params.postId);
+  return { sent, sentTo: to, links, comments: await commentStates(req.params.postId),
+    // 👥 яким акаунтом пост вийшов у мережу (імʼя першого) - короткий підпис біля мережі
+    accounts: Object.fromEntries(to.filter((a) => a.name && isAccNet(a.net)).reverse().map((a) => [a.net, a.name])) };
 });
 
 // 💬 «Надіслати коментар»: для мереж, куди пост уже вийшов, а першого коментаря ще нема (дописали
@@ -1708,7 +1738,7 @@ app.get("/api/analytics/threads", async (req: any, reply) => {
             coalesce(pm.reposts,0) reposts, coalesce(pm.quotes,0) quotes
        from threads_publish tp join post p on p.id=tp.post_id
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
-       left join post_metric pm on pm.post_id=tp.post_id and pm.network='threads'
+       left join post_metric pm on pm.post_id=tp.post_id and pm.network='threads' and pm.account=coalesce(tp.account_id,'')
      where s.workspace_id=$1 and tp.status='sent'
      order by tp.created_at desc limit 10`, [ws]);
   // інтервал постингу за 7 днів + к-сть постів
@@ -2136,14 +2166,89 @@ app.get("/api/integrations/telegram", async (req: any) => {
     sharedDm: sharedBotDmWorks(),
     // канал підключено через попереднього спільного бота: він публікує далі, а в кабінеті - як перейти
     formerBot: c?.bot_token && isFormerShared(c.bot_token) ? await formerBotName(c.bot_token) : null,
+    // 📣 усі канали й групи бренду: основні (канал, група) і додаткові - куди можна публікувати; posts -
+    // скільки ще не опублікованих постів обрали саме цей чат (попередити перед «Прибрати»)
+    chats: c?.bot_token ? await Promise.all((await telegramTargets(req.user.workspace_id)).targets.map(async (t) =>
+      ({ ...t, posts: await postsUsingAccount(req.user.workspace_id, [{ net: "telegram", id: t.id }]) }))) : [],
   };
+});
+
+// 📣 Ще канал чи група Telegram у бренд (кілька каналів - запит Олега 28.09). Той самий бот, що й в
+// основному, має бути там адміном: перевіряємо ДО збереження, інакше публікація падала б потім.
+// @назва, t.me/назва або id (-100…). Першим каналом бренду він стає основним.
+const tgChatRef = (raw: string): string | null => {
+  const v = String(raw || "").trim().replace(/^https?:\/\/(www\.)?t(elegram)?\.me\//i, "").replace(/[/?#].*$/, "");
+  if (/^-?\d{5,20}$/.test(v)) return v;
+  const name = v.replace(/^@/, "");
+  return /^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(name) ? "@" + name : null;
+};
+app.post("/api/integrations/telegram/chats", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const c = await tgConfig(ws);
+  if (!c?.bot_token) return reply.code(400).send({ error: "Спершу підключи Telegram (кнопка «Підключити наш бот» або власний бот нижче)" });
+  const ref = tgChatRef(String(req.body?.chat ?? ""));
+  if (!ref) return reply.code(400).send({ error: "Вкажи @назву каналу (як у посиланні t.me/назва) або його id (-100…)" });
+  let info: { id: number; title?: string; username?: string; type?: string };
+  try { info = await tg.getChat(c.bot_token, ref); }
+  catch { return reply.code(400).send({ error: `Бот не бачить ${ref}: додай бота в канал адміністратором (з правом публікувати) і спробуй ще раз` }); }
+  const id = String(info.id);
+  try {
+    const me = await tg.getMe(c.bot_token);
+    const m = await tg.getChatMember(c.bot_token, id, me.id);
+    if (!["administrator", "creator"].includes(m.status))
+      return reply.code(400).send({ error: `Бот є в «${info.title || ref}», але не адмін. Зроби його адміністратором з правом публікувати й спробуй ще раз.` });
+  } catch { /* приватні групи бувають без member - публікація скаже сама */ }
+  const title = info.title || (info.username ? "@" + info.username : id);
+  let result: "main" | "added" | "exists";
+  if (!c.channel_chat_id && !c.group_chat_id) {
+    await q(`update telegram_config set channel_chat_id=$2, channel_title=$3, channel_username=$4, updated_at=now() where workspace_id=$1`,
+      [ws, id, info.title || null, info.username || ""]);
+    result = "main";
+  } else if (id === c.channel_chat_id || id === c.group_chat_id) result = "exists";
+  else {
+    const r = await one<{ fresh: boolean }>(
+      `insert into telegram_chat(workspace_id, chat_id, title, username) values($1,$2,$3,$4)
+       on conflict (workspace_id, chat_id) do update set title=excluded.title, username=excluded.username returning (xmax = 0) as fresh`,
+      [ws, id, info.title || null, info.username || ""]);
+    result = r?.fresh ? "added" : "exists";
+  }
+  await logEvent("info", "telegram", `канал ${result === "added" ? "додано" : result === "main" ? "підключено основним" : "уже в бренді"}: ${title}`, null, req.user.id);
+  return { ok: true, result, chat: { id, name: title }, chats: (await telegramTargets(ws)).targets };
+});
+
+// Прибрати канал чи групу з бренду. Основний канал заміняє перший додатковий (як із Сторінками).
+app.post("/api/integrations/telegram/chats/remove", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  const id = String(req.body?.chatId ?? "").trim();
+  if (!id) return reply.code(400).send({ error: "Не вказано канал" });
+  const c = await tgConfig(ws);
+  if (!c) return reply.code(404).send({ error: "Telegram не підключено" });
+  const waiting = await postsUsingAccount(ws, [{ net: "telegram", id }]);
+  let result: "extra" | "main" | "group" | "none";
+  if (id === c.channel_chat_id) {
+    const next = await one<{ chat_id: string; title: string | null; username: string | null }>(
+      `select chat_id, title, username from telegram_chat where workspace_id=$1 order by added_at, chat_id limit 1`, [ws]);
+    await q(`update telegram_config set channel_chat_id=$2, channel_title=$3, channel_username=$4, updated_at=now() where workspace_id=$1`,
+      [ws, next?.chat_id ?? null, next?.title ?? null, next ? next.username ?? null : null]);
+    if (next) await q(`delete from telegram_chat where workspace_id=$1 and chat_id=$2`, [ws, next.chat_id]);
+    result = "main";
+  } else if (id === c.group_chat_id) {
+    await q(`update telegram_config set group_chat_id=null, group_title=null, updated_at=now() where workspace_id=$1`, [ws]);
+    result = "group";
+  } else {
+    const d = await q(`delete from telegram_chat where workspace_id=$1 and chat_id=$2 returning chat_id`, [ws, id]);
+    result = d.length ? "extra" : "none";
+  }
+  await logEvent("info", "telegram", `канал прибрано з бренду (${result})`, null, req.user.id);
+  return { ok: true, result, posts: waiting, chats: (await telegramTargets(ws)).targets };
 });
 
 // спільний бот: видати deep-link для підключення каналу
 app.post("/api/integrations/telegram/connect-link", async (req: any, reply) => {
   if (!botEnabled()) return reply.code(400).send({ error: "Спільний бот не налаштований на сервері" });
   // імʼя бота - з самого посилання: воно веде в бота, що обслуговує кабінет (власний або спільний)
-  try { const link = await createConnectLink(req.user.workspace_id, req.user.id); return { link, bot: /t\.me\/([^?/]+)/.exec(link)?.[1] || botUsername() }; }
+  // add: «＋ Додати канал» - переслана з каналу публікація ДОДАСТЬ його до бренду, а не замінить основний
+  try { const link = await createConnectLink(req.user.workspace_id, req.user.id, req.body?.add === true ? "add" : "main"); return { link, bot: /t\.me\/([^?/]+)/.exec(link)?.[1] || botUsername() }; }
   catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
 
@@ -4127,8 +4232,16 @@ app.get("/api/tg/post/:postId", async (req: any, reply) => {
   const slot = await one<{ id: string; scheduled_at: string }>(
     `select id, scheduled_at from schedule_slot where post_id=$1 and status='planned' order by scheduled_at limit 1`, [p.id]);
   const sent = (await sentMap([p.id])).get(p.id) || [];
+  // 💬 стан першого коментаря - по кожній публікації (пост у двох Сторінках - два коментарі); назва
+  // акаунта - коли мережа вийшла кількома, інакше «Facebook ✓» двічі нічого б не пояснив
+  const to = await sentTo(u.ws, p.id);
+  const many = (net: string) => to.filter((x) => x.net === net).length > 1;
+  const who = (x: SentTo) => (many(x.net) && x.name ? x.name : null);
   return { ...p, scheduled_at: slot?.scheduled_at || null, slot_id: slot?.id || null, sent, links: await postPermalinks(u.ws, p.id).catch(() => ({})),
-           media: (await postMediaList(p.id)).map((x) => x.filename), comments: await commentStates(p.id) };
+           media: (await postMediaList(p.id)).map((x) => x.filename),
+           comments: to.filter((x) => x.comment).map((x) => ({ network: x.net, account: x.account, name: who(x), ...x.comment })),
+           // куди пост уже вийшов, а коментаря під ним нема чи він не вийшов - «Надіслати коментар»
+           fcMissing: to.filter((x) => COMMENT_NETS.includes(x.net) && !(x.comment && ["sent", "sending"].includes(x.comment.status))).map((x) => ({ network: x.net, name: who(x) })) };
 });
 
 // 🖼 фото з телефона. Без нього Mini App лишався «текстовим блокнотом», хоч усі мережі

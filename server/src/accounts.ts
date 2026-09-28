@@ -1,12 +1,14 @@
 // 👥 Кілька акаунтів однієї мережі в бренді: особистий і компанії (питання Олега 26.09). Сторінки
-// Facebook (кожна зі своїм Instagram) і профілі Threads.
+// Facebook (кожна зі своїм Instagram), профілі Threads і канали та групи Telegram (28.09).
 //
 // Головні рішення:
 //  • ОСНОВНИЙ акаунт живе там, де й жив: meta_config / threads_config. Увесь код, що знає лише «акаунт
 //    бренду» (онбординг, імпорт голосу з Instagram, RSS із чужих Instagram, стрік Threads), працює з
 //    ним як раніше, а бренди з одним акаунтом не помічають нічого. ДОДАТКОВІ - у meta_page /
 //    threads_account; «зробити основним» міняє їх місцями однією транзакцією.
-//  • Пост обирає акаунт у channels.<мережа>.account (id Сторінки / Instagram / Threads). Нема = основний.
+//  • Пост обирає акаунти галочками в channels.<мережа>.accounts (id Сторінки / Instagram / Threads /
+//    чату Telegram; давнє одиночне .account читається як список з одного). Нема = за замовчуванням
+//    (основний; у Telegram - основні канал і група). Кілька - той самий пост окремо в кожен.
 //  • Рядок публікації памʼятає, ЯКИМ акаунтом пост вийшов (account_id, account_name). Коментар,
 //    статистика, посилання й CTA-відповідь ідуть тим самим акаунтом: інакше після зміни основного
 //    акаунта все, що робиться під старими постами, падає «The requested resource does not exist».
@@ -20,6 +22,10 @@ import type { FbPage } from "./meta.js";
 export const MULTI_NETS = ["facebook", "instagram", "threads"] as const;
 export type MultiNet = (typeof MULTI_NETS)[number];
 export const isMultiNet = (n: string): n is MultiNet => (MULTI_NETS as readonly string[]).includes(n);
+// мережі, де пост обирає, КУДИ саме піти (галочки): акаунти Meta й Threads + канали й групи Telegram
+export const ACC_NETS = ["facebook", "instagram", "threads", "telegram"] as const;
+export type AccNet = (typeof ACC_NETS)[number];
+export const isAccNet = (n: string): n is AccNet => (ACC_NETS as readonly string[]).includes(n);
 
 export type MetaPage = { pageId: string; pageName: string; pageToken: string; igUserId: string | null; igUsername: string | null; main: boolean };
 export type ThreadsLogin = { token: string; userId: string; username: string };
@@ -308,10 +314,12 @@ export async function saveThreadsLogin(ws: string, a: { userId: string; username
 /** Старі рядки публікацій, де відомий лише нік (з посилання), привʼязуємо до щойно підключеного акаунта. */
 async function linkThreadsRows(ws: string, userId: string, username: string): Promise<void> {
   if (!username) return;
-  await q(`update threads_publish tp set account_id=$2
+  const rows = await q<{ post_id: string }>(`update threads_publish tp set account_id=$2
              from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
-            where tp.post_id=p.id and s.workspace_id=$1 and tp.account_id is null and lower(tp.account_name)=lower($3)`,
+            where tp.post_id=p.id and s.workspace_id=$1 and tp.account_id is null and lower(tp.account_name)=lower($3)
+            returning tp.post_id`,
     [ws, userId, "@" + username.replace(/^@/, "")]);
+  for (const r of rows) await rekeyLegacy("threads", r.post_id, userId);
 }
 
 /** Чужий пост (не цього акаунта) чи пост видалено - Threads каже саме так; решта збоїв (мережа, ліміт) - ні. */
@@ -332,8 +340,8 @@ export async function probeThreadsRows(ws: string): Promise<number> {
   try {
     const accs = await threadsAccounts(ws);
     if (accs.length < 2) return 0;
-    const rows = await q<{ id: string; media_id: string }>(
-      `select tp.id, tp.media_id from threads_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+    const rows = await q<{ id: string; media_id: string; post_id: string }>(
+      `select tp.id, tp.media_id, tp.post_id from threads_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
         where s.workspace_id=$1 and tp.status='sent' and tp.account_id is null and tp.account_name is null and coalesce(tp.media_id,'')<>''
         order by tp.created_at desc limit 100`, [ws]);
     if (!rows.length) return 0;
@@ -355,6 +363,7 @@ export async function probeThreadsRows(ws: string): Promise<number> {
         if (!who) break;
         await q(`update threads_publish set account_id=$2, account_name=$3, permalink=coalesce(permalink, nullif($4,'')) where id=$1 and account_id is null`,
           [r.id, who.userId, at(who.username), hit.permalink]);
+        await rekeyLegacy("threads", r.post_id, who.userId);
         found++;
         break;
       }
@@ -413,21 +422,51 @@ export async function removeThreadsAccount(ws: string, userId: string): Promise<
 }
 
 // ---------------------------------------------------------------- вибір у кабінеті й конекторі
-/** Акаунти, які можна обрати для поста, по мережах (без токенів). main - той, куди пост піде без вибору. */
-export async function accountChoices(ws: string): Promise<Record<MultiNet, AccountChoice[]>> {
-  const [pages, th] = await Promise.all([metaPages(ws), threadsAccounts(ws)]);
+// ---------------------------------------------------------------- Telegram (канали й групи)
+export type TgTarget = { id: string; name: string; main: boolean; kind: "channel" | "group" | "extra"; username: string | null };
+type TgCfg = { bot_token: string | null; channel_chat_id: string | null; channel_title: string | null; channel_username: string | null; group_chat_id: string | null; group_title: string | null };
+/** Куди бренд публікує в Telegram: основні канал і група (telegram_config) - вони й отримують пост без
+ *  вибору, як завжди, - плюс додаткові канали (telegram_chat). Той самий бот, токен - один. */
+export async function telegramTargets(ws: string): Promise<{ token: string | null; targets: TgTarget[] }> {
+  const [c, extra] = await Promise.all([
+    one<TgCfg>(`select bot_token, channel_chat_id, channel_title, channel_username, group_chat_id, group_title from telegram_config where workspace_id=$1`, [ws]),
+    q<{ chat_id: string; title: string | null; username: string | null }>(`select chat_id, title, username from telegram_chat where workspace_id=$1 order by added_at, chat_id`, [ws]),
+  ]);
+  const out: TgTarget[] = [];
+  if (c?.channel_chat_id) out.push({ id: c.channel_chat_id, name: c.channel_title || at(c.channel_username) || c.channel_chat_id, main: true, kind: "channel", username: c.channel_username || null });
+  if (c?.group_chat_id && c.group_chat_id !== c.channel_chat_id) out.push({ id: c.group_chat_id, name: c.group_title || c.group_chat_id, main: true, kind: "group", username: null });
+  for (const e of extra) if (!out.some((o) => o.id === e.chat_id))
+    out.push({ id: e.chat_id, name: e.title || at(e.username) || e.chat_id, main: false, kind: "extra", username: e.username || null });
+  return { token: c?.bot_token || null, targets: out };
+}
+
+/** Акаунти, які можна обрати для поста, по мережах (без токенів). main - той, куди пост піде без вибору
+ *  (у Telegram таких двоє: основні канал і група). */
+export async function accountChoices(ws: string): Promise<Record<AccNet, AccountChoice[]>> {
+  const [pages, th, tgt] = await Promise.all([metaPages(ws), threadsAccounts(ws), telegramTargets(ws)]);
   const ig = defaultIg(pages);
   return {
     facebook: pages.map((p) => ({ id: p.pageId, name: p.pageName, main: p.main })),
     instagram: pages.filter((p) => p.igUserId).map((p) => ({ id: p.igUserId!, name: at(p.igUsername) || p.igUserId!, main: p === ig })),
     threads: th.map((a) => ({ id: a.userId, name: at(a.username) || a.userId, main: a.main })),
+    telegram: tgt.token ? tgt.targets.map((t) => ({ id: t.id, name: t.name, main: t.main })) : [],
   };
 }
 
-/** Обраний у пості акаунт мережі (id) або null - за замовчуванням. */
+/** Обрані в пості акаунти мережі (id, по порядку, без повторів); порожньо - за замовчуванням. Пост,
+ *  збережений до галочок, мав одне `account` - це список з одного. */
+export function postAccounts(channels: any, net: string): string[] {
+  const c = channels && typeof channels === "object" ? channels[net] : null;
+  if (!c || typeof c !== "object") return [];
+  const raw: unknown[] = Array.isArray(c.accounts) ? c.accounts : typeof c.account === "string" ? [c.account] : [];
+  const out: string[] = [];
+  for (const x of raw) { const v = String(x ?? "").trim(); if (v && !out.includes(v) && out.length < 20) out.push(v); }
+  return out;
+}
+/** Перший обраний акаунт мережі (id) або null - за замовчуванням (там, де акаунт може бути один:
+ *  нік на кадрах каруселі, свій нік для співавторів Instagram). */
 export function postAccount(channels: any, net: string): string | null {
-  const v = channels && typeof channels === "object" ? channels[net]?.account : null;
-  return typeof v === "string" && v.trim() ? v.trim() : null;
+  return postAccounts(channels, net)[0] || null;
 }
 
 /** Знайти акаунт мережі за тим, як його назвала людина чи модель: id, @нік, назва Сторінки. */
@@ -438,13 +477,15 @@ export function matchAccount(list: AccountChoice[], wanted: string): AccountChoi
     || list.find((a) => a.name.replace(/^@/, "").toLowerCase().includes(w)) || null;
 }
 
-/** Скільки ще НЕопублікованих у цю мережу постів бренду обрали цей акаунт (попередити перед «прибрати»). */
-export async function postsUsingAccount(ws: string, pairs: { net: MultiNet; id: string }[]): Promise<number> {
+/** Скільки ще НЕопублікованих цим акаунтом постів бренду обрали його (попередити перед «прибрати»). */
+export async function postsUsingAccount(ws: string, pairs: { net: AccNet; id: string }[]): Promise<number> {
   if (!pairs.length) return 0;
-  const conds = pairs.map((_, i) => `(p.channels->$${2 + i * 2}::text->>'account' = $${3 + i * 2} and p.channels->$${2 + i * 2}::text->>'on' = 'true'
-      and not exists (select 1 from (select post_id, 'threads'::text as net from threads_publish where status='sent'
-                                     union all select post_id, channel from meta_publish where status='sent') x
-                       where x.post_id=p.id and x.net=$${2 + i * 2}))`).join(" or ");
+  const conds = pairs.map((_, i) => `((p.channels->$${2 + i * 2}::text->>'account' = $${3 + i * 2} or coalesce(p.channels->$${2 + i * 2}::text->'accounts', '[]'::jsonb) ? $${3 + i * 2})
+      and p.channels->$${2 + i * 2}::text->>'on' = 'true'
+      and not exists (select 1 from (select post_id, 'threads'::text as net, account_id as acc from threads_publish where status='sent'
+                                     union all select post_id, channel, account_id from meta_publish where status='sent'
+                                     union all select post_id, 'telegram', chat_id from telegram_publish where status='sent') x
+                       where x.post_id=p.id and x.net=$${2 + i * 2} and x.acc=$${3 + i * 2}))`).join(" or ");
   const r = await one<{ n: number }>(
     `select count(*)::int n from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
       where s.workspace_id=$1 and p.stage='final' and coalesce(p.review,'')<>'archived' and (${conds})`,
@@ -452,14 +493,29 @@ export async function postsUsingAccount(ws: string, pairs: { net: MultiNet; id: 
   return r?.n || 0;
 }
 
-/** Акаунти «за замовчуванням» по мережах (id) - куди піде пост без явного вибору. */
-export async function mainAccountIds(ws: string): Promise<Record<MultiNet, string>> {
+/** Акаунти «за замовчуванням» по мережах (id) - куди піде пост без явного вибору (Telegram - основний
+ *  канал, а без нього група). */
+export async function mainAccountIds(ws: string): Promise<Record<AccNet, string>> {
   const ch = await accountChoices(ws);
   const pick = (l: AccountChoice[]) => (l.find((a) => a.main) || l[0])?.id || "";
-  return { facebook: pick(ch.facebook), instagram: pick(ch.instagram), threads: pick(ch.threads) };
+  return { facebook: pick(ch.facebook), instagram: pick(ch.instagram), threads: pick(ch.threads), telegram: pick(ch.telegram) };
 }
 
-/** Ключ «мережа + акаунт» для порівнянь (дублі в розкладі): мережі з одним акаунтом - просто мережа. */
+/** Ключ «мережа + акаунт» для порівнянь (дублі в розкладі): мережі без вибору акаунта - просто мережа. */
 export function netKey(net: string, account: string | null | undefined, mains: Record<string, string>): string {
-  return isMultiNet(net) ? `${net}|${account || mains[net] || ""}` : net;
+  return isAccNet(net) ? `${net}|${account || mains[net] || ""}` : net;
+}
+
+/** Старому рядку публікації щойно визначили акаунт (нік із посилання, питання до Threads): перший
+ *  коментар і метрики цієї публікації жили під ключем '' - переносимо їх під ключ акаунта, інакше
+ *  аналітика й «надіслати коментар» їх не знайдуть. Лише коли в мережу в поста інших публікацій без
+ *  акаунта нема (тоді '' належить саме цій). */
+export async function rekeyLegacy(net: string, postId: string, account: string): Promise<void> {
+  const table = net === "threads" ? "threads_publish" : "meta_publish";
+  const chan = net === "threads" ? "" : " and channel=$2";
+  const orphan = await one<{ n: number }>(`select count(*)::int n from ${table} where post_id=$1${chan} and account_id is null`, net === "threads" ? [postId] : [postId, net]);
+  if ((orphan?.n || 0) > 0) return;
+  for (const t of ["post_comment", "post_metric"])
+    await q(`update ${t} set account=$3 where post_id=$1 and network=$2 and account=''
+               and not exists (select 1 from ${t} x where x.post_id=$1 and x.network=$2 and x.account=$3)`, [postId, net, account]);
 }

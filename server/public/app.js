@@ -1838,8 +1838,11 @@ async function storytellingCheck(id){ aiBusy('📖 Оцінюю пост як і
     catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } }; }
 async function loadChanStatus(){ try{ ChanStatus=await api('/channels/status'); }catch(e){ ChanStatus={}; } }
 // 👥 мережа з кількома акаунтами в бренді: яким акаунтом піде пост (обраний у пості або основний)
-function chanAcc(ch,k){ const l=((ChanStatus.accounts||{})[k])||[]; if(l.length<2) return null; const id=ch&&ch[k]&&ch[k].account;
-  const a=id?l.find(x=>x.id===id):(l.find(x=>x.main)||l[0]); return a?a.name:(id?'⚠ акаунт прибрано':null); }
+// (кілька галочками - усі через «+»; у Telegram без вибору - основні канал і група)
+function chanAcc(ch,k){ const l=((ChanStatus.accounts||{})[k])||[]; if(l.length<2) return null; const c=(ch&&ch[k])||{};
+  const ids=Array.isArray(c.accounts)&&c.accounts.length?c.accounts:(c.account?[c.account]:null);
+  if(!ids){ const m=k==='telegram'?l.filter(x=>x.main):[l.find(x=>x.main)||l[0]]; return m.filter(Boolean).map(x=>x.name).join(' + ')||null; }
+  return ids.map(id=>{ const a=l.find(x=>x.id===id); return a?a.name:'⚠ акаунт прибрано'; }).join(' + '); }
 function chanDots(ch){ if(!ch) return ''; const on=NETS.filter(n=>ch[n[0]]&&ch[n[0]].on);
   const accs=[...new Set(on.map(n=>chanAcc(ch,n[0])).filter(Boolean))];
   return on.map(n=>{ const acc=chanAcc(ch,n[0]); return '<span class="cdot" title="'+esc(n[1]+(acc?' · '+acc:''))+'" style="background:var('+NETVAR[n[0]]+')"><svg width="11" height="11" viewBox="0 0 24 24" fill="#fff"><path d="'+NETICON[n[0]]+'"></path></svg></span>'; }).join('')
@@ -2238,8 +2241,8 @@ async function refreshSentState(postId, sentSet, onState){
     (st.sent||[]).forEach(k=>sentSet.add(k));
     const links=st.links||{};
     if(onState) onState(links, st);
-    // усі надіслані мережі вже мають лінк - чекати більше нема чого
-    if(![...sentSet].some(k=>!links[k])) return;
+    // усі надіслані мережі (кожен акаунт) вже мають лінк - чекати більше нема чого
+    if(st.sentTo?!st.sentTo.some(x=>!x.link):![...sentSet].some(k=>!links[k])) return;
     await new Promise(r=>setTimeout(r,2000));
   }
 }
@@ -2285,7 +2288,8 @@ async function openComposer(postId, opts){
   let ps={sent:[],links:{}}; try{ ps=await api('/posts/'+postId+'/publish-state'); }catch(e){}
   let sentLinks=ps.links||{}; // 🔗 мережа → URL живого поста (щоб одразу перескочити й глянути)
   let sentAccs=ps.accounts||{}; // 👥 мережа → яким акаунтом пост уже вийшов
-  const sentSet=new Set(ps.sent||[]);
+  let sentTo=ps.sentTo||[];      // 👥 куди саме вийшов, акаунт за акаунтом: [{net, account, name, link, comment}]
+  const sentSet=new Set(ps.sent||[]); // мережі, куди пост уже вийшов хоч одним акаунтом
   const C=JSON.parse(JSON.stringify(full.channels||{}));
   // якщо жодна мережа не обрана - вмикаємо всі підключені й ще не надіслані
   if(!Object.keys(C).some(k=>C[k]&&C[k].on)) NETS.forEach(n=>{ if(ChanStatus[n[0]]&&!sentSet.has(n[0])){ C[n[0]]=C[n[0]]||{text:''}; C[n[0]].on=true; } });
@@ -2383,7 +2387,7 @@ async function openComposer(postId, opts){
   // C.manual_adapt=true означає «адаптацією керує людина» → сервер більше не перепаковує сам
   // (інакше мережі, які юзер свідомо лишив зі своїм текстом, все одно переписувались при публікації).
   async function adaptOne(k,btn){
-    if(sentSet.has(k)) return;
+    if(netDone(k)) return;
     if(btn) btn.disabled=true; setMsg('✨ підлаштовую під '+netName(k)+'…'); aiBusy('✨ Підлаштовую під '+netName(k)+'…');
     try{
       master=txt.value; // адаптація завжди з АКТУАЛЬНОГО майстер-тексту, а не з того, що було при відкритті
@@ -2396,29 +2400,60 @@ async function openComposer(postId, opts){
     }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); }
     finally{ if(btn) btn.disabled=false; aiDone(); }
   }
-  // 👥 кілька акаунтів однієї мережі в бренді (особистий і компанії): обрати, яким піде пост.
-  // Без вибору - основний (так і було). Обраний, але вже прибраний із бренду - червоним.
-  const ACC_NETS=['facebook','instagram','threads'];
+  // 👥 кілька акаунтів однієї мережі в бренді (особистий і компанії, кілька каналів Telegram): галочками
+  // обрати, куди піде пост, - і одразу в кілька (той самий пост у кожен). Без вибору - за замовчуванням
+  // (основний акаунт; у Telegram - основні канал і група), як і було. Обраний, але вже прибраний із
+  // бренду - червоним. Акаунт, куди пост уже вийшов, - ✓ з посиланням, решту обраних ще можна опублікувати.
+  const ACC_NETS=['facebook','instagram','threads','telegram'];
   const accList=(k)=>((ChanStatus.accounts||{})[k])||[];
   const accMain=(k)=>{ const l=accList(k); return l.find(a=>a.main)||l[0]||null; };
-  const accOf=(k)=>{ const id=C[k]&&C[k].account; if(!id) return accMain(k); return accList(k).find(a=>a.id===id)||{id,name:'⚠ акаунт прибрано з бренду',gone:true}; };
-  // як підписати акаунт у прев'ю (без @, як у самих мережах)
-  function pvUser(k){ if(sentSet.has(k)&&sentAccs[k]) return String(sentAccs[k]).replace(/^@/,''); if(!ACC_NETS.includes(k)) return 'ваш_профіль'; const a=accOf(k); return a&&!a.gone?String(a.name).replace(/^@/,''):'ваш_профіль'; }
+  const defIds=(k)=>{ if(k==='telegram') return accList(k).filter(a=>a.main).map(a=>a.id); const m=accMain(k); return m?[m.id]:[]; };
+  // обрані галочками (пост, збережений до галочок, мав одне account - це список з одного)
+  const selIds=(k)=>{ const c=C[k]||{}; const raw=Array.isArray(c.accounts)?c.accounts:(typeof c.account==='string'&&c.account?[c.account]:[]); return [...new Set(raw.map(String).filter(Boolean))]; };
+  const tgtIds=(k)=>{ const x=selIds(k); return x.length?x:defIds(k); };
+  const sentAcc=(k,id)=>sentTo.find(x=>x.net===k&&x.account===id)||null;
+  const accName=(k,id)=>{ const a=accList(k).find(x=>x.id===id); if(a) return a.name; const x=sentAcc(k,id); return (x&&x.name)||((k==='telegram'?'канал …':'акаунт …')+String(id).slice(-4)); };
+  // мережа вся надіслана: кожен акаунт, куди пост має піти, його отримав (мережа з одним акаунтом - як і було)
+  function netDone(k){ if(!ACC_NETS.includes(k)||!accList(k).length) return sentSet.has(k); const ids=tgtIds(k); return ids.length?ids.every(id=>sentAcc(k,id)):sentSet.has(k); }
+  // вибір акаунтів показуємо, коли є з чого вибирати (2+), або обраний акаунт уже прибрано з бренду
+  const multi=(k)=>ACC_NETS.includes(k)&&(accList(k).length>1||selIds(k).some(id=>!accList(k).some(a=>a.id===id)));
+  // яким акаунтом підписати прев'ю (як у самих мережах - без @): перший, куди пост піде
+  function pvUser(k){ const first=ACC_NETS.includes(k)?tgtIds(k)[0]:null;
+    if(first){ const a=accList(k).find(x=>x.id===first); if(a) return String(a.name).replace(/^@/,''); const x=sentAcc(k,first); if(x&&x.name) return String(x.name).replace(/^@/,''); }
+    if(sentSet.has(k)&&sentAccs[k]) return String(sentAccs[k]).replace(/^@/,''); return 'ваш_профіль'; }
+  // зберігаємо лише відхилення від типового: вибір «як за замовчуванням» іде за основним, навіть якщо основний потім зміниться
+  function setAccs(k,ids){ C[k]=C[k]||{text:''}; delete C[k].account; const d=defIds(k);
+    if(ids.length===d.length&&ids.every(x=>d.includes(x))) delete C[k].accounts; else C[k].accounts=ids; }
   function renderAccs(){ const box=ov.querySelector('#cmpAccs'); if(!box) return;
-    const nets=ACC_NETS.filter(k=>C[k]&&C[k].on&&(accList(k).length>1||(C[k].account&&accOf(k).gone)));
+    const nets=ACC_NETS.filter(k=>C[k]&&C[k].on&&multi(k)&&!(isStory()&&!STORY_NETS.includes(k)));
     box.style.display=nets.length?'':'none';
-    box.innerHTML=nets.map(k=>{ const lab=netName(k);
-      if(sentSet.has(k)) return '<label>'+esc(lab)+': <b style="color:var(--ink)">✓ '+esc(sentAccs[k]||'опубліковано')+'</b></label>';
-      const cur=accOf(k); const opts=accList(k).map(a=>'<option value="'+esc(a.id)+'"'+(cur&&cur.id===a.id?' selected':'')+'>'+esc(a.name)+(a.main?' (основн'+(k==='facebook'?'а':'ий')+')':'')+'</option>').join('');
-      return '<label title="Яким акаунтом '+esc(lab)+' опублікувати цей пост">'+esc(lab)+': <select data-acc="'+k+'"'+(cur&&cur.gone?' class="bad"':'')+'>'+(cur&&cur.gone?'<option value="'+esc(cur.id)+'" selected>'+esc(cur.name)+'</option>':'')+opts+'</select></label>'; }).join('');
-    box.querySelectorAll('[data-acc]').forEach(sel=>sel.onchange=()=>{ const k=sel.dataset.acc, m=accMain(k); C[k]=C[k]||{text:''};
-      if(m&&sel.value===m.id) delete C[k].account; else C[k].account=sel.value; renderAccs(); renderPrev(); }); }
+    box.innerHTML=nets.map(k=>{ const sel=tgtIds(k), list=accList(k);
+      // усі варіанти: акаунти бренду, обрані, яких уже нема (червоним), і ті, куди пост уже вийшов
+      const ids=[...new Set([...list.map(a=>a.id),...sel,...sentTo.filter(x=>x.net===k&&x.account).map(x=>x.account)])];
+      const chips=ids.map(id=>{ const a=list.find(x=>x.id===id), sn=sentAcc(k,id), on=sel.includes(id);
+        if(sn) return '<span class="accchk sent" title="Уже опубліковано цим акаунтом">✓ '+esc(accName(k,id))+(sn.link?' <a href="'+esc(sn.link)+'" target="_blank" rel="noopener" title="Відкрити пост">↗</a>':'')+'</span>';
+        if(!a) return '<button class="accchk bad on" data-acct="'+k+'" data-id="'+esc(id)+'" title="Цього акаунта вже нема в бренді - зніми галочку (або додай його знову: Налаштування → Канали)">☑ ⚠ '+esc(accName(k,id))+' - прибрано з бренду</button>';
+        return '<button class="accchk'+(on?' on':'')+'" data-acct="'+k+'" data-id="'+esc(id)+'" aria-pressed="'+on+'" title="'+(on?'Пост піде сюди - клік, щоб зняти':'Клік - опублікувати і сюди')+'">'+(on?'☑ ':'☐ ')+esc(a.name)+(a.main?' <small>основн'+(k==='facebook'?'а':'ий')+'</small>':'')+'</button>'; }).join('');
+      return '<div class="accrow"><span class="acclab">'+esc(netName(k))+(k==='telegram'?' · канали':'')+':</span>'+chips+'</div>'; }).join('')
+      +(nets.length?'<div class="acchint">Галочки - куди піде пост; кілька - той самий пост у кожен акаунт'+(nets.includes('telegram')?' чи канал':'')+'.</div>':'');
+    box.querySelectorAll('[data-acct]').forEach(b=>b.onclick=()=>{ const k=b.dataset.acct, id=b.dataset.id; let cur=tgtIds(k);
+      if(cur.includes(id)){ const rest=cur.filter(x=>x!==id);
+        // останню галочку не знімаємо: щоб пост не йшов у мережу взагалі, її вимикають угорі (там і видно).
+        // Виняток - акаунт, якого вже нема в бренді: зняли його - пост піде за замовчуванням
+        if(!rest.length){ const done=sentTo.filter(x=>x.net===k&&x.account).map(x=>x.account);
+          if(done.length) cur=done; else if(!accList(k).some(a=>a.id===id)) cur=defIds(k);
+          else { setMsg('хоч один акаунт '+netName(k)+' має лишитись - або вимкни саму мережу вгорі','var(--danger)'); return; } }
+        else cur=rest; }
+      else cur=[...cur,id];
+      setAccs(k,cur); renderChips(); renderPrev(); }); }
   function renderChips(){ const box=ov.querySelector('#cmpChips'); const thOn=!!(C.threads&&C.threads.on&&C.threads.thread);
-    box.innerHTML=NETS.map(n=>{ const k=n[0]; const on=C[k]&&C[k].on; const conn=ChanStatus[k]; const sent=sentSet.has(k);
+    box.innerHTML=NETS.map(n=>{ const k=n[0]; const on=C[k]&&C[k].on; const conn=ChanStatus[k];
+      // sent - пост уже вийшов у мережу хоч одним акаунтом (мережу вже не зняти); done - усіма обраними
+      const sent=sentSet.has(k), done=netDone(k);
       const storyOff=isStory()&&!STORY_NETS.includes(k); // сторіс - лише Instagram і Facebook
       const dimmed=(thOn&&k!=='threads')||storyOff; // режим гілки: серія їде ЛИШЕ в Threads, решта мереж затінені
       const own=hasOwn(k);             // у мережі вже є СВОЯ версія тексту
-      const segOff=!conn||sent||dimmed||!on;
+      const segOff=!conn||done||dimmed||!on;
       // ✨ = підлаштувати САМЕ цю мережу; ↺ (лише коли є своя версія) = вернути мій текст.
       // Коли ↺ показано, ✨ втрачає скруглення справа - вони виглядають однією складеною кнопкою.
       const seg='<button class="netseg'+(own?' has':'')+'" data-adapt="'+k+'"'+(segOff?' disabled':'')
@@ -2428,14 +2463,14 @@ async function openComposer(postId, opts){
       // Мережа УВІМКНЕНА, але не підключена (пост із бота/плану чи канал відключили): чіп мусить лишатись
       // клікабельним, щоб її можна було ЗНЯТИ - інакше «не можу зняти Telegram» (фідбек тестера).
       const lockOff=sent||dimmed||(!conn&&!on);
-      const chip='<button class="netchip'+(on&&!dimmed?' on':'')+(on&&!conn?' warn':'')+'" data-net="'+k+'"'+(lockOff?' disabled':'')+' style="'+(dimmed?'opacity:.35':'')+'" title="'+(sent?'вже опубліковано':(storyOff?'сторіс через API приймають лише Instagram і Facebook':(dimmed?'у режимі гілки пост їде лише в Threads (вимкни 🧵, щоб обрати інші мережі)':(conn?'':(on?'мережа не підключена - клік, щоб зняти її з поста':'не підключено')))))+'">'+(sent?'✓ ':'')+(on&&!conn?'⚠ ':'')+n[1]+'</button>';
+      const chip='<button class="netchip'+(on&&!dimmed?' on':'')+(on&&!conn?' warn':'')+'" data-net="'+k+'"'+(lockOff?' disabled':'')+' style="'+(dimmed?'opacity:.35':'')+'" title="'+(sent?(done?'вже опубліковано':'опубліковано не в усі обрані акаунти - решту можна опублікувати'):(storyOff?'сторіс через API приймають лише Instagram і Facebook':(dimmed?'у режимі гілки пост їде лише в Threads (вимкни 🧵, щоб обрати інші мережі)':(conn?'':(on?'мережа не підключена - клік, щоб зняти її з поста':'не підключено')))))+'">'+(sent?(done?'✓ ':'◐ '):'')+(on&&!conn?'⚠ ':'')+n[1]+'</button>';
       return '<span class="netgrp">'+chip+seg+rev+'</span>'; }).join('');
     box.querySelectorAll('.netchip').forEach(b=>{ if(b.disabled) return; b.onclick=()=>{ const k=b.dataset.net; C[k]=C[k]||{text:''}; C[k].on=!C[k].on; renderChips(); renderPrev(); if(isVideo()) renderMedia(); }; });
     box.querySelectorAll('[data-adapt]').forEach(b=>{ if(b.disabled) return; b.onclick=()=>adaptOne(b.dataset.adapt,b); });
     box.querySelectorAll('[data-revert]').forEach(b=>{ b.onclick=()=>{ const k=b.dataset.revert; if(C[k]) C[k].text=''; C.manual_adapt=true; renderChips(); renderPrev(); setMsg('вернув твій текст для '+netName(k)+' ✓','var(--brand)'); }; });
     // 🧵 режим «Гілкою»: серія повʼязаних постів (root-гачок + відповіді) з ПОВНОГО тексту
     const tw=ov.querySelector('#cmpThreadWrap');
-    if(tw){ const showTh=C.threads&&C.threads.on&&!sentSet.has('threads')&&!isStory(); tw.style.display=showTh?'':'none';
+    if(tw){ const showTh=C.threads&&C.threads.on&&!netDone('threads')&&!isStory(); tw.style.display=showTh?'':'none';
       const tb=ov.querySelector('#cmpThread'), nb=ov.querySelector('#cmpThreadNum'), hint=ov.querySelector('#cmpThreadHint');
       tb.classList.toggle('on',thOn);
       nb.style.display=thOn?'':'none'; nb.classList.toggle('on',thOn&&C.threads.number!==false);
@@ -2456,7 +2491,7 @@ async function openComposer(postId, opts){
   let storySnap=null; // вибір мереж до переходу в сторіс (вертається, якщо формат змінити назад)
   function isVideo(){ return !isStory()&&media.length===1&&media[0].kind==='video'; }
   // межі мереж для відео - показуємо ДО публікації, для тих мереж, що обрані на пості
-  function videoWarn(v){ const on=(k)=>C[k]&&C[k].on&&!sentSet.has(k); const w=[]; const mb=v.size?Math.round(v.size/1048576):0, d=Number(v.duration)||0;
+  function videoWarn(v){ const on=(k)=>C[k]&&C[k].on&&!netDone(k); const w=[]; const mb=v.size?Math.round(v.size/1048576):0, d=Number(v.duration)||0;
     if(on('telegram')&&v.size>50*1048576) w.push('Telegram не прийме відео понад 50 МБ (це '+mb+' МБ) - стисни його або зніми Telegram');
     if(on('threads')&&d>300) w.push('Threads приймає відео до 5 хв');
     if(on('instagram')&&d&&(d<3||d>900)) w.push('Instagram Reels - від 3 с до 15 хв');
@@ -2537,7 +2572,7 @@ async function openComposer(postId, opts){
       renderFc(); return; }
     if(!sel.length){ box.innerHTML='<div style="font-size:12px;color:var(--muted);text-align:center">Обери канал ліворуч.</div>'; renderFc(); return; }
     const av=(($('avatar')&&$('avatar').textContent)||'В').slice(0,2);
-    box.innerHTML=sel.map(n=>{ const k=n[0]; const t=textOf(k); const lim=NETLIM[k]||2200; const over=t.length>lim; const sent=sentSet.has(k);
+    box.innerHTML=sel.map(n=>{ const k=n[0]; const t=textOf(k); const lim=NETLIM[k]||2200; const over=t.length>lim; const sent=netDone(k);
       const img=pvMedia(k);
       const cnt=sent?'<span style="margin-left:auto;font-size:11px;font-weight:800;color:var(--brand)">✓</span>':'<span class="cmp-cnt" style="margin-left:auto;color:'+(over?'var(--danger)':'var(--faint)')+'">'+t.length+'/'+lim+'</span>';
       const who=pvUser(k); // 👥 акаунт, яким пост піде (кілька акаунтів однієї мережі)
@@ -2563,9 +2598,13 @@ async function openComposer(postId, opts){
       const auto=!sent&&!C.manual_adapt&&!hasOwn(k)
         ? '<div class="pv-note">✨ при публікації текст спакується під цю мережу автоматично. Хочеш керувати сам - тисни ✨ на каналі</div>' : '';
       const ownMark=hasOwn(k)?'<div class="pv-note" style="color:var(--brand)">✨ своя версія для цієї мережі (↺ на каналі - вернути твій текст)</div>':'';
+      // 👥 кілька акаунтів мережі: куди саме піде пост (✓ з посиланням - куди вже вийшов)
+      const ids=ACC_NETS.includes(k)?[...new Set([...tgtIds(k),...sentTo.filter(x=>x.net===k&&x.account).map(x=>x.account)])]:[];
+      const accLine=ids.length>1?'<div class="pv-accs">'+(k==='telegram'?'✈️ у канали: ':'👥 піде від: ')+ids.map(id=>{ const sn=sentAcc(k,id);
+        return sn?(sn.link?'<a href="'+esc(sn.link)+'" target="_blank" rel="noopener" title="Відкрити пост">✓ '+esc(accName(k,id))+' ↗</a>':'<b>✓ '+esc(accName(k,id))+'</b>'):'<span>'+esc(accName(k,id))+'</span>'; }).join(' · ')+'</div>':'';
       // 🔗 щойно мережа опублікована - поруч із її плашкою зʼявляється лінк на живий пост
-      const open=sentLinks[k]?'<a href="'+esc(sentLinks[k])+'" target="_blank" rel="noopener" class="pv-open" title="Відкрити пост у '+esc(n[1])+'">↗ Відкрити пост</a>':'';
-      return '<div class="pv-label" style="background:var('+NETVAR[k]+')">'+n[1]+'</div>'+open+'<div class="phone">'+body+pvFc(k,av)+'</div>'+auto+ownMark; }).join('');
+      const open=(!accLine&&sentLinks[k])?'<a href="'+esc(sentLinks[k])+'" target="_blank" rel="noopener" class="pv-open" title="Відкрити пост у '+esc(n[1])+'">↗ Відкрити пост</a>':'';
+      return '<div class="pv-label" style="background:var('+NETVAR[k]+')">'+n[1]+'</div>'+open+accLine+'<div class="phone">'+body+pvFc(k,av)+'</div>'+auto+ownMark; }).join('');
     box.querySelectorAll('[data-more]').forEach(el=>el.onclick=()=>{ _pvExp.add(el.dataset.more); renderPrev(); });
     // 💬 свій текст коментаря / без коментаря в цій мережі / назад до спільного
     box.querySelectorAll('[data-fcedit]').forEach(a=>a.onclick=()=>{ const k=a.dataset.fcedit; const v=prompt('Перший коментар для '+netName(k)+' (порожньо = без коментаря в цій мережі):', fcOf(k)||fcMaster.trim()); if(v===null) return; C[k]=C[k]||{text:''}; C[k].first_comment=v.trim(); renderPrev(); });
@@ -2590,6 +2629,13 @@ async function openComposer(postId, opts){
   // свій текст мережі (рядок, порожній = без коментаря тут) або спільний; у сторіс і Telegram - нема
   function fcOwn(k){ return !!(C[k]&&typeof C[k].first_comment==='string'); }
   function fcOf(k){ if(!FC_NETS.includes(k)||isStory()) return ''; return String(fcOwn(k)?C[k].first_comment:fcMaster).trim(); }
+  // 💬 коментар іде під КОЖНОЮ публікацією мережі (кілька акаунтів - кілька коментарів, кожен від свого)
+  function fcList(k){ return sentTo.filter(x=>x.net===k&&x.comment).map(x=>({name:accName(k,x.account),cs:x.comment})); }
+  // один підсумок мережі: збій важить більше за очікування, очікування - більше за «✓»
+  function fcAgg(k){ const l=fcList(k); if(!l.length) return null; const pre=(x)=>l.length>1?x.name+': ':'';
+    const bad=l.find(x=>x.cs.status==='failed'); if(bad) return {...bad.cs,error:pre(bad)+(bad.cs.error||'')};
+    const wait=l.find(x=>x.cs.status!=='sent'); if(wait) return {...wait.cs,error:wait.cs.error?pre(wait)+wait.cs.error:wait.cs.error};
+    return {status:'sent'}; }
   function fcStateHtml(cs){ if(!cs) return '';
     if(cs.status==='sent') return '<span style="color:var(--brand);font-weight:700">✓ опубліковано</span>';
     if(cs.status==='failed') return '<span style="color:var(--danger)">⚠ не вийшов: '+esc(cs.error||'')+'</span>';
@@ -2598,9 +2644,10 @@ async function openComposer(postId, opts){
   function pvFc(k,av){
     if(isStory()) return '';
     if(!FC_NETS.includes(k)) return (k==='telegram'&&fcMaster.trim())?'<div class="pv-fc-off">💬 у Telegram коментар не піде: коментарі каналу живуть в окремій групі обговорення, бот туди не пише</div>':'';
-    const own=fcOwn(k), t=fcOf(k), cs=cmStates.find(x=>x.network===k);
+    const own=fcOwn(k), t=fcOf(k), cs=fcAgg(k), per=fcList(k);
     if(!t&&!own&&!cs) return '';
-    const lim=FC_MAX[k], st=fcStateHtml(cs);
+    // кілька акаунтів: стан коментаря під кожним постом окремо
+    const lim=FC_MAX[k], st=per.length>1?per.map(x=>esc(x.name)+' '+(x.cs.status==='sent'?'✓':x.cs.status==='failed'?'⚠':'⏳')).join(' · '):fcStateHtml(cs);
     const bubble=t
       ?'<div class="pv-fc"><span class="phone-av">'+esc(av)+'</span><div class="pv-fc-t"><b>'+esc(pvUser(k))+'</b>'+(k==='threads'?' · відповідь':'')+'<br>'+esc(t)
         +(t.length>lim?'<div style="color:var(--danger);font-size:10.5px">'+t.length+'/'+lim+' - задовгий для '+netName(k)+'</div>':'')
@@ -2620,33 +2667,34 @@ async function openComposer(postId, opts){
     if(cnt){ if(m&&withMaster.length){ const k=withMaster.reduce((a,b)=>FC_MAX[a]<=FC_MAX[b]?a:b); cnt.textContent=m.length+'/'+FC_MAX[k]+' ('+netName(k)+')'; cnt.style.color=m.length>FC_MAX[k]?'var(--danger)':'var(--faint)'; } else cnt.textContent=''; }
     ov.querySelector('#cmpFcNets').innerHTML=sel.map(k=>{
       if(!FC_NETS.includes(k)) return m?'<span class="fcchip off" title="Коментарі каналу Telegram живуть в окремій групі обговорення - бот туди не пише">'+netName(k)+'</span>':'';
-      const cs=cmStates.find(x=>x.network===k), t=fcOf(k), own=fcOwn(k);
+      const cs=fcAgg(k), t=fcOf(k), own=fcOwn(k);
       if(cs&&cs.status==='sent') return '<span class="fcchip ok" title="Коментар уже під постом">💬✓ '+netName(k)+'</span>';
       if(cs&&cs.status==='failed') return '<span class="fcchip bad" title="'+esc(cs.error||'')+'">⚠ '+netName(k)+'</span>';
       if(!t) return (m||own)?'<span class="fcchip off" title="У цій мережі без коментаря">'+netName(k)+'</span>':'';
       return '<span class="fcchip" title="'+(own?'свій текст для цієї мережі':'спільний текст')+'">'+(own?'✎ ':'✓ ')+netName(k)+(k==='threads'?' (відповіддю)':'')+'</span>'; }).join('');
     let html='';
-    const needMeta=sel.filter(k=>(k==='instagram'||k==='facebook')&&fcOf(k)&&!cmStates.some(x=>x.network===k&&x.status==='sent'));
+    const needMeta=sel.filter(k=>(k==='instagram'||k==='facebook')&&fcOf(k)&&!(fcAgg(k)&&fcAgg(k).status==='sent'));
     if(needMeta.length&&metaInfo&&metaInfo.extras&&metaInfo.extras.comments===false)
       html+='<div style="color:var(--amber)">⚠ '+needMeta.map(netName).join(' і ')+' ще не дали дозволу на коментарі: пост вийде, а коментар - ні. <a href="#" data-fcperm="1" style="color:var(--brand)">💬 Дозволити коментарі</a></div>';
     // пост уже вийшов, а коментаря нема (дописали пізніше, не було дозволу, збій) - можна надіслати
-    const missing=[...sentSet].filter(k=>FC_NETS.includes(k)&&fcOf(k)&&!cmStates.some(x=>x.network===k&&(x.status==='sent'||x.status==='sending')));
-    if(missing.length) html+='<div style="margin-top:6px"><button class="dashbtn" id="cmpFcSend">↻ Надіслати коментар ('+missing.map(netName).join(', ')+')</button></div>';
+    // (по кожній публікації: пост вийшов двома акаунтами - коментар потрібен під обома)
+    const missing=sentTo.filter(x=>FC_NETS.includes(x.net)&&fcOf(x.net)&&!(x.comment&&(x.comment.status==='sent'||x.comment.status==='sending')));
+    if(missing.length) html+='<div style="margin-top:6px"><button class="dashbtn" id="cmpFcSend">↻ Надіслати коментар ('+[...new Set(missing.map(x=>netName(x.net)+(multi(x.net)?' · '+accName(x.net,x.account):'')))].join(', ')+')</button></div>';
     const st=ov.querySelector('#cmpFcState'); st.innerHTML=html;
     const pb=st.querySelector('[data-fcperm]'); if(pb) pb.onclick=(e)=>{ e.preventDefault(); connectPopup('/api/integrations/meta/connect?add=comments'); };
     const sb=st.querySelector('#cmpFcSend'); if(sb) sb.onclick=sendComments; }
   // поки коментар «надсилається» (а не чекає запланованого повтору) - перечитуємо стан, до ~45 с
   async function pollComments(){
     for(let i=0;i<15;i++){ let st=null; try{ st=await api('/posts/'+postId+'/publish-state'); }catch(e){ return; }
-      cmStates=st.comments||[]; if(st.links) sentLinks=st.links; renderPrev();
+      cmStates=st.comments||[]; if(st.sentTo) sentTo=st.sentTo; if(st.links) sentLinks=st.links; renderPrev();
       if(!cmStates.some(x=>x.status==='sending'||(x.status==='pending'&&!x.error))) return;
       await new Promise(r=>setTimeout(r,3000)); } }
   async function sendComments(){ const b=ov.querySelector('#cmpFcSend'); if(b) b.disabled=true; setMsg('💬 надсилаю коментар…');
     try{ await saveDraft(); const r=await api('/posts/'+postId+'/first-comment/send',{method:'POST'});
       if(!r.queued||!r.queued.length){ setMsg('нема чого надсилати'+(r.sent&&r.sent.length?' (коментар уже під постом)':''),'var(--muted)'); return; }
       await pollComments();
-      const bad=cmStates.filter(x=>r.queued.includes(x.network)&&x.status!=='sent');
-      setMsg(bad.length?'⚠ '+bad.map(x=>netName(x.network)+': '+(x.error||'ще надсилається')).join('; '):'💬 коментар під постом ✓', bad.length?'var(--danger)':'var(--brand)');
+      const bad=sentTo.filter(x=>r.queued.includes(x.net)&&x.comment&&x.comment.status!=='sent');
+      setMsg(bad.length?'⚠ '+bad.map(x=>netName(x.net)+(multi(x.net)?' · '+accName(x.net,x.account):'')+': '+(x.comment.error||'ще надсилається')).join('; '):'💬 коментар під постом ✓', bad.length?'var(--danger)':'var(--brand)');
     }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } finally{ renderPrev(); } }
   const collabIn=ov.querySelector('#cmpCollab'); collabIn.value=collabList().map(u=>'@'+u).join(', ');
   collabIn.addEventListener('input',()=>{ const r=parseCollab(collabIn.value); C.instagram=C.instagram||{on:false};
@@ -2737,7 +2785,10 @@ async function openComposer(postId, opts){
   // формат «Карусель», а кадрів ще нема: інакше сценарій «Слайд 1…Слайд 10» піде підписом під одним фото
   const carouselNotBuilt=()=>{ const fv=ov.querySelector('#cmpFormat'); return fv&&fv.value==='carousel'&&media.length<2; };
   const carGuard=()=>(isStory()&&!media.length)?confirm('У сторіс немає жодного кадру - публікація не вийде. Додай фото/відео або «🎨 Зібрати кадри».\n\nВсе одно продовжити?'):!carouselNotBuilt()||confirm('Це карусель, але кадрів ще не зібрано (є '+media.length+').\n\nНатисни «🎨 Зібрати слайди» - тоді сценарій стане кадрами, а текст поста підписом.\n\nОпублікувати як звичайний пост?');
-  ov.querySelector('#cmpNow').onclick=async(e)=>{ const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('усі обрані канали вже опубліковано','var(--danger)'); return; } if(!carGuard()) return; const b=e.target; b.disabled=true;
+  // «Facebook (Rozum.one)» - коли в публікації кілька акаунтів мережі, результат називає кожен
+  const resLbl=(x)=>x.channel+(x.accountName?' ('+x.accountName+')':'');
+  const onSent=(l,st)=>{ sentLinks=l; if(st&&st.comments) cmStates=st.comments; if(st&&st.sentTo) sentTo=st.sentTo; if(st&&st.accounts) sentAccs=st.accounts; renderChips(); renderPrev(); };
+  ov.querySelector('#cmpNow').onclick=async(e)=>{ const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!netDone(k)); if(!todo.length){ setMsg('усі обрані канали вже опубліковано','var(--danger)'); return; } if(!carGuard()) return; const b=e.target; b.disabled=true;
     try{
       // Авто-перепаковка мереж без власної версії - АЛЕ лише поки адаптацією не почала керувати
       // людина. Щойно юзер підлаштував (чи вернув ↺) хоч одну мережу вручну, прев'ю = істина:
@@ -2757,18 +2808,18 @@ async function openComposer(postId, opts){
           missing.forEach(k=>{ const v=ra.channels&&ra.channels[k]; if(v&&v.text) C[k]={...(C[k]||{}),on:true,text:v.text}; }); renderPrev();
         } finally { aiDone(); } }
     }catch(_){ /* адаптація не критична - публікуємо майстер-текстом */ }
-    setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const res=await runPublish(postId,setMsg); const ok=res.filter(x=>x.status==='sent').map(x=>x.channel); const err=res.filter(x=>x.status==='error'); ok.forEach(k=>sentSet.add(k)); await refreshSentState(postId,sentSet,(l,st)=>{ sentLinks=l; if(st&&st.comments) cmStates=st.comments; if(st&&st.accounts) sentAccs=st.accounts; renderChips(); renderPrev(); }); renderChips(); renderPrev();
+    setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const res=await runPublish(postId,setMsg); const sentRes=res.filter(x=>x.status==='sent'); const ok=sentRes.map(resLbl); const err=res.filter(x=>x.status==='error'); sentRes.forEach(x=>sentSet.add(x.channel)); await refreshSentState(postId,sentSet,onSent); renderChips(); renderPrev();
       // 💬 перший коментар: окремий рядок - пост уже в мережі, навіть якщо коментар ні
       const cm=res.filter(x=>x.comment); const cmBad=cm.filter(x=>x.comment.status!=='sent');
-      const cmTxt=cm.length?(' · 💬 '+cm.map(x=>x.channel+(x.comment.status==='sent'?' ✓':x.comment.status==='pending'?' ⏳':' ⚠')).join(', ')):'';
-      const notes=res.filter(x=>x.status==='sent'&&x.note).map(x=>x.channel+': '+x.note);
-      setMsg((ok.length?'✓ '+ok.join(', '):'')+cmTxt+(err.length?' ⚠ '+err.map(x=>x.channel+': '+x.error).join('; '):'')+(cmBad.length?' · коментар: '+cmBad.map(x=>x.channel+': '+(x.comment.error||'надсилається')).join('; '):'')+(notes.length?' · ⚠ '+notes.join('; '):''), (err.length||notes.length||cmBad.some(x=>x.comment.status==='failed'))?'var(--danger)':'var(--brand)');
+      const cmTxt=cm.length?(' · 💬 '+cm.map(x=>resLbl(x)+(x.comment.status==='sent'?' ✓':x.comment.status==='pending'?' ⏳':' ⚠')).join(', ')):'';
+      const notes=res.filter(x=>x.status==='sent'&&x.note).map(x=>resLbl(x)+': '+x.note);
+      setMsg((ok.length?'✓ '+ok.join(', '):'')+cmTxt+(err.length?' ⚠ '+err.map(x=>resLbl(x)+': '+x.error).join('; '):'')+(cmBad.length?' · коментар: '+cmBad.map(x=>resLbl(x)+': '+(x.comment.error||'надсилається')).join('; '):'')+(notes.length?' · ⚠ '+notes.join('; '):''), (err.length||notes.length||cmBad.some(x=>x.comment.status==='failed'))?'var(--danger)':'var(--brand)');
       if(cmStates.some(x=>x.status==='sending'||(x.status==='pending'&&!x.error))) pollComments(); if(ok.length&&!err.length) flash('Опубліковано ✓ Якщо пост залетить - 🔥 на картці дасть 5 кутів продовження'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)');
       // навіть при збої частина мереж могла пройти - перечитуємо ФАКТИЧНИЙ стан, щоб інтерфейс
       // не показував «не опубліковано» на пості, який уже вийшов
-      try{ await refreshSentState(postId,sentSet,(l,st)=>{ sentLinks=l; if(st&&st.comments) cmStates=st.comments; if(st&&st.accounts) sentAccs=st.accounts; renderChips(); renderPrev(); }); }catch(_){ }
+      try{ await refreshSentState(postId,sentSet,onSent); }catch(_){ }
     } finally{ b.disabled=false; aiDone(); } };
-  ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ setMsg('вкажи дату й час','var(--danger)'); return; } const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!sentSet.has(k)); if(!todo.length){ setMsg('немає каналів для планування (усі вже опубліковано)','var(--danger)'); return; } if(!carGuard()) return; const b=e.target; b.disabled=true; setMsg('🗓 зберігаю…'); const at=zonedToUTCISO(d,t); try{ await saveDraft(); if(opts.slotId){ await scheduleApi('/schedule/'+opts.slotId,'PUT',{scheduledAt:at}); } else { await scheduleApi('/schedule','POST',{postId,scheduledAt:at}); } setMsg('заплановано ✓ ('+todo.join(', ')+')','var(--brand)'); try{await loadPublish();}catch(_){} try{await loadStudioPosts();}catch(_){} setTimeout(close,1000); }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); b.disabled=false; } };
+  ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ setMsg('вкажи дату й час','var(--danger)'); return; } const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!netDone(k)); if(!todo.length){ setMsg('немає каналів для планування (усі вже опубліковано)','var(--danger)'); return; } if(!carGuard()) return; const b=e.target; b.disabled=true; setMsg('🗓 зберігаю…'); const at=zonedToUTCISO(d,t); try{ await saveDraft(); if(opts.slotId){ await scheduleApi('/schedule/'+opts.slotId,'PUT',{scheduledAt:at}); } else { await scheduleApi('/schedule','POST',{postId,scheduledAt:at}); } setMsg('заплановано ✓ ('+todo.join(', ')+')','var(--brand)'); try{await loadPublish();}catch(_){} try{await loadStudioPosts();}catch(_){} setTimeout(close,1000); }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); b.disabled=false; } };
 }
 // двокроковий редактор фото поста: крок 1 - джерело (галерея/завантаження/генерація) + формат (кроп),
 // крок 2 - текст на фото (шрифт/місце/фон, безкоштовне перенакладання) + перегенерація з коментарем
@@ -3279,7 +3330,35 @@ $('newRun').onclick=()=>{
 $('logoutBtn').onclick=async()=>{ try{ await api('/auth/logout',{method:'POST'}); }catch(e){} location.href='/login'; };
 
 // ---------- Telegram / Threads / Meta ----------
-async function loadTelegram(){ try{ const c=await api('/integrations/telegram'); $('tgChannel').value=c.channelChatId||''; $('tgGroup').value=c.groupChatId||''; if(c.hasToken) $('tgToken').placeholder='•••••••• (токен збережено - лиши порожнім, щоб не міняти)'; if($('tgSharedBox')) $('tgSharedBox').style.display=c.sharedBot?'block':'none';
+// 📣 кілька каналів і груп Telegram у бренді: список (основні - куди пост іде без вибору), «＋ Додати
+// канал» за @назвою (бот має бути там адміном - сервер перевіряє одразу), «＋ Через бота» для приватного
+// каналу без назви (переслати боту пост) і «Прибрати» з попередженням про пости, що обрали цей канал
+function renderTgChats(c){ const box=$('tgChatsBox'); if(!box) return; box.style.display=c.hasToken?'':'none'; if(!c.hasToken) return;
+  const list=c.chats||[];
+  $('tgChats').innerHTML=list.length?list.map(t=>'<div class="acc-row"><span class="nm">'+esc(t.name)+'</span><span class="sub">'+(t.kind==='group'?'група':'канал')+(t.username?' · @'+esc(t.username):'')+'</span>'+(t.main?'<span class="tag">основн'+(t.kind==='group'?'а':'ий')+'</span>':'')
+    +(t.posts?'<span class="sub">'+t.posts+' '+anPlural(t.posts,'пост чекає','пости чекають','постів чекають')+' на нього</span>':'')+'<span class="sp"></span>'
+    +'<button class="ghost" data-tgrm="'+esc(t.id)+'" data-nm="'+esc(t.name)+'" data-n="'+(t.posts||0)+'">Прибрати</button></div>').join('')
+    :'<div class="hint">Каналу ще нема - додай нижче.</div>';
+  const via=$('tgChatViaBot'); if(via) via.style.display=(c.sharedBot&&c.sharedDm!==false)?'':'none';
+  $('tgChats').querySelectorAll('[data-tgrm]').forEach(b=>b.onclick=async()=>{ const n=+b.dataset.n;
+    if(!confirm('Прибрати «'+b.dataset.nm+'» з бренду? Бот перестане туди публікувати (уже опубліковане лишиться в каналі).'+(n?'\n\n'+n+' '+anPlural(n,'пост обрав','пости обрали','постів обрали')+' саме цей канал - туди вони не вийдуть, поки не обереш інший.':''))) return;
+    b.disabled=true;
+    try{ const r=await api('/integrations/telegram/chats/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chatId:b.dataset.tgrm})});
+      flash('Канал прибрано'+(r.result==='main'?' · основним став наступний':''));
+      await loadTelegram(); loadChanStatus(); }catch(e){ flash('⚠ '+e.message); b.disabled=false; } }); }
+if($('tgChatAdd')) $('tgChatAdd').onclick=async()=>{ const m=$('tgChatMsg'), v=$('tgChatIn').value.trim();
+  if(!v){ m.style.color='var(--danger)'; m.textContent='впиши @назву каналу'; return; }
+  m.style.color='var(--muted)'; m.textContent='перевіряю…'; $('tgChatAdd').disabled=true;
+  try{ const r=await api('/integrations/telegram/chats',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat:v})}); $('tgChatIn').value='';
+    m.style.color='var(--brand)'; m.textContent=r.result==='added'?'✓ «'+r.chat.name+'» додано':r.result==='main'?'✓ «'+r.chat.name+'» підключено основним':'«'+r.chat.name+'» уже в бренді';
+    await loadTelegram(); loadChanStatus(); }
+  catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } finally{ $('tgChatAdd').disabled=false; } };
+if($('tgChatViaBot')) $('tgChatViaBot').onclick=async()=>{ const m=$('tgChatMsg'); m.style.color='var(--muted)'; m.textContent='…';
+  try{ const r=await api('/integrations/telegram/connect-link',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({add:true})});
+    m.style.color='var(--ink2)'; m.innerHTML='1) Відкрий <a href="'+esc(r.link)+'" target="_blank" rel="noopener"><b>@'+esc(r.bot)+'</b></a> → Start. 2) Додай бота адміном у новий канал. 3) Перешли боту будь-який пост цього каналу - він додасться до бренду, основний лишиться. Потім онови сторінку.';
+    window.open(r.link,'_blank'); }
+  catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
+async function loadTelegram(){ try{ const c=await api('/integrations/telegram'); renderTgChats(c); $('tgChannel').value=c.channelChatId||''; $('tgGroup').value=c.groupChatId||''; if(c.hasToken) $('tgToken').placeholder='•••••••• (токен збережено - лиши порожнім, щоб не міняти)'; if($('tgSharedBox')) $('tgSharedBox').style.display=c.sharedBot?'block':'none';
   // спільний бот є, але його DM мертві на цьому інстансі (бета) - кажемо це ДО кліку, а кнопку
   // підключення глушимо: інакше вона видає посилання, яке нікуди не веде
   const off=c.sharedBot&&c.sharedDm===false; if($('tgSharedOff')) $('tgSharedOff').style.display=off?'block':'none';
