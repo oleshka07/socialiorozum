@@ -1,9 +1,8 @@
 name: beta-check
 
 # Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ, нічого не змінює й не перезапускає.
-# 28.09, 14:45 UTC: Google для беті вже приймає адреси; Олег щойно підключив Threads на беті й тисне
-# «Дозволити статистику» (Meta). Дивимось, чим закінчився колбек Meta і які дозволи Meta реально дала
-# (meta_config.granted - лише назви дозволів, без токенів).
+# 28.09, 16:00 UTC: Олег опублікував на беті тестовий пост із першим коментарем (FB/IG). Дивимось, що
+# пішло в мережі, чим закінчився перший коментар і чи зібралась статистика Facebook (read_insights).
 
 on:
   push:
@@ -23,61 +22,42 @@ jobs:
           command_timeout: 4m
           script: |
             mask() { sed -E -e 's/([A-Za-z0-9._%+-]{1,3})[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+)/\1***@\2/g' \
-                            -e 's/[0-9a-fA-F]{24,}/<hex>/g' -e 's/[0-9]{6,}:[A-Za-z0-9_-]{30,}/<bot-token>/g' \
                             -e 's/EAA[A-Za-z0-9]{20,}/<meta-token>/g' -e 's/TH[A-Za-z0-9]{40,}/<th-token>/g' \
                             -e 's/((^|[?&])(code|state|access_token|client_secret)=)[^&" ]+/\1<x>/g'; }
-            enc() { printf '%s' "$1" | sed -e 's/%/%25/g' -e 's/:/%3A/g' -e 's#/#%2F#g' -e 's/?/%3F/g' -e 's/=/%3D/g' -e 's/&/%26/g'; }
-            short() { echo "$1" | sed -E 's/^([0-9]+)-[a-z0-9]+(\.apps\.googleusercontent\.com)$/\1-…\2/'; }
-            UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36'
-            T=$(mktemp -d)
-            echo "prod HEAD $(git -C "${{ secrets.APP_DIR }}" rev-parse --short HEAD) | beta HEAD $(git -C "${{ secrets.APP_DIR }}-beta" rev-parse --short HEAD) | зараз $(date -u +%H:%M) UTC"
-            echo "=== Google: яким клієнтом входять прод і бета ==="
-            GP=$(curl -sS -m 15 -D - -o /dev/null https://holos.rozum.one/api/auth/google | grep -i '^location:' | tr -d '\r')
-            CIDP=$(echo "$GP" | grep -oE 'client_id=[^&]+' | head -1 | cut -d= -f2)
-            J=$(mktemp)
-            curl -sS -m 15 -c $J -o /dev/null -H 'content-type: application/json' -d '{"pin":"2345"}' https://beta.holos.rozum.one/beta-pin
-            GB=$(curl -sS -m 15 -b $J -D - -o /dev/null https://beta.holos.rozum.one/api/auth/google | grep -i '^location:' | tr -d '\r')
-            CIDB=$(echo "$GB" | grep -oE 'client_id=[^&]+' | head -1 | cut -d= -f2)
-            rm -f $J
-            echo "прод: $(short "$CIDP")"
-            echo "бета: $(short "$CIDB") $( [ -n "$CIDB" ] && [ "$CIDB" = "$CIDP" ] && echo '(той самий клієнт, що на проді)' || echo '(ІНШИЙ клієнт)')"
-            echo "бета шле redirect_uri: $(echo "$GB" | grep -oE 'redirect_uri=[^&]+' | head -1)"
-            if [ -n "$CIDB" ]; then
-              for R in https://beta.holos.rozum.one https://beta.socialio.rozum.one https://holos.rozum.one https://example.org; do
-                for P in /api/auth/google/callback /api/integrations/gdrive/callback /api/integrations/youtube/callback; do
-                  U="https://accounts.google.com/o/oauth2/v2/auth?client_id=$CIDB&redirect_uri=$(enc "$R$P")&response_type=code&scope=openid&state=diag"
-                  curl -sS -m 20 -A "$UA" -H 'Accept-Language: en-US,en;q=0.9' -D $T/h -o $T/b "$U" >/dev/null 2>&1 || true
-                  L=$(grep -i '^location:' $T/h | head -1 | tr -d '\r' | grep -oE 'accounts\.google\.com/[a-zA-Z0-9/_.-]+' | head -1)
-                  V="?"; echo "$L" | grep -q 'signin/oauth/error' && V="НЕ ПРИЙМАЄ"; echo "$L" | grep -qE 'signin/identifier|v3/signin' && V="приймає"
-                  if [ "$V" = "?" ]; then V="? $(head -1 $T/h | tr -d '\r') $L $(grep -oE 'redirect_uri_mismatch|invalid_client|deleted_client' $T/b | head -1)"; fi
-                  echo "  клієнт беті ← $R$P: $V"
-                done
-              done
-            fi
-            echo; echo "=== журнал підключень на беті (з 14:00 UTC, час Праги) ==="
+            echo "beta HEAD $(git -C "${{ secrets.APP_DIR }}-beta" rev-parse --short HEAD) | зараз $(date -u +%H:%M) UTC"
             cd "${{ secrets.APP_DIR }}-beta/server" && docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -v ON_ERROR_STOP=0' <<'SQL' 2>&1 | mask
             set session characteristics as transaction read only;
-            select to_char(l.created_at at time zone 'Europe/Prague','DD.MM HH24:MI:SS') as t, l.level, l.scope,
-                   left(regexp_replace(l.message,'\s+',' ','g'),150) as msg, l.meta->>'code' as code, u.email
-              from app_log l left join app_user u on u.id = l.user_id
-             where l.created_at > date_trunc('day', now() at time zone 'UTC') at time zone 'UTC' + interval '14 hours'
-               and l.scope in ('meta','threads','linkedin','google','gdrive','youtube','auth','oauth')
+            \echo === публікації в мережі (3 год, Прага) ===
+            with ws as (select m.workspace_id id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%'),
+                 pub as (select 'meta:'||channel as net, post_id, status, error, created_at, permalink from meta_publish
+                         union all select 'threads', post_id, status, error, created_at, permalink from threads_publish
+                         union all select 'telegram', post_id, status, error, created_at, permalink from telegram_publish
+                         union all select 'linkedin', post_id, status, error, created_at, permalink from linkedin_publish)
+            select to_char(x.created_at at time zone 'Europe/Prague','DD.MM HH24:MI:SS') t, x.net, x.status, left(coalesce(x.error,''),140) err,
+                   left(p.id::text,8) post, left(regexp_replace(p.content,'\s+',' ','g'),45) txt, (x.permalink is not null) link
+              from pub x join post p on p.id=x.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+             where s.workspace_id in (select id from ws) and x.created_at > now() - interval '3 hours'
+             order by x.created_at;
+            \echo === перший коментар (3 год) ===
+            with ws as (select m.workspace_id id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%')
+            select to_char(pc.updated_at at time zone 'Europe/Prague','DD.MM HH24:MI:SS') t, left(pc.post_id::text,8) post, pc.network, pc.status, pc.attempts,
+                   (pc.external_id is not null) has_id, left(pc.message,50) msg, left(coalesce(pc.error,''),200) err
+              from post_comment pc join post p on p.id=pc.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+             where s.workspace_id in (select id from ws) and pc.created_at > now() - interval '3 hours'
+             order by pc.created_at;
+            \echo === статистика цих постів ===
+            with ws as (select m.workspace_id id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%'),
+                 recent as (select mp.post_id from meta_publish mp join post p on p.id=mp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+                             where s.workspace_id in (select id from ws) and mp.created_at > now() - interval '3 hours')
+            select left(pm.post_id::text,8) post, pm.network, pm.views, pm.reach, pm.likes, pm.replies, pm.shares, pm.saves,
+                   to_char(pm.fetched_at at time zone 'Europe/Prague','HH24:MI:SS') fetched, to_char(pm.measured_at at time zone 'Europe/Prague','HH24:MI:SS') measured,
+                   left(coalesce(pm.error,''),160) err
+              from post_metric pm where pm.post_id in (select post_id from recent);
+            \echo === журнал беті (3 год): meta, comment, metrics, publish, error ===
+            select to_char(l.created_at at time zone 'Europe/Prague','DD.MM HH24:MI:SS') t, l.level, l.scope,
+                   left(regexp_replace(l.message,'\s+',' ','g'),170) as msg
+              from app_log l
+             where l.created_at > now() - interval '3 hours'
+               and (l.scope in ('meta','comment','metrics','publish','autopost','threads','job') or l.level in ('error','warn'))
              order by l.created_at desc limit 40;
-            select w.title, mc.page_name, mc.ig_username, mc.granted,
-                   to_char(mc.updated_at at time zone 'Europe/Prague','DD.MM HH24:MI') as meta_upd,
-                   tc.username as threads, to_char(tc.updated_at at time zone 'Europe/Prague','DD.MM HH24:MI') as th_upd
-              from workspace w
-              join workspace_member m on m.workspace_id = w.id
-              join app_user u on u.id = m.user_id
-              left join meta_config mc on mc.workspace_id = w.id
-              left join threads_config tc on tc.workspace_id = w.id
-             where u.email like 'o.stepeniev%';
             SQL
-            echo; echo "=== nginx (прод і бета разом): підключення й повернення (сьогодні) ==="
-            for f in /var/log/nginx/access.log; do
-              [ -r "$f" ] || continue
-              grep -hE '/api/(integrations/(meta|threads|linkedin|gdrive|youtube)/(connect|callback)|auth/google)' "$f" 2>/dev/null \
-                | grep "$(date -u +%d/%b/%Y)" \
-                | sed -E 's/^([0-9]+\.[0-9]+)\.[0-9]+\.[0-9]+/\1.x.x/' | mask | cut -c1-240 | tail -25
-            done
-            rm -rf $T
