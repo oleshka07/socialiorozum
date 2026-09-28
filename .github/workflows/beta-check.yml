@@ -1,8 +1,8 @@
 name: beta-check
 
 # Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ, нічого не змінює й не перезапускає.
-# 28.09 вечір: Олег позначив картку «кілька акаунтів» виконаною - що саме зроблено в його брендах на беті
-# (які акаунти додано, що опубліковано, як пішли коментарі) і чи визначились старі пости Threads.
+# 28.09 після деплою 7ecd670 (галочки + кілька каналів Telegram): чи лягла міграція, що з ключами
+# коментарів і метрик у живих даних, чи віддає застосунок новий кабінет, журнал після рестарту.
 
 on:
   push:
@@ -13,7 +13,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Beta - Oleg's brands after multi-account check (read-only)
+      - name: Beta after 7ecd670 - checkboxes and Telegram channels (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -26,50 +26,30 @@ jobs:
             echo "beta HEAD $(git -C "${{ secrets.APP_DIR }}-beta" rev-parse --short HEAD) | зараз $(date -u +%H:%M) UTC"
             echo "health: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/health)"
             cd "${{ secrets.APP_DIR }}-beta/server" && docker compose ps app --format '{{.Status}}'
+            echo "кабінет з галочками: $(docker compose exec -T app sh -c 'grep -c "accchk" public/app.js; grep -c "tgChatsBox" public/app.html' | tr '\n' ' ')"
             docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -v ON_ERROR_STOP=0' <<'SQL' 2>&1 | mask
             set session characteristics as transaction read only;
-            \echo === бренди Олега: акаунти Threads (основний + додаткові) ===
-            select coalesce(w.title, w.name) brand, 'main' as kind, tc.username, tc.token_expires_at::date exp
-              from workspace w join threads_config tc on tc.workspace_id=w.id
-             where w.id in (select m.workspace_id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%')
-            union all
-            select coalesce(w.title, w.name), 'extra', ta.username, ta.token_expires_at::date
-              from workspace w join threads_account ta on ta.workspace_id=w.id
-             where w.id in (select m.workspace_id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%')
-             order by 1, 2 desc;
-            \echo === бренди Олега: Сторінки Facebook та їхній Instagram ===
-            select coalesce(w.title, w.name) brand, 'main' as kind, mc.page_name, mc.ig_username, right(mc.page_id,4) page
-              from workspace w join meta_config mc on mc.workspace_id=w.id
-             where w.id in (select m.workspace_id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%')
-            union all
-            select coalesce(w.title, w.name), 'extra', mp.page_name, mp.ig_username, right(mp.page_id,4)
-              from workspace w join meta_page mp on mp.workspace_id=w.id
-             where w.id in (select m.workspace_id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%')
-             order by 1, 2 desc;
-            \echo === публікації в брендах Олега за останні 6 год (Прага) ===
-            select to_char(x.created_at at time zone 'Europe/Prague','DD.MM HH24:MI') t, coalesce(w.title, w.name) brand, left(p.id::text,8) post, x.net, coalesce(x.acc,'-') acc, x.status
-              from (select post_id, 'threads'::text net, account_name acc, status, created_at from threads_publish
-                    union all select post_id, channel, account_name, status, created_at from meta_publish
-                    union all select post_id, 'telegram', target, status, created_at from telegram_publish
-                    union all select post_id, 'linkedin', null, status, created_at from linkedin_publish) x
-              join post p on p.id=x.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id join workspace w on w.id=s.workspace_id
-             where x.created_at > now() - interval '6 hours'
-               and w.id in (select m.workspace_id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%')
-             order by x.created_at;
-            \echo === перші коментарі в брендах Олега, змінені за 6 год ===
-            select to_char(pc.updated_at at time zone 'Europe/Prague','DD.MM HH24:MI') t, left(p.id::text,8) post, pc.network, pc.status, pc.attempts, left(coalesce(pc.error,''),120) err
-              from post_comment pc join post p on p.id=pc.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
-             where pc.updated_at > now() - interval '6 hours'
-               and s.workspace_id in (select m.workspace_id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%')
-             order by pc.updated_at;
-            \echo === старі пости Threads без акаунта (після «＋ Додати акаунт» сервіс мав визначити) ===
-            select coalesce(w.title, w.name) brand, count(*) filter (where tp.account_id is null) no_id, count(*) filter (where tp.account_id is null and tp.account_name is null) no_name, count(*) total
-              from threads_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id join workspace w on w.id=s.workspace_id
-             where tp.status='sent' and w.id in (select m.workspace_id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%')
-             group by 1;
-            \echo === журнал беті за 6 год: акаунти, підключення, публікація, коментарі ===
-            select to_char(created_at at time zone 'Europe/Prague','DD.MM HH24:MI:SS') t, level, scope, left(regexp_replace(message,'\s+',' ','g'),170) msg
-              from app_log where created_at > now() - interval '6 hours'
-               and (scope in ('threads','meta','comment','publish','accounts','telegram') or level in ('error','warn'))
-             order by created_at desc limit 40;
+            \echo === індекси й ключі після міграції ===
+            select string_agg(indexname, ', ' order by indexname) from pg_indexes
+             where indexname in ('uq_thpub_post','uq_metapub_post_channel','uq_thpub_post_acc','uq_metapub_post_ch_acc','uq_post_comment_acc','uq_post_metric_acc','uq_tgpub_post_target');
+            select conname from pg_constraint where conname in ('post_comment_post_id_network_key','post_metric_pkey');
+            select to_regclass('telegram_chat') telegram_chat, (select count(*) from information_schema.columns where table_name='tg_connect' and column_name='mode') tg_mode;
+            \echo === коментарі й метрики: ключ акаунта (порожній - публікація без акаунта) ===
+            select 'post_comment' t, network, (account<>'') has_acc, count(*) from post_comment group by 1,2,3
+            union all select 'post_metric', network, (account<>''), count(*) from post_metric group by 1,2,3 order by 1,2,3;
+            \echo === коментарі/метрики з ключем '', хоча в публікації акаунт відомий (мають бути 0) ===
+            select count(*) comments_orphan from post_comment pc
+             where pc.account='' and exists (select 1 from threads_publish tp where tp.post_id=pc.post_id and pc.network='threads' and tp.status='sent' and tp.account_id is not null)
+               and not exists (select 1 from threads_publish tp where tp.post_id=pc.post_id and pc.network='threads' and tp.status='sent' and tp.account_id is null);
+            select count(*) metrics_orphan from post_metric pm
+             where pm.account='' and exists (select 1 from meta_publish mp where mp.post_id=pm.post_id and mp.channel=pm.network and mp.status='sent' and mp.account_id is not null)
+               and not exists (select 1 from meta_publish mp where mp.post_id=pm.post_id and mp.channel=pm.network and mp.status='sent' and mp.account_id is null);
+            \echo === Telegram: рядки без chat_id, підписники по каналах ===
+            select count(*) filter (where chat_id is null) no_chat, count(*) total from telegram_publish where status='sent';
+            select network, (account<>'') has_acc, count(*) from follower_snapshot where network='telegram' group by 1,2;
+            \echo === незавершені резервації (sending) ===
+            select 'threads' net, count(*) from threads_publish where status='sending' union all select 'meta', count(*) from meta_publish where status='sending' union all select 'telegram', count(*) from telegram_publish where status='sending';
+            \echo === журнал з рестарту (помилки й попередження) ===
+            select to_char(created_at at time zone 'Europe/Prague','HH24:MI:SS') t, level, scope, left(regexp_replace(message,'\s+',' ','g'),150) msg
+              from app_log where created_at > now() - interval '15 minutes' and level in ('error','warn') order by created_at desc limit 20;
             SQL
