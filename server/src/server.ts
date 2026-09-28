@@ -44,7 +44,7 @@ import * as gdrive from "./gdrive.js";
 import { publishPostToChannels, alreadySentNetworks, startReelPublishJob, reelSentNetworks, closeSlotsIfDone, enabledNets, beginShutdown, publishesInFlight, unschedulePost, isPublishingNow } from "./publisher.js";
 import { startLifecycleWorker } from "./lifecycle.js";
 import { startDigest } from "./digest.js";
-import { startMetrics, networkBenchmarks, collectWorkspace, analyticsFor } from "./metrics.js";
+import { startMetrics, networkBenchmarks, collectWorkspace, analyticsFor, bestTimesFor, bestTimeAuto } from "./metrics.js";
 import { scheduleConflicts, describeConflicts } from "./schedule.js";
 import { briefMismatch, brandTextOf } from "./textkind.js";
 import { startDiary } from "./diary.js";
@@ -62,7 +62,8 @@ import { kieCatalog, kieCredits, kieReady } from "./kie.js";
 import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook, sharedBotDmWorks, hookSecret, sameSecret, ownBotToken, refreshOwnBotWebhooks, initHookBase, sharedHookKind, looksLikeBotToken, switchSharedBot, loadFormerShared, isFormerShared, formerBotName, sharedTokens, liveSharedTokens } from "./tgbot.js";
 import { chat } from "./openrouter.js";
 import { threadsToken, threadsAccounts, saveThreadsLogin, setMainThreads, removeThreadsAccount, metaPages, saveMetaLogin, addMetaPage, setMainPage, removeMetaPage, accountChoices, postsUsingAccount, metaAccountForRow, threadsAccountForRow,
-  mainAccountIds, telegramTargets, isAccNet } from "./accounts.js";
+  mainAccountIds, telegramTargets, isAccNet, postAccounts } from "./accounts.js";
+import { timesFor } from "./besttime.js";
 import { handleBody, wantsSse, sseEncode, resolveToken, mcpTokenFor, issueMcpToken, revokeMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
 import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember, deleteBrand, workspaceTitle } from "./workspaces.js";
 import { postMediaList, mediaCounts, setPostMediaOrder, setPostVideo, appendPostMedia, removePostMedia, promoteIfCoverless, healCoverless, SlideError, MAX_SLIDES, altToOriginal } from "./slides.js";
@@ -1685,7 +1686,18 @@ app.get("/api/analytics/posts", async (req: any) => {
   const raw = String(req.query?.net ?? "");
   const net = ["all", "threads", "instagram", "facebook", "telegram", "linkedin"].includes(raw)
     || /^(threads|instagram|facebook):[A-Za-z0-9_.:@-]{1,80}$/.test(raw) ? raw : "all";
-  return analyticsFor(req.user.workspace_id, days, net);
+  const ws = req.user.workspace_id;
+  const [a, bt, auto] = await Promise.all([analyticsFor(ws, days, net), bestTimesFor(ws), bestTimeAuto(ws)]);
+  // ⏰ найкращий час - завжди за пів року, незалежно від фільтра періоду (за 30 днів даних замало)
+  return { ...a, best: bt.items, bestAuto: auto };
+});
+
+// ⏰ Найкращий час з власних даних: що саме ставить календар (Ритм каналів, композер).
+// ?fresh=1 - перерахувати зараз, а не з 10-хв памʼяті.
+app.get("/api/best-times", async (req: any) => {
+  const ws = req.user.workspace_id;
+  const [bt, auto] = await Promise.all([bestTimesFor(ws, String(req.query?.fresh || "") === "1"), bestTimeAuto(ws)]);
+  return { auto, tz: bt.tz, items: bt.items };
 });
 
 // «Оновити статистику зараз»: воркер ходить по метрики раз на 6 год, а людина, що щойно
@@ -3491,6 +3503,28 @@ app.post("/api/schedule/auto", async (req: any) => {
     rhythm = JSON.parse(rr?.content || "{}") || {};
   } catch { rhythm = {}; }
   const hasCustom = (n: string) => { const r = rhythm[n]; return !!(r && ((r.days && r.days.length) || r.time || (r.times && r.times.length) || (r.rubrics && r.rubrics.length))); };
+  // ⏰ найкращий час з власних даних: мережа без СВОГО ритму (свій ритм - рішення людини, його не
+  // чіпаємо), по якій статистики досить, отримує окремий слот у свою найкращу годину того ж дня.
+  // Акаунт - той, яким пост вийде (один обраний або основний); кілька обраних - час мережі разом.
+  const btItems = (await bestTimeAuto(ws)) ? (await bestTimesFor(ws)).items : [];
+  const mains = btItems.length ? await mainAccountIds(ws) : ({} as Record<string, string>);
+  const learnedTimes = (u: { channels: any }, n: string): string[] => {
+    if (!btItems.length) return [];
+    const accs = postAccounts(u.channels, n);
+    const acc = accs.length === 1 ? accs[0] : accs.length ? null : ((mains as any)[n] || null);
+    return timesFor(btItems, n, acc);
+  };
+  const btIdx: Record<string, number> = {};      // ротація найкращих часів мережі між постами
+  const btUsed = new Set<string>();               // «мережа|день|час» - двох постів в одну мережу на ту саму хвилину не ставимо
+  const bestUsed: Record<string, string[]> = {};  // для відповіді: які часи поставлено з власних даних
+  const pickLearned = (n: string, dayKey: string, list: string[]): string => {
+    const start = btIdx[n] || 0; btIdx[n] = start + 1;
+    for (let i = 0; i < list.length; i++) { const t = list[(start + i) % list.length]; if (!btUsed.has(`${n}|${dayKey}|${t}`)) return t; }
+    // усі найкращі часи цього дня вже зайняті цією мережею - наступний вільний через 90 хв
+    let [h, m] = list[start % list.length].split(":").map(Number);
+    for (let k = 0; k < 12; k++) { m += 90; h += Math.floor(m / 60); m %= 60; h %= 24; const t = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`; if (!btUsed.has(`${n}|${dayKey}|${t}`)) return t; }
+    return list[0];
+  };
   const rhIdx: Record<string, number> = {}; // кілька часів мережі → ротація між ПОСТАМИ (2-3 слоти/день у Threads)
   // скільки постів припадає на день у цьому розподілі (для мереж зі своїм ритмом, де часів менше)
   let perDayHint = 1;
@@ -3500,14 +3534,27 @@ app.post("/api/schedule/auto", async (req: any) => {
     const ch = u.channels && Object.keys(u.channels).length ? u.channels : { telegram: { on: true } };
     const nets = Object.keys(ch).filter((k) => ch[k] && ch[k].on);
     const custom = nets.filter(hasCustom);
-    const inherit = nets.filter((n) => !custom.includes(n));
+    const learned = new Map<string, string[]>();
+    for (const n of nets) if (!custom.includes(n)) { const t = learnedTimes(u, n); if (t.length) learned.set(n, t); }
+    const inherit = nets.filter((n) => !custom.includes(n) && !learned.has(n));
     const futureOr10m = (d: Date) => (d.getTime() > Date.now() ? d : new Date(Date.now() + 10 * 60 * 1000));
     const [bh, bm] = baseTime.split(":").map(Number);
-    if (inherit.length || !custom.length) {
+    if (inherit.length || (!custom.length && !learned.size)) {
       // channels=null коли підмножина = всі мережі поста (легасі-поведінка, нічого не змінюється)
-      const subset = custom.length ? JSON.stringify(Object.fromEntries(inherit.map((n) => [n, { on: true }]))) : null;
+      const subset = custom.length || learned.size ? JSON.stringify(Object.fromEntries(inherit.map((n) => [n, { on: true }]))) : null;
       const dd = futureOr10m(zonedToUTC(Y, Mo, D, bh, bm, tz));
       await q(`insert into schedule_slot(post_id, scheduled_at, status, channels) values($1,$2,'planned',$3)`, [u.id, dd.toISOString(), subset]);
+      count++;
+    }
+    const dayKey = `${Y}-${Mo}-${D}`;
+    for (const [n, list] of learned) {
+      const t = pickLearned(n, dayKey, list);
+      btUsed.add(`${n}|${dayKey}|${t}`);
+      (bestUsed[n] ||= []).includes(t) || bestUsed[n].push(t);
+      const [h, m] = t.split(":").map(Number);
+      const dd = futureOr10m(zonedToUTC(Y, Mo, D, h, m, tz));
+      await q(`insert into schedule_slot(post_id, scheduled_at, status, channels) values($1,$2,'planned',$3)`,
+        [u.id, dd.toISOString(), JSON.stringify({ [n]: { on: true } })]);
       count++;
     }
     for (const n of custom) {
@@ -3569,7 +3616,7 @@ app.post("/api/schedule/auto", async (req: any) => {
     const pass = Math.floor(idx / dayDates.length); // 0 = перший пост дня, 1 = другий тощо
     await placePost(rest[idx], day.Y, day.Mo, day.D, dayTimes[pass % dayTimes.length]);
   }
-  return { ok: true, count };
+  return { ok: true, count, bestTime: bestUsed };
 });
 
 // ===================== ТРАНСКРИБАЦІЯ (Fireflies) =====================

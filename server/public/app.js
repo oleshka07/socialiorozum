@@ -62,6 +62,7 @@ let Finals = [];
 let Guide={tips:[],i:0,on:true,busy:false,shownAt:0}; // 🦉 сова-провідник (стан угорі - selectView його читає)
 // 📈 Аналітика: фільтр (памʼятається в браузері), останні дані, сортування й «таблиця замість графіка»
 let AnState={days:90,net:'all'}, AnData=null, AnSort={key:'created_at',dir:-1}, AnShown=30, AnTableView={};
+let BestT=null, BestTAt=0;     // ⏰ найкращий час з власних даних (/api/best-times), 5 хв памʼяті
 function owlEl(){ return $('owl'); } // hoisted - безпечно з selectView вище
 
 async function api(path, opts){
@@ -670,21 +671,41 @@ function renderFmtFact(mix){
     +'<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;font-size:11px;color:var(--muted)">'
     +keys.map(k=>'<span>'+FMT_META[k][0]+' '+esc(FMT_META[k][1])+' '+Math.round(mix[k]/total*100)+'%</span>').join('')+'</div>';
 }
+// ---- ⏰ Найкращий час з власних даних (п.5 дорожньої карти) ----
+// Сервер рахує вікна доби, у які пости мережі набирають більше «×норми», і конкретний час; тут - лише
+// показати й підставити. Акаунт: один обраний у пості - його час (якщо по ньому досить даних), інакше мережі.
+async function loadBestTimes(fresh){ if(!fresh&&BestT&&Date.now()-BestTAt<300000) return BestT;
+  BestT=await api('/best-times'+(fresh?'?fresh=1':'')); BestTAt=Date.now(); return BestT; }
+function bestTimesFor(net,acc){ const items=(BestT&&BestT.items)||[];
+  const a=acc?items.find(b=>b.key===net+':'+acc):null; if(a&&a.times&&a.times.length) return a.times;
+  const all=items.find(b=>b.key===net); return (all&&all.times)||[]; }
+// найближчий майбутній (≥ через 15 хв) із найкращих часів, у поясі кабінету; у межах дня - спершу найкращий
+function nextBestLocal(times){ const now=Date.now();
+  for(let d=0;d<8;d++){ const day=locDate(now+d*864e5);
+    for(const t of times){ if(Date.parse(zonedToUTCISO(day,t))>=now+15*60e3) return {date:day,time:t}; } }
+  return null; }
+
 // ---- 📡 Ритм каналів (спадкування «як у бренду» / свій ритм: дні, час, рубрики) ----
 const DAY_LBL=[['1','пн'],['2','вт'],['3','ср'],['4','чт'],['5','пт'],['6','сб'],['0','нд']];
 async function renderRhythm(){
   const box=$('rhythmRows'); if(!box) return;
   if(!Object.keys(ChanStatus||{}).length){ try{ await loadChanStatus(); }catch(e){} }
   let rh={}; try{ const rows=await api('/settings'); const m=Object.fromEntries(rows.map(r=>[r.key,r.content])); rh=JSON.parse(m.channel_rhythm||'{}')||{}; }catch(e){ rh={}; }
+  let bt=null; try{ bt=await loadBestTimes(); }catch(e){ bt=null; }
   const nets=NETS.filter(n=>ChanStatus[n[0]]);
   if(!nets.length){ box.innerHTML='<div style="font-size:12.5px;color:var(--faint)">Спершу підключи мережі в Налаштування → Канали.</div>'; return; }
   // компактні рядки; кілька часів на мережу (Threads 2-3 рази/день): часи ротуються між постами
-  box.innerHTML=nets.map(n=>{ const k=n[0], r=rh[k]||null, custom=!!r;
+  // ⏰ зверху - чи ставить AI-розподіл пости в найкращий час з власної статистики (типово так)
+  const btHead=bt?'<label id="rhBestRow" style="display:flex;gap:8px;align-items:center;font-size:12.5px;padding:0 0 8px;border-bottom:1px solid var(--line);cursor:pointer" title="Для мереж без свого ритму: календар бере годину, у яку твої пости в цій мережі набирають найбільше переглядів (порівняння з твоєю ж нормою за пів року)">'
+    +'<input type="checkbox" id="rhBestAuto"'+(bt.auto?' checked':'')+'> <b>⏰ Найкращий час з моєї статистики</b><span style="color:var(--faint);font-size:11.5px">- мережі без свого ритму отримують свою найкращу годину</span></label>':'';
+  box.innerHTML=btHead+nets.map(n=>{ const k=n[0], r=rh[k]||null, custom=!!r;
+    const bestT=bt&&bt.auto&&!custom?bestTimesFor(k,null):[];
     const times=(r&&(Array.isArray(r.times)?r.times:(r.time?[r.time]:[])))||[];
     return '<div style="padding:7px 0;border-bottom:1px solid var(--line)" data-net="'+k+'">'
       +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
         +'<span style="font-size:12.5px;font-weight:700;min-width:80px">'+esc(n[1])+'</span>'
         +'<select class="rhMode txt" style="width:auto;padding:4px 7px;font-size:11.5px"><option value="inherit"'+(custom?'':' selected')+'>як у бренду</option><option value="custom"'+(custom?' selected':'')+'>свій ритм</option></select>'
+        +(bestT.length?'<span class="rhBest" style="font-size:11.5px;color:var(--brand);font-weight:700" title="найкращий час з твоєї статистики - AI-розподіл ставить сюди">⏰ '+esc(bestT.join(', '))+'</span>':'')
         +'<span class="rhCustom" style="display:'+(custom?'flex':'none')+';gap:6px;align-items:center;flex-wrap:wrap">'
           +'<span style="display:flex;gap:2px">'+DAY_LBL.map(d=>'<button class="rhDay" data-d="'+d[0]+'" style="padding:2px 6px;font-size:11px;border-radius:6px;border:1px solid var(--line);background:'+((r&&r.days||[]).includes(+d[0])?'var(--brand-soft)':'transparent')+';color:'+((r&&r.days||[]).includes(+d[0])?'var(--brand)':'var(--muted)')+';cursor:pointer">'+d[1]+'</button>').join('')+'</span>'
           +'<span class="rhTimes" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">'
@@ -693,6 +714,7 @@ async function renderRhythm(){
           +'</span>'
           +'<input class="rhRub txt" placeholder="рубрики через кому" value="'+esc(((r&&r.rubrics)||[]).join(', '))+'" style="width:150px;padding:3px 7px;font-size:11.5px" title="ця мережа братиме лише ці рубрики (порожньо = всі)">'
         +'</span>'
+      +'</div>' // рядок із селектом закривається тут: без цього наступна мережа опинялась ВСЕРЕДИНІ попередньої, і «свій ритм» Telegram зберігав дні й часи Threads
       // 🎨 мікс форматів саме ПО МЕРЕЖАХ: той самий формат у різних мережах працює по-різному
       // (LinkedIn виграє каруселями-документами, IG - рілсами по охвату). Дефолт - лише пости,
       // тож поки юзер нічого не обрав, поведінка плану не змінюється.
@@ -714,6 +736,7 @@ async function renderRhythm(){
         .map(l=>({f:l.dataset.f, share:Math.max(0,Math.min(100,+l.querySelector('.rhFmtShare').value||25))}));
       out[row.dataset.net]={...(days.length?{days}:{}),...(times.length?{times}:{}),...(rubrics.length?{rubrics}:{}),...(formats.length?{formats}:{})}; });
     try{ await saveSetting('channel_rhythm', JSON.stringify(out)); }catch(e){} };
+  const ba=$('rhBestAuto'); if(ba) ba.onchange=async()=>{ await saveSetting('best_time_auto', ba.checked?'1':'0'); BestT=null; renderRhythm(); };
   box.querySelectorAll('[data-net]').forEach(row=>{
     row.querySelectorAll('.rhDay').forEach(b=>{ const r=rh[row.dataset.net]; b.dataset.on=((r&&r.days)||[]).includes(+b.dataset.d)?'1':'0';
       b.onclick=()=>{ const on=b.dataset.on!=='1'; b.dataset.on=on?'1':'0'; b.style.background=on?'var(--brand-soft)':'transparent'; b.style.color=on?'var(--brand)':'var(--muted)'; save(); }; });
@@ -728,6 +751,13 @@ async function renderRhythm(){
       sh.addEventListener('input',()=>{ clearTimeout(l._t); l._t=setTimeout(save,700); }); });
   });
 }
+// ⏰ Аналітика: найкращий час по мережах (і акаунтах, де їх кілька й даних досить) - завжди за пів року
+function anBestPanel(a){ const net=String(a.net||'all').split(':')[0];
+  const items=(a.best||[]).filter(b=>(net==='all'||b.net===net)&&(b.account==null||b.ready)); if(!items.length) return '';
+  return '<div class="panel" id="anBest"><div class="vz-head"><div class="vz-title">⏰ Найкращий час публікації</div>'
+    +'<span class="vz-sub">за пів року, «×норма» постів старших за 2 доби; '+(a.bestAuto?'AI-розподіл календаря ставить пости саме сюди':'AI-розподіл зараз бере час зі стратегії')+'</span>'
+    +'<button class="ghost vz-toggle" id="anBestToggle">'+(a.bestAuto?'Не ставити в календар':'Ставити в календар')+'</button></div>'
+    +'<ul class="an-ins">'+items.map(b=>'<li><span class="ic '+(b.times&&b.times.length?'good':'info')+'">'+(b.times&&b.times.length?'⏰':'ℹ')+'</span><span>'+esc(b.text)+'</span></li>').join('')+'</ul></div>'; }
 function renderPlan(){
   const list=$('planList'); if(!list) return;
   const filled=PlanSlots.filter(s=>s.status!=='empty').length;
@@ -1243,6 +1273,7 @@ async function loadAnalytics(){
       +'<div class="panel" style="margin:0"><div class="vz-head"><div class="vz-title">Підписники</div><span class="vz-sub">щоденні знімки</span></div><div id="anFollow"></div></div>'
     +'</div>'
     +'<div class="panel"><div class="vz-head"><div class="vz-title">Що впливає на результат</div><span class="vz-sub">медіана «×норми» в групі: ×1 - твій звичайний пост у тій самій мережі; сіре - менше 3 постів, лише орієнтир</span></div><div id="anDrivers"></div></div>'
+    +anBestPanel(a)
     +'<div class="panel"><div class="vz-head"><div class="vz-title">Коли публікувати</div><span class="vz-sub">день тижня × час доби за поясом кабінету ('+esc(a.tz)+')</span></div><div id="anHeat"></div></div>'
     +'<div class="panel"><div class="vz-head"><div class="vz-title">Усі публікації</div><span class="vz-sub">клік по заголовку колонки сортує, по посту - відкриває його</span></div><div id="anTbl"></div></div>'
     +'</div>'
@@ -1252,6 +1283,7 @@ async function loadAnalytics(){
   $('anNet').onchange=(e)=>{ AnState.net=e.target.value; try{ localStorage.setItem('kg_an',JSON.stringify(AnState)); }catch(err){ /* ignore */ } loadAnalytics(); };
   $('anCsv').onclick=anCsv;
   $('topPatBtn').onclick=topPatterns;
+  const bto=$('anBestToggle'); if(bto) bto.onclick=async()=>{ bto.disabled=true; await saveSetting('best_time_auto', a.bestAuto?'0':'1'); BestT=null; loadAnalytics(); };
   const rb=$('anRefresh'); rb.onclick=async()=>{ rb.disabled=true; const t0=rb.textContent;
     try{ const r=await runAiJob('/analytics/refresh',{},(s)=>{ rb.textContent='↻ Збираю… '+s+'с'; });
       flash('📈 Оновлено: '+((r&&r.posts)||0)+' '+anPlural((r&&r.posts)||0,'пост','пости','постів')+(r&&r.followers?' і підписники':''));
@@ -2391,6 +2423,7 @@ async function openComposer(postId, opts){
     +'<div class="cmp-foot"><button class="icon" id="cmpDel" title="Видалити пост назавжди" style="color:var(--danger);display:none">🗑</button><span style="font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--faint)">ЧЕРНЕТКА</span><button class="ghost" id="cmpSave">💾 Зберегти</button><button class="ghost" id="cmpApprove">✅ Затвердити</button><span style="flex:1"></span><span style="font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--faint);border-left:1px solid var(--line);padding-left:12px">ПУБЛІКАЦІЯ</span>'
       +'<label style="font-size:12px;color:var(--muted)">Дата <input type="date" id="cmpDate" class="txt" value="'+initDate+'" style="width:auto;padding:6px 8px;display:inline-block"></label>'
       +'<label style="font-size:12px;color:var(--muted)">Час <input type="time" id="cmpTime" class="txt" value="'+initTime+'" style="width:auto;padding:6px 8px;display:inline-block"></label>'
+      +'<button class="ghost" id="cmpBest" title="Підставити найближчий найкращий час з твоєї статистики для обраних мереж" style="display:none;padding:6px 9px">⏰</button>'
       +'<button class="ok" id="cmpSched">🗓 Запланувати</button><button class="primary" id="cmpNow">📣 Опублікувати зараз</button></div>';
   document.body.appendChild(ov);
   _cmpOpenId=postId; writeRoute('post',postId); // 🔗 тепер на цей пост можна дати пряме посилання
@@ -2857,6 +2890,14 @@ async function openComposer(postId, opts){
       // не показував «не опубліковано» на пості, який уже вийшов
       try{ await refreshSentState(postId,sentSet,onSent); }catch(_){ }
     } finally{ b.disabled=false; aiDone(); } };
+  // ⏰ найкращий час з власної статистики: перша обрана мережа, по якій даних досить (кнопка - лише коли є що радити)
+  loadBestTimes().then(()=>{ const bb=ov.querySelector('#cmpBest'); if(bb&&((BestT&&BestT.items)||[]).some(x=>x.times&&x.times.length)) bb.style.display=''; }).catch(()=>{});
+  ov.querySelector('#cmpBest').onclick=()=>{ const on=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!netDone(k));
+    for(const k of on){ const acc=(C[k].accounts||[]).length===1?C[k].accounts[0]:null; const ts=bestTimesFor(k,acc); if(!ts.length) continue;
+      const nb=nextBestLocal(ts); if(!nb) continue;
+      ov.querySelector('#cmpDate').value=nb.date; ov.querySelector('#cmpTime').value=nb.time;
+      setMsg('⏰ '+(AN_LABEL[k]||k)+': найкращий час з твоєї статистики - '+ts.join(', '),'var(--brand)'); return; }
+    setMsg('для обраних мереж ще нема статистики, щоб радити час (треба 10+ постів, старших за 2 доби)','var(--muted)'); };
   ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ setMsg('вкажи дату й час','var(--danger)'); return; } const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!netDone(k)); if(!todo.length){ setMsg('немає каналів для планування (усі вже опубліковано)','var(--danger)'); return; } if(!carGuard()) return; const b=e.target; b.disabled=true; setMsg('🗓 зберігаю…'); const at=zonedToUTCISO(d,t); try{ await saveDraft(); if(opts.slotId){ await scheduleApi('/schedule/'+opts.slotId,'PUT',{scheduledAt:at}); } else { await scheduleApi('/schedule','POST',{postId,scheduledAt:at}); } setMsg('заплановано ✓ ('+todo.join(', ')+')','var(--brand)'); try{await loadPublish();}catch(_){} try{await loadStudioPosts();}catch(_){} setTimeout(close,1000); }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); b.disabled=false; } };
 }
 // двокроковий редактор фото поста: крок 1 - джерело (галерея/завантаження/генерація) + формат (кроп),
@@ -3353,7 +3394,8 @@ $('autopilotBtn').onclick=async()=>{
   }catch(e){ flash('Помилка: '+e.message); try{ await refresh(); }catch(_){} }
   finally{ btn.disabled=false; btn.textContent=old; }
 };
-$('aiDistribute').onclick=async()=>{ if(!confirm('Перерозподілити всі незапощені пости за розкладом зі Стратегії? Раніше заплановані (але не опубліковані) слоти буде перекладено.')) return; const m=$('pubMsg'); m.style.color='var(--muted)'; m.textContent='розподіляю…'; aiBusy('🗓 Розподіляю пости по календарю за стратегією…'); try{ const r=await api('/schedule/auto',{method:'POST'}); m.style.color='var(--brand)'; m.textContent='розподілено: '+r.count; await loadPublish(); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; }finally{ aiDone(); } };
+$('aiDistribute').onclick=async()=>{ if(!confirm('Перерозподілити всі незапощені пости за розкладом зі Стратегії (а мережі, де є твоя статистика, - у їхню найкращу годину)? Раніше заплановані (але не опубліковані) слоти буде перекладено.')) return; const m=$('pubMsg'); m.style.color='var(--muted)'; m.textContent='розподіляю…'; aiBusy('🗓 Розподіляю пости по календарю за стратегією…'); try{ const r=await api('/schedule/auto',{method:'POST'}); m.style.color='var(--brand)'; const bu=Object.entries(r.bestTime||{});
+    m.textContent='розподілено: '+r.count+(bu.length?' · ⏰ '+bu.map(([n,ts])=>(AN_LABEL[n]||n)+' о '+ts.join(', ')).join('; ')+' - найкращий час з твоєї статистики':''); await loadPublish(); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; }finally{ aiDone(); } };
 $('reloadPub').onclick=()=>loadPublish();
 $('newRun').onclick=()=>{
   if(busy) return;

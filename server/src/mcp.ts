@@ -30,7 +30,8 @@ import { connectedNets, parseWhen, zonedToUtc } from "./tgcompose.js";
 import { publishPostToChannels, alreadySentNetworks, reelSentNetworks, closeSlotsIfDone, publishingNow, isPublishingNow, unschedulePost, pubLabel, type PubResult } from "./publisher.js";
 import { scheduleConflicts, describeConflicts, schedulable } from "./schedule.js";
 import { startJob, getJob } from "./jobs.js";
-import { analyticsFor } from "./metrics.js";
+import { analyticsFor, bestTimesFor } from "./metrics.js";
+import { timesFor } from "./besttime.js";
 import { fmtMult } from "./analytics.js";
 import { publicFetch } from "./netguard.js";
 import { saveMediaFile, MEDIA_DIR } from "./media.js";
@@ -46,7 +47,7 @@ import { COMMENT_NETS, COMMENT_MAX, COMMENT_PERM, commentFor, commentStates, que
 import { normCollaborators, cleanAlt, IG_MAX_COLLABORATORS } from "./igextras.js";
 import { getThumb } from "./media.js";
 import sharp from "sharp";
-import { accountChoices, matchAccount, postAccount, postAccounts, isAccNet, metaAccountFor, MULTI_NETS, ACC_NETS, type AccountChoice } from "./accounts.js";
+import { accountChoices, matchAccount, postAccount, postAccounts, isAccNet, metaAccountFor, mainAccountIds, MULTI_NETS, ACC_NETS, type AccountChoice } from "./accounts.js";
 import { collectInbox, replyToComment, skipComment, isInboxNet, INBOX_NETS } from "./inbox.js";
 
 // ============================================================================
@@ -674,6 +675,37 @@ const ASPECT_ARG = { type: "string", enum: ASPECTS, description: "Формат: 
 
 // Інструменти кабінетів свідомо БЕЗ аргументу workspace (див. WS_ARG): перемикати кабінет,
 // перебуваючи в іншому кабінеті, - це зайва плутанина на рівному місці.
+// ⏰ schedule_post з at: "best": найближчий майбутній (≥ через 15 хв) найкращий час першої мережі поста,
+// для якої статистики досить; у межах дня - спершу найкраще вікно; час, де в мережі вже стоїть інший пост,
+// пропускається (якщо не force). Нема даних - чесно, чому, і прохання назвати час самому.
+async function nextBestTime(ws: string, p: { id: string; channels: any }, nets: string[], tz: string, force: boolean): Promise<{ at: Date | null; why: string; note: string }> {
+  const { items } = await bestTimesFor(ws);
+  const mains = await mainAccountIds(ws);
+  let chosen = "", list: string[] = [];
+  for (const n of nets) {
+    const accs = postAccounts(p.channels, n);
+    const acc = accs.length === 1 ? accs[0] : accs.length ? null : ((mains as any)[n] || null);
+    const t = timesFor(items, n, acc);
+    if (t.length) { chosen = n; list = t; break; }
+  }
+  if (!chosen) {
+    const why = nets.filter((n) => ["threads", "instagram", "facebook"].includes(n)).map((n) => items.find((b) => b.key === n)?.text || `${NET_LABEL[n]}: постів зі статистикою ще нема.`);
+    return { at: null, note: "", why: `Найкращого часу з твоєї статистики поки нема${why.length ? " - " + why.join(" ") : " (Telegram і LinkedIn не віддають переглядів постів)"}. Назви час сам, наприклад «завтра 19:00».` };
+  }
+  const [Y, Mo, D] = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()).split("-").map(Number);
+  for (let d = 0; d < 8; d++) {
+    const day = new Date(Date.UTC(Y, Mo - 1, D + d, 12));
+    for (const t of list) {
+      const [h, m] = t.split(":").map(Number);
+      const c = zonedToUtc(day.getUTCFullYear(), day.getUTCMonth() + 1, day.getUTCDate(), h, m, tz);
+      if (c.getTime() < Date.now() + 15 * 60 * 1000) continue;
+      if (!force && (await scheduleConflicts(ws, p.id, c, nets)).length) continue;
+      return { at: c, why: "", note: `⏰ ${NET_LABEL[chosen]}: найкращий час з твоєї статистики - ${list.join(" і ")}.` };
+    }
+  }
+  return { at: null, note: "", why: `Найближчого тижня найкращі години ${NET_LABEL[chosen]} (${list.join(", ")}) уже зайняті іншими постами. Назви час сам або force: true.` };
+}
+
 export const TOOLS: ToolDef[] = [
   {
     name: "list_workspaces",
@@ -1524,7 +1556,7 @@ export const TOOLS: ToolDef[] = [
     description: "Поставити пост у календар на дату й час. Час читається в часовому поясі кабінету. Відправить автопостер - нічого додатково робити не треба. Відмовить, якщо в ту саму мережу ±5 хв уже стоїть інший пост або такий самий текст уже заплановано чи опубліковано (свідомо - force: true). Прибрати з календаря - unschedule_post.",
     properties: {
       id: S("Id поста."),
-      at: S("Коли: «2026-09-14 09:00», «завтра 18:30», «14.09 09:00» або ISO з Z."),
+      at: S("Коли: «2026-09-14 09:00», «завтра 18:30», «14.09 09:00», ISO з Z або «best» - найближчий найкращий час зі статистики кабінету (Threads, Instagram, Facebook)."),
       channels: { ...NETS_ARG, description: "Мережі (необовʼязково - інакше вже обрані на пості)." },
       force: { type: "boolean", description: "true - поставити попри збіг часу чи тексту з іншим постом." },
     },
@@ -1533,11 +1565,18 @@ export const TOOLS: ToolDef[] = [
       const p = await findPost(ws, a.id);
       const tz = await wsTz(ws);
       const raw = str(a.at, 60);
-      const at = parseIsoAt(raw, tz) || (await parseWhen(ws, raw));
-      if (!at) throw new ToolError("Не зрозумів дату. Приклади: «2026-09-14 09:00», «завтра 18:30» (час обовʼязково через двокрапку).");
-      if (at.getTime() < Date.now() - 60_000) throw new ToolError(`Цей час уже минув (${fmtWhen(at, tz)}). Обери майбутній.`);
       const nets = pickNets(a.channels);
       const on = nets.length ? nets : enabledNets(p.channels);
+      let bestNote = "";
+      let at: Date | null;
+      if (/^\s*(best|найкращ)/i.test(raw)) {
+        if (!on.length) throw new ToolError("Спершу обери мережі (channels) - найкращий час рахується для мережі.");
+        const b = await nextBestTime(ws, p, on, tz, a.force === true);
+        if (!b.at) throw new ToolError(b.why);
+        at = b.at; bestNote = "\n" + b.note;
+      } else at = parseIsoAt(raw, tz) || (await parseWhen(ws, raw));
+      if (!at) throw new ToolError("Не зрозумів дату. Приклади: «2026-09-14 09:00», «завтра 18:30» (час обовʼязково через двокрапку) або «best».");
+      if (at.getTime() < Date.now() - 60_000) throw new ToolError(`Цей час уже минув (${fmtWhen(at, tz)}). Обери майбутній.`);
       if (!on.length) throw new ToolError("Спершу обери мережі (channels) - інакше автопостеру нема куди публікувати.");
       if (!String(p.content || "").trim() && p.format !== "story") throw new ToolError("Пост порожній - спершу додай текст (update_post).");
       if (a.force !== true) {
@@ -1559,7 +1598,7 @@ export const TOOLS: ToolDef[] = [
       await q(`update post set review='approved' where id=$1`, [p.id]);   // запланований = затверджений
       const fcPlan = commentPlanLines({ ...p, channels: chNow }, on, await commentStates(p.id), await alreadySentNetworks(p.id), await metaGranted(ws));
       return `🗓 ${short(p.id)} заплановано на ${fmtWhen(at, tz)}: ${publishPlanLine(publishPlan(chNow, p.content))}.${ex ? " Наявний слот перенесено." : ""}`
-        + (fcPlan.length ? "\n" + fcPlan.join("\n") : "");
+        + bestNote + (fcPlan.length ? "\n" + fcPlan.join("\n") : "");
     },
   },
   {
@@ -1803,6 +1842,9 @@ export const TOOLS: ToolDef[] = [
       const noPer = ["telegram", "linkedin"].filter((n) => (an.coverage as any)[n]?.published);
       if (noPer.length) lines.push(`${netList(noPer)}: API не віддає переглядів окремих постів - там лише факт публікації.`);
       if (an.insights.length) lines.push("", "Висновки:", ...an.insights.map((i) => `- ${i.text}`));
+      // ⏰ найкращий час - за пів року (за коротший період дозрілих постів зазвичай замало)
+      const bt = (await bestTimesFor(ws)).items.filter((b) => (net === "all" || b.net === net) && (b.account == null || b.ready));
+      if (bt.length) lines.push("", "⏰ Найкращий час публікації (за пів року, за «×нормою» дозрілих постів; schedule_post з at: \"best\" ставить саме туди):", ...bt.map((b) => `- ${b.text}`));
       const withNums = an.posts.filter((p) => p.views != null || p.likes != null || p.replies != null);
       // 👥 мережі, де в бренді кілька акаунтів, - біля поста видно, яким він вийшов (і норма в кожного своя)
       const multi = new Set((an.accounts || []).map((x) => x.net));

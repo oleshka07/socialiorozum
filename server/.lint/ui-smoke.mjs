@@ -339,6 +339,18 @@ const CM_ITEMS = [
   { net: "threads", commentId: "thc1", username: "fan_th", comment: "А як записатись?", postTitle: "Пост про AI", timestamp: iso(0, 4), permalink: null, account: "thr", accountName: "", draft: "Посилання в профілі!" },
 ];
 const cmDone = new Set(), cmCalls = [];
+// ⏰ найкращий час з власних даних: заглушка СТАНОВА - перемикач пишеться й читається назад
+const BT_ITEMS = [
+  { key: "threads", net: "threads", account: null, accountName: null, n: 14, ready: true, times: ["19:30"],
+    best: [{ key: "w18", label: "18-21", n: 6, median: 1.4, score: 1.29, time: "19:30" }], worst: { key: "w9", label: "9-12", n: 6, median: 0.6, score: 0.71, time: "09:30" },
+    text: "Threads: найкраще о 18-21 - ×1.4 від твоєї норми (6 постів); найслабше о 9-12 - ×0.6 (6 постів). Найкращий час для постів - 19:30." },
+  { key: "threads:thu", net: "threads", account: "thu", accountName: "@olegalisio", n: 3, ready: false, times: [], best: [], worst: null,
+    text: "Threads @olegalisio: поки 3 пости зі статистикою - для поради треба 10." },
+  { key: "instagram", net: "instagram", account: null, accountName: null, n: 12, ready: true, times: [], best: [], worst: null,
+    text: "Instagram: час публікації майже не впливає (2 вікна доби з 12 постів, різниця менша за 10%) - став, коли зручно." },
+];
+let btAuto = true;
+const btPuts = [];
 let cmNeeds = false;
 function cmInbox(path) {
   const qp = new URL(path, "http://x").searchParams;
@@ -402,13 +414,16 @@ function handleApi(method, path, body) {
     const qp = new URL(path, "http://x").searchParams;
     const days = [7, 30, 90, 180, 365].includes(+qp.get("days")) ? +qp.get("days") : 90, net = qp.get("net") || "all";
     anQueries.push({ days, net });
-    return { ...buildAnalytics(AN_ROWS, AN_FOLLOW, { days, net, tz: "Europe/Kyiv" }), connected: { threads: true, meta: true, telegram: true, linkedin: false } };
+    return { ...buildAnalytics(AN_ROWS, AN_FOLLOW, { days, net, tz: "Europe/Kyiv" }), connected: { threads: true, meta: true, telegram: true, linkedin: false }, best: BT_ITEMS, bestAuto: btAuto };
   }
   if (method === "POST" && path === "/analytics/refresh") {
     anRefreshes++; aiJobPolls = 0; AI_JOB_RESULT.set("job-an", { posts: 7, followers: 3 });
     return { jobId: "job-an" };
   }
   if (path.startsWith("/tg/")) return handleTg(method, path.slice(3), body);
+  if (method === "GET" && path.startsWith("/best-times")) return { auto: btAuto, tz: "Europe/Kyiv", items: BT_ITEMS };
+  if (method === "PUT" && path === "/settings/best_time_auto") { btAuto = String(body?.content) !== "0"; btPuts.push(String(body?.content)); return { ok: true }; }
+  if (method === "POST" && path === "/schedule/auto") return { ok: true, count: 3, bestTime: btAuto ? { threads: ["19:30"] } : {} };
   if (method === "GET" && path.startsWith("/comments/inbox")) return cmInbox(path);
   if (method === "POST" && (path === "/comments/reply" || path === "/comments/skip")) {
     cmCalls.push({ path, body });
@@ -1333,6 +1348,31 @@ const run = async () => {
     return slotTags.some((t) => t.includes("карусель")) && fact.includes("Фактично за 30 днів") && fmtBoxes >= 4;
   });
 
+  await check("bestRhythm", async () => {
+    // ⏰ у Ритмі каналів: мережа зі СВОЇМ ритмом (Threads у заглушці) години не отримує - то рішення людини;
+    // без свого ритму біля Threads - найкраща година; перемикач вимкнули - годин нема
+    const cr = SETTINGS.find((x) => x.key === "channel_rhythm"), saved = cr.content;
+    try {
+      const render = () => page.evaluate(() => { BestT = null; return renderRhythm(); });
+      await render();
+      await page.waitForSelector("#rhBestAuto", { timeout: 8000, state: "attached" });
+      const custom = await page.evaluate(() => ({ on: document.querySelector("#rhBestAuto").checked, th: !!document.querySelector('#rhythmRows [data-net="threads"] .rhBest') }));
+      cr.content = "{}";
+      await render();
+      await page.waitForFunction(() => document.querySelector('#rhythmRows [data-net="threads"] .rhBest'), undefined, { timeout: 8000 });
+      const st0 = await page.evaluate(() => ({ th: document.querySelector('#rhythmRows [data-net="threads"] .rhBest').textContent, tg: !!document.querySelector('#rhythmRows [data-net="telegram"] .rhBest'),
+        nested: !!document.querySelector('#rhythmRows [data-net] [data-net]') }));
+      await page.evaluate(() => { const c = document.querySelector("#rhBestAuto"); c.checked = false; c.dispatchEvent(new Event("change")); });
+      await page.waitForFunction(() => { const c = document.querySelector("#rhBestAuto"); return c && !c.checked && !document.querySelector("#rhythmRows .rhBest"); }, undefined, { timeout: 8000 });
+      await page.evaluate(() => { const c = document.querySelector("#rhBestAuto"); c.checked = true; c.dispatchEvent(new Event("change")); });
+      await page.waitForFunction(() => { const c = document.querySelector("#rhBestAuto"); return c && c.checked && document.querySelector("#rhythmRows .rhBest"); }, undefined, { timeout: 8000 });
+      // рядки мереж - сусіди, а не вкладені один в одного (інакше «свій ритм» однієї мережі забирав дні й часи іншої)
+      const good = custom.on && !custom.th && st0.th === "⏰ 19:30" && !st0.tg && !st0.nested && btPuts.slice(-2).join(",") === "0,1";
+      if (!good) console.log("   ↳ bestRhythm:", JSON.stringify({ custom, st0, btPuts }));
+      return good;
+    } finally { cr.content = saved; await page.evaluate(() => renderRhythm()); }
+  });
+
   await check("planDefault", async () => {
     // стандарт CORE: один майстер-план. Чекбокси мереж сховані, вибір мереж порожній.
     const advOff = await page.$eval("#planAdv", (el) => !el.checked);
@@ -1560,6 +1600,24 @@ const run = async () => {
       && st.young >= 1 && !st.youngDown && /свіж\S* пост\S* ще набира/.test(st.cov);
     if (!ok) console.log("   ↳ analyticsV2:", JSON.stringify(st).slice(0, 1600));
     return ok;
+  });
+
+  await check("bestAnalytics", async () => {
+    // ⏰ панель найкращого часу в Аналітиці: мережі з порадою й чесне «не впливає»; акаунт без даних не
+    // засмічує; перемикач пише налаштування й панель чесно каже, звідки календар бере час
+    await page.waitForSelector("#anBest", { timeout: 8000 });
+    const st0 = await page.evaluate(() => ({ items: [...document.querySelectorAll("#anBest li")].map((l) => l.innerText), sub: document.querySelector("#anBest .vz-sub").innerText, btn: document.querySelector("#anBestToggle").innerText }));
+    if (process.env.SMOKE_SHOTS) { const el = await page.$("#anBest"); await el.scrollIntoViewIfNeeded(); await el.screenshot({ path: join(HERE, "best-analytics.png") }); }
+    await page.evaluate(() => document.querySelector("#anBestToggle").click());
+    await page.waitForFunction(() => /зі стратегії/.test((document.querySelector("#anBest .vz-sub") || {}).textContent || ""), undefined, { timeout: 8000 });
+    const st1 = await page.evaluate(() => ({ sub: document.querySelector("#anBest .vz-sub").innerText, btn: document.querySelector("#anBestToggle").innerText }));
+    await page.evaluate(() => document.querySelector("#anBestToggle").click());
+    await page.waitForFunction(() => /ставить пости саме сюди/.test((document.querySelector("#anBest .vz-sub") || {}).textContent || ""), undefined, { timeout: 8000 });
+    const good = st0.items.length === 2 && /Найкращий час для постів - 19:30/.test(st0.items[0]) && /майже не впливає/.test(st0.items[1]) && !st0.items.some((t) => /@olegalisio/.test(t))
+      && /ставить пости саме сюди/.test(st0.sub) && /Не ставити/.test(st0.btn) && /зі стратегії/.test(st1.sub) && /Ставити в календар/.test(st1.btn)
+      && btPuts.slice(-2).join(",") === "0,1" && btAuto === true;
+    if (!good) console.log("   ↳ bestAnalytics:", JSON.stringify({ st0, st1, btPuts }));
+    return good;
   });
 
   await check("analyticsTip", async () => {
@@ -2456,6 +2514,33 @@ const run = async () => {
     });
     const good = st.tag === "💬 ⚠" && st.a === "composer" && st.okTag === "💬 ✓";
     if (!good) console.log("   ↳ fcStudio:", JSON.stringify(st));
+    return good;
+  });
+
+  await check("bestComposer", async () => {
+    // ⏰ у композері: кнопка є, коли статистика щось радить; підставляє найближчі 19:30 для Threads
+    await closeComposers();
+    await page.evaluate((id) => { BestT = null; openComposer(id); }, P5);
+    await page.waitForFunction(() => { const b = document.querySelector(".cmp-ov #cmpBest"); return b && b.style.display !== "none"; }, undefined, { timeout: 8000 });
+    await page.evaluate(() => document.querySelector(".cmp-ov #cmpBest").click());
+    if (process.env.SMOKE_SHOTS) await (await page.$(".cmp-ov .cmp-foot")).screenshot({ path: join(HERE, "best-composer.png") });
+    const st = await page.evaluate(() => ({ t: document.querySelector("#cmpTime").value, d: document.querySelector("#cmpDate").value, msg: document.querySelector("#cmpMsg").textContent,
+      today: locDate(Date.now()), tomorrow: locDate(Date.now() + 864e5) }));
+    await closeComposers();
+    const good = st.t === "19:30" && (st.d === st.today || st.d === st.tomorrow) && /Threads: найкращий час з твоєї статистики - 19:30/.test(st.msg);
+    if (!good) console.log("   ↳ bestComposer:", JSON.stringify(st));
+    return good;
+  });
+
+  await check("bestDistribute", async () => {
+    // AI-розподіл каже, які мережі поставлено в найкращий час з власної статистики
+    await page.evaluate(() => { selectView("publish"); setPTab("cal"); });
+    await page.waitForSelector("#aiDistribute", { timeout: 8000 });
+    await page.evaluate(() => document.querySelector("#aiDistribute").click());
+    await page.waitForFunction(() => /розподілено: 3/.test((document.querySelector("#pubMsg") || {}).textContent || ""), undefined, { timeout: 8000 });
+    const m = await page.evaluate(() => document.querySelector("#pubMsg").textContent);
+    const good = /⏰ Threads о 19:30 - найкращий час з твоєї статистики/.test(m);
+    if (!good) console.log("   ↳ bestDistribute:", m);
     return good;
   });
 

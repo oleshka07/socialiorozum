@@ -10,6 +10,7 @@ import * as meta from "./meta.js";
 import * as tg from "./telegram.js";
 import { threadsAccounts, threadsToken, metaPages, threadsAccountForRow, metaAccountForRow, accountChoices, mainAccountIds, telegramTargets, MULTI_NETS, isMultiNet, type Picked, type MetaPage, type ThreadsLogin } from "./accounts.js";
 import { buildAnalytics, MATURE_H, type PubRow, type FollowerRow } from "./analytics.js";
+import { bestTimes, BT_DAYS, type BestTime } from "./besttime.js";
 
 const PER_TICK = 25; // постів на мережу за прохід (щоб не впертись у ліміти Graph API)
 
@@ -421,4 +422,23 @@ export async function analyticsFor(ws: string, days: number, net = "all") {
     if (all.length > 1) for (const id of all) accounts.push({ key: `${net}:${id}`, net, name: nameOf.get(`${net}:${id}`) || id });
   }
   return { ...buildAnalytics(rows, followers, { days: d, net, tz }), connected, accounts };
+}
+
+// ⏰ Найкращий час з власних даних (besttime.ts): для AI-розподілу календаря, композера, Аналітики й
+// конектора. Беремо пів року постів - за 30 днів «дозрілих» зазвичай замало, щоб порівнювати вікна
+// доби. 10 хв памʼяті на кабінет: календар, композер і Аналітика питають те саме по кілька разів.
+const btCache = new Map<string, { at: number; v: { tz: string; items: BestTime[] } }>();
+export async function bestTimesFor(ws: string, fresh = false): Promise<{ tz: string; items: BestTime[] }> {
+  const hit = btCache.get(ws);
+  if (!fresh && hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.v;
+  const a = await analyticsFor(ws, BT_DAYS);
+  const v = { tz: a.tz, items: bestTimes(a.posts, a.tz) };
+  btCache.set(ws, { at: Date.now(), v });
+  if (btCache.size > 500) for (const [k, x] of btCache) if (Date.now() - x.at > 10 * 60 * 1000) btCache.delete(k);
+  return v;
+}
+/** Чи ставить календар пости в найкращий час (налаштування «⏰» у Ритмі каналів; типово - так). */
+export async function bestTimeAuto(ws: string): Promise<boolean> {
+  const r = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='best_time_auto'`, [ws]);
+  return String(r?.content ?? "1").trim() !== "0";
 }
