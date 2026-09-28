@@ -14,6 +14,7 @@
 //    вже публікували (його постам потрібен його токен) або бренд і так веде кілька акаунтів.
 import { q, one, tx } from "./db.js";
 import * as threads from "./threads.js";
+import { logEvent } from "./log.js";
 import type { FbPage } from "./meta.js";
 
 export const MULTI_NETS = ["facebook", "instagram", "threads"] as const;
@@ -299,6 +300,8 @@ export async function saveThreadsLogin(ws: string, a: { userId: string; username
   await linkThreadsRows(ws, a.userId, a.username);
   // кеш панелі Threads в Аналітиці - про основний акаунт; основний міг змінитись
   if (res === "new" || res === "main") await q(`delete from settings_block where workspace_id=$1 and key='threads_an_cache'`, [ws]);
+  // склад акаунтів змінився - старі пости без акаунта визначаємо у фоні (вікно OAuth не чекає)
+  if (res !== "refreshed") void probeThreadsRows(ws).catch(() => {});
   return res;
 }
 
@@ -309,6 +312,57 @@ async function linkThreadsRows(ws: string, userId: string, username: string): Pr
              from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
             where tp.post_id=p.id and s.workspace_id=$1 and tp.account_id is null and lower(tp.account_name)=lower($3)`,
     [ws, userId, "@" + username.replace(/^@/, "")]);
+}
+
+/** Чужий пост (не цього акаунта) чи пост видалено - Threads каже саме так; решта збоїв (мережа, ліміт) - ні. */
+const notOwnPost = (msg: string) => /does not exist|cannot be loaded|missing permission|unsupported get request/i.test(String(msg || ""));
+const probing = new Set<string>();
+
+/**
+ * Старі пости Threads без акаунта: опубліковані до того, як ми його записували, і без посилання, з
+ * якого він видний. Правило «такий пост - основного акаунта» хибне, щойно основний змінився (28.09:
+ * 7 постів @rozum.one після перепідключення рахувались постами @olegalisio - їхня статистика падала,
+ * а в Аналітиці вони тягнули норму не того профілю). Питаємо Threads токеном кожного акаунта бренду:
+ * свій пост токен бачить, чужий - ні. Разово, коли акаунтів стало кілька чи змінився основний; до 100
+ * найновіших. Мережевий збій зупиняє прохід - решту визначить наступна зміна акаунтів.
+ */
+export async function probeThreadsRows(ws: string): Promise<number> {
+  if (probing.has(ws)) return 0;
+  probing.add(ws);
+  try {
+    const accs = await threadsAccounts(ws);
+    if (accs.length < 2) return 0;
+    const rows = await q<{ id: string; media_id: string }>(
+      `select tp.id, tp.media_id from threads_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+        where s.workspace_id=$1 and tp.status='sent' and tp.account_id is null and tp.account_name is null and coalesce(tp.media_id,'')<>''
+        order by tp.created_at desc limit 100`, [ws]);
+    if (!rows.length) return 0;
+    const logins: ThreadsLogin[] = [];
+    for (const a of accs) { const t = await threadsToken(ws, a.userId); if (t) logins.push(t); }
+    const byName = new Map(accs.map((a) => [a.username.toLowerCase(), a] as const));
+    const until = Date.now() + 90_000;
+    let found = 0;
+    for (const r of rows) {
+      if (Date.now() > until) break;
+      for (const t of logins) {
+        let hit: { username: string; permalink: string };
+        try { hit = await threads.mediaOwner(t.token, r.media_id); }
+        catch (e: any) { if (notOwnPost(e?.message)) continue; return found; }
+        // ник у відповіді - хто автор; нема ника - автор той, чий токен пост побачив. Автор не з цього
+        // бренду (пост видно, а ник чужий) - нікому не приписуємо
+        const name = hit.username.replace(/^@/, "").toLowerCase();
+        const who = name ? byName.get(name) : accs.find((a) => a.userId === t.userId);
+        if (!who) break;
+        await q(`update threads_publish set account_id=$2, account_name=$3, permalink=coalesce(permalink, nullif($4,'')) where id=$1 and account_id is null`,
+          [r.id, who.userId, at(who.username), hit.permalink]);
+        found++;
+        break;
+      }
+    }
+    if (found)
+      await logEvent("info", "threads", `визначено акаунт у ${found} старих публікаціях (з ${rows.length} без акаунта)`, { ws });
+    return found;
+  } finally { probing.delete(ws); }
 }
 
 /** Зробити додатковий акаунт Threads основним (колишній основний лишається додатковим). */
@@ -329,7 +383,11 @@ export async function setMainThreads(ws: string, userId: string): Promise<boolea
     await c.q(`delete from threads_account where workspace_id=$1 and threads_user_id=$2`, [ws, userId]);
     return true;
   });
-  if (ok) await q(`delete from settings_block where workspace_id=$1 and key='threads_an_cache'`, [ws]);
+  if (ok) {
+    await q(`delete from settings_block where workspace_id=$1 and key='threads_an_cache'`, [ws]);
+    // пост без акаунта рахується постом основного - основний змінився, тож визначаємо такі пости
+    void probeThreadsRows(ws).catch(() => {});
+  }
   return ok;
 }
 

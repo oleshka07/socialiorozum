@@ -8,7 +8,7 @@ import { logEvent } from "./log.js";
 import * as threads from "./threads.js";
 import * as meta from "./meta.js";
 import * as tg from "./telegram.js";
-import { threadsAccounts, threadsToken, metaPages, threadsAccountForRow, metaAccountForRow, accountChoices, mainAccountIds, MULTI_NETS, type Picked, type MetaPage, type ThreadsLogin } from "./accounts.js";
+import { threadsAccounts, threadsToken, metaPages, threadsAccountForRow, metaAccountForRow, accountChoices, mainAccountIds, MULTI_NETS, isMultiNet, type Picked, type MetaPage, type ThreadsLogin } from "./accounts.js";
 import { buildAnalytics, MATURE_H, type PubRow, type FollowerRow } from "./analytics.js";
 
 const PER_TICK = 25; // постів на мережу за прохід (щоб не впертись у ліміти Graph API)
@@ -391,13 +391,18 @@ export async function analyticsFor(ws: string, days: number, net = "all") {
   const idByName = new Map<string, string>();
   for (const net of MULTI_NETS) for (const a of choices[net]) idByName.set(`${net}:n:${a.name.toLowerCase()}`, a.id);
   for (const r of rows) if (r.account?.startsWith("n:")) r.account = idByName.get(`${r.net}:${r.account}`) || r.account;
+  // акаунт, якого вже нема в бренді і назва якого невідома (старі дописи Сторінки): не сирий id, а
+  // впізнавана підпис - щоб у фільтрі й таблиці було видно, що це окремий, не підключений акаунт
+  const unknownName = (net: string, id: string) =>
+    `${({ facebook: "Сторінка", instagram: "Instagram", threads: "Threads" } as Record<string, string>)[net] || net} …${id.slice(-4)} (не підключено)`;
   for (const r of rows) {
     if (!r.account) continue;
     const k = `${r.net}:${r.account}`;
-    if (!nameOf.has(k)) nameOf.set(k, r.account_name || (r.account.startsWith("n:") ? r.account.slice(2) : ""));
+    if (!nameOf.has(k)) nameOf.set(k, r.account_name || (r.account.startsWith("n:") ? r.account.slice(2) : unknownName(r.net, r.account)));
     r.account_name = nameOf.get(k) || r.account_name || null;
   }
-  for (const f of followers) f.label = nameOf.get(`${f.network}:${f.account || ""}`) || undefined;
+  for (const f of followers)
+    f.label = nameOf.get(`${f.network}:${f.account || ""}`) || (f.account && isMultiNet(f.network) ? unknownName(f.network, f.account) : undefined);
   const connected = await one<{ threads: boolean; meta: boolean; telegram: boolean; linkedin: boolean }>(
     `select exists(select 1 from threads_config where workspace_id=$1 and access_token is not null) as threads,
             exists(select 1 from meta_config where workspace_id=$1 and page_token is not null) as meta,

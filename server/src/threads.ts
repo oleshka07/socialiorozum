@@ -173,6 +173,16 @@ export async function mediaPermalink(token: string, mediaId: string): Promise<st
   return j.permalink || "";
 }
 
+/** Хто автор поста. Threads віддає пост лише токеном його автора (чужий - «does not exist»), тож
+ *  успішна відповідь уже каже «це мій»; ник у відповіді - друга перевірка. */
+export async function mediaOwner(token: string, mediaId: string): Promise<{ username: string; permalink: string }> {
+  const u = new URL(`${GRAPH}/v1.0/${mediaId}`);
+  u.searchParams.set("fields", "id,username,permalink");
+  u.searchParams.set("access_token", token);
+  const j = await thFetch<{ username?: string; permalink?: string }>(u.toString());
+  return { username: j.username || "", permalink: j.permalink || "" };
+}
+
 // інсайти ПРОФІЛЮ за період (views - часовий ряд, решта - total_value за since..until;
 // followers_count - лише поточне значення, без періоду)
 export async function userInsights(token: string, userId: string, metrics: string[], sinceUnix?: number, untilUnix?: number): Promise<Record<string, number>> {
