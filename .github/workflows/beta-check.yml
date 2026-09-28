@@ -1,8 +1,8 @@
 name: beta-check
 
 # Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ, нічого не змінює й не перезапускає.
-# 28.09, 16:00 UTC: Олег опублікував на беті тестовий пост із першим коментарем (FB/IG). Дивимось, що
-# пішло в мережі, чим закінчився перший коментар і чи зібралась статистика Facebook (read_insights).
+# 28.09, 16:05 UTC: два перші коментарі Threads на беті впали «The requested resource does not exist».
+# Дивимось, яким акаунтом опубліковано ці пости і який акаунт Threads підключено зараз.
 
 on:
   push:
@@ -27,37 +27,30 @@ jobs:
             echo "beta HEAD $(git -C "${{ secrets.APP_DIR }}-beta" rev-parse --short HEAD) | зараз $(date -u +%H:%M) UTC"
             cd "${{ secrets.APP_DIR }}-beta/server" && docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -v ON_ERROR_STOP=0' <<'SQL' 2>&1 | mask
             set session characteristics as transaction read only;
-            \echo === публікації в мережі (3 год, Прага) ===
-            with ws as (select m.workspace_id id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%'),
-                 pub as (select 'meta:'||channel as net, post_id, status, error, created_at, permalink from meta_publish
-                         union all select 'threads', post_id, status, error, created_at, permalink from threads_publish
-                         union all select 'telegram', post_id, status, error, created_at, permalink from telegram_publish
-                         union all select 'linkedin', post_id, status, error, created_at, permalink from linkedin_publish)
-            select to_char(x.created_at at time zone 'Europe/Prague','DD.MM HH24:MI:SS') t, x.net, x.status, left(coalesce(x.error,''),140) err,
-                   left(p.id::text,8) post, left(regexp_replace(p.content,'\s+',' ','g'),45) txt, (x.permalink is not null) link
-              from pub x join post p on p.id=x.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
-             where s.workspace_id in (select id from ws) and x.created_at > now() - interval '3 hours'
-             order by x.created_at;
-            \echo === перший коментар (3 год) ===
-            with ws as (select m.workspace_id id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%')
-            select to_char(pc.updated_at at time zone 'Europe/Prague','DD.MM HH24:MI:SS') t, left(pc.post_id::text,8) post, pc.network, pc.status, pc.attempts,
-                   (pc.external_id is not null) has_id, left(pc.message,50) msg, left(coalesce(pc.error,''),200) err
+            \echo === невдалі коментарі Threads: чий пост, коли й ким опубліковано ===
+            select left(pc.post_id::text,8) post, coalesce(w.title,w.name) brand,
+                   to_char(tp.created_at at time zone 'Europe/Prague','DD.MM HH24:MI') published, tp.status pub_status,
+                   (tp.media_id = pc.target_id) same_target, to_char(pc.created_at at time zone 'Europe/Prague','DD.MM HH24:MI') queued,
+                   tc.username now_connected, to_char(tc.updated_at at time zone 'Europe/Prague','DD.MM HH24:MI') connected_at
               from post_comment pc join post p on p.id=pc.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
-             where s.workspace_id in (select id from ws) and pc.created_at > now() - interval '3 hours'
+              join workspace w on w.id=s.workspace_id
+              left join threads_publish tp on tp.post_id=pc.post_id and tp.status='sent'
+              left join threads_config tc on tc.workspace_id=s.workspace_id
+             where pc.network='threads' and pc.created_at > now() - interval '4 hours'
              order by pc.created_at;
-            \echo === статистика цих постів ===
-            with ws as (select m.workspace_id id from workspace_member m join app_user u on u.id=m.user_id where u.email like 'o.stepeniev%'),
-                 recent as (select mp.post_id from meta_publish mp join post p on p.id=mp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
-                             where s.workspace_id in (select id from ws) and mp.created_at > now() - interval '3 hours')
-            select left(pm.post_id::text,8) post, pm.network, pm.views, pm.reach, pm.likes, pm.replies, pm.shares, pm.saves,
-                   to_char(pm.fetched_at at time zone 'Europe/Prague','HH24:MI:SS') fetched, to_char(pm.measured_at at time zone 'Europe/Prague','HH24:MI:SS') measured,
-                   left(coalesce(pm.error,''),160) err
-              from post_metric pm where pm.post_id in (select post_id from recent);
-            \echo === журнал беті (3 год): meta, comment, metrics, publish, error ===
-            select to_char(l.created_at at time zone 'Europe/Prague','DD.MM HH24:MI:SS') t, l.level, l.scope,
-                   left(regexp_replace(l.message,'\s+',' ','g'),170) as msg
-              from app_log l
-             where l.created_at > now() - interval '3 hours'
-               and (l.scope in ('meta','comment','metrics','publish','autopost','threads','job') or l.level in ('error','warn'))
-             order by l.created_at desc limit 40;
+            \echo === які бренди Олега й що в них підключено ===
+            select coalesce(w.title,w.name) brand, mc.page_name, mc.ig_username, tc.username threads,
+                   to_char(tc.updated_at at time zone 'Europe/Prague','DD.MM HH24:MI') th_upd,
+                   to_char(mc.updated_at at time zone 'Europe/Prague','DD.MM HH24:MI') meta_upd,
+                   (select count(*) from threads_publish tp2 join post p2 on p2.id=tp2.post_id join pipeline_run r2 on r2.id=p2.run_id join source s2 on s2.id=r2.source_id
+                     where s2.workspace_id=w.id and tp2.status='sent') threads_posts
+              from workspace w join workspace_member m on m.workspace_id=w.id join app_user u on u.id=m.user_id
+              left join meta_config mc on mc.workspace_id=w.id left join threads_config tc on tc.workspace_id=w.id
+             where u.email like 'o.stepeniev%';
+            \echo === історія підключень Threads і Meta (7 днів) ===
+            select to_char(l.created_at at time zone 'Europe/Prague','DD.MM HH24:MI') t, l.scope, left(l.message,90) msg
+              from app_log l join app_user u on u.id=l.user_id
+             where u.email like 'o.stepeniev%' and l.scope in ('threads','meta') and l.message ~ '(підключено|обрано)'
+               and l.created_at > now() - interval '7 days'
+             order by l.created_at;
             SQL
