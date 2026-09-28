@@ -1,7 +1,7 @@
 name: beta-check
 
 # Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ, нічого не змінює й не перезапускає.
-# 29.09: бета після 36125ce (⏰ без дубля мережі) - версія, здоров'я, і що «⏰» покаже в кабінетах Олега.
+# 29.09: бета після ba242e4 (♻️ вічнозелена черга) - версія, здоров'я, таблиці, і що черга запропонує в кабінетах Олега.
 
 on:
   push:
@@ -12,7 +12,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Beta after best-time refinement (read-only)
+      - name: Beta after evergreen deploy (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -24,24 +24,23 @@ jobs:
             echo "зараз $(date -u +%d.%m\ %H:%M) UTC · beta HEAD $(git -C "$B" rev-parse --short HEAD)"
             echo "health: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/health)"
             cd "$B/server" && echo "контейнер: $(docker compose ps app --format '{{.Status}}')"
-            echo "маркери: app.js rhBestAuto=$(docker compose exec -T app grep -c rhBestAuto /app/public/app.js) · anBestPanel=$(docker compose exec -T app grep -c anBestPanel /app/public/app.js) · dist besttime=$(docker compose exec -T app ls /app/dist/besttime.js 2>/dev/null | wc -l)"
+            echo "маркери: app.js renderEvergreen=$(docker compose exec -T app grep -c renderEvergreen /app/public/app.js) · tdEvergreen=$(docker compose exec -T app grep -c tdEvergreen /app/public/app.js) · dist evergreen=$(docker compose exec -T app ls /app/dist/evergreen.js /app/dist/evergreen-plan.js 2>/dev/null | wc -l)"
             JS=$(cat <<'EOF'
             const { q } = await import('/app/dist/db.js');
-            const { bestTimesFor, bestTimeAuto } = await import('/app/dist/metrics.js');
+            const { evergreenView } = await import('/app/dist/evergreen.js');
             const mask = (s) => String(s || '').replace(/[^\s@]+@[^\s@]+/g, '<пошта>');
-            const mine = await q(`select w.id, coalesce(nullif(w.title,''), '(без назви)') as title, m.role
-                                    from workspace w join workspace_member m on m.workspace_id=w.id join app_user u on u.id=m.user_id
-                                   where lower(u.email)=lower($1) order by w.created_at`, ['o.stepeniev@swipescape.eu']);
+            const t = await q(`select (select count(*) from information_schema.tables where table_name in ('evergreen_item','evergreen_run'))::int as tabs,
+                                      (select count(*) from information_schema.columns where table_name='post' and column_name='repeat_of')::int as col,
+                                      (select count(*) from evergreen_item)::int as items, (select count(*) from settings_block where key='evergreen')::int as settings`);
+            console.log('таблиці:', JSON.stringify(t[0]));
+            const mine = await q(`select w.id, coalesce(nullif(w.title,''), '(без назви)') as title from workspace w join workspace_member m on m.workspace_id=w.id
+                                   join app_user u on u.id=m.user_id where lower(u.email)=lower($1) order by w.created_at`, ['o.stepeniev@swipescape.eu']);
             for (const w of mine) {
-              const r = await bestTimesFor(w.id);
-              console.log(`\n=== #${w.id.slice(0, 8)} «${mask(w.title)}» (${w.role}) · пояс ${r.tz} · ставити в календар: ${(await bestTimeAuto(w.id)) ? 'так' : 'ні'}`);
-              if (!r.items.length) console.log('  (жодної мережі зі статистикою постів)');
-              for (const i of r.items) console.log(`  [${i.key.replace(/:(.{6}).*$/, ':…$1')}] n=${i.n} ready=${i.ready} show=${i.show} times=${JSON.stringify(i.times)}\n    ${mask(i.text)}`);
+              const v = await evergreenView(w.id);
+              console.log(`\n=== #${w.id.slice(0, 8)} «${mask(w.title)}» · черга ${v.settings.on ? 'увімкнена' : 'вимкнена'} · у бібліотеці ${v.items.length} · найближчих повторів ${v.upcoming.length}`);
+              console.log(`  хіти (×${v.settings.minMult} і більше), які черга додасть сама: ${v.hits.length}`);
+              for (const h of v.hits.slice(0, 6)) console.log(`   ×${h.mult.toFixed(2)} «${mask(h.title).slice(0, 70)}»`);
             }
-            const all = await q(`select id from workspace`);
-            let withData = 0, ready = 0, timed = 0;
-            for (const w of all) { const r = await bestTimesFor(w.id); if (r.items.length) withData++; if (r.items.some((i) => i.ready)) ready++; if (r.items.some((i) => i.times.length)) timed++; }
-            console.log(`\nусього кабінетів на беті: ${all.length} · зі статистикою постів: ${withData} · з порівнянням вікон: ${ready} · з конкретним часом: ${timed}`);
             process.exit(0);
             EOF
             )
