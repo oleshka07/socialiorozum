@@ -1093,28 +1093,39 @@ export async function threadsStarterPack(workspaceId: string): Promise<{ bio: st
   return { bio, intro, pinned };
 }
 
-// 💬 Реплай-коуч: драфти відповідей на коменти під власними Threads-постами.
-// Мосері: «відповідай більше, ніж постиш» - відповідь автора повертає людину в гілку (нотифікація)
-// і дає алгоритму сигнал живої розмови. Один виклик на всі коменти.
-export async function suggestThreadReplies(
+// 💬 Чернетки відповідей на коментарі людей під постами бренду (Instagram, Facebook, Threads).
+// Мосері: «відповідай більше, ніж постиш» - відповідь автора повертає людину під пост і дає алгоритму
+// сигнал живої розмови. Один виклик моделі на всі коментарі; своя межа довжини на мережу.
+const REPLY_RULE: Record<string, string> = {
+  threads: "≤200 символів, розмовно (у Threads відповідь - частина гілки)",
+  instagram: "≤250 символів, тепло й коротко; емодзі - лише якщо так пише бренд",
+  facebook: "≤300 символів, по-людськи, можна трохи докладніше",
+};
+export async function suggestCommentReplies(
   workspaceId: string,
-  items: { commentId: string; postText: string; comment: string; username: string }[]
+  items: { commentId: string; net?: string; postText: string; comment: string; username: string }[]
 ): Promise<Record<string, string>> {
   if (!items.length) return {};
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
-  const material = items.slice(0, 15).map((it, i) =>
-    `[${i}] Пост: ${it.postText.replace(/\s+/g, " ").slice(0, 200)}\nКомент від @${it.username}: ${it.comment.replace(/\s+/g, " ").slice(0, 300)}`).join("\n---\n");
+  const NET_UA: Record<string, string> = { threads: "Threads", instagram: "Instagram", facebook: "Facebook" };
+  const list = items.slice(0, 15);
+  const material = list.map((it, i) =>
+    `[${i}] Мережа: ${NET_UA[it.net || "threads"] || it.net}\nПост: ${it.postText.replace(/\s+/g, " ").slice(0, 200)}\nКоментар від ${it.username ? "@" + it.username : "читача"}: ${it.comment.replace(/\s+/g, " ").slice(0, 300)}`).join("\n---\n");
+  const nets = [...new Set(list.map((it) => it.net || "threads"))];
   const system =
-    "Ти автор Threads. Напиши коротку живу відповідь на КОЖЕН комент під своїми постами." +
+    "Ти автор бренду в соцмережах. Напиши коротку живу відповідь на КОЖЕН коментар під своїми постами." +
     (s.tone_of_voice ? `\nГолос бренду: ${s.tone_of_voice}` : "") + voicePassport(s) +
-    "\n\nПравила відповіді: ≤200 символів; продовжуй РОЗМОВУ (подякуй/погодься/уточни/докинь думку), а де доречно - закінчи зустрічним питанням; звертайся на «ти», без офіціозу і без «дякуємо за ваш коментар»-канцеляриту; НЕ повторюй текст поста; на критику - спокійно і по суті, без виправдовувань." +
+    "\n\nПравила відповіді: продовжуй РОЗМОВУ (подякуй/погодься/уточни/докинь думку), а де доречно - закінчи зустрічним питанням; звертайся так, як бренд звертається до аудиторії, без офіціозу і без «дякуємо за ваш коментар»-канцеляриту; НЕ повторюй текст поста; на критику - спокійно і по суті, без виправдовувань; на питання про ціну чи замовлення - коротко по суті і куди написати, без тиску." +
+    "\nДовжина за мережею: " + nets.map((n) => `${NET_UA[n] || n} - ${REPLY_RULE[n] || REPLY_RULE.facebook}`).join("; ") + "." +
     NO_DASH_RULE + ANTI_AI_RULE +
-    `\n\nПоверни ЛИШЕ валідний JSON-обʼєкт {"0":"відповідь на комент [0]","1":"…"} за індексами. Мова: ${lang}.`;
-  const raw = await chat("openai/gpt-4o", system, material, { workspaceId, step: "thread_replies" });
+    `\n\nПоверни ЛИШЕ валідний JSON-обʼєкт {"0":"відповідь на коментар [0]","1":"…"} за індексами. Мова: ${lang}.`;
+  // межа відповіді - під кількість коментарів: зі стандартними 1500 токенами 15 відповідей Facebook
+  // обрізались би посеред JSON, і не лишилось би жодної чернетки
+  const raw = await chat(mainModel(s), system, material, { workspaceId, step: "comment_replies", json: true, maxTokens: 400 + list.length * 170 });
   const obj = extractJsonObject(raw) as Record<string, string>;
   const out: Record<string, string> = {};
-  items.slice(0, 15).forEach((it, i) => { const t = String(obj?.[String(i)] || "").trim(); if (t) out[it.commentId] = t.slice(0, 480); });
+  list.forEach((it, i) => { const t = String(obj?.[String(i)] || "").trim(); if (t) out[it.commentId] = t.slice(0, it.net === "threads" || !it.net ? 480 : 1000); });
   return out;
 }
 

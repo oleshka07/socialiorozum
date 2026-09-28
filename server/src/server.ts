@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { createHash, createHmac, timingSafeEqual, randomUUID } from "node:crypto";
 import { env } from "./env.js";
 import { q, one } from "./db.js";
-import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, ideaMode, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, storytellingVerdict, normFormat, FORMATS, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet, topPatterns, generateThreadsTakes, repeatVariant, expandTake, threadsStarterPack, threadsNicheReview, suggestThreadReplies, DEFAULT_MAIN_MODEL, PLAN_MAX_PPW, buildTopicFuel } from "./pipeline.js";
+import { executeStep, STEP_ORDER, StepKey, DEFAULT_PROMPTS, deriveVoice, deriveBrandFromText, generateStrategy, adaptForChannels, generatePostsOnePass, buildLitePrompt, rewritePost, generateChannelPlan, atomizePost, extractIdeasFromText, ideaMode, matchPlanSlots, buildLiteSkeleton, suggestHashtags, directorVerdict, aiAudit, deAiFix, storytellingVerdict, normFormat, FORMATS, suggestHooks, suggestHeadline, reelsScript, sliceToReels, publishQuestions, suggestDevelopment, suggestLeadMagnets, buildLeadMagnet, topPatterns, generateThreadsTakes, repeatVariant, expandTake, threadsStarterPack, threadsNicheReview, DEFAULT_MAIN_MODEL, PLAN_MAX_PPW, buildTopicFuel } from "./pipeline.js";
 import { startReelJob, parseReelScript } from "./reelvideo.js";
 import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
@@ -50,6 +50,7 @@ import { briefMismatch, brandTextOf } from "./textkind.js";
 import { startDiary } from "./diary.js";
 import { startThreadsAuto } from "./threads-auto.js";
 import { startComments, commentStates, queueMissingComments, processDue as processDueComments, COMMENT_NETS } from "./comments.js";
+import { collectInbox, replyToComment, skipComment, isInboxNet, inboxDrafts, INBOX_NETS, type InboxNet } from "./inbox.js";
 import { cleanAlt } from "./igextras.js";
 import { BRAND, legacyHosts, legacyRedirect } from "./brand.js";
 import { getSettingText } from "./settings.js";
@@ -1312,65 +1313,59 @@ app.post("/api/threads/niche-review", async (req: any, reply) => {
   catch (e: any) { await logEvent("error", "niche-review", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
 });
 
-// 💬 Реплай-коуч: свіжі коментарі під нашими Threads-постами + AI-драфт відповіді на кожен.
-// Потребує threads_manage_replies у токені (перепідключення після апруву пермішена).
-app.get("/api/threads/comments", async (req: any, reply) => {
+// 💬 Коментарі в одному місці (inbox.ts): свіжі коментарі людей під постами бренду в Instagram,
+// Facebook і Threads + AI-чернетка відповіді на кожен. ?net=instagram|facebook|threads - лише одна
+// мережа; ?countOnly=1 - дешевий лічильник для «Сьогодні» (без моделі); ?fresh=1 - не з 3-хв памʼяті.
+async function inboxView(req: any, nets?: InboxNet[]) {
   const ws = req.user.workspace_id;
-  const accs = await threadsAccounts(ws);
-  if (!accs.length) return reply.code(400).send({ error: "Threads не підключено" });
-  // власні відповіді - будь-якого акаунта бренду (особистий відповідає під постом компанії - теж «свій»)
-  const own = new Set(accs.map((a) => a.username.toLowerCase()).filter(Boolean));
-  const posts = await q<{ media_id: string; content: string; account_id: string | null; account_name: string | null }>(
-    `select tp.media_id, p.content, tp.account_id, tp.account_name from threads_publish tp join post p on p.id=tp.post_id
-       join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
-     where s.workspace_id=$1 and tp.status='sent' and tp.media_id is not null
-       and tp.created_at > now() - interval '7 days' order by tp.created_at desc limit 6`, [ws]);
-  if (!posts.length) return { items: [], hint: "За останній тиждень нема опублікованих Threads-постів." };
-  let replied: string[] = [];
-  try { const rr = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='th_replied'`, [ws]); replied = JSON.parse(rr?.content || "[]") || []; } catch { replied = []; }
-  const repliedSet = new Set(replied);
-  const items: { commentId: string; username: string; comment: string; postTitle: string; postText: string; timestamp: string; account: string; accountName: string }[] = [];
-  let permErr = "";
-  for (const p of posts) {
-    try {
-      // коментарі під постом бачить (і відповідає на них) лише акаунт, яким пост опубліковано
-      const acc = await threadsAccountForRow(ws, p);
-      if (!acc.ok) { permErr = acc.error; continue; }
-      for (const r of await threads.mediaReplies(acc.acc.token, p.media_id)) {
-        if (own.has(String(r.username || "").toLowerCase())) continue; // власні ветки/відповіді
-        if (repliedSet.has(r.id)) continue;
-        items.push({ commentId: r.id, username: r.username, comment: r.text, postTitle: (p.content || "").split("\n")[0].slice(0, 70), postText: p.content || "", timestamp: r.timestamp, account: acc.acc.userId, accountName: acc.acc.username });
-      }
-    } catch (e: any) { permErr = String(e.message).slice(0, 200); }
-  }
-  if (!items.length && permErr)
-    return reply.code(400).send({ error: "Не вдалося прочитати коментарі: " + permErr + ". Якщо пермішен threads_manage_replies щойно увімкнено - перепідключи Threads у Налаштування → Канали (токен отримує нові дозволи лише при повторному підключенні)." });
-  items.sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
-  // ?countOnly=1 - дешевий лічильник для екрана «Сьогодні» (без LLM-драфтів)
-  if (String(req.query?.countOnly || "") === "1") return { count: items.length };
-  let drafts: Record<string, string> = {};
-  try { drafts = await suggestThreadReplies(ws, items.map((it) => ({ commentId: it.commentId, postText: it.postText, comment: it.comment, username: it.username }))); }
-  catch { /* без драфтів теж корисно - користувач напише сам */ }
-  return { items: items.slice(0, 15).map((it) => ({ commentId: it.commentId, username: it.username, comment: it.comment, postTitle: it.postTitle, timestamp: it.timestamp, draft: drafts[it.commentId] || "",
-    account: it.account, accountName: accs.length > 1 ? it.accountName : "" })) };
+  const inbox = await collectInbox(ws, { nets, fresh: String(req.query?.fresh || "") === "1" });
+  const counts = Object.fromEntries(INBOX_NETS.map((n) => [n, inbox.items.filter((x) => x.net === n).length]));
+  if (String(req.query?.countOnly || "") === "1") return { count: inbox.items.length, counts, needs: inbox.needs, connected: inbox.connected };
+  const items = inbox.items.slice(0, 30);
+  const drafts = await inboxDrafts(ws, items);
+  // назву акаунта показуємо, коли в мережі бренду їх кілька (інакше - шум)
+  const multi = new Set(INBOX_NETS.filter((n) => (inbox.accounts[n] || 0) > 1));
+  return {
+    items: items.map((it) => ({ net: it.net, commentId: it.commentId, username: it.username, comment: it.comment, postTitle: it.postTitle, timestamp: it.timestamp,
+      permalink: it.permalink, account: it.account, accountName: multi.has(it.net) ? it.accountName : "", draft: drafts[it.commentId] || "" })),
+    counts, needs: inbox.needs, errors: inbox.errors, connected: inbox.connected,
+    hint: inbox.connected.length ? "" : "Підключи Instagram, Facebook чи Threads - тут зʼявляться коментарі під твоїми постами.",
+  };
+}
+app.get("/api/comments/inbox", async (req: any, reply) => {
+  const net = String(req.query?.net || "");
+  try { return await inboxView(req, isInboxNet(net) ? [net] : undefined); }
+  catch (e: any) { await logEvent("error", "inbox", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
 });
-
-// відповісти на конкретний комент (reply_to_id = id комента; фіксуємо, щоб не показувати вдруге)
-app.post("/api/threads/reply", async (req: any, reply) => {
-  const ws = req.user.workspace_id;
-  const commentId = String(req.body?.commentId || ""), text = String(req.body?.text || "").trim().slice(0, 490);
-  if (!commentId || !text) return reply.code(400).send({ error: "порожня відповідь" });
-  // відповідає той акаунт, під чиїм постом коментар (account з /api/threads/comments; нема - основний)
-  const tok = await thValidToken(ws, typeof req.body?.account === "string" && req.body.account ? req.body.account : null);
-  if (!tok) return reply.code(400).send({ error: "Threads не підключено" });
+// відповісти від імені акаунта, під чиїм постом коментар (account - з /api/comments/inbox)
+app.post("/api/comments/reply", async (req: any, reply) => {
+  const net = String(req.body?.net || "");
+  if (!isInboxNet(net)) return reply.code(400).send({ error: "невідома мережа" });
   try {
-    await threads.publish(tok.token, tok.userId, text, undefined, commentId);
-    let replied: string[] = [];
-    try { const rr = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='th_replied'`, [ws]); replied = JSON.parse(rr?.content || "[]") || []; } catch { replied = []; }
-    replied.push(commentId);
-    await q(`insert into settings_block(workspace_id, key, content) values($1,'th_replied',$2)
-             on conflict (workspace_id,key) do update set content=excluded.content, updated_at=now()`,
-      [ws, JSON.stringify(replied.slice(-200))]);
+    const r = await replyToComment(req.user.workspace_id, net, String(req.body?.commentId || ""), String(req.body?.text || ""), typeof req.body?.account === "string" ? req.body.account : null);
+    return { ok: true, ...r };
+  } catch (e: any) {
+    await logEvent("warn", "inbox", `${net}: відповідь на коментар не вийшла: ${e.message}`, null, req.user.id);
+    return reply.code(400).send({ error: e.message + (net === "threads" && /permission|not authorized|OAuth/i.test(e.message) ? " (перепідключи Threads - нові дозволи діють після повторного підключення)" : "") });
+  }
+});
+app.post("/api/comments/skip", async (req: any, reply) => {
+  const net = String(req.body?.net || "");
+  if (!isInboxNet(net)) return reply.code(400).send({ error: "невідома мережа" });
+  try { await skipComment(req.user.workspace_id, net, String(req.body?.commentId || "")); return { ok: true }; }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+// давні адреси реплай-коуча Threads (кабінет, відкритий до оновлення) - те саме, лише Threads
+app.get("/api/threads/comments", async (req: any, reply) => {
+  try {
+    const v: any = await inboxView(req, ["threads"]);
+    if (!v.connected?.length) return reply.code(400).send({ error: "Threads не підключено" });
+    return v;
+  } catch (e: any) { return reply.code(500).send({ error: e.message }); }
+});
+app.post("/api/threads/reply", async (req: any, reply) => {
+  try {
+    await replyToComment(req.user.workspace_id, "threads", String(req.body?.commentId || ""), String(req.body?.text || "").slice(0, 490), typeof req.body?.account === "string" && req.body.account ? req.body.account : null);
     return { ok: true };
   } catch (e: any) {
     await logEvent("error", "threads-reply", e.message, null, req.user.id);
@@ -2569,8 +2564,9 @@ const META_SCOPES = ["public_profile", "pages_show_list", "pages_read_engagement
 // базове підключення лишається робочим за будь-якого стану застосунку, а людина просить коментарі чи
 // статистику Facebook, коли вони їй справді потрібні.
 const META_EXTRA: Record<string, string[]> = {
-  comments: ["instagram_manage_comments", "pages_manage_engagement"],   // 💬 перший коментар
+  comments: ["instagram_manage_comments", "pages_manage_engagement"],   // 💬 перший коментар і відповіді на коментарі
   insights: ["read_insights"],                                          // 📈 перегляди постів Facebook
+  inbox: ["pages_read_user_content"],                                   // 📥 читати коментарі людей під дописами Сторінки
 };
 
 async function metaCfg(ws: string) {

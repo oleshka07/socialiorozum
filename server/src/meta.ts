@@ -443,3 +443,69 @@ export async function publishMultiPhotoToPage(pageId: string, pageToken: string,
     method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body,
   });
 }
+
+// ===================== 💬 КОМЕНТАРІ В ОДНОМУ МІСЦІ =====================
+// Свіжі дописи акаунта з коментарями, самі коментарі людей і відповідь на них. Instagram: читання й
+// відповідь - instagram_manage_comments; Facebook: читання коментарів людей - pages_read_user_content,
+// відповідь - pages_manage_engagement (обидва просяться окремими кнопками в Каналах).
+export type IgRecent = { id: string; caption: string; permalink: string | null; timestamp: string; comments: number };
+export async function igRecentMedia(igUserId: string, pageToken: string, limit = 12): Promise<IgRecent[]> {
+  const u = new URL(`${GRAPH}/${igUserId}/media`);
+  u.searchParams.set("fields", "id,caption,permalink,timestamp,comments_count,media_product_type");
+  u.searchParams.set("limit", String(limit));
+  u.searchParams.set("access_token", pageToken);
+  const j = await fbFetch<{ data: Array<any> }>(u.toString());
+  // сторіс коментарів не мають (відповіді на сторіс - це Direct)
+  return (j.data || []).filter((m) => m.id && String(m.media_product_type || "").toUpperCase() !== "STORY")
+    .map((m) => ({ id: String(m.id), caption: String(m.caption || ""), permalink: m.permalink || null, timestamp: String(m.timestamp || ""), comments: Number(m.comments_count) || 0 }));
+}
+
+export type IgComment = { id: string; text: string; username: string; timestamp: string; replyUsers: string[] };
+export async function igComments(mediaId: string, pageToken: string, limit = 50): Promise<IgComment[]> {
+  const u = new URL(`${GRAPH}/${mediaId}/comments`);
+  u.searchParams.set("fields", "id,text,username,timestamp,replies.limit(25){username}");
+  u.searchParams.set("limit", String(limit));
+  u.searchParams.set("access_token", pageToken);
+  const j = await fbFetch<{ data: Array<any> }>(u.toString());
+  return (j.data || []).map((c) => ({
+    id: String(c.id || ""), text: String(c.text || ""), username: String(c.username || ""), timestamp: String(c.timestamp || ""),
+    replyUsers: ((c.replies && c.replies.data) || []).map((r: any) => String(r.username || "")).filter(Boolean),
+  })).filter((c) => c.id && c.text);
+}
+
+/** Відповідь на коментар в Instagram - гілкою під ним, від імені акаунта. */
+export async function igReply(commentId: string, pageToken: string, message: string): Promise<{ id: string }> {
+  const body = new URLSearchParams({ message, access_token: pageToken });
+  return fbFetch<{ id: string }>(`${GRAPH}/${commentId}/replies`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body,
+  });
+}
+
+export type FbRecent = { id: string; message: string; permalink: string | null; timestamp: string; comments: number };
+export async function pageRecentPosts(pageId: string, pageToken: string, limit = 12): Promise<FbRecent[]> {
+  const u = new URL(`${GRAPH}/${pageId}/published_posts`);
+  u.searchParams.set("fields", "id,message,permalink_url,created_time,comments.limit(0).summary(true)");
+  u.searchParams.set("limit", String(limit));
+  u.searchParams.set("access_token", pageToken);
+  const j = await fbFetch<{ data: Array<any> }>(u.toString());
+  return (j.data || []).filter((p) => p.id).map((p) => ({
+    id: String(p.id), message: String(p.message || ""), permalink: p.permalink_url || null, timestamp: String(p.created_time || ""),
+    comments: Number(p.comments?.summary?.total_count) || 0,
+  }));
+}
+
+export type FbComment = { id: string; text: string; fromId: string | null; fromName: string; timestamp: string; permalink: string | null; replyFromIds: string[] };
+export async function fbComments(objectId: string, pageToken: string, limit = 50): Promise<FbComment[]> {
+  const u = new URL(`${GRAPH}/${objectId}/comments`);
+  u.searchParams.set("fields", "id,message,from{id,name},created_time,permalink_url,comments.limit(25){from{id}}");
+  u.searchParams.set("filter", "toplevel");
+  u.searchParams.set("order", "reverse_chronological");
+  u.searchParams.set("limit", String(limit));
+  u.searchParams.set("access_token", pageToken);
+  const j = await fbFetch<{ data: Array<any> }>(u.toString());
+  return (j.data || []).map((c) => ({
+    id: String(c.id || ""), text: String(c.message || ""), fromId: c.from?.id ? String(c.from.id) : null, fromName: String(c.from?.name || ""),
+    timestamp: String(c.created_time || ""), permalink: c.permalink_url || null,
+    replyFromIds: ((c.comments && c.comments.data) || []).map((r: any) => String(r.from?.id || "")).filter(Boolean),
+  })).filter((c) => c.id && c.text);
+}

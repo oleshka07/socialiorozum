@@ -159,7 +159,6 @@ const API = {
     publishedToday: 1,
     netToday: { telegram: 1 },
   },
-  "GET /threads/comments": { count: 4, items: [] },
   "POST /brand/context-check-result": {
     score: 5, promptChars: 9200,
     findings: [
@@ -331,6 +330,25 @@ const mediaBytes = [];   // і скільки байтів у кожному (ng
 // ---- 📈 синтетичні публікації для Аналітики (детерміновано: той самий набір щоразу) ----
 const anQueries = [];
 let anRefreshes = 0;
+// 💬 коментарі в одному місці: заглушка СТАНОВА - відповідь і «пропустити» прибирають коментар, як на сервері;
+// cmNeeds - сценарій «Meta ще не дала дозволу читати коментарі Facebook»
+const CM_ITEMS = [
+  { net: "instagram", commentId: "igc1", username: "fan1", comment: "Де купити такий рюкзак?", postTitle: "Похід у Карпати", timestamp: iso(0, 1), permalink: "https://instagram.com/p/U1", account: "igu", accountName: "@olegalisio", draft: "Deuter, посилання в профілі 🙂" },
+  { net: "instagram", commentId: "igc2", username: "hotel_owner", comment: "А скільки коштує впровадження?", postTitle: "Кейс: AI у готелі", timestamp: iso(0, 2), permalink: null, account: "igr", accountName: "@rozum.one", draft: "Напишіть у Direct - порахуємо" },
+  { net: "facebook", commentId: "fbc1", username: "Марія Коваль", comment: "Підкажіть контакти", postTitle: "Допис Сторінки", timestamp: iso(0, 3), permalink: null, account: "pg1", accountName: "", draft: "Пишіть у Messenger" },
+  { net: "threads", commentId: "thc1", username: "fan_th", comment: "А як записатись?", postTitle: "Пост про AI", timestamp: iso(0, 4), permalink: null, account: "thr", accountName: "", draft: "Посилання в профілі!" },
+];
+const cmDone = new Set(), cmCalls = [];
+let cmNeeds = false;
+function cmInbox(path) {
+  const qp = new URL(path, "http://x").searchParams;
+  const items = CM_ITEMS.filter((x) => !cmDone.has(x.commentId) && !(cmNeeds && x.net === "facebook"));
+  const counts = { instagram: 0, facebook: 0, threads: 0 }; items.forEach((x) => counts[x.net]++);
+  const needs = cmNeeds ? [{ net: "facebook", perm: "inbox", text: "Facebook: щоб бачити коментарі під дописами Сторінки, дай дозвіл" }] : [];
+  const connected = ["instagram", "facebook", "threads"];
+  if (qp.get("countOnly") === "1") return { count: items.length, counts, needs, connected };
+  return { items, counts, needs, errors: [], connected, hint: "" };
+}
 function anRows() {
   let seed = 42;
   const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
@@ -391,6 +409,15 @@ function handleApi(method, path, body) {
     return { jobId: "job-an" };
   }
   if (path.startsWith("/tg/")) return handleTg(method, path.slice(3), body);
+  if (method === "GET" && path.startsWith("/comments/inbox")) return cmInbox(path);
+  if (method === "POST" && (path === "/comments/reply" || path === "/comments/skip")) {
+    cmCalls.push({ path, body });
+    // Facebook без дозволу відповідати - відмова (кнопка знову активна, картка не «зроблена»)
+    if (path === "/comments/reply" && body?.commentId === "fbc1") return { __status: 400, error: "Facebook: Meta ще не дала дозволу відповідати на коментарі - «💬 Дозволити коментарі»" };
+    cmDone.add(body?.commentId);
+    const it = CM_ITEMS.find((x) => x.commentId === body?.commentId);
+    return path === "/comments/reply" ? { ok: true, id: "r1", accountName: it?.accountName || "@olegalisio" } : { ok: true };
+  }
   const key = method + " " + path.split("?")[0];
   if (key === "GET /admin/keys") return { keys: KEYS, kie: { ready: KEYS[1].set, credits: KEYS[1].set ? 1200 : null } };
   if (method === "PUT" && path.startsWith("/admin/keys/")) {
@@ -693,6 +720,75 @@ const run = async () => {
   await check("commCount", async () => {
     await page.waitForFunction(() => { const e = document.getElementById("tdComm"); return e && e.textContent === "4"; }, undefined, { timeout: 8000 });
     return true;
+  });
+
+  await check("commInbox", async () => {
+    // вікно з плитки «💬 Коменти»: фільтри з лічильниками, акаунт біля коментаря, AI-чернетка; відповідь іде від
+    // потрібного акаунта з правленим текстом; «Пропустити»; відмова мережі видна на картці; набраний текст не
+    // губиться при перемиканні фільтра; лічильник на «Сьогодні» зменшується
+    // вікно закривається за будь-якого результату - інакше провал цієї перевірки валив би сусідні
+    const closeCm = () => page.evaluate(() => document.querySelectorAll(".modal").forEach((m) => { if (m.querySelector(".cmModal")) m.remove(); }));
+    try {
+    await page.evaluate(() => { const t = [...document.querySelectorAll(".tdTile")].find((x) => /Коменти/.test(x.textContent)); t.click(); });
+    await page.waitForSelector(".cmModal .cmCard", { timeout: 8000 });
+    const st0 = await page.evaluate(() => {
+      const m = document.querySelector(".cmModal");
+      return { cards: m.querySelectorAll(".cmCard").length, chips: [...m.querySelectorAll("[data-cmf]")].map((x) => x.textContent.trim()).join("|"),
+        accs: [...m.querySelectorAll(".cmAcc")].map((x) => x.textContent).join("|"), draft: m.querySelector(".cmTxt").value };
+    });
+    // набрати текст у картці Threads, перемкнути на Instagram і назад - текст на місці
+    await page.evaluate(() => { const card = [...document.querySelectorAll(".cmModal .cmCard")].find((c) => /Threads/.test(c.querySelector(".cmNet").textContent));
+      const ta = card.querySelector(".cmTxt"); ta.value = "Мій власний текст для Threads"; ta.dispatchEvent(new Event("input", { bubbles: true }));
+      document.querySelector('[data-cmf="instagram"]').click(); });
+    const igOnly = await page.$$eval(".cmModal .cmCard", (a) => a.length);
+    await page.evaluate(() => document.querySelector('[data-cmf="all"]').click());
+    const kept = await page.evaluate(() => [...document.querySelectorAll(".cmModal .cmCard")].find((c) => /Threads/.test(c.querySelector(".cmNet").textContent)).querySelector(".cmTxt").value);
+    // відповісти на коментар під постом компанії з правленим текстом
+    await page.evaluate(() => { const card = [...document.querySelectorAll(".cmModal .cmCard")].find((c) => /rozum\.one/.test(c.textContent));
+      const ta = card.querySelector(".cmTxt"); ta.value = "Напишіть у Direct - порахуємо під ваш готель"; ta.dispatchEvent(new Event("input", { bubbles: true }));
+      card.querySelector(".cmSend").click(); });
+    await page.waitForFunction(() => /✓ відповідь від @rozum\.one/.test(document.querySelector(".cmModal").textContent), undefined, { timeout: 6000 });
+    // Facebook - відмова мережі: видно причину, картка лишається активною; потім «Пропустити»
+    await page.evaluate(() => [...document.querySelectorAll(".cmModal .cmCard")].find((c) => /Facebook/.test(c.querySelector(".cmNet").textContent)).querySelector(".cmSend").click());
+    await page.waitForFunction(() => /⚠ Facebook: Meta ще не дала/.test(document.querySelector(".cmModal").textContent), undefined, { timeout: 6000 });
+    const fbAfterErr = await page.evaluate(() => { const c = [...document.querySelectorAll(".cmModal .cmCard")].find((x) => /Facebook/.test(x.querySelector(".cmNet").textContent));
+      return { done: c.classList.contains("done"), sendOn: !c.querySelector(".cmSend").disabled }; });
+    await page.evaluate(() => [...document.querySelectorAll(".cmModal .cmCard")].find((c) => /Facebook/.test(c.querySelector(".cmNet").textContent)).querySelector(".cmSkip").click());
+    await page.waitForFunction(() => /пропущено/.test(document.querySelector(".cmModal").textContent), undefined, { timeout: 6000 });
+    const st1 = await page.evaluate(() => ({ chips: [...document.querySelectorAll("[data-cmf]")].map((x) => x.textContent.trim()).join("|"),
+      done: document.querySelectorAll(".cmModal .cmCard.done").length, tile: document.getElementById("tdComm").textContent }));
+    if (process.env.SMOKE_SHOTS) {
+      await page.screenshot({ path: join(HERE, "comments-light.png") });
+      const th = await page.evaluate(() => document.body.getAttribute("data-theme"));
+      await page.evaluate(() => setTheme("dark")); await page.screenshot({ path: join(HERE, "comments-dark.png") });
+      await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(300);
+      await page.screenshot({ path: join(HERE, "comments-mobile.png") });
+      await page.setViewportSize({ width: 1400, height: 950 }); await page.evaluate((t) => setTheme(t || "light"), th);
+    }
+    const reply = cmCalls.find((c) => c.path === "/comments/reply" && c.body.commentId === "igc2"), skip = cmCalls.find((c) => c.path === "/comments/skip");
+    const good = st0.cards === 4 && st0.chips === "Усі 4|📸 Instagram 2|📘 Facebook 1|🧵 Threads 1" && st0.accs === "@olegalisio|@rozum.one" && st0.draft === "Deuter, посилання в профілі 🙂"
+      && igOnly === 2 && kept === "Мій власний текст для Threads"
+      && reply && reply.body.net === "instagram" && reply.body.account === "igr" && reply.body.text === "Напишіть у Direct - порахуємо під ваш готель"
+      && !fbAfterErr.done && fbAfterErr.sendOn && skip && skip.body.commentId === "fbc1"
+      && st1.chips === "Усі 2|📸 Instagram 1|📘 Facebook 0|🧵 Threads 1" && st1.done === 2 && st1.tile === "2";
+    if (!good) console.log("   ↳ commInbox:", JSON.stringify({ st0, igOnly, kept, reply, fbAfterErr, skip, st1 }));
+    return good;
+    } finally { await closeCm(); }
+  });
+
+  await check("commNeeds", async () => {
+    // Meta не дала дозволу читати коментарі Facebook: у вікні - пояснення і кнопка, що відкриває вікно Meta з ?add=inbox
+    cmNeeds = true;
+    try {
+    await page.evaluate(() => { window.__popups = []; window.connectPopup = (u) => { window.__popups.push(u); return false; }; openComments(); });
+    await page.waitForSelector(".cmModal .cmNeed", { timeout: 8000 });
+    const st = await page.evaluate(() => { const b = document.querySelector('.cmModal [data-cmperm="inbox"]'); if (b) b.click();
+      return { need: document.querySelector(".cmModal .cmNeed").textContent, btn: b && b.textContent, popups: window.__popups,
+        cards: document.querySelectorAll(".cmModal .cmCard").length }; });
+    const good = /дай дозвіл/.test(st.need) && st.btn === "📥 Дозволити читати коментарі" && st.popups.length === 1 && st.popups[0] === "/api/integrations/meta/connect?add=inbox" && st.cards === 2;
+    if (!good) console.log("   ↳ commNeeds:", JSON.stringify(st));
+    return good;
+    } finally { cmNeeds = false; await page.evaluate(() => document.querySelectorAll(".modal").forEach((m) => { if (m.querySelector(".cmModal")) m.remove(); })); }
   });
 
   await check("todayFails", async () =>
@@ -2077,9 +2173,9 @@ const run = async () => {
       const btn = ex && ex.querySelector('[data-mtadd="comments"]'); if (btn) btn.click();
       return { shown: !!ex && ex.style.display !== "none", rows: ex ? ex.querySelectorAll(".card").length : 0,
         commentsBtn: !!btn && /Дозволити коментарі/.test(btn.textContent), insightsOk: !!ex && /Перегляди постів Facebook[\s\S]*✓ дозволено/.test(ex.textContent),
-        insightsBtn: !!(ex && ex.querySelector('[data-mtadd="insights"]')), popups: window.__popups };
+        insightsBtn: !!(ex && ex.querySelector('[data-mtadd="insights"]')), inboxBtn: !!(ex && ex.querySelector('[data-mtadd="inbox"]') && /Дозволити читати коментарі/.test(ex.querySelector('[data-mtadd="inbox"]').textContent)), popups: window.__popups };
     });
-    const good = st.shown && st.rows === 2 && st.commentsBtn && st.insightsOk && !st.insightsBtn && st.popups.length === 1 && st.popups[0] === "/api/integrations/meta/connect?add=comments";
+    const good = st.shown && st.rows === 3 && st.commentsBtn && st.insightsOk && !st.insightsBtn && st.inboxBtn && st.popups.length === 1 && st.popups[0] === "/api/integrations/meta/connect?add=comments";
     if (!good) console.log("   ↳ fcMetaExtras:", JSON.stringify(st));
     return good;
   });
@@ -2389,12 +2485,19 @@ const run = async () => {
       top: document.querySelector(".cmp-ov").getBoundingClientRect().top, barH: document.getElementById("reviewBar").offsetHeight,
       backVisible: (() => { const b = document.querySelector("#cmpBack").getBoundingClientRect(); const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!e && !!e.closest("#cmpBack"); })() }));
     await closeComposers();
+    // вікно коментарів - свій підпис із дозволами читання й відповіді
+    await page.evaluate(() => openComments());
+    await page.waitForSelector(".cmModal", { timeout: 8000 });
+    await page.waitForTimeout(800);
+    const cmTxt = await page.evaluate(() => document.getElementById("reviewTxt").textContent);
+    await page.evaluate(() => document.querySelectorAll(".modal").forEach((m) => { if (m.querySelector(".cmModal")) m.remove(); }));
     const off = await page.evaluate(() => { document.getElementById("reviewOff").click();
       return { gone: !document.getElementById("reviewBar"), cls: document.documentElement.classList.contains("review-on"), ls: localStorage.getItem("kg_review_en") }; });
     const good = /instagram_manage_insights/.test(st.an) && /pages_show_list/.test(st.ch) && st.cls && st.lang === "en" && st.barH > 20 && st.owlHidden
       && /^Post editor/.test(cmp.txt) && Math.abs(cmp.top - cmp.barH) <= 1 && cmp.backVisible
+      && /^Comments inbox/.test(cmTxt) && /pages_read_user_content/.test(cmTxt) && /pages_manage_engagement/.test(cmTxt)
       && off.gone && !off.cls && off.ls === null;
-    if (!good) console.log("   ↳ reviewCaptions:", JSON.stringify({ st, cmp, off }));
+    if (!good) console.log("   ↳ reviewCaptions:", JSON.stringify({ st, cmp, cmTxt, off }));
     return good;
   });
 

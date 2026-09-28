@@ -1,4 +1,4 @@
-# Meta App Review: що саме знімати і що вписувати · оновлено 28.09.2026
+# Meta App Review: що саме знімати і що вписувати · оновлено 28.09.2026 (вечір: скринька коментарів)
 
 > **Holos by Rozum (колишній socialio).** Записуємо й подаємо вже після переїзду на `holos.rozum.one`: рецензент бачить ту саму назву й адресу, що й користувачі. У застосунку Meta (App settings → Basic) Privacy Policy, Terms і Data Deletion - теж на holos.rozum.one; адреси повернення додає картка «Holos: додати адресу holos.rozum.one…».
 
@@ -9,7 +9,7 @@ the Threads API» усередині ROZUM Marketing Pulse; `1347525417441376` -
 
 | Що | ID | Навіщо | Дозволи на ревʼю |
 |---|---|---|---|
-| **ROZUM Marketing Pulse** | App ID `1255606142995192` | Facebook-Сторінка + Instagram | 9 (3 нові: коментарі й статистика) |
+| **ROZUM Marketing Pulse** | App ID `1255606142995192` | Facebook-Сторінка + Instagram | 10 (4 нові: коментарі, скринька коментарів, статистика) |
 | **Threads у тому ж застосунку** | Threads App ID `1347525417441376` | Threads | 4 |
 
 Подаються з App Review того самого застосунку; якщо Meta дозволить - однією заявкою.
@@ -26,7 +26,12 @@ the Threads API» усередині ROZUM Marketing Pulse; `1347525417441376` -
   Каналах, Аналітиці - свій текст). Монтувати субтитри не треба. Сова-помічник у цьому режимі
   схована. Вимкнути - ✕ на смузі.
 - **Нові дозволи:** `instagram_manage_comments` і `pages_manage_engagement` (перший коментар під
-  постом), `read_insights` (перегляди дописів Facebook в Аналітиці).
+  постом і відповіді людям), `read_insights` (перегляди дописів Facebook в Аналітиці),
+  `pages_read_user_content` (читати коментарі людей під дописами Сторінки).
+- **💬 Коментарі в одному місці (з 28.09):** плитка «💬 Коменти» на «Сьогодні» відкриває свіжі
+  коментарі людей під постами в Instagram, на Сторінці й у Threads, з чернеткою відповіді. Тому текст
+  для `instagram_manage_comments` переписано: застосунок тепер **читає** коментарі інших людей (раніше
+  ми писали, що не читає, - це вже неправда), а для Facebook додано `pages_read_user_content`.
 - **Threads:** додався `threads_manage_replies` (реплай-коуч: відповіді на коментарі під твоїми
   постами).
 - **Правила Meta (з їхньої документації):** окреме відео на кожен дозвіл (одне відео можна
@@ -43,11 +48,12 @@ the Threads API» усередині ROZUM Marketing Pulse; `1347525417441376` -
    **Перевіряй і записуй лише на `holos.rozum.one`.** Адрес беті (`beta.holos.rozum.one`) у
    налаштуваннях Meta немає, тож там вікно Meta пише «URL Blocked» - 28.09 саме так і сталося.
    Кабінет тепер так і пояснює цю помилку (адреса й точне поле для адміна), а не «скасовано».
-2. **Додати 3 нові дозволи в застосунок Meta.** developers.facebook.com → My Apps → ROZUM Marketing
+2. **Додати 4 нові дозволи в застосунок Meta.** developers.facebook.com → My Apps → ROZUM Marketing
    Pulse → **Use cases** → сценарій із Facebook-Сторінкою → **Customize** → додати
-   `pages_manage_engagement` і `read_insights`; сценарій з Instagram → додати
-   `instagram_manage_comments`. **Save.** Без цього кнопки «💬 Дозволити коментарі» і «📈 Дозволити
-   статистику» в Holos відкриють вікно Meta з помилкою «Invalid Scopes».
+   `pages_manage_engagement`, `read_insights` і `pages_read_user_content`; сценарій з Instagram →
+   додати `instagram_manage_comments`. **Save.** Без цього кнопки «💬 Дозволити коментарі»,
+   «📈 Дозволити статистику» і «📥 Дозволити читати коментарі» в Holos відкриють вікно Meta з
+   помилкою «Invalid Scopes».
 3. **Мова Facebook - англійська** (Facebook → Settings & privacy → Language) - тоді й вікно входу
    Facebook у записі буде англійською.
 4. **Тестовий акаунт Holos для рецензента** (Facebook-пароль рецензенту давати заборонено, лише
@@ -57,7 +63,11 @@ the Threads API» усередині ROZUM Marketing Pulse; `1347525417441376` -
      прийде в твою ж скриньку);
    - у цьому акаунті: Налаштування → Канали → Facebook + Instagram → «🔗 Підключити» → твій Facebook
      → обрати **демо-Сторінку** з привʼязаним Instagram (бізнес або автор, 3-5 постів);
-   - там же «💬 Дозволити коментарі» і «📈 Дозволити статистику»;
+   - там же «💬 Дозволити коментарі», «📈 Дозволити статистику» і «📥 Дозволити читати коментарі»;
+   - **коментарі людей для відео 2:** опублікуй з Holos демо-пост у Facebook і Instagram, потім зі
+     свого особистого Instagram (не демо-акаунта) залиш під ним коментар-питання, а у Facebook -
+     коментар від свого профілю (у полі коментаря обери себе, а не Сторінку). Свої коментарі
+     акаунта й Сторінки Holos у скриньці не показує - вони там і не потрібні;
    - пройди онбординг і зроби 2-3 чернетки, щоб рецензент прийшов у живий кабінет.
 5. **Чим знімати:** Windows - Win+Alt+R (Xbox Game Bar) або OBS; 1920×1080, курсор видно. Окреме
    вікно браузера, без зайвих вкладок і сповіщень.
@@ -82,8 +92,8 @@ the Threads API» усередині ROZUM Marketing Pulse; `1347525417441376` -
    **Instagram** (у поста має бути фото) → **«📣 Опублікувати зараз»** → дочекатись «Опубліковано».
 6. Під прев'ю кожної мережі **«↗ Відкрити пост»** → показати пост на Сторінці і в Instagram.
 
-### Відео 2 - Перший коментар
-Дозволи: `instagram_manage_comments`, `pages_manage_engagement`
+### Відео 2 - Коментарі: перший коментар і відповіді людям
+Дозволи: `instagram_manage_comments`, `pages_manage_engagement`, `pages_read_user_content`
 1. Налаштування → «Канали» → «Facebook + Instagram» → **«💬 Дозволити коментарі»** → вікно
    Facebook, видно два нові дозволи → підтвердити → у картці «💬 Перший коментар ✓ дозволено».
 2. Нова чернетка → «✍ Редагувати» → Facebook і Instagram → у полі **«💬 Перший коментар»** написати,
@@ -91,6 +101,14 @@ the Threads API» усередині ROZUM Marketing Pulse; `1347525417441376` -
    під постом у кожній мережі.
 3. **«📣 Опублікувати зараз»** → під прев'ю «💬 ✓ опубліковано».
 4. «↗ Відкрити пост» → показати під постом в Instagram і на Сторінці коментар від імені акаунта.
+5. Налаштування → «Канали» → «Facebook + Instagram» → **«📥 Дозволити читати коментарі»** → вікно
+   Facebook (`pages_read_user_content`) → підтвердити → «✓ дозволено».
+6. **«Сьогодні»** → плитка **«💬 Коменти»** → вікно «Коментарі під твоїми постами»: коментарі людей з
+   Instagram (`instagram_manage_comments`) і зі Сторінки (`pages_read_user_content`), під кожним -
+   чернетка відповіді.
+7. Поправити чернетку під коментарем з Instagram → **«↩ Відповісти»** → «✓ відповідь від @акаунт»;
+   те саме для Facebook (`pages_manage_engagement`). **«↗»** у картці → показати відповідь під
+   коментарем у самій мережі.
 
 ### Відео 3 - Статистика
 Дозволи: `pages_read_engagement`, `instagram_manage_insights`, `read_insights`
@@ -133,8 +151,9 @@ Advanced - не чіпай.
 | `instagram_basic` | 1 | The app reads the connected Instagram professional account's username and the captions of the user's own recent posts: to confirm which account is connected and, when the user clicks “Voice from Instagram”, to learn the tone of voice for new posts. |
 | `pages_manage_posts` | 1 | The app publishes the user's own approved posts (text and photos or video) to the Facebook Page the user selected, immediately or at a time the user schedules. |
 | `instagram_content_publish` | 1 | The app publishes the user's own approved posts (photo, carousel or video with caption) to the user's Instagram professional account, immediately or at a scheduled time. |
-| `instagram_manage_comments` | 2 | Right after publishing the user's post to their Instagram professional account, the app adds the user's own first comment under that post (for example hashtags or a link), which the user writes in the post editor. The app comments only on media it published for this user and does not read, hide or delete other people's comments. |
-| `pages_manage_engagement` | 2 | Right after publishing the user's post to their Facebook Page, the app adds the Page's own first comment under that post (for example a link the user wrote, because links inside the post text reduce reach). The comment text is written by the user in the post editor. The app does not edit or delete other people's comments. |
+| `instagram_manage_comments` | 2 | Two uses, both on the user's own Instagram professional account. 1) Right after publishing the user's post, the app adds the user's own first comment under it (for example hashtags or a link) that the user wrote in the post editor. 2) The Comments inbox shows the comments other people left under the user's own recent posts, with a suggested reply; the user edits it and clicks Reply, and the app posts the reply from the user's account. The app does not hide or delete comments, and it keeps only the IDs of comments the user answered or skipped, so they are not shown again. |
+| `pages_manage_engagement` | 2 | Right after publishing the user's post to their Facebook Page, the app adds the Page's own first comment under that post (for example a link the user wrote, because links inside the post text reduce reach). In the Comments inbox the user can also reply as the Page to comments people left under the Page's posts: the user edits the suggested reply and clicks Reply. The app does not edit or delete other people's comments. |
+| `pages_read_user_content` | 2 | The Comments inbox reads the comments people left under the user's own Facebook Page posts from the last two weeks (comment text, commenter name, time) so the Page owner can see and answer them in one place together with Instagram. The comments are shown only to the Page's own team in Holos; the app stores only the IDs of comments the user answered or skipped. |
 | `pages_read_engagement` | 3 | The app reads engagement of the user's own Page posts (reactions, comments and shares) and the Page follower count to show the user how their published posts perform in the Analytics screen. |
 | `instagram_manage_insights` | 3 | The app reads insights of the user's own Instagram media (views, reach, likes, comments, shares, saves, follows) and the account's follower count to show per-post performance and follower growth in the Analytics screen. |
 | `read_insights` | 3 | The app reads insights of the user's own Page posts (media views and unique views) to show in the Analytics screen how many people saw each post the user published, compared with the user's typical post. |
@@ -161,6 +180,7 @@ Email: ⟨email тестового акаунта⟩
 Password: ⟨пароль тестового акаунта⟩
 
 The test workspace is already connected to our demo Facebook Page and its Instagram account.
+The demo posts have a few comments from another account, so the Comments inbox is not empty.
 1. Settings (avatar menu) → "Канали" (Channels) → "Facebook + Instagram": the connected Page and
    Instagram account; the Page list shows the Pages the user manages.
 2. "Створення" (Create) → any draft → "✍ Редагувати" (Edit): the post editor. Select Facebook
@@ -168,6 +188,9 @@ The test workspace is already connected to our demo Facebook Page and its Instag
    click "📣 Опублікувати зараз" (Publish now). "↗ Відкрити пост" (Open post) opens the live post.
 3. "Аналітика" (Analytics) → "↻ Оновити статистику" (Refresh): per-post views, reach, likes,
    comments, shares, saves and follower counts.
+4. "Сьогодні" (Home) → "💬 Коменти" (Comments): comments people left under the connected Page's
+   and Instagram account's posts, each with a suggested reply. Edit it and click "↩ Відповісти"
+   (Reply) to answer from the Page or Instagram account; "Пропустити" (Skip) hides a comment.
 ```
 
 ---
@@ -196,5 +219,6 @@ Threads Testers і прийняти в Threads (Налаштування → А�
   `https://beta.holos.rozum.one/...` ще нема (картка «адреси beta.holos.rozum.one»).
 - Базове підключення Holos просить рівно 7 дозволів (`public_profile`, `pages_show_list`,
   `pages_read_engagement`, `pages_manage_posts`, `instagram_basic`, `instagram_content_publish`,
-  `instagram_manage_insights`); коментарі й статистику - окремими кнопками, щоб базове підключення
-  не ламалось, поки нових дозволів нема в застосунку.
+  `instagram_manage_insights`); коментарі, статистику й читання коментарів Сторінки - окремими
+  кнопками («💬 Дозволити коментарі», «📈 Дозволити статистику», «📥 Дозволити читати коментарі»),
+  щоб базове підключення не ламалось, поки нових дозволів нема в застосунку.

@@ -863,6 +863,7 @@ async function loadToday(){
     +'</div></div>';
   // 📡 канали публікації: статус підключення + скільки пішло сьогодні, клік = Налаштування→Канали
   const chStatus=ChanStatus||{}, netT=t.netToday||{};
+  const cmOn=!!(th||chStatus.instagram||chStatus.facebook||chStatus.threads); // 💬 є де читати коментарі
   const chanHtml='<div class="panel" style="margin-top:16px"><div style="font-weight:700;font-size:14.5px;margin-bottom:10px">📡 Канали публікації</div>'
     +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
     +NETS.map(([k,label])=>{ const on=!!chStatus[k]; const n=netT[k]||0;
@@ -874,7 +875,7 @@ async function loadToday(){
     +'</div></div>';
   const tiles=[
     th?['🔥 Стрік Threads', th.streak+' дн.', th.postedToday?'сьогодні вже є пост ✓':'<span style="color:var(--danger)">сьогодні ще пусто</span>']:null,
-    th?['💬 Коменти','<span id="tdComm"><span class="spin"></span></span>','без відповіді · клік = відповісти']:null,
+    cmOn?['💬 Коменти','<span id="tdComm"><span class="spin"></span></span>','без відповіді · клік = відповісти']:null,
     ['✈️ Вчора вийшло', String(t.publishedYesterday||0), 'публікацій · клік = аналітика'],
     ['💡 Ідеї в банку', String(t.ideas||0), 'клік = відкрити'],
   ].filter(Boolean);
@@ -904,7 +905,7 @@ async function loadToday(){
   const tAll=$('tdAll'); if(tAll) tAll.onclick=()=>{ selectView('create'); setCTab('posts'); };
   w.querySelectorAll('.tdFix').forEach(b=>b.onclick=()=>openComposer(b.dataset.post,{slotId:b.dataset.slot}));
   w.querySelectorAll('.tdTile').forEach(el=>el.onclick=()=>{ const lbl=tiles[+el.dataset.tile][0];
-    if(lbl.includes('Коменти')) openThreadsComments();
+    if(lbl.includes('Коменти')) openComments();
     else if(lbl.includes('Ідеї')){ selectView('create'); setCTab('ideas'); }
     else if(lbl.includes('Чернеток')){ selectView('create'); setCTab('posts'); }
     else if(lbl.includes('матеріали')){ selectView('create'); setCTab('materials'); }
@@ -915,9 +916,10 @@ async function loadToday(){
   const tTk=$('tdTakes'); if(tTk) tTk.onclick=async()=>{ tTk.disabled=true; aiBusy('🧵 Пишу тейки…');
     try{ const r=await api('/posts/threads-takes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:3})}); flash('🧵 +'+r.created+' чернеток'); loadToday(); }
     catch(e){ flash('⚠ '+e.message); tTk.disabled=false; } finally{ aiDone(); } };
-  // лічильник коментарів - окремо (живі виклики Threads API, не блокують екран)
-  if(th){ api('/threads/comments?countOnly=1').then(r=>{ const el=$('tdComm'); if(el) el.textContent=String(r.count||0); })
-    .catch(()=>{ const el=$('tdComm'); if(el){ el.textContent='—'; el.title='не вдалося прочитати (перепідключи Threads для нових дозволів)'; } }); }
+  // лічильник коментарів - окремо (живі виклики мереж, не блокують екран); чого бракує - у підказці
+  if(cmOn){ api('/comments/inbox?countOnly=1').then(r=>{ const el=$('tdComm'); if(!el) return; el.textContent=String(r.count||0);
+      if((r.needs||[]).length) el.title=r.needs.map(n=>n.text).join('\n'); })
+    .catch(()=>{ const el=$('tdComm'); if(el){ el.textContent='—'; el.title='не вдалося прочитати коментарі'; } }); }
 }
 
 // ===================== 📈 АНАЛІТИКА =====================
@@ -1640,31 +1642,67 @@ if($('thStarter')) $('thStarter').onclick=async()=>{ const b=$('thStarter'); b.d
     ov.querySelector('#spPin').onclick=()=>{ close(); openComposer(r.pinnedId); };
     try{ await loadStudioPosts(); }catch(_){ }
   }catch(e){ flash('⚠ '+e.message); } finally{ b.disabled=false; aiDone(); } };
-// 💬 реплай-коуч: свіжі коменти під нашими постами + AI-драфт відповіді (Мосері: «відповідай більше, ніж постиш»).
-// Викликається з «Сьогодні» (тайл коментарів) і з панелі Threads в Аналітиці.
-async function openThreadsComments(btn){ const b=btn||null; if(b) b.disabled=true; aiBusy('💬 Збираю коментарі і пишу драфти відповідей…');
-  try{ const r=await api('/threads/comments');
-    const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
-    const items=r.items||[];
-    ov.innerHTML='<div class="modal-card" style="max-width:620px;padding:20px;max-height:85vh;overflow:auto">'
-      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:16px">💬 Коментарі під твоїми постами</b><button class="icon" id="tcmX" style="margin-left:auto">✕</button></div>'
-      +'<div class="hint" style="margin-bottom:10px">Відповідь автора повертає людину в гілку і розганяє пост («відповідай більше, ніж постиш»). Драфт можна правити перед відправкою.</div>'
-      +(items.length?items.map((it,i)=>'<div class="card" style="margin-bottom:10px;padding:12px 14px" data-ci="'+i+'">'
-        +'<div style="font-size:11px;color:var(--faint);margin-bottom:4px">під постом'+(it.accountName?' @'+esc(it.accountName):'')+': '+esc(it.postTitle||'')+'</div>'
-        +'<div style="font-size:13px;line-height:1.5"><b>@'+esc(it.username)+':</b> '+esc(it.comment)+'</div>'
-        +'<textarea class="txt tcmTxt" rows="2" style="margin-top:8px;font-size:13px">'+esc(it.draft||'')+'</textarea>'
-        +'<div class="btnrow" style="margin-top:6px"><button class="primary tcmSend" style="padding:6px 12px;font-size:12.5px">↩ Відповісти</button><span class="tcmMsg" style="font-size:12px;color:var(--muted)"></span></div>'
-        +'</div>').join(''):'<div class="empty">'+esc(r.hint||'Свіжих коментарів без відповіді нема. Зазирни після наступної публікації.')+'</div>')
-      +'</div>';
-    document.body.appendChild(ov); const close=()=>ov.remove();
-    ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#tcmX').onclick=close;
-    ov.querySelectorAll('[data-ci]').forEach(card=>{ const it=items[+card.dataset.ci];
-      card.querySelector('.tcmSend').onclick=async(ev)=>{ const sb=ev.target, m=card.querySelector('.tcmMsg'); const text=card.querySelector('.tcmTxt').value.trim();
-        if(!text){ m.textContent='порожньо'; return; } sb.disabled=true; m.textContent='надсилаю…';
-        try{ await api('/threads/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({commentId:it.commentId,text,account:it.account||''})});
-          m.style.color='var(--brand)'; m.textContent='✓ відповідь у гілці'; card.style.opacity='.55'; }
-        catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; sb.disabled=false; } }; });
-  }catch(e){ flash('⚠ '+e.message); } finally{ if(b) b.disabled=false; aiDone(); } }
+// 💬 Коментарі в одному місці: свіжі коментарі людей під постами бренду в Instagram, Facebook і Threads
+// (усі акаунти бренду) + AI-чернетка відповіді на кожен. Мосері: «відповідай більше, ніж постиш».
+// Викликається з «Сьогодні» (плитка коментарів) і з панелі Threads в Аналітиці (одразу з фільтром).
+const CM_NET={instagram:['📸','Instagram','--ig'],facebook:['📘','Facebook','--fb'],threads:['🧵','Threads','--th']};
+function cmAgo(ts){ const t=Date.parse(ts); if(!isFinite(t)) return ''; const m=Math.round((Date.now()-t)/60000);
+  return m<60?Math.max(1,m)+' хв тому':m<1440?Math.round(m/60)+' год тому':Math.round(m/1440)+' дн. тому'; }
+async function openComments(btn,onlyNet){ const b=btn||null; if(b) b.disabled=true; aiBusy('💬 Збираю коментарі і пишу чернетки відповідей…');
+  let r; try{ r=await api('/comments/inbox'); }catch(e){ flash('⚠ '+e.message); if(b) b.disabled=false; aiDone(); return; }
+  if(b) b.disabled=false; aiDone();
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
+  function close(){ ov.remove(); }
+  let items=r.items||[], filt=onlyNet&&CM_NET[onlyNet]?onlyNet:'all'; const done=new Set(), typed={};
+  // лічильники - з сервера (там усі коментарі, а в списку - 30 найновіших) мінус оброблені в цьому вікні
+  const counts=()=>{ const c={all:0}, rc=r.counts||{}; Object.keys(CM_NET).forEach(n=>{ c[n]=rc[n]||0; c.all+=c[n]; });
+    if(!c.all) items.forEach(it=>{ c.all++; c[it.net]=(c[it.net]||0)+1; });
+    items.forEach(it=>{ if(done.has(it.net+':'+it.commentId)){ c.all=Math.max(0,c.all-1); c[it.net]=Math.max(0,(c[it.net]||0)-1); } }); return c; };
+  function render(){ const c=counts(), nets=(r.connected||[]).filter(n=>CM_NET[n]);
+    const chips=nets.length>1?'<div class="cmChips">'+[['all','Усі']].concat(nets.map(n=>[n,CM_NET[n][0]+' '+CM_NET[n][1]])).map(x=>'<button class="netchip'+(filt===x[0]?' on':'')+'" data-cmf="'+x[0]+'">'+x[1]+' <b>'+(c[x[0]]||0)+'</b></button>').join('')+'</div>':'';
+    const needs=(r.needs||[]).filter(n=>filt==='all'||n.net===filt).map(n=>'<div class="cmNeed">⚠ '+esc(n.text)+(n.perm==='comments'||n.perm==='inbox'?' <button class="ghost" data-cmperm="'+n.perm+'">'+(n.perm==='inbox'?'📥 Дозволити читати коментарі':'💬 Дозволити коментарі')+'</button>':' <button class="ghost" data-cmchan="1">Канали →</button>')+'</div>').join('');
+    const list=items.map((it,i)=>({it,i})).filter(x=>filt==='all'||x.it.net===filt);
+    const cards=list.map(({it,i})=>{ const n=CM_NET[it.net]||['💬',it.net,'--brand']; const isDone=done.has(it.net+':'+it.commentId);
+      return '<div class="card cmCard'+(isDone?' done':'')+'" data-ci="'+i+'">'
+        +'<div class="cmHead"><span class="cmNet" style="color:var('+n[2]+');border-color:var('+n[2]+')">'+n[0]+' '+n[1]+'</span>'+(it.accountName?'<span class="cmAcc">'+esc(it.accountName)+'</span>':'')
+          +'<span class="cmPost">під постом: '+esc(it.postTitle||'…')+'</span><span class="sp"></span><span class="cmAgo">'+esc(cmAgo(it.timestamp))+'</span>'
+          +(it.permalink?'<a href="'+esc(it.permalink)+'" target="_blank" rel="noopener" title="Відкрити в мережі">↗</a>':'')+'</div>'
+        +'<div class="cmText"><b>'+esc(it.username?(it.net==='facebook'?it.username:'@'+it.username):'Читач')+':</b> '+esc(it.comment)+'</div>'
+        +'<textarea class="txt cmTxt" rows="2"'+(isDone?' disabled':'')+'>'+esc(it.draft||'')+'</textarea>'
+        +'<div class="btnrow" style="margin-top:6px"><button class="primary cmSend"'+(isDone?' disabled':'')+'>↩ Відповісти</button><button class="ghost cmSkip"'+(isDone?' disabled':'')+' title="Прибрати зі списку без відповіді (спам, «дякую», уже відповів деінде)">Пропустити</button><span class="cmMsg"></span></div>'
+        +'</div>'; }).join('');
+    const empty=!list.length?'<div class="empty">'+esc(r.hint||'Свіжих коментарів без відповіді нема. Зазирни після наступної публікації.')+'</div>':'';
+    const tot=Object.values(r.counts||{}).reduce((a,x)=>a+(+x||0),0);
+    const more=tot>items.length?'<div class="hint" style="margin-top:8px">Показано '+items.length+' найновіших із '+tot+'. Відповідай на ці, потім ↻ - підтягнуться наступні.</div>':'';
+    ov.innerHTML='<div class="modal-card cmModal">'
+      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:16px">💬 Коментарі під твоїми постами</b><button class="icon" id="cmRefresh" title="Перечитати з мереж" style="margin-left:auto">↻</button><button class="icon" id="cmX">✕</button></div>'
+      +'<div class="hint" style="margin-bottom:10px">Відповідь автора повертає людину під пост і розганяє його. Чернетку можна правити перед відправкою; відповідає той акаунт, під чиїм постом коментар.</div>'
+      +chips+needs+cards+empty+more+((r.errors||[]).length?'<div class="hint" style="margin-top:8px;color:var(--amber)">Не прочиталось: '+esc(r.errors.join('; '))+'</div>':'')+'</div>';
+    ov.querySelector('#cmX').onclick=close;
+    ov.querySelector('#cmRefresh').onclick=async()=>{ aiBusy('💬 Перечитую коментарі…'); try{ r=await api('/comments/inbox?fresh=1'); items=(r.items||[]).map(it=>{ const k=it.net+':'+it.commentId; return typed[k]!=null?{...it,draft:typed[k]}:it; }); done.clear(); render(); }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } };
+    ov.querySelectorAll('[data-cmf]').forEach(x=>x.onclick=()=>{ filt=x.dataset.cmf; render(); });
+    ov.querySelectorAll('[data-cmperm]').forEach(x=>x.onclick=()=>connectPopup('/api/integrations/meta/connect?add='+x.dataset.cmperm));
+    ov.querySelectorAll('[data-cmchan]').forEach(x=>x.onclick=()=>{ close(); selectView('settings','channels'); });
+    ov.querySelectorAll('[data-ci]').forEach(card=>{ const it=items[+card.dataset.ci]; const m=card.querySelector('.cmMsg');
+      const finish=(txt)=>{ done.add(it.net+':'+it.commentId); m.style.color='var(--brand)'; m.textContent=txt; card.classList.add('done');
+        card.querySelectorAll('button,textarea').forEach(x=>x.disabled=true); refreshCounts(); };
+      card.querySelector('.cmTxt').oninput=(ev)=>{ it.draft=ev.target.value; typed[it.net+':'+it.commentId]=ev.target.value; };
+      card.querySelector('.cmSend').onclick=async(ev)=>{ const sb=ev.target; const text=card.querySelector('.cmTxt').value.trim();
+        if(!text){ m.textContent='порожньо'; return; } sb.disabled=true; m.style.color='var(--muted)'; m.textContent='надсилаю…';
+        try{ const rr=await api('/comments/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({net:it.net,commentId:it.commentId,text,account:it.account||''})});
+          finish('✓ відповідь'+(rr.accountName?' від '+rr.accountName:'')+' під коментарем'); }
+        catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; sb.disabled=false; } };
+      card.querySelector('.cmSkip').onclick=async(ev)=>{ const kb=ev.target; kb.disabled=true;
+        try{ await api('/comments/skip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({net:it.net,commentId:it.commentId})}); finish('пропущено'); }
+        catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; kb.disabled=false; } }; }); }
+  // лічильники у фільтрах - без перемальовування карток (щоб не губити набраний текст)
+  function refreshCounts(){ const c=counts(); ov.querySelectorAll('[data-cmf]').forEach(x=>{ const bb=x.querySelector('b'); if(bb) bb.textContent=String(c[x.dataset.cmf]||0); });
+    const el=$('tdComm'); if(el) el.textContent=String(c.all||0); }
+  document.body.appendChild(ov);
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
+  render(); }
+// давня назва (панель Threads в Аналітиці) - те саме вікно, одразу з фільтром Threads
+function openThreadsComments(btn){ return openComments(btn,'threads'); }
 // 🔍 розбір ніші: формули з хітів топ-авторів → правила голосу + ідеї в Банк
 if($('thNiche')) $('thNiche').onclick=async()=>{ const b=$('thNiche'); b.disabled=true; aiBusy('🔍 Аналізую хіти твоєї ніші в Threads…');
   try{ const r=await api('/threads/niche-review',{method:'POST'});
@@ -3461,6 +3499,7 @@ async function loadMeta(){
         ex.style.display='';
         ex.innerHTML=row2('comments','💬 Перший коментар','коментар під постом в Instagram і Facebook одразу після публікації','💬 Дозволити коментарі')
           +row2('insights','📈 Перегляди постів Facebook','скільки людей побачили кожен допис - в Аналітиці','📈 Дозволити статистику')
+          +row2('inbox','📥 Коментарі людей у Facebook','читати й відповідати на коментарі під дописами Сторінки в «💬 Коментарі» (Instagram уже працює з «Дозволити коментарі»)','📥 Дозволити читати коментарі')
           +'<div class="hint" style="margin-top:4px">Відкриється вікно Meta: залиш галочки увімкненими. Поки Meta не схвалила застосунок, це працює для власника застосунку й запрошених тестерів.</div>';
         ex.querySelectorAll('[data-mtadd]').forEach(b=>b.onclick=()=>connectPopup('/api/integrations/meta/connect?add='+b.dataset.mtadd)); } }
   }catch(e){}
@@ -4601,7 +4640,7 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
 const REVIEW_KEY='kg_review_en';
 const REVIEW_TXT={
   default:'Holos by Rozum: a content studio for small businesses. The user writes posts in their own brand voice and publishes them to their own Facebook Page and Instagram account.',
-  today:'Home. Holos helps a small business write posts in its own voice and publish them to its own Facebook Page and Instagram account.',
+  today:'Home. Holos helps a small business write posts in its own voice and publish them to its own Facebook Page and Instagram account. The “Коменти” (Comments) tile opens the inbox of comments people left under the user\'s own posts.',
   create:'Drafts: posts prepared for the user\'s own channels. “Редагувати” (Edit) opens the post editor, where the user reviews the text and publishes it.',
   publish:'Calendar: approved posts are scheduled here and published at the chosen time to the user\'s own Facebook Page and Instagram account (pages_manage_posts, instagram_content_publish).',
   brand:'Brand voice: learned from the captions of the user\'s own recent Instagram posts (instagram_basic), so new posts sound like the user.',
@@ -4609,8 +4648,9 @@ const REVIEW_TXT={
   settings:'Settings of the user\'s workspace.',
   tools:'Tools of the user\'s workspace.',
   channelsOff:'Settings → Channels. “Підключити” (Connect) in the Facebook + Instagram card opens Facebook Login; the user picks which of their Pages and linked Instagram account the app may use (pages_show_list, instagram_basic).',
-  channelsOn:'Connected: the user\'s Facebook Page and linked Instagram account; the Page list shows all Pages the user manages (pages_show_list). “Дозволити коментарі” (Allow comments) requests instagram_manage_comments + pages_manage_engagement; “Дозволити статистику” (Allow statistics) requests read_insights.',
+  channelsOn:'Connected: the user\'s Facebook Page and linked Instagram account; the Page list shows all Pages the user manages (pages_show_list). “Дозволити коментарі” (Allow comments) requests instagram_manage_comments + pages_manage_engagement; “Дозволити статистику” (Allow statistics) requests read_insights; “Дозволити читати коментарі” (Allow reading comments) requests pages_read_user_content to show people’s comments under the Page’s posts in the Comments inbox.',
   composer:'Post editor. Left: post text, networks (Instagram, Facebook…) and an optional first comment. Right: preview per network. “Опублікувати зараз” (Publish now) posts to the user\'s own Page (pages_manage_posts) and Instagram (instagram_content_publish), then adds the first comment (pages_manage_engagement, instagram_manage_comments).',
+  comments:'Comments inbox: comments other people left under the user\'s own recent Instagram posts (instagram_manage_comments), Facebook Page posts (pages_read_user_content) and Threads posts. Holos suggests a draft; the user edits it and clicks “Відповісти” (Reply) to answer from their own account (instagram_manage_comments, pages_manage_engagement). “Пропустити” (Skip) hides a comment without replying.',
   composerSent:'Published. “↗ Відкрити пост” (Open post) opens the live post; under each network the editor shows whether the first comment was posted (✓).',
 };
 function reviewWanted(){
@@ -4619,6 +4659,7 @@ function reviewWanted(){
   catch(e){ return q==='en'; }
 }
 function reviewKey(){
+  if(document.querySelector('.cmModal')) return 'comments';
   const cmp=document.querySelector('.cmp-ov');
   if(cmp) return /Відкрити пост/.test((cmp.querySelector('#cmpPrev')||{}).textContent||'')?'composerSent':'composer';
   if(curView==='settings'&&sTab==='channels'){ const st=$('mtStatus'); return st&&/Підключено/.test(st.textContent)?'channelsOn':'channelsOff'; }

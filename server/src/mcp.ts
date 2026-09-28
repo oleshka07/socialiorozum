@@ -47,6 +47,7 @@ import { normCollaborators, cleanAlt, IG_MAX_COLLABORATORS } from "./igextras.js
 import { getThumb } from "./media.js";
 import sharp from "sharp";
 import { accountChoices, matchAccount, postAccount, postAccounts, isAccNet, metaAccountFor, MULTI_NETS, ACC_NETS, type AccountChoice } from "./accounts.js";
+import { collectInbox, replyToComment, skipComment, isInboxNet, INBOX_NETS } from "./inbox.js";
 
 // ============================================================================
 // 1. ПРОТОКОЛ (чисті функції - саме вони під юнітами в test/mcp.test.mjs)
@@ -1645,6 +1646,61 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "list_comments",
+    title: "Коментарі під постами",
+    description: "Свіжі коментарі ЛЮДЕЙ під постами бренду (останні 2 тижні) в Instagram, Facebook і Threads - з усіх акаунтів бренду, без тих, на які вже відповіли чи які пропустили. Новіші першими. Щоб відповісти - напиши відповідь сам голосом бренду (brand_voice) і передай її в reply_to_comment: це безкоштовно для кабінету. Якщо мережі бракує дозволу, відповідь скаже, яку кнопку натиснути в кабінеті.",
+    properties: {
+      network: S("Лише одна мережа: instagram, facebook або threads (необовʼязково - інакше всі).", { enum: ["instagram", "facebook", "threads"] }),
+      limit: { type: "integer", description: "Скільки показати (1-30, типово 15).", minimum: 1, maximum: 30 },
+      fresh: { type: "boolean", description: "Перечитати з мереж зараз (інакше можна отримати список, зібраний до 3 хв тому)." },
+    },
+    run: async (ws, a) => {
+      const net = typeof a.network === "string" && isInboxNet(a.network) ? a.network : null;
+      const inbox = await collectInbox(ws, { nets: net ? [net] : undefined, fresh: a.fresh === true });
+      const tz = await wsTz(ws);
+      const limit = int(a.limit, 15, 1, 30);
+      if (!inbox.connected.length) throw new ToolError("У бренді не підключено ні Instagram, ні Facebook, ні Threads - коментарям нема звідки взятись.");
+      const needs = inbox.needs.map((n) => `⚠️ ${n.text}`);
+      if (!inbox.items.length)
+        return [`Нових коментарів без відповіді немає${net ? ` (${NET_LABEL[net]})` : ""}.`, ...needs, ...inbox.errors.map((e) => `Не прочиталось: ${e}`)].join("\n");
+      const multi = new Set(INBOX_NETS.filter((n) => (inbox.accounts[n] || 0) > 1));
+      const lines = inbox.items.slice(0, limit).map((it, i) => [
+        `${i + 1}. ${NET_LABEL[it.net]}${multi.has(it.net) ? ` (${it.accountName})` : ""} · ${fmtWhen(it.timestamp, tz)} · під постом «${oneLine(it.postTitle, 70)}»`,
+        `   ${it.username ? (it.net === "facebook" ? it.username : "@" + it.username) : "Читач"}: ${oneLine(it.comment, 400)}`,
+        `   network: ${it.net}, comment_id: ${it.commentId}${multi.has(it.net) ? `, account: ${it.account}` : ""}${it.permalink ? ` · ${it.permalink}` : ""}`,
+      ].join("\n"));
+      return [`Нових коментарів без відповіді: ${inbox.items.length}${inbox.items.length > limit ? ` (показано ${limit})` : ""}.`, ...lines, ...needs,
+        ...inbox.errors.map((e) => `Не прочиталось: ${e}`),
+        "Відповісти: reply_to_comment з network, comment_id і текстом (account - якщо вказано); пропустити без відповіді - skip: true."].join("\n");
+    },
+  },
+  {
+    name: "reply_to_comment",
+    title: "Відповісти на коментар",
+    description: "Відповісти на коментар людини під постом бренду (id - з list_comments): відповідь з'явиться гілкою під коментарем від того акаунта, під чиїм постом він стоїть. Текст пиши сам голосом бренду - коротко, по-людськи, продовжуючи розмову (Instagram до ~250 знаків, Facebook до ~300, Threads до ~200; межі мереж - 2200 / 8000 / 500). skip: true - прибрати коментар зі списку без відповіді (спам, «дякую»).",
+    properties: {
+      network: S("instagram, facebook або threads.", { enum: ["instagram", "facebook", "threads"] }),
+      comment_id: S("comment_id з list_comments."),
+      text: S("Текст відповіді (не потрібен зі skip: true)."),
+      account: S("account з list_comments, якщо його там вказано (кілька акаунтів мережі в бренді)."),
+      skip: { type: "boolean", description: "Не відповідати, а прибрати зі списку." },
+    },
+    required: ["network", "comment_id"],
+    run: async (ws, a) => {
+      const net = String(a.network || "");
+      if (!isInboxNet(net)) throw new ToolError("network - instagram, facebook або threads.");
+      const id = String(a.comment_id || "").trim();
+      if (!id) throw new ToolError("comment_id - з list_comments.");
+      if (a.skip === true) { await skipComment(ws, net, id); return `Коментар прибрано зі списку (${NET_LABEL[net]}), без відповіді.`; }
+      const text = typeof a.text === "string" ? a.text : "";
+      if (!text.trim()) throw new ToolError("Порожня відповідь: передай text (або skip: true, щоб просто прибрати коментар зі списку).");
+      try {
+        const r = await replyToComment(ws, net, id, text, typeof a.account === "string" && a.account.trim() ? a.account.trim() : null);
+        return `✓ ${NET_LABEL[net]}: відповідь від ${r.accountName} під коментарем.`;
+      } catch (e: any) { throw new ToolError(`${NET_LABEL[net]}: не вийшло - ${e.message}`); }
+    },
+  },
+  {
     name: "delete_post",
     title: "Видалити пост",
     description: "Видалити чернетку чи запланований пост НАЗАВЖДИ (разом із його слотами в календарі). Опублікований пост видалити не можна - він лишається в історії й аналітиці; прибрати його з календаря - unschedule_post. Незворотно: спершу покажи людині, що саме видаляєш.",
@@ -1814,6 +1870,7 @@ export const SERVER_INSTRUCTIONS = [
   "Сторіс: create_draft з format: \"story\" і мережами instagram/facebook (інші сторіс через API не приймають) → кадри через attach_media (фото й відео разом, фото ріжуться 9:16) або render_carousel з рядками «Кадр 1: …»; кожен кадр - окрема сторіс, підпису немає.",
   "Якщо кабінетів кілька (list_workspaces), спершу переконайся, що активний саме той бренд: перемкни switch_workspace або передай workspace у виклику. Кожна відповідь називає кабінет у першому рядку - звіряйся з ним перед публікацією.",
   "У бренді буває кілька акаунтів однієї мережі (особистий і компанії) і кілька каналів Telegram - workspace_info їх перелічує: пост без вибору йде основним, інший чи кілька одразу - accounts у create_draft / update_post (назва Сторінки чи каналу, @нік; масивом - той самий пост у кожен). Пиши текст голосом того акаунта, яким він піде.",
+  "Коментарі людей під постами бренду в Instagram, Facebook і Threads - list_comments; відповідь пиши сам голосом бренду (brand_voice) і відправляй reply_to_comment (безкоштовно для кабінету); спам чи «дякую» - skip: true.",
   "Файл з інтернету (пряме посилання) чи невеликий файл у base64 - upload_media; папка з компʼютера - media_upload_link.",
   "Календар: schedule_post відмовить, якщо в ту саму мережу майже в той самий час уже стоїть пост або такий текст уже є (свідомо - force: true); прибрати з календаря - unschedule_post, чернетку назавжди - delete_post (опубліковане не видаляється). publish_post, що відповів «триває у фоні», не повторюй - результат у get_post.",
   "Перший коментар (посилання, хештеги, заклик окремо від тексту): first_comment у create_draft / update_post, свій для мережі - first_comment_by_network; іде сам одразу після публікації в Instagram, Facebook, LinkedIn і Threads (у Telegram і сторіс - ні). Посилання в тексті LinkedIn і Facebook ріже охоплення - краще в перший коментар. Дописали коментар після публікації - send_first_comment.",

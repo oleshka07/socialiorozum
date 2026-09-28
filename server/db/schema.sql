@@ -1006,3 +1006,17 @@ update telegram_publish tp set chat_id = case tp.target when 'channel' then tc.c
   from post p join pipeline_run r on r.id = p.run_id join source s on s.id = r.source_id
        join telegram_config tc on tc.workspace_id = s.workspace_id
  where tp.post_id = p.id and tp.chat_id is null and tp.target in ('channel', 'group');
+-- 💬 Коментарі в одному місці: на які коментарі людей під постами бренду вже відповіли з Holos (чи
+-- свідомо пропустили), щоб вони не поверталися в список. Давній список Threads (settings_block
+-- th_replied) теж читається. Ключ - мережа + id коментаря в мережі.
+create table if not exists comment_reply (
+  workspace_id uuid not null references workspace(id) on delete cascade,
+  network      text not null,               -- instagram | facebook | threads
+  comment_id   text not null,
+  account      text not null default '',    -- яким акаунтом бренду відповіли
+  action       text not null,               -- replied | skipped
+  reply_id     text,
+  reply_text   text,
+  created_at   timestamptz not null default now(),
+  primary key (workspace_id, network, comment_id)
+);
