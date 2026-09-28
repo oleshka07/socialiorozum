@@ -1,9 +1,9 @@
 name: beta-check
 
 # Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ, нічого не змінює й не перезапускає.
-# 28.09: новий лендинг і вхід Holos викотились на прод (db3bc4d) - перевіряємо ззовні (з самого сервера,
-# через nginx): версія, сторінки й статуси мереж, SEO, кеш статики, стара адреса, вхід через Google,
-# журнал після рестарту.
+# 28.09: Олег надіслав скрін нового пояснення «Meta не прийняла адресу цього сайту (beta.holos.rozum.one)».
+# Питання: де саме були спроби підключення за останні 12 год - лише на беті чи й на проді, і чи дійшло
+# щось до колбека (журнал app_log + nginx).
 
 on:
   push:
@@ -14,50 +14,36 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Landing on prod (read-only)
+      - name: Connect attempts (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 4m
+          command_timeout: 3m
           script: |
             mask() { sed -E -e 's/([A-Za-z0-9._%+-]{1,3})[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+)/\1***@\2/g' \
                             -e 's/[0-9a-fA-F]{24,}/<hex>/g' -e 's/[0-9]{6,}:[A-Za-z0-9_-]{30,}/<bot-token>/g' \
-                            -e 's/((key|token|secret|password|passwd|pwd)[^=:]{0,20}[=:] *)[^ ,"]+/\1<masked>/Ig'; }
-            P=https://holos.rozum.one
-            echo "=== версії ==="
+                            -e 's/EAA[A-Za-z0-9]{20,}/<meta-token>/g' -e 's/TH[A-Za-z0-9]{40,}/<th-token>/g' \
+                            -e 's/((^|[?&])(code|state|access_token|client_secret)=)[^&" ]+/\1<x>/g'; }
             echo "prod HEAD $(git -C "${{ secrets.APP_DIR }}" rev-parse --short HEAD) | beta HEAD $(git -C "${{ secrets.APP_DIR }}-beta" rev-parse --short HEAD)"
-            docker ps --filter name=socialio --format '{{.Names}}\t{{.Status}}'
-            echo "health: $(curl -sS -m 15 -o /dev/null -w '%{http_code}' $P/health)"
-            H=$(curl -sS -m 15 $P/)
-            echo "=== головна ==="
-            echo "головна: $(curl -sS -m 15 -o /dev/null -w '%{http_code} %{size_download}B' $P/)"
-            echo "title: $(echo "$H" | grep -o '<title>[^<]*' | head -1)"
-            echo "canonical: $(echo "$H" | grep -o '<link rel="canonical"[^>]*>' | head -1)"
-            echo "og:image: $(echo "$H" | grep -o 'property="og:image" content="[^"]*"' | head -1)"
-            echo "robots meta: $(echo "$H" | grep -o '<meta name="robots"[^>]*>' | head -1)"
-            echo "невставлені токени: $(echo "$H" | grep -cE '%(BASE|ST:|SC:|NET_NOTE|FAQ_NETS)')"
-            echo "ld+json: $(echo "$H" | grep -c 'application/ld+json')"
-            echo "статуси мереж на лендингу:"
-            echo "$H" | grep -oE 'id="p-[a-z]+"|<span class="st st-[a-z]+">[^<]+' | paste - - | sed 's/<span class="st /  /'
-            echo "примітка: $(echo "$H" | grep -o '<p class="netnote">[^<]*' | sed 's/<p class="netnote">//')"
-            echo "ціни (ранній доступ): $(echo "$H" | grep -o 'Ранній доступ[^<]*' | head -1)"
-            echo "=== SEO ==="
-            echo "robots.txt: $(curl -sS -m 15 $P/robots.txt | tr '\n' '|')"
-            echo "sitemap: $(curl -sS -m 15 $P/sitemap.xml | grep -o '<loc>[^<]*' | sed 's/<loc>//' | tr '\n' ' ')"
-            echo "/index.html -> $(curl -sS -m 15 -o /dev/null -w '%{http_code} %{redirect_url}' $P/index.html)"
-            for p in /register /login /app /privacy /terms /data-deletion /tgapp; do echo "$p: $(curl -sS -m 15 -o /dev/null -w '%{http_code}' $P$p) $(curl -sS -m 15 $P$p | grep -oE '<title>[^<]*|noindex,nofollow' | tr '\n' ' ')"; done
-            echo "=== статика й кеш ==="
-            for p in /fonts/inter-cyrillic.woff2 /images/site/holos-source-to-post-800.webp /images/og/holos-og-1200x630.jpg /favicon.ico /favicon.svg /apple-touch-icon.png /site.webmanifest /app.js; do
-              echo "$p: $(curl -sS -m 15 -D - -o /dev/null $P$p | grep -iE '^(HTTP|content-type|cache-control)' | tr -d '\r' | tr '\n' ' ')"
+            for d in "${{ secrets.APP_DIR }}" "${{ secrets.APP_DIR }}-beta"; do
+            echo; echo "=================== журнал підключень: $d (12 год, час Праги) ==================="
+            cd "$d/server" || continue
+            docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -v ON_ERROR_STOP=0' <<'SQL' 2>&1 | mask
+            set session characteristics as transaction read only;
+            select to_char(l.created_at at time zone 'Europe/Prague','DD.MM HH24:MI:SS') as t, l.level, l.scope,
+                   left(regexp_replace(l.message,'\s+',' ','g'),150) as msg, l.meta->>'code' as code, u.email
+              from app_log l left join app_user u on u.id = l.user_id
+             where l.created_at > now() - interval '12 hours'
+               and l.scope in ('meta','threads','linkedin','google','gdrive','youtube','oauth')
+             order by l.created_at desc limit 40;
+            SQL
             done
-            echo "gzip головної через nginx: $(curl -sS -m 15 -H 'Accept-Encoding: gzip' -D - -o /dev/null $P/ | grep -i '^content-encoding' | tr -d '\r')"
-            echo "=== стара адреса ==="
-            for p in / /robots.txt /sitemap.xml /login /app; do echo "socialio$p -> $(curl -sS -m 15 -o /dev/null -w '%{http_code} %{redirect_url}' https://socialio.rozum.one$p)"; done
-            echo "socialio /health -> $(curl -sS -m 15 -o /dev/null -w '%{http_code}' https://socialio.rozum.one/health) (машинний маршрут без редіректу)"
-            echo "=== вхід через Google ==="
-            echo "$(curl -sS -m 15 -D - -o /dev/null $P/api/auth/google | grep -i '^location:' | tr -d '\r' | grep -oE 'https://accounts\.google\.com/[^?]+|redirect_uri=[^&]+' | tr '\n' ' ')"
-            echo "=== журнал проду після рестарту ==="
-            cd "${{ secrets.APP_DIR }}/server" && docker compose logs --since 10m app 2>&1 | grep -iE '"level":(40|50)|error|unhandled' | cut -c1-220 | mask | tail -15
-            echo "(кінець журналу)"
+            echo; echo "=================== nginx: підключення й повернення (12 год) ==================="
+            for f in /var/log/nginx/access.log /var/log/nginx/access.log.1; do
+              [ -r "$f" ] || continue
+              grep -hE '/api/(integrations/(meta|threads|linkedin|gdrive|youtube)/(connect|callback)|auth/google)' "$f" 2>/dev/null \
+                | grep -E "$(date -u +%d/%b/%Y)|$(date -u -d '12 hours ago' +%d/%b/%Y)" \
+                | sed -E 's/^([0-9]+\.[0-9]+)\.[0-9]+\.[0-9]+/\1.x.x/' | mask | cut -c1-240 | tail -20
+            done
