@@ -301,16 +301,55 @@ export function allocate(slots: Slot[], total?: number | null): number[] {
   return out.map(r2);
 }
 
+/** Найбільше сповільнення кліпу: для b-roll 1,6× ще не помітно, далі рух стає «ватним». */
+export const MAX_SLOW = 1.6;
+
 /**
- * Як показати кліп тривалістю d, якщо з нього можна взяти avail секунд: довший - обрізаємо (з
- * середини, або з from, якщо його задали), коротший - сповільнюємо до 1,6× (для b-roll непомітно),
- * а що не добрали сповільненням - тримаємо останній кадр.
+ * Як показати кліп тривалістю d, якщо з нього можна взяти avail секунд: довший - обрізаємо, коротший -
+ * сповільнюємо до 1,6×, а що не добрали сповільненням - тримаємо останній кадр (це лише залишок
+ * округлення: довші нестачі planShots закриває повтором кліпу). Якою частиною кліпу обрізати: повтор k
+ * з n бере шматки рівномірно від початку до кінця (щоб повтор не показував те саме), один показ - з
+ * середини, або з початку, якщо початок (from) задала людина.
  */
-export function fitClip(avail: number, d: number, fromGiven: boolean): { offset: number; take: number; speed: number; freeze: number } {
-  if (avail >= d) return { offset: fromGiven ? 0 : r2((avail - d) / 2), take: r2(d), speed: 1, freeze: 0 };
-  const speed = Math.min(1.6, d / Math.max(avail, 0.1));
+export function fitClip(avail: number, d: number, fromGiven: boolean, k = 0, n = 1): { offset: number; take: number; speed: number; freeze: number } {
+  if (avail >= d) {
+    const pos = n > 1 ? k / (n - 1) : fromGiven ? 0 : 0.5;
+    return { offset: r2((avail - d) * pos), take: r2(d), speed: 1, freeze: 0 };
+  }
+  const speed = Math.min(MAX_SLOW, d / Math.max(avail, 0.1));
   const freeze = Math.max(0, d - avail * speed);
   return { offset: 0, take: r2(avail), speed: r2(speed), freeze: r2(freeze) };
+}
+
+export type ShotClip = { avail: number; still?: boolean; fromGiven?: boolean };
+export type Shot = { clip: number; start: number; dur: number; offset: number; take: number; speed: number; freeze: number };
+
+/**
+ * Кадри монтажу по порядку: який кліп, з якого місця, скільки й з якою швидкістю.
+ *
+ * 29.09 Олег: голосове 23 с, а відео 7,6 с - кліп сповільнився до 1,6× (12 с) і далі 11,6 с стояв на
+ * останньому кадрі: «завис». Тепер, коли кліпу не вистачає навіть сповільненого, він не стоїть, а
+ * повторюється. continuous (один голос на весь ролик) - уся послідовність іде по колу (1, 2, 1, 2),
+ * як змонтувала б людина; інакше в кліпа свій текст і своє місце - він повторюється там же.
+ * Повтор бере інший шматок кліпу, якщо кліп довший за шматок. passes - скільки разів ішло по колу.
+ */
+export function planShots(clips: ShotClip[], durs: number[], continuous: boolean): { shots: Shot[]; passes: number } {
+  // скільки показів треба кліпу, щоб жоден не сповільнювався понад MAX_SLOW (фото тягнеться скільки завгодно)
+  const need = clips.map((c, i) => c.still ? 1 : Math.max(1, Math.ceil(durs[i] / (Math.max(c.avail, 0.1) * MAX_SLOW) - 1e-6)));
+  const passes = continuous ? Math.max(1, ...need) : 1;
+  const order: Array<[number, number, number]> = [];  // [кліп, повтор k, із n]
+  if (continuous) { for (let k = 0; k < passes; k++) clips.forEach((_, i) => order.push([i, k, passes])); }
+  else clips.forEach((_, i) => { for (let k = 0; k < need[i]; k++) order.push([i, k, need[i]]); });
+  const shots: Shot[] = [];
+  let t = 0;
+  for (const [i, k, n] of order) {
+    const c = clips[i];
+    const dur = durs[i] / n;
+    const fit = c.still ? { offset: 0, take: dur, speed: 1, freeze: 0 } : fitClip(c.avail, dur, !!c.fromGiven, k, n);
+    shots.push({ clip: i, start: t, dur, ...fit });
+    t += dur;
+  }
+  return { shots, passes: continuous ? passes : Math.max(1, ...need) };
 }
 
 // ---- де різати довгу сторіс ----

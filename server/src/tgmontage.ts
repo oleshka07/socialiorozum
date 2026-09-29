@@ -18,12 +18,14 @@ import { liveSend } from "./tgbot.js";
 import { startMontage, MONTAGE_MAX_CLIPS, type MontageOpts, type MontageResult } from "./montage.js";
 import { ttsReady } from "./tts.js";
 import { getJob } from "./jobs.js";
-import { spreadText } from "./montage-plan.js";
+import { spreadText, MAX_SLOW } from "./montage-plan.js";
+import { plural } from "./analytics.js";
 
 export type MtMode = "auto" | "captions" | "ai-voice";
 export type MtState = {
   chat: string;
-  clips: Array<{ id: string; kind: "video" | "image"; dur: number }>;
+  // mid - message_id повідомлення з кліпом: за ним тримається порядок (альбом доходить не по порядку)
+  clips: Array<{ id: string; kind: "video" | "image"; dur: number; mid?: number }>;
   voice: { id: string; dur: number } | null;
   script: string | null;
   mode: MtMode;
@@ -51,6 +53,19 @@ export async function clearMt(ws: string): Promise<void> {
   await q(`delete from settings_block where workspace_id=$1 and key='montage_state'`, [ws]);
 }
 
+// Одна дія із сесією за раз на кабінет. 29.09 Олег надіслав 2 відео альбомом: Telegram доставив їх
+// одночасно, обидва обробники прочитали сесію без кліпів, і другий запис затер перший - у монтаж
+// пішов один кліп. Тепер повідомлення й кнопки сесії йдуть чергою (застосунок - один процес), і кожне
+// читає свіжий стан; «Змонтувати» чекає, поки кліпи, що вже прийшли, додадуться.
+const mtChains = new Map<string, Promise<unknown>>();
+export function mtLocked<T>(ws: string, fn: () => Promise<T>): Promise<T> {
+  const run = (mtChains.get(ws) || Promise.resolve()).catch(() => {}).then(fn);
+  const tail = run.catch(() => {});
+  mtChains.set(ws, tail);
+  void tail.then(() => { if (mtChains.get(ws) === tail) mtChains.delete(ws); });
+  return run;
+}
+
 const dur = (s: number) => { const n = Math.round(s || 0); return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, "0")}`; };
 
 /** Що вийде при «Змонтувати» - людськими словами (картка показує це ДО монтажу). */
@@ -63,6 +78,14 @@ export function mtTextPlan(st: MtState, tts: boolean): string {
   return "🔊 Якщо в кліпах говорять - субтитри з мови; якщо ні - AI підпише кадри.";
 }
 
+/** Голосове довше, ніж кліпи покривають навіть сповільнені - кажемо ДО монтажу, що вони підуть по колу. */
+export function loopHint(st: MtState): string {
+  if (!st.voice || !st.clips.length || st.clips.some((c) => c.kind === "image")) return "";
+  const foot = st.clips.reduce((a, c) => a + c.dur, 0);
+  if (foot * MAX_SLOW >= st.voice.dur) return "";
+  return `🔁 Голосове (${dur(st.voice.dur)}) довше за відео (${dur(foot)}) - кліпи підуть по колу. Щоб без повторів, додай ще кліпи.`;
+}
+
 function mtCard(st: MtState): { text: string; buttons: tg.TgButton[][] } {
   const tts = ttsReady();
   const total = st.clips.reduce((a, c) => a + (c.kind === "image" ? 3 : c.dur), 0);
@@ -71,6 +94,7 @@ function mtCard(st: MtState): { text: string; buttons: tg.TgButton[][] } {
     `🎬 **Монтаж** · ${st.format === "story" ? "⚡ сторіс (Instagram і Facebook, частини до 60 с)" : "🎞 рілс"}`,
     st.clips.length ? `Кліпи (${st.clips.length}, ≈${dur(total)}): ${list}` : "Кліпів ще нема.",
     mtTextPlan(st, tts),
+    ...(loopHint(st) ? [loopHint(st)] : []),
     "",
     st.clips.length
       ? "Ще відео (до 20 МБ) чи фото - надсилай. Голосове - стане озвучкою, текст - словами для відео. Готово - «✂️ Змонтувати»."
@@ -99,60 +123,73 @@ async function showCard(ws: string, chatId: string, st: MtState, note = ""): Pro
 }
 
 /** /montage чи кнопка «🎬 Монтаж»: відкрита сесія - показуємо її, інакше нова. */
-export async function startMt(ws: string, chatId: string): Promise<void> {
-  const cur = await getMt(ws);
-  if (cur) { cur.chat = chatId; await saveMt(ws, cur); await showCard(ws, chatId, cur); return; }
-  const st: MtState = { chat: chatId, clips: [], voice: null, script: null, mode: "auto", format: "story", at: Date.now() };
-  await saveMt(ws, st);
-  await showCard(ws, chatId, st);
+export function startMt(ws: string, chatId: string): Promise<void> {
+  return mtLocked(ws, async () => {
+    const cur = await getMt(ws);
+    if (cur) { cur.chat = chatId; await saveMt(ws, cur); await showCard(ws, chatId, cur); return; }
+    const st: MtState = { chat: chatId, clips: [], voice: null, script: null, mode: "auto", format: "story", at: Date.now() };
+    await saveMt(ws, st);
+    await showCard(ws, chatId, st);
+  });
 }
 
 const TOO_BIG = "⚠️ Telegram не віддає ботам файли понад 20 МБ. Великі відео - через «🚀 Кабінет» (Mini App → «🎬 Відео») або кабінет, а змонтувати їх можна звідти чи з Claude.";
 
 /**
  * Повідомлення під час сесії: відео/фото - кліп, голосове - озвучка, текст - слова для відео.
- * true - повідомлення забрав монтаж (далі його не обробляти).
+ * true - повідомлення забрав монтаж (далі його не обробляти). Стан на момент приходу (_st) не беремо:
+ * під замком читаємо свіжий - інше повідомлення альбому могло щойно додати кліп.
  */
-export async function montageMessage(ws: string, chatId: string, msg: any, st: MtState, token: string): Promise<boolean> {
+export async function montageMessage(ws: string, chatId: string, msg: any, _st: MtState, token: string): Promise<boolean> {
   const doc = msg.document;
   const docMime = String(doc?.mime_type || "");
   const vid = msg.video || msg.video_note || msg.animation || (doc && /^video\//.test(docMime) ? doc : null);
   const photo = msg.photo?.length ? msg.photo[msg.photo.length - 1] : (doc && /^image\//.test(docMime) ? doc : null);
   const voice = msg.voice || msg.audio || (doc && /^audio\//.test(docMime) ? doc : null);
   const file = vid || photo || voice;
-  if (file) {
-    if ((file.file_size || 0) > 19.5 * 1024 * 1024) { await tg.sendMessage(token, chatId, TOO_BIG); return true; }
-    if (!voice && st.clips.length >= MONTAGE_MAX_CLIPS) { await tg.sendMessage(token, chatId, `У монтажі до ${MONTAGE_MAX_CLIPS} кліпів - тисни «✂️ Змонтувати».`); return true; }
-    let buf: Buffer;
-    try { buf = (await tg.getFileBuffer(token, file.file_id)).buffer; }
-    catch (e: any) { await tg.sendMessage(token, chatId, "⚠️ " + (/too big/i.test(String(e.message)) ? TOO_BIG : String(e.message).slice(0, 200))); return true; }
-    const mime = vid ? (vid.mime_type || "video/mp4") : photo ? "image/jpeg" : (voice.mime_type || "audio/ogg");
-    const name = String(file.file_name || (vid ? "clip.mp4" : photo ? "photo.jpg" : "voice.ogg")).slice(0, 120);
-    let saved: { id: string; kind: string };
-    try { saved = await saveMedia(ws, { buffer: buf, mime, name, source: "bot", dedupe: true }); }
-    catch (e: any) { await tg.sendMessage(token, chatId, "⚠️ " + String(e.message).slice(0, 200)); return true; }
-    const row = await one<{ duration: number | null }>(`select duration from media_asset where id=$1`, [saved.id]);
-    const d = Number(row?.duration) || 0;
-    if (saved.kind === "audio") {
-      st.voice = { id: saved.id, dur: d };
-      await saveMt(ws, st);
-      await showCard(ws, chatId, st, `🎙 Голосове (${dur(d)}) - буде озвучкою, субтитри з нього.`);
+  const text = String(msg.text || "").trim();
+  if (!file && !(text && !text.startsWith("/"))) return false;
+  return mtLocked(ws, async () => {
+    // сесію щойно закрили («Скасувати» чи готовий монтаж) - не воскрешаємо її, повідомлення піде далі
+    const cur = await getMt(ws);
+    if (!cur) return false;
+    if (file) {
+      if ((file.file_size || 0) > 19.5 * 1024 * 1024) { await tg.sendMessage(token, chatId, TOO_BIG); return true; }
+      if (!voice && cur.clips.length >= MONTAGE_MAX_CLIPS) { await tg.sendMessage(token, chatId, `У монтажі до ${MONTAGE_MAX_CLIPS} кліпів - тисни «✂️ Змонтувати».`); return true; }
+      let buf: Buffer;
+      try { buf = (await tg.getFileBuffer(token, file.file_id)).buffer; }
+      catch (e: any) { await tg.sendMessage(token, chatId, "⚠️ " + (/too big/i.test(String(e.message)) ? TOO_BIG : String(e.message).slice(0, 200))); return true; }
+      const mime = vid ? (vid.mime_type || "video/mp4") : photo ? "image/jpeg" : (voice.mime_type || "audio/ogg");
+      const name = String(file.file_name || (vid ? "clip.mp4" : photo ? "photo.jpg" : "voice.ogg")).slice(0, 120);
+      let saved: { id: string; kind: string };
+      try { saved = await saveMedia(ws, { buffer: buf, mime, name, source: "bot", dedupe: true }); }
+      catch (e: any) { await tg.sendMessage(token, chatId, "⚠️ " + String(e.message).slice(0, 200)); return true; }
+      const row = await one<{ duration: number | null }>(`select duration from media_asset where id=$1`, [saved.id]);
+      const d = Number(row?.duration) || 0;
+      if (saved.kind === "audio") {
+        cur.voice = { id: saved.id, dur: d };
+        await saveMt(ws, cur);
+        await showCard(ws, chatId, cur, `🎙 Голосове (${dur(d)}) - буде озвучкою, субтитри з нього.`);
+        return true;
+      }
+      if (!cur.clips.some((c) => c.id === saved.id)) {
+        cur.clips.push({ id: saved.id, kind: saved.kind === "image" ? "image" : "video", dur: d, mid: Number(msg.message_id) || 0 });
+        // порядок - як людина надсилала (у альбомі - як розклала), а не як Telegram доставив
+        cur.clips.sort((a, b) => (a.mid || 0) - (b.mid || 0));
+      }
+      await saveMt(ws, cur);
+      await showCard(ws, chatId, cur, `✅ ${saved.kind === "image" ? "Фото" : `Відео ${dur(d)}`} додано - кліпів: ${cur.clips.length}.`);
       return true;
     }
-    if (!st.clips.some((c) => c.id === saved.id)) st.clips.push({ id: saved.id, kind: saved.kind === "image" ? "image" : "video", dur: d });
-    await saveMt(ws, st);
-    await showCard(ws, chatId, st, `✅ ${saved.kind === "image" ? "Фото" : `Відео ${dur(d)}`} додано - кліп ${st.clips.length}.`);
-    return true;
-  }
-  const text = String(msg.text || "").trim();
-  // текст - слова для відео, поки людина щойно працювала з монтажем (інакше - звичайна ідея чи щоденник)
-  if (text && !text.startsWith("/") && Date.now() - Number(st.at || 0) < TEXT_WINDOW) {
-    st.script = text.slice(0, 3000);
-    await saveMt(ws, st);
-    await showCard(ws, chatId, st, "✍ Текст для відео збережено.");
-    return true;
-  }
-  return false;
+    // текст - слова для відео, поки людина щойно працювала з монтажем (інакше - звичайна ідея чи щоденник)
+    if (Date.now() - Number(cur.at || 0) < TEXT_WINDOW) {
+      cur.script = text.slice(0, 3000);
+      await saveMt(ws, cur);
+      await showCard(ws, chatId, cur, "✍ Текст для відео збережено.");
+      return true;
+    }
+    return false;
+  });
 }
 
 /** Вибір мереж для нового поста: сторіс - Instagram і Facebook; рілс - вони ж (решту людина вмикає в картці). */
@@ -177,6 +214,9 @@ export function mtOpts(st: MtState, tts: boolean): { opts: MontageOpts; aiText: 
 /** Кнопки картки монтажу (mt:*). openPost - відкрити картку поста (композер бота). */
 export async function montageCallback(ws: string, chatId: string, data: string, cbq: any, token: string, openPost: (postId: string) => Promise<void>): Promise<boolean> {
   if (!data.startsWith("mt:")) return false;
+  return mtLocked(ws, () => montageTap(ws, chatId, data, cbq, token, openPost));
+}
+async function montageTap(ws: string, chatId: string, data: string, cbq: any, token: string, openPost: (postId: string) => Promise<void>): Promise<boolean> {
   const st = await getMt(ws);
   if (!st) { await tg.answerCallbackQuery(token, cbq.id, "Сесія монтажу завершилась - /montage, щоб почати нову"); return true; }
   const [, cmd, arg] = data.split(":");
@@ -219,7 +259,7 @@ async function sendResult(ws: string, chatId: string, r: MontageResult, token: s
     const path = join(MEDIA_DIR, v.filename);
     const size = (await stat(path).catch(() => null))?.size || 0;
     const cap = k === 0
-      ? `🎬 Готово: ${dur(r.duration)} · ${sub}${many ? ` · ${r.videos.length} частини (у сторіс кожна - окремий кадр)` : ""}.${r.warnings.length ? `\n⚠️ ${r.warnings.join("; ")}` : ""}`
+      ? `🎬 Готово: ${dur(r.duration)} · ${r.clips} ${plural(r.clips, "кліп", "кліпи", "кліпів")} · ${sub}${many ? ` · ${r.videos.length} частини (у сторіс кожна - окремий кадр)` : ""}.${r.warnings.length ? `\n⚠️ ${r.warnings.join("; ")}` : ""}`
       : `Частина ${k + 1} з ${r.videos.length}`;
     if (size && size <= tg.TG_VIDEO_MAX) {
       await tg.sendVideo(token, chatId, { file: await readFile(path), name: many ? `montage-${k + 1}.mp4` : "montage.mp4" }, cap, { width: 1080, height: 1920, duration: v.duration })

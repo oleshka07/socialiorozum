@@ -66,6 +66,9 @@ export async function sweepMontageTmp(maxAgeMs = 3 * 3600_000): Promise<number> 
 export const MONTAGE_MAX_CLIPS = 20;
 export const MONTAGE_MAX_SEC = 180;
 export const STORY_PART_SEC = 59.5;
+// більше кадрів - це вже не монтаж, а одна секунда відео по колу хвилину: краще сказати людині
+const MONTAGE_MAX_SHOTS = 200;
+const secs = (x: number) => x < 60 ? `${Math.round(x)} с` : `${Math.floor(x / 60)}:${String(Math.round(x % 60)).padStart(2, "0")}`;
 const W = 1080, H = 1920, FPS = 30;
 
 // ---- запуск ffmpeg ----
@@ -155,7 +158,9 @@ async function renderSegment(dir: string, i: number, src: Src, fit: { offset: nu
     return out;
   }
   const pre = fit.speed !== 1 ? `setpts=${fit.speed}*PTS,` : "";
-  const tail = `fps=${FPS},format=yuv420p,setsar=1${fit.freeze > 0 ? `,tpad=stop_mode=clone:stop_duration=${fit.freeze.toFixed(3)}` : ""}[v]`;
+  // запас стоп-кадру: навіть якщо відеопотік кліпу коротший, ніж каже контейнер, сегмент рівно dur (-t
+  // обрізає), і наступний кліп стає на своє місце на таймлайні
+  const tail = `fps=${FPS},format=yuv420p,setsar=1,tpad=stop_mode=clone:stop_duration=${(fit.freeze + 0.5).toFixed(3)}[v]`;
   const vg = isPortrait(src) ? `[0:v]${pre}${coverChain},${tail}` : `${padChain(`[0:v]${pre}`, ",")}${tail}`.replace(",,", ",");
   // звук кліпу - лише коли він іде у звичайній швидкості (сповільнений голос звучить як зі старого магнітофона)
   const sound = withSound && src.audio && fit.speed === 1;
@@ -354,18 +359,36 @@ export async function buildMontage(ws: string, o: MontageOpts): Promise<MontageR
     // Instagram і Facebook приймають відео (і сторіс, і Reels) від 3 с
     if (total < 3) throw new MontageError(`Замало відео: ${total.toFixed(1)} с, а мережі приймають від 3 с - додай кліп чи візьми довший шматок.`);
 
-    // сегменти
+    // кадри: кліпи по порядку, а коли відео коротше за голос - по колу, а не стоп-кадр на останньому кадрі
     const withVoice = voiceParts.length > 0;
-    const segs: string[] = [];
-    const starts: number[] = [];
-    let t = 0;
-    for (let i = 0; i < srcs.length; i++) {
-      const fit = srcs[i].kind === "image" ? { offset: 0, take: durs[i], speed: 1, freeze: 0 } : P.fitClip(trims[i].avail, durs[i], trims[i].fromGiven);
-      if (srcs[i].kind === "video") fit.offset = Math.round((trims[i].from + fit.offset) * 1000) / 1000;
-      starts.push(t);
-      segs.push(await renderSegment(dir, i, srcs[i], fit, durs[i], o.voice !== "tts" || o.keepSound !== false));
-      t += durs[i];
+    const continuous = (o.voice === "audio" || (o.voice === "tts" && !!String(o.script || "").trim())) && !slots.some((s) => s.want != null && s.want > 0);
+    const plan = P.planShots(srcs.map((s, i) => ({ avail: trims[i].avail, still: s.kind === "image", fromGiven: trims[i].fromGiven })), durs, continuous);
+    if (plan.shots.length > MONTAGE_MAX_SHOTS) throw new MontageError(`Відео замало для такої довгої озвучки: кліпи довелось би повторити ${plan.passes} разів. Додай ще кліпів або скороти текст.`);
+    if (plan.passes > 1) {
+      const foot = srcs.reduce((a, s, i) => a + (s.kind === "image" ? 0 : trims[i].avail), 0);
+      warnings.push(`відео ${secs(foot)} на ${secs(total)} ${withVoice ? "озвучки" : "ролика"} - ${srcs.length === 1 ? "кліп пішов" : "кліпи пішли"} по колу (×${plan.passes}); щоб без повторів, додай ще кліпи`);
     }
+    const segs: string[] = [];
+    const rendered = new Map<string, string>();   // однаковий кадр (повтор цілого кліпу) рендеримо раз
+    for (const sh of plan.shots) {
+      const src = srcs[sh.clip];
+      const fit = { offset: sh.offset, take: sh.take, speed: sh.speed, freeze: sh.freeze };
+      if (src.kind === "video") fit.offset = Math.round((trims[sh.clip].from + fit.offset) * 1000) / 1000;
+      const key = [sh.clip, fit.offset, fit.take, fit.speed, sh.dur.toFixed(3)].join(":");
+      let file = rendered.get(key);
+      if (!file) {
+        file = await renderSegment(dir, rendered.size, src, fit, sh.dur, o.voice !== "tts" || o.keepSound !== false);
+        rendered.set(key, file);
+      }
+      segs.push(file);
+    }
+    // де на екрані кожен кліп (перший його показ) - для підписів по кліпах
+    const span = srcs.map((_, i) => {
+      const a = plan.shots.findIndex((s) => s.clip === i);
+      let b = a;
+      while (b + 1 < plan.shots.length && plan.shots[b + 1].clip === i) b++;
+      return { start: plan.shots[a].start, end: plan.shots[b].start + plan.shots[b].dur };
+    });
     // сегменти склеюються прямо на вході фінального кодування (concat-демуксер) - без проміжного
     // raw.mp4: на 3-хвилинному ролику це сотні МБ на спільному диску сервера
     await writeFile(join(dir, "list.txt"), segs.map((s) => `file '${s}'`).join("\n") + "\n");
@@ -390,7 +413,7 @@ export async function buildMontage(ws: string, o: MontageOpts): Promise<MontageR
 
     // субтитри
     const captions: P.Caption[] = [];
-    if (!words.length) for (let i = 0; i < srcs.length; i++) captions.push(...P.captionChunks(clipTexts[i], starts[i] + 0.1, starts[i] + durs[i] - 0.05));
+    if (!words.length) for (let i = 0; i < srcs.length; i++) captions.push(...P.captionChunks(clipTexts[i], span[i].start + 0.1, span[i].end - 0.05));
     let sub: SubMode = o.subtitles || (words.length ? "karaoke" : captions.length ? "lines" : "none");
     if (sub !== "none" && !words.length && !captions.length) sub = "none";
     const cues = words.length ? P.groupCues(words) : [];
@@ -404,7 +427,7 @@ export async function buildMontage(ws: string, o: MontageOpts): Promise<MontageR
     if (withVoice) voiceFile = await buildVoiceTrack(dir, voiceParts, total);
 
     // де різати довгу сторіс
-    const cuts = o.format === "story" ? P.splitPoints(total, starts.slice(1), sub === "none" ? [] : (cues.length ? cues : captions), STORY_PART_SEC) : [];
+    const cuts = o.format === "story" ? P.splitPoints(total, plan.shots.slice(1).map((x) => x.start), sub === "none" ? [] : (cues.length ? cues : captions), STORY_PART_SEC) : [];
 
     // фінал
     const keep = o.keepSound === false ? 0 : 0.18;

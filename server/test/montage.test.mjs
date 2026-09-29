@@ -149,6 +149,60 @@ test("fitClip: обрізаємо з середини (або з from), коро
   assert.equal(f.speed, 1.6); assert.equal(f.freeze, 2.8);
 });
 
+test("fitClip: повтор k з n бере різні шматки кліпу - від початку до кінця", () => {
+  assert.deepEqual(fitClip(10, 4, false, 0, 2), { offset: 0, take: 4, speed: 1, freeze: 0 });
+  assert.deepEqual(fitClip(10, 4, false, 1, 2), { offset: 6, take: 4, speed: 1, freeze: 0 });
+  assert.equal(fitClip(10, 4, false, 1, 3).offset, 3);
+});
+
+// 29.09 Олег: 2 відео (6,2 і 7,57 с) і голосове 23 с. До фіксу в монтаж дійшов один кліп, а він 1,6× і
+// далі 11,6 с стоп-кадру - «завис». Жоден кадр не має стояти довше за залишок округлення.
+const sumDur = (shots) => Math.round(shots.reduce((a, s) => a + s.dur, 0) * 100) / 100;
+const maxFreeze = (shots) => Math.max(0, ...shots.map((s) => s.freeze));
+test("planShots: відео коротше за голос - кліпи по колу (1, 2, 1, 2), без стоп-кадру й не швидше за 1,6×", () => {
+  const clips = [{ avail: 6.2 }, { avail: 7.57 }];
+  const durs = allocate(clips, 23.69);
+  const { shots, passes } = planShots(clips, durs, true);
+  assert.equal(passes, 2);
+  assert.deepEqual(shots.map((s) => s.clip), [0, 1, 0, 1]);
+  assert.equal(sumDur(shots), 23.69);
+  assert.ok(maxFreeze(shots) <= 0.1, "стоп-кадр " + maxFreeze(shots));
+  assert.ok(shots.every((s) => s.speed <= MAX_SLOW && s.take <= clips[s.clip].avail + 1e-9));
+  // повтор - інший шматок кліпу
+  assert.notEqual(shots[0].offset, shots[2].offset);
+  // початки кадрів ідуть підряд
+  for (let k = 1; k < shots.length; k++) assert.ok(Math.abs(shots[k].start - (shots[k - 1].start + shots[k - 1].dur)) < 1e-9);
+});
+
+test("planShots: один кліп 7,57 с під голос 23,7 с - повтор, а не 11,6 с стоп-кадру", () => {
+  const clips = [{ avail: 7.57 }];
+  const { shots, passes } = planShots(clips, allocate(clips, 23.69), true);
+  assert.ok(passes >= 2);
+  assert.equal(sumDur(shots), 23.69);
+  assert.ok(maxFreeze(shots) <= 0.1, "стоп-кадр " + maxFreeze(shots));
+  assert.ok(shots.every((s) => s.speed <= MAX_SLOW));
+});
+
+test("planShots: відео вистачає - як і раніше, один кадр на кліп, обрізка з середини чи сповільнення", () => {
+  const clips = [{ avail: 10 }, { avail: 4 }];
+  const a = planShots(clips, [6, 4], true);
+  assert.equal(a.passes, 1);
+  assert.deepEqual(a.shots.map((s) => [s.clip, s.offset, s.take, s.speed]), [[0, 2, 6, 1], [1, 0, 4, 1]]);
+  const b = planShots(clips, allocate(clips, 20), true);  // 1,43× - ще в межах сповільнення
+  assert.equal(b.passes, 1); assert.equal(b.shots.length, 2); assert.ok(maxFreeze(b.shots) <= 0.1);
+  // фото тягнеться скільки треба і не множить повторів
+  const c = planShots([{ avail: Infinity, still: true }, { avail: 5 }], [12, 6], true);
+  assert.equal(c.passes, 1); assert.deepEqual(c.shots.map((s) => s.dur), [12, 6]);
+});
+
+test("planShots: кліп із власним текстом (слот) повторюється у своєму місці, сусіди не зсуваються", () => {
+  const clips = [{ avail: 2 }, { avail: 8 }];
+  const { shots } = planShots(clips, [7, 5], false);  // перший кліп мусить звучати 7 с (AI-голос по кліпах)
+  assert.deepEqual(shots.map((s) => s.clip), [0, 0, 0, 1]);
+  assert.equal(Math.round((shots[3].start) * 100) / 100, 7);
+  assert.ok(maxFreeze(shots) <= 0.1);
+});
+
 test("splitPoints: сторіс довше 60 с ріжеться на стику кліпів чи в паузі, не посеред картки", () => {
   assert.deepEqual(splitPoints(50, [10, 20]), []);
   const cuts = splitPoints(100, [20, 45, 58, 80], [{ start: 57, end: 59 }]);
@@ -170,8 +224,8 @@ test("wordsText: слова → текст без пробілів перед р
 });
 
 // ---- друга хвиля: текст автора по кліпах, режими бота, аудіо, провайдери ----
-import { spreadText } from "../dist/montage-plan.js";
-import { mtOpts, mtTextPlan } from "../dist/tgmontage.js";
+import { spreadText, planShots, MAX_SLOW } from "../dist/montage-plan.js";
+import { mtOpts, mtTextPlan, loopHint, mtLocked } from "../dist/tgmontage.js";
 import { sniffKind } from "../dist/media.js";
 import { humanElevenError, azureVoice } from "../dist/tts.js";
 import { deepgramWords, whisperWords } from "../dist/stt.js";
@@ -204,6 +258,25 @@ test("mtOpts: бот обирає звідки текст - голосове, с
   assert.equal(auto.opts.voice, "clips"); assert.equal(auto.opts.autoCaptions, true);
   assert.match(mtTextPlan({ ...st, voice: { id: "v", dur: 7 } }, true), /голосове \(0:07\)/);
   assert.match(mtTextPlan({ ...st, script: "Ahoj" }, false), /підписами/);
+});
+
+test("loopHint: голосове довше за відео - картка каже ДО монтажу, що кліпи підуть по колу", () => {
+  const st = { chat: "1", clips: [{ id: "a", kind: "video", dur: 6.2 }, { id: "b", kind: "video", dur: 7.57 }], voice: { id: "v", dur: 23 }, script: null, mode: "auto", format: "story", at: Date.now() };
+  assert.match(loopHint(st), /по колу/);
+  assert.equal(loopHint({ ...st, voice: { id: "v", dur: 20 } }), "");
+  assert.equal(loopHint({ ...st, voice: null }), "");
+});
+
+test("mtLocked: дії з сесією одного кабінету - по черзі (альбом не губить кліпи), різні кабінети - паралельно", async () => {
+  const log = [];
+  const slow = (tag, ms) => async () => { log.push(tag + ">"); await new Promise((r) => setTimeout(r, ms)); log.push("<" + tag); return tag; };
+  const r = await Promise.all([mtLocked("w1", slow("a", 30)), mtLocked("w1", slow("b", 5)), mtLocked("w2", slow("c", 5))]);
+  assert.deepEqual(r, ["a", "b", "c"]);
+  assert.ok(log.indexOf("<a") < log.indexOf("b>"), log.join(" "));
+  assert.ok(log.indexOf("c>") < log.indexOf("<a"), log.join(" "));
+  // збій однієї дії не блокує наступні
+  await assert.rejects(mtLocked("w1", async () => { throw new Error("x"); }));
+  assert.equal(await mtLocked("w1", async () => 7), 7);
 });
 
 test("sniffKind: голос розпізнається за байтами (OGG, MP3, M4A, WAV, FLAC), відео й фото - як раніше", () => {
