@@ -3,7 +3,8 @@ name: beta-check
 # Службова гілка. Лише ЧИТАННЯ сервера (діагностика) або заливка файлів у медіатеку кабінету через його ж
 # разове посилання. 29.09: бета після монтажу відео - версія, здоров'я, маркери і ПРОБНИЙ МОНТАЖ ffmpeg у
 # контейнері беті (тимчасова тека, нічого не пише ні в базу, ні в медіатеку): чи є в Alpine-ffmpeg усі
-# фільтри (ass, zoompan, boxblur, loudnorm, amix, tpad, сегментатор) і шрифт субтитрів.
+# фільтри (ass, zoompan, boxblur, loudnorm, amix, tpad, сегментатор) і шрифт субтитрів. Другий прохід: ffmpeg 8
+# відмовив «-vf crop=…» у пробі - чи працюють ті -vf, що їх викликає рушій (кадри для video_frames, рілс).
 
 on:
   push:
@@ -40,6 +41,7 @@ jobs:
             cat > /tmp/holos-mtcheck.sh <<'EOS'
             set -e
             D=$(mktemp -d); cd $D
+            trap 'cd /; rm -rf "$D"' EXIT
             F="ffmpeg -hide_banner -loglevel error -y"
             $F -f lavfi -i testsrc2=s=720x1280:r=30:d=3 -f lavfi -i sine=f=440:d=3 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest p.mp4
             $F -f lavfi -i testsrc=s=1280x720:r=25:d=2 -c:v libx264 -pix_fmt yuv420p l.mp4
@@ -75,13 +77,41 @@ jobs:
             $F -i out.mp4 -map 0 -c copy -f segment -segment_times 3.00 -segment_time_delta 0.05 -reset_timestamps 1 -segment_format_options movflags=+faststart part%02d.mp4
             for f in out.mp4 part00.mp4 part01.mp4; do echo "$f: $(ffprobe -v error -show_entries format=duration -of csv=p=0 $f)s $(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 $f)"; done
             # субтитри справді намальовані: кадр із субтитрами відрізняється від кадру без них у зоні тексту
-            $F -ss 1 -i seg0.mp4 -frames:v 1 -vf "crop=1080:200:0:1160" a.png
-            $F -ss 1 -i out.mp4 -frames:v 1 -vf "crop=1080:200:0:1160" b.png
+            $F -ss 1 -i seg0.mp4 -frames:v 1 -filter_complex "[0:v]crop=1080:200:0:1160[c]" -map "[c]" a.png
+            $F -ss 1 -i out.mp4 -frames:v 1 -filter_complex "[0:v]crop=1080:200:0:1160[c]" -map "[c]" b.png
             echo "субтитри в кадрі: $(cmp -s a.png b.png && echo НІ || echo так)"
-            cd /; rm -rf "$D"
             EOS
             docker compose exec -T app sh < /tmp/holos-mtcheck.sh 2>&1 | tail -12
             rm -f /tmp/holos-mtcheck.sh
+            echo "--- -vf у ffmpeg 8 (виклики як у рушії, без оболонки) ---"
+            VF=$(cat <<'EOF'
+            import { spawnSync } from 'node:child_process';
+            import { mkdtempSync, rmSync, readdirSync, existsSync, writeFileSync } from 'node:fs';
+            import { join } from 'node:path';
+            // тека попереднього пробного запуску (він упав до rm -rf) - геть: лише наша, з list.txt і seg0.mp4
+            for (const d of readdirSync('/tmp')) { const p = join('/tmp', d);
+              if (d.startsWith('tmp.') && existsSync(join(p, 'list.txt')) && existsSync(join(p, 'seg0.mp4'))) { rmSync(p, { recursive: true, force: true }); console.log('прибрано теку попереднього запуску', p); } }
+            const D = mkdtempSync('/tmp/vfcheck-');
+            const ff = (args) => { const r = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args], { cwd: D });
+              return { ok: r.status === 0, n: r.stdout ? r.stdout.length : 0, err: String(r.stderr).trim().split('\n').slice(-1)[0] }; };
+            try {
+              ff(['-f', 'lavfi', '-i', 'testsrc2=s=1080x1920:r=30:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', 'v.mp4']);
+              writeFileSync(join(D, 's.ass'), '[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: W,DejaVu Sans,76,&H00FFFFFF,&H00FFFFFF,&H00141010,&H80000000,-1,0,0,0,100,100,0,0,1,6,2,2,70,70,560,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:02.00,W,,0,0,0,,Test\n');
+              const cases = [
+                ['frameAt рушія: -vf scale=270:-2 → mjpeg у pipe', ['-ss', '1', '-i', 'v.mp4', '-frames:v', '1', '-vf', 'scale=270:-2', '-f', 'image2pipe', '-vcodec', 'mjpeg', '-']],
+                ['-vf crop=1080:200:0:1160 → png', ['-ss', '1', '-i', 'v.mp4', '-frames:v', '1', '-vf', 'crop=1080:200:0:1160', 'a.png']],
+                ['-vf crop з іменами опцій → png', ['-ss', '1', '-i', 'v.mp4', '-frames:v', '1', '-vf', 'crop=w=1080:h=200:x=0:y=1160', 'b.png']],
+                ['-vf scale → png', ['-ss', '1', '-i', 'v.mp4', '-frames:v', '1', '-vf', 'scale=270:-2', 'c.png']],
+                ['-vf ass=… (рілс, класичний шлях)', ['-i', 'v.mp4', '-t', '1', '-vf', 'ass=' + join(D, 's.ass'), '-c:v', 'libx264', '-preset', 'ultrafast', 'r.mp4']],
+              ];
+              for (const [name, args] of cases) { const r = ff(args); console.log(name + ': ' + (r.ok ? 'так' + (r.n ? ' (' + r.n + ' байт)' : '') : 'НІ - ' + r.err)); }
+              const sh = spawnSync('sh', ['-c', 'ffmpeg -hide_banner -loglevel error -y -ss 1 -i v.mp4 -frames:v 1 -vf "crop=1080:200:0:1160" d.png'], { cwd: D });
+              console.log('те саме через sh (як у пробі): ' + (sh.status === 0 ? 'так' : 'НІ - ' + String(sh.stderr).trim().split('\n').slice(-1)[0]));
+            } finally { rmSync(D, { recursive: true, force: true }); }
+            process.exit(0);
+            EOF
+            )
+            docker compose exec -T app node --input-type=module -e "$VF" 2>&1 | tail -10
             JS=$(cat <<'EOF'
             const { q } = await import('/app/dist/db.js');
             const t = await q(`select (select count(*) from media_asset where kind='audio')::int as audio,
