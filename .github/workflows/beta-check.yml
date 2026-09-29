@@ -24,7 +24,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Beta Telegram bot after deploy (read-only)
+      - name: Beta Telegram bot - who is linked, channels (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -40,43 +40,37 @@ jobs:
             JS=$(cat <<'EOF'
             const { q } = await import('/app/dist/db.js');
             const tg = await import('/app/dist/telegram.js');
-            const idOf = (t) => String(t || '').split(':')[0];
             const okTok = (t) => /^\d{5,20}:[A-Za-z0-9_-]{30,}$/.test(String(t || ''));
-            const envTok = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
-            const a = (await q("select value, updated_by, to_char(updated_at at time zone 'UTC','DD.MM HH24:MI') t from app_secret where name='TELEGRAM_BOT_TOKEN'"))[0];
-            const adm = a?.value || '';
-            console.log('бот з .env: id ' + (idOf(envTok) || '-') + ' · з адмінки: ' + (adm ? 'id ' + idOf(adm) + ', записав ' + a.updated_by + ' о ' + a.t + ' UTC' : 'не задано') + (adm && adm === envTok ? ' (той самий токен, що в .env)' : ''));
-            if (adm) {
-              try {
-                const me = await tg.getMe(adm);
-                const wi = await tg.getWebhookInfo(adm);
-                const u = String(wi.url || '');
-                const path = u.includes('/api/webhooks/telegram/bot/') ? 'шлях ВЛАСНОГО бота' : u.includes('/api/webhooks/telegram/') ? 'шлях спільного бота' : 'інший шлях';
-                console.log('адмінка: @' + me.username + ' живий · вебхук → ' + (u ? (new URL(u)).host + ' (' + path + ')' : '—') + ' · у черзі ' + (wi.pending_update_count ?? 0) + (wi.last_error_message ? ' · остання помилка: ' + String(wi.last_error_message).slice(0, 100) : ''));
-              } catch (e) { console.log('адмінка: Telegram не прийняв токен (' + String(e.message).slice(0, 90) + ')'); }
+            const mask = (s) => String(s || '').replace(/([A-Za-z0-9._%+-]{1,4})[A-Za-z0-9._%+-]*@([A-Za-z0-9])[A-Za-z0-9.-]*/g, '$1***@$2…');
+            const shared = (await q("select value from app_secret where name='TELEGRAM_BOT_TOKEN'"))[0]?.value || '';
+            const me = await tg.getMe(shared);
+            console.log('спільний на беті: @' + me.username);
+            const ws = await q(`select w.id, coalesce(nullif(w.title,''), w.name) t,
+                (select u.email from workspace_member m join app_user u on u.id=m.user_id where m.workspace_id=w.id and m.role='owner' limit 1) owner
+              from workspace w`);
+            const W = new Map(ws.map((w) => [w.id, 'бренд «' + mask(w.t) + '» (власник ' + mask(w.owner) + ', #' + w.id.slice(0, 8) + ')']));
+            for (const o of await q("select workspace_id, to_char(created_at at time zone 'UTC','DD.MM HH24:MI') c from tg_owner order by created_at")) {
+              console.log('tg_owner: людина Telegram → ' + (W.get(o.workspace_id) || '?') + ', прив\'язано ' + o.c + ' UTC');
             }
-            const rows = await q("select bot_token, (channel_chat_id is not null or group_chat_id is not null) as ch from telegram_config");
-            const by = {};
-            const alive = {};
-            for (const r of rows) {
-              const t = r.bot_token || '';
-              const k = !t ? 'без токена' : !okTok(t) ? 'не токен (сміття)' : 'бот ' + idOf(t) + (t === adm ? ' (= спільний з адмінки)' : t === envTok ? ' (= мертвий з .env)' : ' (свій токен)');
-              by[k] = (by[k] || 0) + 1;
-              if (okTok(t) && t !== adm && !(idOf(t) in alive)) {
-                alive[idOf(t)] = await tg.getMe(t).then(() => 'живий', (e) => 'мертвий: ' + String(e.message).slice(0, 60));
+            for (const r of await q('select workspace_id, bot_token, channel_chat_id, group_chat_id from telegram_config')) {
+              const token = okTok(r.bot_token) ? r.bot_token : shared;
+              const bot = token === shared ? '@' + me.username + ' (спільний)' : 'власний бот ' + String(r.bot_token).split(':')[0];
+              const botId = Number(token.split(':')[0]);
+              const parts = [];
+              for (const [kind, chat] of [['канал', r.channel_chat_id], ['група', r.group_chat_id]]) {
+                if (!chat) continue;
+                const title = await tg.getChat(token, chat).then((c) => c.title || c.username || '?', (e) => 'не бачить (' + String(e.message).slice(0, 50) + ')');
+                const st = await tg.getChatMember(token, chat, botId).then((m) => m.status + (m.can_post_messages === false ? ', без права публікувати' : ''), (e) => 'нема (' + String(e.message).slice(0, 50) + ')');
+                parts.push(kind + ' «' + title + '»: бот ' + st);
               }
+              console.log(W.get(r.workspace_id) + ': ' + bot + ' · ' + (parts.join(' · ') || 'каналу нема'));
             }
-            console.log('рядки telegram_config (' + rows.length + '):', JSON.stringify(by));
-            if (Object.keys(alive).length) console.log('власні боти в рядках:', JSON.stringify(alive));
-            const logs = await q("select level, message, to_char(created_at at time zone 'UTC','DD.MM HH24:MI') t from app_log where scope='tgbot' and created_at > now() - interval '3 hours' order by created_at");
-            for (const l of logs) console.log('журнал ' + l.t + ' [' + l.level + '] ' + String(l.message).slice(0, 230));
-            if (!logs.length) console.log('журнал tgbot за 3 год: порожньо');
             process.exit(0);
             EOF
             )
             docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -20
-            echo "--- консоль беті після рестарту: бот ---"
-            docker compose logs --since 30m app 2>&1 | grep -iE "tgbot|telegram" | tail -12
+            echo "--- консоль беті: бот після рестарту ---"
+            docker compose logs --since 40m app 2>&1 | grep -iE "tgbot|telegram" | tail -12
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
