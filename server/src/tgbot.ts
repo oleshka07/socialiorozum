@@ -16,6 +16,7 @@ import { cabinetPostLink } from "./permalink.js";
 import * as cmp from "./tgcompose.js";
 import { looksLikeReadyPost } from "./textkind.js";
 import { legacyHosts, isOurHookUrl } from "./brand.js";
+import { getMt, startMt, montageMessage, montageCallback } from "./tgmontage.js";
 const postDeepLink = (postId: string) => cabinetPostLink(env.appBaseUrl, postId);
 
 let BOT_ID = 0;
@@ -439,10 +440,11 @@ async function sendIdeaList(workspaceId: string, chatId: string): Promise<void> 
 // TG_MENU: підказки в ☰; кнопка ліворуч від поля вводу відкриває Mini App; постійна клавіатура
 // дублює найчастіші дії текстом (натиснув - Telegram надіслав саме цей рядок, ми його роутимо).
 const MINIAPP_URL = `${env.appBaseUrl}/tgapp`;
-const KB_NEW = "✍️ Новий пост", KB_APP = "🚀 Кабінет", KB_IDEAS = "💡 Ідеї", KB_DIARY = "📔 Щоденник", KB_PLAN = "📅 План", KB_DIGEST = "☀️ Зведення";
+const KB_NEW = "✍️ Новий пост", KB_APP = "🚀 Кабінет", KB_IDEAS = "💡 Ідеї", KB_DIARY = "📔 Щоденник", KB_PLAN = "📅 План", KB_DIGEST = "☀️ Зведення", KB_MONTAGE = "🎬 Монтаж";
 async function registerMenu(token: string): Promise<void> {
   await tg.setMyCommands(token, [
     { command: "post", description: "Новий пост: текст, фото, канали, публікація" },
+    { command: "montage", description: "Змонтувати сторіс чи рілс із кліпів (з субтитрами)" },
     { command: "plan", description: "Що заплановано найближчим часом" },
     { command: "idea", description: "Банк ідей" },
     { command: "diary", description: "Записати в щоденник" },
@@ -451,7 +453,7 @@ async function registerMenu(token: string): Promise<void> {
   await tg.setChatMenuButton(token, MINIAPP_URL, "Кабінет");
 }
 const mainKeyboard = (): tg.TgKbButton[][] => [
-  [{ text: KB_NEW }, { text: KB_APP, web_app: { url: MINIAPP_URL } }],
+  [{ text: KB_NEW }, { text: KB_MONTAGE }, { text: KB_APP, web_app: { url: MINIAPP_URL } }],
   [{ text: KB_PLAN }, { text: KB_IDEAS }, { text: KB_DIARY }, { text: KB_DIGEST }],
 ];
 
@@ -538,7 +540,7 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
            returning t.workspace_id, t.created_by`, own ? [code, fromId, token] : [code, fromId]);
         if (row) {
           await setOwner(fromId, row.workspace_id, chatId, row.created_by);
-          await tg.sendWithKeyboard(token, chatId, "Вітаю! 🤝 Я тепер твій контент-помічник.\n\n• Надішли будь-яку думку — збережу як ідею в Банк.\n• /idea — твої ідеї, зробити з них пост у 1 тап.\n• /post — написати пост прямо тут: текст, фото, канали, публікація зараз або за розкладом.\n• 📔 Двічі на день спитаю, що відбувалося: відповідай текстом, ГОЛОСОМ, фото чи відео — усе ляже в щоденник і стане живим джерелом постів. /diary — спитати зараз.\n\nЩоб публікувати у свій канал: додай мене АДМІНОМ у канал і перешли сюди будь-який пост із нього.", mainKeyboard());
+          await tg.sendWithKeyboard(token, chatId, "Вітаю! 🤝 Я тепер твій контент-помічник.\n\n• Надішли будь-яку думку — збережу як ідею в Банк.\n• /idea — твої ідеї, зробити з них пост у 1 тап.\n• /post — написати пост прямо тут: текст, фото, канали, публікація зараз або за розкладом.\n• 🎬 /montage — надішли кліпи й голосове, я змонтую сторіс чи рілс із субтитрами.\n• 📔 Двічі на день спитаю, що відбувалося: відповідай текстом, ГОЛОСОМ, фото чи відео — усе ляже в щоденник і стане живим джерелом постів. /diary — спитати зараз.\n\nЩоб публікувати у свій канал: додай мене АДМІНОМ у канал і перешли сюди будь-який пост із нього.", mainKeyboard());
           await registerMenu(token);
           return;
         }
@@ -552,7 +554,7 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
       }
       // людина вже привʼязана (напр., прийшла з попереднього спільного бота) - просто вітаємо з кнопками
       if (await ownerWorkspace(fromId, token)) {
-        await tg.sendWithKeyboard(token, chatId, "Вітаю! 🤝 Кабінет уже підключено.\n\n• Надішли будь-яку думку — збережу як ідею.\n• /post — новий пост, /idea — ідеї, /diary — щоденник, /plan — що заплановано.\n\nЩоб публікувати у свій канал через мене: додай мене АДМІНОМ у канал і перешли сюди будь-який пост із нього.", mainKeyboard());
+        await tg.sendWithKeyboard(token, chatId, "Вітаю! 🤝 Кабінет уже підключено.\n\n• Надішли будь-яку думку — збережу як ідею.\n• /post — новий пост, /montage — сторіс чи рілс із кліпів, /idea — ідеї, /diary — щоденник, /plan — що заплановано.\n\nЩоб публікувати у свій канал через мене: додай мене АДМІНОМ у канал і перешли сюди будь-який пост із нього.", mainKeyboard());
         return;
       }
       await tg.sendMessage(token, chatId, "Привіт! Щоб під'єднати мене до твого кабінету, відкрий посилання «Підключити наш бот» у Holos.");
@@ -571,9 +573,10 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
     }
 
     // кнопки постійної клавіатури приходять звичайним текстом - зводимо їх до тих самих дій
-    if (text === KB_NEW || text === KB_IDEAS || text === KB_DIARY || text === KB_PLAN || text === KB_DIGEST) {
+    if (text === KB_NEW || text === KB_IDEAS || text === KB_DIARY || text === KB_PLAN || text === KB_DIGEST || text === KB_MONTAGE) {
       const ws = await ownerWorkspace(fromId, token);
       if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos."); return; }
+      if (text === KB_MONTAGE) { await startMt(ws, chatId); return; }
       if (text === KB_IDEAS) { await sendIdeaList(ws, chatId); return; }
       if (text === KB_DIARY) { await sendDiaryNow(ws, chatId); return; }
       if (text === KB_PLAN)  { await sendPlan(ws, chatId); return; }
@@ -590,6 +593,14 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
       const body = text.slice(5).trim();
       if (!body) { await cmp.expect(ws, "", "text", chatId); await tg.sendMessage(token, chatId, "📝 Надішли текст поста наступним повідомленням."); return; }
       await openCompose(ws, chatId, await cmp.createBotDraft(ws, body), token);
+      return;
+    }
+
+    // 🎬 /montage — змонтувати сторіс чи рілс із кліпів, надісланих сюди ж
+    if (text.toLowerCase().startsWith("/montage")) {
+      const ws = await ownerWorkspace(fromId, token);
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos."); return; }
+      await startMt(ws, chatId);
       return;
     }
 
@@ -645,6 +656,9 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
       if (wsC) {
         const st = await cmp.getCompose(wsC);
         if (st.await && await composeReply(wsC, chatId, msg, st, token)) return;
+        // 🎬 відкрита сесія монтажу: відео, фото й голосові - у монтаж, а не в щоденник
+        const mt = await getMt(wsC);
+        if (mt && await montageMessage(wsC, chatId, msg, mt, token)) return;
       }
     }
 
@@ -876,6 +890,7 @@ async function handleCallback(cbq: any, tokenOverride?: string): Promise<void> {
       return;
     }
     if (await composeCallback(ws, chatId, data, cbq, token)) return;
+    if (await montageCallback(ws, chatId, data, cbq, token, (pid) => viaBot.run(token, () => openCompose(ws, chatId, pid, token)))) return;
     if (data === "idea_list") { await tg.answerCallbackQuery(token, cbq.id); await sendIdeaList(ws, chatId); return; }
     if (data.startsWith("slot_post:")) {
       await tg.answerCallbackQuery(token, cbq.id, "Генерую пост…");

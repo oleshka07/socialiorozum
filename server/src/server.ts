@@ -37,6 +37,9 @@ import { normalizeMeeting, saveMeeting } from "./meetings.js";
 import { spendStatus, SpendCapError, CAPS } from "./spend.js";
 import { spreadTimes, topicAngles } from "./textkind.js";
 import { startJob, getJob, getJobByKey, jobView, markLostJobs } from "./jobs.js";
+import { startMontage, MONTAGE_MAX_CLIPS } from "./montage.js";
+import { spreadText } from "./montage-plan.js";
+import { ttsReady } from "./tts.js";
 import { readdir, stat } from "node:fs/promises";
 import { startMeetingPull, testPull, pullOnce } from "./meetings-pull.js";
 import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
@@ -711,6 +714,41 @@ app.post("/api/generate/from-brand", async (req: any, reply) => {
 async function startAiJob(ws: string, work: () => Promise<any>): Promise<string> {
   return (await startJob("ai", null, ws, work)).id;
 }
+
+// 🎬 Монтаж із кабінету: обрані кліпи й фото медіатеки → сторіс чи рілс 9:16 із субтитрами (фоном,
+// клієнт полить /api/jobs/:id). Текст - свій, зі звуку кліпів, з голосового чи AI з кадрів.
+app.post("/api/montage", async (req: any, reply) => {
+  const ws = req.user.workspace_id, b = req.body || {};
+  const clips = (Array.isArray(b.clips) ? b.clips : []).slice(0, MONTAGE_MAX_CLIPS + 1)
+    .map((c: any) => ({ id: String(c?.id || ""), from: c?.from ?? null, to: c?.to ?? null, seconds: c?.seconds ?? null, text: String(c?.text || "").slice(0, 600) || null }));
+  if (!clips.length) return reply.code(400).send({ error: "обери хоча б один кліп" });
+  if (clips.length > MONTAGE_MAX_CLIPS) return reply.code(400).send({ error: `до ${MONTAGE_MAX_CLIPS} кліпів за раз` });
+  if (clips.some((c: any) => !/^[0-9a-f-]{36}$/i.test(c.id))) return reply.code(400).send({ error: "невідомий кліп" });
+  let voice = ["none", "clips", "audio", "tts"].includes(b.voice) ? b.voice : "none";
+  const format = b.format === "reel" ? "reel" : "story";
+  const ai = b.aiText === "captions" || b.aiText === "voiceover" ? { mode: b.aiText as "captions" | "voiceover", hint: String(b.hint || "").slice(0, 500) } : null;
+  // свій текст: є AI-голос - він його прочитає, нема - текст стає підписами по кліпах
+  const own = String(b.ownText || "").trim().slice(0, 5000);
+  let script = String(b.script || "").slice(0, 5000) || null;
+  if (own) {
+    if (ttsReady()) { voice = "tts"; script = own; }
+    else { voice = "none"; spreadText(own, clips.length).forEach((t, i) => { clips[i].text = t || null; }); }
+  }
+  if ((voice === "tts" || ai?.mode === "voiceover") && !ttsReady()) return reply.code(400).send({ error: "AI-голос не підключено: адмін додає ключ ElevenLabs у Налаштування → Профіль → Ключі провайдерів" });
+  const nets = Array.isArray(b.nets) ? b.nets.map(String).filter((n: string) => ["instagram", "facebook", "threads", "telegram", "linkedin"].includes(n)) : [];
+  const job = await startMontage(ws, {
+    clips, voice: ai?.mode === "voiceover" ? "tts" : voice, audio: b.audio ? String(b.audio) : null,
+    script, subtitles: ["karaoke", "lines", "none"].includes(b.subtitles) ? b.subtitles : null,
+    keepSound: b.keepSound === false ? false : null, format, autoCaptions: b.autoCaptions === true,
+  }, { create: b.create === false ? null : { nets: nets.length ? nets : (await connectedNets(ws)).filter((n) => n === "instagram" || n === "facebook"), text: String(b.text || "").slice(0, 5000) }, aiText: ai });
+  return { jobId: job.id };
+});
+
+// що доступно для монтажу на цьому сервері (кабінет вмикає/пояснює варіанти тексту)
+app.get("/api/montage/caps", async () => {
+  const stt = sttAvailable();
+  return { tts: ttsReady(), stt: stt.deepgram || stt.whisper, vision: !!(env.openai.apiKey || env.openrouter.apiKey || env.gemini.apiKey), maxClips: MONTAGE_MAX_CLIPS };
+});
 
 app.get("/api/jobs/:id", async (req: any, reply) => {
   const j = await getJob(req.params.id);

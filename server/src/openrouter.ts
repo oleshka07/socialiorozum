@@ -13,7 +13,9 @@ import { logEvent } from "./log.js";
 // «модель не тримає наш контракт», хоча насправді це НАШ ліміт був затісний - і в порівнянні моделей
 // це прямо обмовляло нормальну модель.
 export type UsageOut = { prompt_tokens: number; completion_tokens: number; cost: number; costKnown: boolean; truncated?: boolean };
-export type ChatCtx = { workspaceId: string; step?: string; json?: boolean; maxTokens?: number; usage?: UsageOut };
+// images: картинки до запиту (data:image/jpeg;base64,…) - моделі, що бачать (gpt-4o-mini, Gemini), так
+// пишуть підписи до кадрів відео. Підписка Claude (сайдкар CLI) картинок не приймає - такий виклик іде API.
+export type ChatCtx = { workspaceId: string; step?: string; json?: boolean; maxTokens?: number; usage?: UsageOut; images?: string[] };
 
 // «—»/«–» - найстійкіший AI-маркер: промпти просять їх не вживати, але моделі однаково їх вставляють.
 // Гарантію дає лише зачистка КОДОМ на виході кожного виклику (безпечно і для JSON-відповідей).
@@ -35,9 +37,13 @@ const GEMINI_PRICES: Record<string, [number, number]> = { "gemini-2.5-flash": [0
 async function geminiChat(model: string, system: string, user: string, ctx?: ChatCtx): Promise<string> {
   const apiModel = model.replace(/^google\//, "");
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${env.gemini.apiKey}`;
+  const imgParts = (ctx?.images || []).map((u) => {
+    const m = /^data:([^;]+);base64,(.+)$/.exec(u);
+    return m ? { inline_data: { mime_type: m[1], data: m[2] } } : null;
+  }).filter(Boolean);
   const body = {
     systemInstruction: { parts: [{ text: system }] },
-    contents: [{ role: "user", parts: [{ text: user }] }],
+    contents: [{ role: "user", parts: [{ text: user }, ...imgParts] }],
     // ctx.maxTokens шанується так само, як в OpenAI-гілці: інакше Gemini обрізався б на 1500 там,
     // де решта моделей отримує 8000 (генерація 8-12 постів), і порівняння моделей було б нечесним
     generationConfig: { temperature: 0.7, maxOutputTokens: ctx?.maxTokens || 1500 },
@@ -126,7 +132,7 @@ export async function chat(model: string, system: string, user: string, ctx?: Ch
   // має ані бачити цього, ані лишатись без відповіді через чужу інфраструктуру.
   if (isCliModel(model)) {
     if (ctx?.workspaceId) assertRate(ctx.workspaceId);
-    if (await cliAllowedFor(ctx?.workspaceId)) {
+    if (!ctx?.images?.length && await cliAllowedFor(ctx?.workspaceId)) {
       try {
         const r = await cliChat(model, system, user, ctx);
         // costKnown=true з ціною 0 - це факт, а не «ціна невідома»: підписку вже сплачено.
@@ -161,8 +167,11 @@ export async function chat(model: string, system: string, user: string, ctx?: Ch
   }
   // presence_penalty: дешевий і надійніший важіль проти шаблонних фраз/повторів, ніж лише regex-заборони
   // в промпті (AI_TRACE_RX). Помірне значення - не ламає структуровані JSON-відповіді.
+  const userContent: any = ctx?.images?.length
+    ? [{ type: "text", text: user }, ...ctx.images.map((url) => ({ type: "image_url", image_url: { url, detail: "low" } }))]
+    : user;
   const body: any = { model: apiModel, temperature: 0.7, max_tokens: ctx?.maxTokens || 1500, presence_penalty: 0.3,
-    messages: [{ role: "system", content: system }, { role: "user", content: user }] };
+    messages: [{ role: "system", content: system }, { role: "user", content: userContent }] };
   if (!useOpenAI) body.usage = { include: true }; // OpenRouter-специфічне
   // примусовий JSON-режим - без нього модель інколи ігнорує «поверни лише JSON» і відповідає прозою
   // (уточнююче питання, відмова), і extractJsonArray/Object лишається ні з чим

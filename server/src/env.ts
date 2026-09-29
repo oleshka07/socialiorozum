@@ -52,6 +52,14 @@ export const env = {
   pexels: {
     apiKey: process.env.PEXELS_API_KEY ?? "",     // безкоштовний сток b-roll для рілсів (опційно)
   },
+  // 🗣 ElevenLabs: AI-голос для монтажу відео (сторіс/рілс із кліпів). Голос - Voice ID з кабінету
+  // ElevenLabs (стандартний або свій клон); без нього - стандартний голос. Модель multilingual_v2
+  // говорить і українською, і чеською. Платно за символи; без ключа - Azure Speech, якщо він є.
+  elevenlabs: {
+    apiKey: process.env.ELEVENLABS_API_KEY ?? "",
+    voiceId: process.env.ELEVENLABS_VOICE_ID ?? "",
+    model: process.env.ELEVENLABS_MODEL || "eleven_multilingual_v2",
+  },
   kie: {                                          // kie.ai: AI-відео для рілсів + свіжі моделі зображень
     apiKey: process.env.KIE_API_KEY ?? "",
   },

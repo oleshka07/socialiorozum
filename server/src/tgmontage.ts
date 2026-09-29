@@ -1,0 +1,230 @@
+// 🎬 Монтаж у Telegram-боті: людина шле кліпи з телефона (і голосове або текст), бот склеює сторіс чи
+// рілс із субтитрами, надсилає готове відео назад і відкриває картку поста - опублікувати чи запланувати.
+//
+// Чому бот, а не чат Claude: відео з телефона найпростіше переслати в Telegram (галерея → поділитись),
+// а конектор Claude файлів із чату не отримує. Межа Telegram для ботів - 20 МБ на файл; більше - через
+// Mini App («🚀 Кабінет») чи кабінет, а змонтувати їх можна звідти ж або з Claude.
+//
+// Стан сесії - у settings_block.montage_state (одна людина на кабінет): що вже надіслано й як монтувати.
+// Сесія живе 3 години від останньої дії; поки вона відкрита, відео й голосові йдуть у монтаж, а не в
+// щоденник.
+import { readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
+import { q, one } from "./db.js";
+import * as tg from "./telegram.js";
+import { saveMedia, MEDIA_DIR } from "./media.js";
+import { connectedNets } from "./tgcompose.js";
+import { liveSend } from "./tgbot.js";
+import { startMontage, MONTAGE_MAX_CLIPS, type MontageOpts, type MontageResult } from "./montage.js";
+import { ttsReady } from "./tts.js";
+import { getJob } from "./jobs.js";
+import { spreadText } from "./montage-plan.js";
+
+export type MtMode = "auto" | "captions" | "ai-voice";
+export type MtState = {
+  chat: string;
+  clips: Array<{ id: string; kind: "video" | "image"; dur: number }>;
+  voice: { id: string; dur: number } | null;
+  script: string | null;
+  mode: MtMode;
+  format: "story" | "reel";
+  at: number;
+  job?: string | null;
+};
+const TTL = 3 * 3600_000;
+const TEXT_WINDOW = 30 * 60_000;
+
+export async function getMt(ws: string): Promise<MtState | null> {
+  const r = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='montage_state'`, [ws]);
+  if (!r?.content) return null;
+  try {
+    const st = JSON.parse(r.content) as MtState;
+    return st && Date.now() - Number(st.at || 0) < TTL ? st : null;
+  } catch { return null; }
+}
+async function saveMt(ws: string, st: MtState): Promise<void> {
+  st.at = Date.now();
+  await q(`insert into settings_block(workspace_id, key, content) values($1,'montage_state',$2)
+           on conflict (workspace_id, key) do update set content=excluded.content, updated_at=now()`, [ws, JSON.stringify(st)]);
+}
+export async function clearMt(ws: string): Promise<void> {
+  await q(`delete from settings_block where workspace_id=$1 and key='montage_state'`, [ws]);
+}
+
+const dur = (s: number) => { const n = Math.round(s || 0); return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, "0")}`; };
+
+/** Що вийде при «Змонтувати» - людськими словами (картка показує це ДО монтажу). */
+export function mtTextPlan(st: MtState, tts: boolean): string {
+  if (st.voice) return `🎙 Озвучка - твоє голосове (${dur(st.voice.dur)}), субтитри слово в слово з нього.`;
+  if (st.script) return tts ? `🗣 AI-голос прочитає твій текст, субтитри - під голос: «${st.script.slice(0, 80)}${st.script.length > 80 ? "…" : ""}»`
+    : `📝 Твій текст стане підписами по кліпах (AI-голос не підключено): «${st.script.slice(0, 80)}${st.script.length > 80 ? "…" : ""}»`;
+  if (st.mode === "ai-voice") return "🗣 AI напише озвучку з того, що в кадрі, і прочитає її голосом; субтитри - під голос.";
+  if (st.mode === "captions") return "📝 AI напише короткі підписи з того, що в кадрі; звук кліпів лишається.";
+  return "🔊 Якщо в кліпах говорять - субтитри з мови; якщо ні - AI підпише кадри.";
+}
+
+function mtCard(st: MtState): { text: string; buttons: tg.TgButton[][] } {
+  const tts = ttsReady();
+  const total = st.clips.reduce((a, c) => a + (c.kind === "image" ? 3 : c.dur), 0);
+  const list = st.clips.map((c, i) => `${i + 1}. ${c.kind === "image" ? "фото" : `відео ${dur(c.dur)}`}`).join(" · ");
+  const text = [
+    `🎬 **Монтаж** · ${st.format === "story" ? "⚡ сторіс (Instagram і Facebook, частини до 60 с)" : "🎞 рілс"}`,
+    st.clips.length ? `Кліпи (${st.clips.length}, ≈${dur(total)}): ${list}` : "Кліпів ще нема.",
+    mtTextPlan(st, tts),
+    "",
+    st.clips.length
+      ? "Ще відео (до 20 МБ) чи фото - надсилай. Голосове - стане озвучкою, текст - словами для відео. Готово - «✂️ Змонтувати»."
+      : "Надсилай відео з галереї (до 20 МБ кожне) чи фото - по черзі або альбомом. Потім голосове (озвучка) або текст - і «✂️ Змонтувати».",
+  ].join("\n");
+  const fmt: tg.TgButton[] = [
+    { text: st.format === "story" ? "⚡ Сторіс ✓" : "⚡ Сторіс", data: "mt:fmt:story" },
+    { text: st.format === "reel" ? "🎞 Рілс ✓" : "🎞 Рілс", data: "mt:fmt:reel" },
+  ];
+  const modes: tg.TgButton[] = [{ text: st.mode === "captions" && !st.voice && !st.script ? "📝 Підписи з кадрів ✓" : "📝 Підписи з кадрів", data: "mt:mode:captions" }];
+  if (tts) modes.push({ text: st.mode === "ai-voice" && !st.voice && !st.script ? "🗣 AI-голос ✓" : "🗣 AI-голос", data: "mt:mode:ai-voice" });
+  const buttons: tg.TgButton[][] = [];
+  if (st.clips.length) buttons.push([{ text: "✂️ Змонтувати", data: "mt:build" }]);
+  buttons.push(fmt, modes);
+  const tail: tg.TgButton[] = [];
+  if (st.voice || st.script) tail.push({ text: st.voice ? "🔇 Без голосового" : "🧹 Без тексту", data: "mt:clear" });
+  if (st.clips.length) tail.push({ text: "↩ Прибрати останній", data: "mt:undo" });
+  tail.push({ text: "✕ Скасувати", data: "mt:cancel" });
+  buttons.push(tail);
+  return { text, buttons };
+}
+
+async function showCard(ws: string, chatId: string, st: MtState, note = ""): Promise<void> {
+  const c = mtCard(st);
+  await liveSend(ws, chatId, "montage", (note ? note + "\n\n" : "") + c.text, c.buttons);
+}
+
+/** /montage чи кнопка «🎬 Монтаж»: відкрита сесія - показуємо її, інакше нова. */
+export async function startMt(ws: string, chatId: string): Promise<void> {
+  const cur = await getMt(ws);
+  if (cur) { cur.chat = chatId; await saveMt(ws, cur); await showCard(ws, chatId, cur); return; }
+  const st: MtState = { chat: chatId, clips: [], voice: null, script: null, mode: "auto", format: "story", at: Date.now() };
+  await saveMt(ws, st);
+  await showCard(ws, chatId, st);
+}
+
+const TOO_BIG = "⚠️ Telegram не віддає ботам файли понад 20 МБ. Великі відео - через «🚀 Кабінет» (Mini App → «🎬 Відео») або кабінет, а змонтувати їх можна звідти чи з Claude.";
+
+/**
+ * Повідомлення під час сесії: відео/фото - кліп, голосове - озвучка, текст - слова для відео.
+ * true - повідомлення забрав монтаж (далі його не обробляти).
+ */
+export async function montageMessage(ws: string, chatId: string, msg: any, st: MtState, token: string): Promise<boolean> {
+  const doc = msg.document;
+  const docMime = String(doc?.mime_type || "");
+  const vid = msg.video || msg.video_note || msg.animation || (doc && /^video\//.test(docMime) ? doc : null);
+  const photo = msg.photo?.length ? msg.photo[msg.photo.length - 1] : (doc && /^image\//.test(docMime) ? doc : null);
+  const voice = msg.voice || msg.audio || (doc && /^audio\//.test(docMime) ? doc : null);
+  const file = vid || photo || voice;
+  if (file) {
+    if ((file.file_size || 0) > 19.5 * 1024 * 1024) { await tg.sendMessage(token, chatId, TOO_BIG); return true; }
+    if (!voice && st.clips.length >= MONTAGE_MAX_CLIPS) { await tg.sendMessage(token, chatId, `У монтажі до ${MONTAGE_MAX_CLIPS} кліпів - тисни «✂️ Змонтувати».`); return true; }
+    let buf: Buffer;
+    try { buf = (await tg.getFileBuffer(token, file.file_id)).buffer; }
+    catch (e: any) { await tg.sendMessage(token, chatId, "⚠️ " + (/too big/i.test(String(e.message)) ? TOO_BIG : String(e.message).slice(0, 200))); return true; }
+    const mime = vid ? (vid.mime_type || "video/mp4") : photo ? "image/jpeg" : (voice.mime_type || "audio/ogg");
+    const name = String(file.file_name || (vid ? "clip.mp4" : photo ? "photo.jpg" : "voice.ogg")).slice(0, 120);
+    let saved: { id: string; kind: string };
+    try { saved = await saveMedia(ws, { buffer: buf, mime, name, source: "bot", dedupe: true }); }
+    catch (e: any) { await tg.sendMessage(token, chatId, "⚠️ " + String(e.message).slice(0, 200)); return true; }
+    const row = await one<{ duration: number | null }>(`select duration from media_asset where id=$1`, [saved.id]);
+    const d = Number(row?.duration) || 0;
+    if (saved.kind === "audio") {
+      st.voice = { id: saved.id, dur: d };
+      await saveMt(ws, st);
+      await showCard(ws, chatId, st, `🎙 Голосове (${dur(d)}) - буде озвучкою, субтитри з нього.`);
+      return true;
+    }
+    if (!st.clips.some((c) => c.id === saved.id)) st.clips.push({ id: saved.id, kind: saved.kind === "image" ? "image" : "video", dur: d });
+    await saveMt(ws, st);
+    await showCard(ws, chatId, st, `✅ ${saved.kind === "image" ? "Фото" : `Відео ${dur(d)}`} додано - кліп ${st.clips.length}.`);
+    return true;
+  }
+  const text = String(msg.text || "").trim();
+  // текст - слова для відео, поки людина щойно працювала з монтажем (інакше - звичайна ідея чи щоденник)
+  if (text && !text.startsWith("/") && Date.now() - Number(st.at || 0) < TEXT_WINDOW) {
+    st.script = text.slice(0, 3000);
+    await saveMt(ws, st);
+    await showCard(ws, chatId, st, "✍ Текст для відео збережено.");
+    return true;
+  }
+  return false;
+}
+
+/** Вибір мереж для нового поста: сторіс - Instagram і Facebook; рілс - вони ж (решту людина вмикає в картці). */
+async function netsFor(ws: string): Promise<string[]> {
+  return (await connectedNets(ws)).filter((n) => n === "instagram" || n === "facebook");
+}
+
+export function mtOpts(st: MtState, tts: boolean): { opts: MontageOpts; aiText: { mode: "captions" | "voiceover" } | null } {
+  const clips = st.clips.map((c) => ({ id: c.id }));
+  const base = { clips, format: st.format } as const;
+  if (st.voice) return { opts: { ...base, voice: "audio", audio: st.voice.id }, aiText: null };
+  if (st.script) {
+    if (tts) return { opts: { ...base, voice: "tts", script: st.script }, aiText: null };
+    const parts = spreadText(st.script, clips.length);
+    return { opts: { ...base, voice: "none", clips: clips.map((c, i) => ({ ...c, text: parts[i] || null })) }, aiText: null };
+  }
+  if (st.mode === "ai-voice" && tts) return { opts: { ...base, voice: "tts" }, aiText: { mode: "voiceover" } };
+  if (st.mode === "captions") return { opts: { ...base, voice: "none" }, aiText: { mode: "captions" } };
+  return { opts: { ...base, voice: "clips", autoCaptions: true }, aiText: null };
+}
+
+/** Кнопки картки монтажу (mt:*). openPost - відкрити картку поста (композер бота). */
+export async function montageCallback(ws: string, chatId: string, data: string, cbq: any, token: string, openPost: (postId: string) => Promise<void>): Promise<boolean> {
+  if (!data.startsWith("mt:")) return false;
+  const st = await getMt(ws);
+  if (!st) { await tg.answerCallbackQuery(token, cbq.id, "Сесія монтажу завершилась - /montage, щоб почати нову"); return true; }
+  const [, cmd, arg] = data.split(":");
+  if (cmd === "cancel") { await clearMt(ws); await tg.answerCallbackQuery(token, cbq.id, "Скасовано"); await liveSend(ws, chatId, "montage", "🎬 Монтаж скасовано. Кліпи лишились у медіатеці. /montage - почати знову."); return true; }
+  if (cmd === "fmt") { st.format = arg === "reel" ? "reel" : "story"; await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id); await showCard(ws, chatId, st); return true; }
+  if (cmd === "mode") { st.mode = arg === "ai-voice" ? "ai-voice" : arg === "captions" ? "captions" : "auto"; st.voice = null; st.script = null; await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id); await showCard(ws, chatId, st); return true; }
+  if (cmd === "clear") { st.voice = null; st.script = null; st.mode = "auto"; await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id); await showCard(ws, chatId, st); return true; }
+  if (cmd === "undo") { st.clips.pop(); await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id, "Прибрав останній кліп"); await showCard(ws, chatId, st); return true; }
+  if (cmd !== "build") return false;
+  if (!st.clips.length) { await tg.answerCallbackQuery(token, cbq.id, "Спершу надішли кліпи"); return true; }
+  if (st.job) {
+    const j = await getJob(st.job);
+    if (j?.status === "running") { await tg.answerCallbackQuery(token, cbq.id, "Уже монтую - зачекай"); return true; }
+  }
+  const tts = ttsReady();
+  const { opts, aiText } = mtOpts(st, tts);
+  const nets = await netsFor(ws);
+  await tg.answerCallbackQuery(token, cbq.id, "Монтую…");
+  const job = await startMontage(ws, opts, {
+    create: { nets, text: "" },
+    aiText,
+    notify: async (r: MontageResult | null, err?: string) => {
+      if (!r) { await tg.sendMessage(token, chatId, `⚠️ ${err || "Монтаж не вдався"}\n\nКліпи на місці - можна змінити й натиснути «✂️ Змонтувати» ще раз.`).catch(() => {}); return; }
+      await sendResult(ws, chatId, r, token);
+      await clearMt(ws);
+      if (r.postId) await openPost(r.postId);
+    },
+  });
+  st.job = job.id;
+  await saveMt(ws, st);
+  await liveSend(ws, chatId, "montage", `⏳ Монтую ${st.clips.length} ${st.clips.length === 1 ? "кліп" : "кліпів"}… Зазвичай 1-2 хвилини - надішлю відео сюди.`);
+  return true;
+}
+
+async function sendResult(ws: string, chatId: string, r: MontageResult, token: string): Promise<void> {
+  const sub = r.subtitles === "karaoke" ? "субтитри під голос" : r.subtitles === "lines" ? "підписи" : "без тексту";
+  const many = r.videos.length > 1;
+  for (let k = 0; k < r.videos.length; k++) {
+    const v = r.videos[k];
+    const path = join(MEDIA_DIR, v.filename);
+    const size = (await stat(path).catch(() => null))?.size || 0;
+    const cap = k === 0
+      ? `🎬 Готово: ${dur(r.duration)} · ${sub}${many ? ` · ${r.videos.length} частини (у сторіс кожна - окремий кадр)` : ""}.${r.warnings.length ? `\n⚠️ ${r.warnings.join("; ")}` : ""}`
+      : `Частина ${k + 1} з ${r.videos.length}`;
+    if (size && size <= tg.TG_VIDEO_MAX) {
+      await tg.sendVideo(token, chatId, { file: await readFile(path), name: many ? `montage-${k + 1}.mp4` : "montage.mp4" }, cap, { width: 1080, height: 1920, duration: v.duration })
+        .catch(async (e: any) => { await tg.sendMessage(token, chatId, `${cap}\n(надіслати відео не вийшло: ${String(e.message).slice(0, 120)} - воно в кабінеті)`).catch(() => {}); });
+    } else await tg.sendMessage(token, chatId, `${cap}\nВідео ${Math.round(size / 1048576)} МБ - більше, ніж Telegram дає боту надіслати; воно в кабінеті й у пості нижче.`).catch(() => {});
+  }
+  void ws;
+}

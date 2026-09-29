@@ -196,7 +196,8 @@ const API = {
   "GET /media": [{ id: "mv1", filename: "lib.mp4", kind: "video", source: "upload", duration: 75, width: 720, height: 1280, size: 12000000, created_at: iso(0, 9) },
     { id: "md1", filename: "pic.jpg", kind: "image", source: "upload", created_at: iso(0, 8) },
     { id: "md2", filename: "pic2.jpg", kind: "image", source: "upload", created_at: iso(0, 7) },
-    { id: "md3", filename: "pic3.jpg", kind: "image", source: "upload", created_at: iso(0, 6) }],
+    { id: "md3", filename: "pic3.jpg", kind: "image", source: "upload", created_at: iso(0, 6) },
+    { id: "ma1", filename: "hlas.ogg", kind: "audio", source: "bot", duration: 35, created_at: iso(0, 5) }],
   "GET /sources/recent": [],
   "GET /sources/rss": { feeds: [] },
   "GET /lead-magnets": { magnets: [] },
@@ -248,6 +249,7 @@ let pubPolls = 0;
 // відповідає «running» на перше опитування - інакше перевірка не відрізнила б полінг від синхронної
 // відповіді, а саме синхронність і давала 504 на nginx.
 let aiJobPolls = 0;
+const mtCalls = [];
 const AI_JOB_RESULT = new Map();
 
 // Пости: /full і /publish-state обслуговуються окремо (шлях із id).
@@ -625,6 +627,13 @@ function handleApi(method, path, body) {
   m = /^\/posts\/([0-9a-f-]+)$/.exec(path);
   if (method === "PUT" && m) { postPuts.push({ id: m[1], body }); return { ok: true }; }
   if (method === "POST" && path === "/ab/generate") return AB_RESULT;
+  if (method === "GET" && path === "/montage/caps") return { tts: true, stt: true, vision: true, maxClips: 20 };
+  if (method === "POST" && path === "/montage") {
+    mtCalls.push(body);
+    aiJobPolls = 0;
+    AI_JOB_RESULT.set("job-mt", { postId: P1, duration: 16, warnings: [], videos: [{ id: "mvx", filename: "m.mp4", duration: 16 }] });
+    return { jobId: "job-mt" };
+  }
   if (method === "POST" && path === "/brand/context-fix") {
     aiJobPolls = 0;
     AI_JOB_RESULT.set("job-fix", { suggestion: "Допомагаємо власникам житла не втрачати гроші на підрядниках." });
@@ -2720,6 +2729,39 @@ const run = async () => {
       && st.rows === 2 && /Відкрили запис на осінь/.test(st.stats) && st.auto && st.utm && st.slug === "kemp.carlsbad" && st.title === "Kemp Carlsbad" && st.on && st.links === 2
       && /\/@kemp\.carlsbad$/.test(st.open) && lkCalls.some((c) => c.k === "settings" && c.body.auto === false && c.body.utm === true);
     if (!good) console.log("   ↳ linksPanel:", JSON.stringify({ st, calls: lkCalls }));
+    return good;
+  });
+
+  await check("montageLib", async () => {
+    // 🎬 медіатека: запис голосу - плиткою 🎙, у режимі вибору - «Змонтувати» з порядком вибору, вікно
+    // з варіантами тексту; свій текст іде на сервер, готовий пост відкривається в композері
+    await page.evaluate(() => { MediaSel = null; selectView("settings"); setSTab("sources"); return loadMedia(); });
+    await page.waitForSelector('#mediaGrid [data-id="ma1"] .audtile', { timeout: 5000 });
+    const tile = await page.$eval('#mediaGrid [data-id="ma1"] .audtile', (el) => el.textContent);
+    await page.evaluate(() => { MediaSel = new Set(); return loadMedia(); });
+    await page.waitForSelector("#mSelMont", { timeout: 5000 });
+    const dis0 = await page.$eval("#mSelMont", (b) => b.disabled);
+    // вибір: спершу фото, потім відео, потім голос (голос у монтаж кліпом не йде)
+    for (const id of ["md2", "mv1", "ma1"]) { await page.click(`#mediaGrid [data-id="${id}"]`); await page.waitForTimeout(150); }
+    const btn = await page.$eval("#mSelMont", (b) => ({ t: b.textContent, d: b.disabled }));
+    const order = await page.$$eval("#mediaGrid [data-id] span", (sp) => sp.filter((x) => /^\d$/.test(x.textContent) && x.style.bottom).map((x) => x.closest("[data-id]").dataset.id + ":" + x.textContent));
+    await page.click("#mSelMont");
+    await page.waitForSelector("#mntSrc", { timeout: 5000 });
+    const opts = await page.$$eval("#mntSrc option", (o) => o.map((x) => x.value + (x.disabled ? "!" : "")));
+    await page.selectOption("#mntSrc", "own");
+    const txtShown = await page.$eval("#mntText", (t) => t.style.display !== "none");
+    await page.click("#mntGo");
+    const emptyMsg = await page.$eval("#mntMsg", (m) => m.textContent);
+    await page.fill("#mntText", "Fasáda hotová. Teď chodba.");
+    await page.click('input[name="mntFmt"][value="reel"]');
+    await page.click("#mntGo");
+    await page.waitForFunction(() => !document.querySelector("#mntSrc") && !!document.querySelector(".cmp-ov"), undefined, { timeout: 10000 });
+    const sent = mtCalls[mtCalls.length - 1] || {};
+    await page.evaluate(() => { document.querySelector(".cmp-ov")?.remove(); MediaSel = null; });
+    const good = tile.includes("🎙") && tile.includes("0:35") && dis0 === true && btn.t === "🎬 Змонтувати (2)" && !btn.d
+      && order.sort().join(",") === "md2:1,mv1:2" && opts.length === 6 && opts.includes("audio") && txtShown && /Напиши текст/.test(emptyMsg)
+      && sent.format === "reel" && sent.ownText === "Fasáda hotová. Teď chodba." && JSON.stringify(sent.clips) === JSON.stringify([{ id: "md2" }, { id: "mv1" }]);
+    if (!good) console.log("   ↳ montageLib:", JSON.stringify({ tile, dis0, btn, order, opts, txtShown, emptyMsg, sent }));
     return good;
   });
 

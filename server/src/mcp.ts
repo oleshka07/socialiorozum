@@ -27,7 +27,7 @@ import { getSettingText } from "./settings.js";
 import { listWorkspaces, isMember, workspaceTitle } from "./workspaces.js";
 import { issueUploadLink, uploadCommands, uploadUrl, clampMinutes, UPLOAD_MAX_FILES } from "./uploadlink.js";
 import { connectedNets, parseWhen, zonedToUtc } from "./tgcompose.js";
-import { publishPostToChannels, alreadySentNetworks, reelSentNetworks, closeSlotsIfDone, publishingNow, isPublishingNow, unschedulePost, pubLabel, type PubResult } from "./publisher.js";
+import { publishPostToChannels, alreadySentNetworks, reelSentNetworks, closeSlotsIfDone, publishingNow, isPublishingNow, unschedulePost, pubLabel, STORY_NETS, type PubResult } from "./publisher.js";
 import { scheduleConflicts, describeConflicts, schedulable } from "./schedule.js";
 import { startJob, getJob } from "./jobs.js";
 import { analyticsFor, bestTimesFor } from "./metrics.js";
@@ -37,7 +37,7 @@ import type { EgSettings } from "./evergreen-plan.js";
 import { linkSettings, saveLinkSettings, bioOf, saveBio, linkStats, shortFor, shortUrl } from "./links.js";
 import { fmtMult } from "./analytics.js";
 import { publicFetch } from "./netguard.js";
-import { saveMediaFile, MEDIA_DIR } from "./media.js";
+import { saveMediaFile, MEDIA_DIR, probeVideo } from "./media.js";
 import { writeFile, mkdir, unlink, open as openFile } from "node:fs/promises";
 import { join } from "node:path";
 import { generatePostsOnePass, normFormat, GOAL_LABELS, CHANNEL_LIMITS } from "./pipeline.js";
@@ -52,6 +52,8 @@ import { getThumb } from "./media.js";
 import sharp from "sharp";
 import { accountChoices, matchAccount, postAccount, postAccounts, isAccNet, metaAccountFor, mainAccountIds, MULTI_NETS, ACC_NETS, type AccountChoice } from "./accounts.js";
 import { collectInbox, replyToComment, skipComment, isInboxNet, INBOX_NETS } from "./inbox.js";
+import { startMontage, contactSheet, clipSpeech, MONTAGE_MAX_CLIPS, type MontageResult } from "./montage.js";
+import { ttsReady } from "./tts.js";
 
 // ============================================================================
 // 1. ПРОТОКОЛ (чисті функції - саме вони під юнітами в test/mcp.test.mjs)
@@ -277,6 +279,19 @@ export function publishPlanLine(plan: ReturnType<typeof publishPlan>): string {
     const over = mode !== "auto" && HARD_WALL.has(net) && limit > 0 && len > limit ? " ⚠️ довше за ліміт - мережа не прийме" : "";
     return `${NET_LABEL[net] || net} - ${how} (${len}${limit ? `/${limit}` : " симв."})${over}`;
   }).join(" · ");
+}
+
+// Сторіс підпису не мають: текст поста нікуди не йде і моделлю не пакується, тож «дослівно» чи
+// «спакується» там неправда. Кажемо, як вийде насправді, і які мережі сторіс не приймуть.
+export function planLineFor(channels: any, content: string, format?: string | null): string {
+  if (format !== "story") return publishPlanLine(publishPlan(channels, content));
+  const nets = enabledNets(channels);
+  const ok = nets.filter((n) => STORY_NETS.includes(n));
+  const no = nets.filter((n) => !STORY_NETS.includes(n));
+  return [
+    ok.length ? `${ok.map((n) => NET_LABEL[n] || n).join(", ")} - сторіс, кожен кадр окремо, без підпису` : "",
+    no.length ? `${no.map((n) => NET_LABEL[n] || n).join(", ")} - сторіс через API не приймає ⚠️ зніми цю мережу` : "",
+  ].filter(Boolean).join(" · ");
 }
 
 // Увімкнути мережі, не затираючи вже адаптовані під них тексти (їх пише «✨ підлаштувати»).
@@ -606,10 +621,10 @@ async function smallThumb(filename: string): Promise<ToolImage | null> {
 // Власні фото автора: завантажені в кабінет, із Google Drive, надіслані боту чи в щоденник.
 // Похідне (кропи під пости, AI, сток, технічні копії) за замовчуванням не показуємо: це копії
 // того, що вже стоїть у постах, і вони лише розмивали б вибір.
-export const OWN_MEDIA = ["upload", "gdrive", "diary", "bot"];
+export const OWN_MEDIA = ["upload", "gdrive", "diary", "bot", "montage"];
 export const GEN_MEDIA = ["ai", "pexels"];
 const MEDIA_PAGE = 12;
-const MEDIA_SRC: Record<string, string> = { upload: "завантажено", gdrive: "Google Drive", diary: "щоденник", bot: "з бота", ai: "AI", pexels: "сток", broll: "b-roll" };
+const MEDIA_SRC: Record<string, string> = { upload: "завантажено", gdrive: "Google Drive", diary: "щоденник", bot: "з бота", ai: "AI", pexels: "сток", broll: "b-roll", montage: "змонтовано" };
 // Де фото вже стоїть: напряму (post.media_id) або через кроп-копію під формат поста, яку
 // attachCroppedImage позначає external_id = id оригіналу. Кропи, зроблені до цієї позначки,
 // відстежити нема як - такі фото просто виглядають вільними.
@@ -647,6 +662,7 @@ async function libraryMediaId(ws: string, raw: unknown): Promise<{ id: string; k
 // лише зображення (кадри каруселі, стоп для відео тут, а не в сирій помилці БД)
 async function libraryImageId(ws: string, raw: unknown): Promise<string> {
   const m = await libraryMediaId(ws, raw);
+  if (m.kind === "audio") throw new ToolError("Це запис голосу, а не фото - він стає озвучкою в montage_video (voice: audio).");
   if (m.kind !== "image") throw new ToolError("Це відео, а не фото. Відео прикріплюється саме (attach_media з одним id) - поруч із ним фото не буває.");
   return m.id;
 }
@@ -747,6 +763,50 @@ function egState(v: EgView, tz: string): string {
   }
   if (v.hits.length) lines.push("Хіти, яких ще нема в черзі (action: add):", ...v.hits.map((h) => `- ${short(h.postId)} ×${h.mult.toFixed(1)} «${oneLine(h.title, 80)}»`));
   return lines.join("\n");
+}
+
+// Відповідь про готовий монтаж: що вийшло (з кадрами - щоб Claude перевірив субтитри очима) і де воно.
+async function montageReport(ws: string, j: { status: string; result: any; error: string | null }): Promise<ToolOut> {
+  if (j.status === "idle") return { text: "⚠️ Сервер перезапустився посеред монтажу - запусти montage_video ще раз." };
+  if (j.status === "error" || !j.result) throw new ToolError(j.error || "Монтаж не вдався.");
+  const r = j.result as MontageResult;
+  const vids = r.videos || [];
+  const images: ToolImage[] = [];
+  for (const v of vids.slice(0, 3)) {
+    const sh = await contactSheet(join(MEDIA_DIR, v.filename), v.duration, vids.length > 1 ? 4 : 8, 200).catch(() => null);
+    if (sh) images.push({ data: sh.jpeg.toString("base64"), mimeType: "image/jpeg" });
+  }
+  const subLabel = r.subtitles === "karaoke" ? "субтитри-караоке" : r.subtitles === "lines" ? "підписи" : "без тексту";
+  const voiceLabel = r.voice === "tts" ? `AI-голос${r.provider === "azure" ? " (Azure)" : ""}` : r.voice === "audio" ? "голос автора" : r.voice === "clips" ? "звук кліпів" : "без озвучки";
+  const post = r.postId ? await one<{ format: string | null }>(`select format from post where id=$1`, [r.postId]) : null;
+  return {
+    text: [
+      `🎬 Готово: ${vids.length > 1 ? `${vids.length} частини сторіс (${vids.map((v) => `${short(v.id)} ${fmtDur(v.duration)}`).join(", ")})` : `відео ${short(vids[0]?.id || "")} · ${fmtDur(r.duration)}`} · 9:16 · ${voiceLabel} · ${subLabel}.`,
+      r.transcript ? `Текст: «${oneLine(r.transcript, 400)}»` : "",
+      r.warnings?.length ? `⚠️ ${r.warnings.join("; ")}.` : "",
+      r.postId ? `Уже в пості ${short(r.postId)}${post?.format === "story" ? " (сторіс - кожна частина окремим кадром)" : ""}. Далі: schedule_post чи publish_post.`
+        : "Відео в медіатеці: прикріпи attach_media (id поста + id відео) або створи пост create_draft і attach_media.",
+      images.length ? `Кадри результату нижче${vids.length > 1 ? " - по частинах" : ""}: перевір, що субтитри читаються й не закривають головне.` : "",
+    ].filter(Boolean).join("\n"),
+    images,
+  };
+}
+
+// 🎙 Записи голосу в медіатеці (голосові з бота, диктофон) - озвучка для montage_video.
+async function listAudio(ws: string, pageIn: number): Promise<string> {
+  const total = (await one<{ n: number }>(`select count(*)::int as n from media_asset where workspace_id=$1 and kind='audio'`, [ws]))?.n || 0;
+  if (!total) return "Записів голосу в медіатеці ще немає. Автор надсилає голосове боту в режимі «🎬 Монтаж» (/montage) або заливає файл (M4A, MP3, OGG, WAV) через media_upload_link чи кабінет.";
+  const pages = Math.ceil(total / MEDIA_PAGE), page = Math.min(pageIn, pages);
+  const rows = await q<{ id: string; original_name: string | null; source: string; created_at: string; duration: number | null }>(
+    `select id, original_name, source, created_at, duration from media_asset where workspace_id=$1 and kind='audio' order by created_at desc limit ${MEDIA_PAGE} offset $2`,
+    [ws, (page - 1) * MEDIA_PAGE]);
+  const tz = await wsTz(ws);
+  return [
+    `Записи голосу: ${total} · сторінка ${page} з ${pages}.`,
+    ...rows.map((r, i) => `${i + 1}. ${short(r.id)} · ${fmtWhen(r.created_at, tz)} · ${MEDIA_SRC[r.source] || r.source}${fmtDur(r.duration) ? ` · ${fmtDur(r.duration)}` : ""}${r.original_name ? ` · ${oneLine(r.original_name, 40)}` : ""}`),
+    page < pages ? `Далі - page: ${page + 1}.` : "",
+    "Озвучити ним відео: montage_video з voice: \"audio\" і audio: id - субтитри будуть із цього голосу.",
+  ].filter(Boolean).join("\n");
 }
 
 export const TOOLS: ToolDef[] = [
@@ -1009,7 +1069,7 @@ export const TOOLS: ToolDef[] = [
         busy.length ? (live
           ? `⏳ публікується просто зараз: ${busy.map((b) => `${NET_LABEL[b.net] || b.net} (з ${fmtWhen(b.since, tz)})`).join(", ")} - дочекайся результату`
           : `⚠️ публікацію в ${netList(busy.map((b) => b.net))} обірвано посеред роботи - наступний publish_post перейме її одразу`) : "",
-        enabledNets(p.channels).length ? `публікація: ${publishPlanLine(publishPlan(p.channels, p.content))}` : "",
+        enabledNets(p.channels).length ? `публікація: ${planLineFor(p.channels, p.content, p.format)}` : "",
         sent.length ? `опубліковано: ${sent.map((x) => `${NET_LABEL[x.net]}${x.account ? ` (${x.account})` : ""} ${fmtWhen(x.at, tz)}${x.link ? ` ${x.link}` : ""}`).join(", ")}` : "",
         ...commentPlanLines(p, [...new Set([...enabledNets(p.channels), ...sent.map((x) => x.net)])], await commentStates(p.id), [...new Set(sent.map((x) => x.net))], await metaGranted(ws),
           await pubAccountNames(p.id)),
@@ -1173,13 +1233,15 @@ export const TOOLS: ToolDef[] = [
     title: "Медіатека кабінету",
     description: "БЕЗКОШТОВНО: власні фото (або з kind: \"video\" - відео) автора з медіатеки кабінету (завантажені в кабінет, із Google Drive, надіслані боту) - з мініатюрами, щоб ти обирав очима; у відео мініатюра - кадр із ролика, плюс тривалість і розмір. Позначено, в яких постах файл уже стоїть. Обране прикріпи через attach_media. Власне фото чи відео автора майже завжди краще за сток і генерацію - дивись сюди першим. По 12 на сторінку, новіші перші.",
     properties: {
-      kind: { type: "string", enum: ["image", "video"], description: "image (типово) - фото; video - відео (Reels, відео-пости)." },
+      kind: { type: "string", enum: ["image", "video", "audio"], description: "image (типово) - фото; video - відео (Reels, відео-пости, кліпи для монтажу); audio - записи голосу (озвучка для montage_video)." },
       unused_only: { type: "boolean", description: "true - лише фото, яких ще немає в жодному пості (щоб не повторюватись)." },
       include_generated: { type: "boolean", description: "true - показати й згенеровані AI та стокові зображення, не лише власні фото автора." },
       page: N("Сторінка (типово 1).", { minimum: 1 }),
     },
     readOnly: true,
     run: async (ws, a) => {
+      const audio = a.kind === "audio";
+      if (audio) return listAudio(ws, int(a.page, 1, 1, 100000));
       const video = a.kind === "video";
       // власні відео автора - це й b-roll для рілсів (завантажені ним самим)
       const sources = video ? [...OWN_MEDIA, "broll"] : a.include_generated === true ? [...OWN_MEDIA, ...GEN_MEDIA] : OWN_MEDIA;
@@ -1249,6 +1311,8 @@ export const TOOLS: ToolDef[] = [
       if (raw.length > MAX_SLIDES) throw new ToolError(`У каруселі до ${MAX_SLIDES} кадрів - передай не більше.`);
       const found = [];
       for (const r of raw) found.push(await libraryMediaId(ws, r));
+      const aud = found.find((m) => m.kind === "audio");
+      if (aud) throw new ToolError(`${short(aud.id)} - запис голосу: до поста він не прикріплюється, а стає озвучкою в montage_video (voice: audio, audio: "${short(aud.id)}").`);
       // 📱 сторіс: кадри по порядку, фото й відео разом; фото ріжемо 9:16, відео - як є
       if (p.format === "story") {
         const cur = append ? (await postMediaList(p.id)).map((m) => m.id) : [];
@@ -1325,6 +1389,137 @@ export const TOOLS: ToolDef[] = [
         : "";
       const altLine = altN ? ` Опис фото (alt): ${altN} з ${after.length}.` : " Опису фото (alt-текст) ще нема - передай alt_text, це допомагає незрячим і пошуку Instagram.";
       return { text: `${short(p.id)}: ${what}.${repeat}${altLine}${after.length > 1 ? " Мініатюри нижче - по порядку кадрів." : ""}`, images: thumbs };
+    },
+  },
+  {
+    name: "video_frames",
+    title: "Подивитись відео: кадри (і що говорять)",
+    description: "БЕЗКОШТОВНО: що в відео з медіатеки - аркуш кадрів (типово 8, рівномірно по ролику, на кожному час) для кожного id; з speech: true - ще й що в ньому говорять, рядками з часом (розшифровка, копійки). Дивись це перед montage_video: текст підписів чи озвучки має відповідати тому, що в кадрі, а from/to - вирізати найкраще.",
+    properties: {
+      media: { type: "array", items: { type: "string" }, description: "Id відео з list_media (kind: \"video\"), до 6." },
+      count: N("Скільки кадрів на відео (4-12, типово 8).", { minimum: 4, maximum: 12 }),
+      speech: { type: "boolean", description: "true - розшифрувати, що говорять у відео (з часом)." },
+    },
+    required: ["media"],
+    readOnly: true,
+    run: async (ws, a) => {
+      const raw = (Array.isArray(a.media) ? a.media : [a.media]).slice(0, 6);
+      if (!raw.length) throw new ToolError("Вкажи id відео з list_media (kind: \"video\").");
+      const n = int(a.count, 8, 4, 12);
+      const lines: string[] = [], images: ToolImage[] = [];
+      for (const r of raw) {
+        const m = await libraryMediaId(ws, r);
+        const row = await one<{ filename: string; kind: string; duration: number | null; width: number | null; height: number | null }>(
+          `select filename, kind, duration, width, height from media_asset where id=$1`, [m.id]);
+        if (!row) continue;
+        if (row.kind !== "video") { lines.push(`${short(m.id)}: це ${row.kind === "audio" ? "запис голосу" : "фото"}, не відео${row.kind === "image" ? " - його видно в list_media" : ""}.`); continue; }
+        const path = join(MEDIA_DIR, row.filename);
+        const info = await probeVideo(path);
+        const dur = info?.duration || Number(row.duration) || 0;
+        const sheet = await contactSheet(path, dur, n);
+        const meta = [fmtDur(dur) || `${dur.toFixed(1)} с`, info ? `${info.width}×${info.height}${info.height > info.width ? " вертикальне" : " горизонтальне - у 9:16 стане посередині на розмитому тлі"}` : "", info?.acodec ? "звук є" : "без звуку"].filter(Boolean).join(" · ");
+        lines.push(`${images.length + 1}. ${short(m.id)} · ${meta}` + (sheet ? ` · кадри на: ${sheet.times.map((t) => t.toFixed(1)).join(", ")} с` : " · кадри не вдалось дістати"));
+        if (sheet) images.push({ data: sheet.jpeg.toString("base64"), mimeType: "image/jpeg" });
+        if (a.speech === true && info?.acodec) {
+          const sp = await clipSpeech(ws, path).catch((e) => ({ lines: [`(розшифровка не вдалась: ${String(e.message).slice(0, 120)})`], text: "" }));
+          if (!sp) lines.push("   мову не розшифрувати: не підключено ні Deepgram, ні OpenAI");
+          else lines.push(sp.lines.length ? sp.lines.map((l) => "   " + l).join("\n") : "   мови не чути");
+        }
+      }
+      return {
+        text: [...lines, images.length ? "Аркуші кадрів нижче - по одному на відео, у тому ж порядку. Далі: montage_video (кліпи з from/to і text)." : ""].filter(Boolean).join("\n"),
+        images,
+      };
+    },
+  },
+  {
+    name: "montage_video",
+    title: "Змонтувати сторіс чи рілс із кліпів (з субтитрами)",
+    description: "Склеїти кліпи (і фото) з медіатеки у вертикальне відео 9:16 із субтитрами. Текст на відео: text кожного кліпу - підписи (voice: none); звук самих кліпів - субтитри слово в слово (voice: clips); запис голосу автора з медіатеки (voice: audio + audio) - озвучка й субтитри з неї; AI-голос ElevenLabs (voice: tts) читає text кліпів або script. Спершу подивись кліпи через video_frames - текст має відповідати кадрам. Кліп довший за свій шматок обрізається (from/to - вирізати самому), коротший - трохи сповільнюється; фото стоїть 3 с (seconds - інакше). Монтаж на сервері займає 1-2 хв: якщо не встигне - відповідь дасть job для montage_status. Результат - нове відео в медіатеці; з post - одразу в пості, з channels - новий пост (затверджений, лишається schedule_post). Сторіс довша за 60 с ріжеться на кілька кадрів. Безкоштовно, крім voice: tts (ElevenLabs - за символи) і розшифровки (копійки).",
+    properties: {
+      clips: {
+        type: "array", minItems: 1, maxItems: 20,
+        description: "Кліпи по порядку.",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Id відео чи фото з list_media." },
+            from: { type: "number", description: "З якої секунди брати (необовʼязково)." },
+            to: { type: "number", description: "До якої секунди (необовʼязково)." },
+            text: { type: "string", description: "Підпис до кліпу (voice: none) або його шматок озвучки (voice: tts)." },
+            seconds: { type: "number", description: "Скільки секунд показувати (для фото - типово 3)." },
+          },
+          required: ["id"],
+          additionalProperties: false,
+        },
+      },
+      voice: { type: "string", enum: ["none", "clips", "audio", "tts"], description: "Звідки текст і голос: none (типово) - підписи з text; clips - звук кліпів і субтитри з нього; audio - запис голосу (audio); tts - AI-голос." },
+      audio: S("Id запису голосу з list_media (kind: \"audio\") для voice: audio."),
+      script: S("Увесь текст озвучки одним шматком для voice: tts (замість text кліпів) - кліпи розкладуться під нього."),
+      voice_id: S("Голос ElevenLabs (Voice ID), якщо не типовий кабінету."),
+      subtitles: { type: "string", enum: ["karaoke", "lines", "none"], description: "karaoke (типово з голосом) - слово, що звучить, кольором; lines - картки тексту; none - без тексту." },
+      keep_sound: { type: "boolean", description: "Під озвучкою тихо лишати звук кліпів (типово так)." },
+      format: { type: "string", enum: ["story", "reel"], description: "story (типово) - сторіс Instagram/Facebook; reel - Reels і відео-пост. З post формат береться з поста." },
+      post: S("Прикріпити результат до цього поста (замість його медіа)."),
+      channels: { ...NETS_ARG, description: "Створити НОВИЙ пост із результатом у цих мережах (сторіс - instagram і facebook)." },
+      text: S("Текст нового поста (підпис рілса); для сторіс не публікується."),
+    },
+    required: ["clips"],
+    run: async (ws, a) => {
+      const clipsIn = Array.isArray(a.clips) ? a.clips.slice(0, 21) : [];
+      if (!clipsIn.length) throw new ToolError("Дай кліпи: [{id: \"#a1b2c3d4\"}, …] з list_media.");
+      if (clipsIn.length > MONTAGE_MAX_CLIPS) throw new ToolError(`До ${MONTAGE_MAX_CLIPS} кліпів за раз.`);
+      const num = (v: unknown) => (v === undefined || v === null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+      const clips = [];
+      for (const c of clipsIn) {
+        const m = await libraryMediaId(ws, c && typeof c === "object" ? c.id : c);
+        if (m.kind === "audio") throw new ToolError(`${short(m.id)} - запис голосу: передай його як audio (voice: audio), а не як кліп.`);
+        clips.push({ id: m.id, from: num(c?.from), to: num(c?.to), seconds: num(c?.seconds), text: str(c?.text, 600) || null });
+      }
+      const voice = (["none", "clips", "audio", "tts"].includes(String(a.voice)) ? String(a.voice) : "none") as "none" | "clips" | "audio" | "tts";
+      let audio: string | null = null;
+      if (voice === "audio") {
+        if (!a.audio) throw new ToolError("Для voice: audio передай audio - id запису голосу (list_media з kind: \"audio\").");
+        const m = await libraryMediaId(ws, a.audio);
+        if (m.kind === "image") throw new ToolError(`${short(m.id)} - фото, а не запис голосу.`);
+        audio = m.id;
+      }
+      if (voice === "tts" && !ttsReady()) throw new ToolError("AI-голос не підключено: адмін додає ключ ElevenLabs у Налаштування → Профіль → Ключі провайдерів. Поки що - voice: audio (голос автора) або none (підписи).");
+      if (voice === "tts" && !str(a.script) && !clips.some((c) => c.text)) throw new ToolError("Для AI-голосу потрібен текст: script або text у кліпів.");
+      let postId: string | null = null, format: "story" | "reel" = a.format === "reel" ? "reel" : "story";
+      if (a.post) {
+        const p = await findPost(ws, a.post);
+        postId = p.id;
+        format = p.format === "story" ? "story" : "reel";
+      }
+      const nets = pickNets(a.channels);
+      if (!postId && format === "story" && nets.some((n) => !STORY_NETS.includes(n)))
+        throw new ToolError("Сторіс через API приймають лише Instagram і Facebook - прибери інші мережі або зроби format: reel.");
+      const opts = { clips, voice, audio, script: str(a.script, 5000) || null, voiceId: str(a.voice_id, 60) || null,
+        subtitles: ["karaoke", "lines", "none"].includes(String(a.subtitles)) ? String(a.subtitles) as "karaoke" : null,
+        keepSound: a.keep_sound === false ? false : null, format };
+      const job = await startMontage(ws, opts, { postId, create: !postId && nets.length ? { nets, text: str(a.text, 5000) } : null });
+      const waitMs = Number(process.env.MCP_MONTAGE_WAIT_MS) || 45_000;
+      let j = await getJob(job.id);
+      for (const t0 = Date.now(); j && j.status === "running" && Date.now() - t0 < waitMs;) { await sleep(700); j = await getJob(job.id); }
+      if (!j || j.status === "running")
+        return `⏳ Монтую далі у фоні (${clips.length} кліпів). Через хвилину виклич montage_status з job: "${job.id}" - там буде результат.${postId ? ` Відео саме стане в пост ${short(postId)}.` : ""}`;
+      return montageReport(ws, j);
+    },
+  },
+  {
+    name: "montage_status",
+    title: "Стан монтажу",
+    description: "Результат montage_video, якщо той не встиг за відповідь: готове відео (з кадрами), пост, куди воно стало, або причина збою.",
+    properties: { job: S("job з відповіді montage_video.") },
+    required: ["job"],
+    readOnly: true,
+    run: async (ws, a) => {
+      const id = str(a.job, 60);
+      const j = /^[0-9a-f-]{36}$/i.test(id) ? await getJob(id) : null;
+      if (!j || j.kind !== "montage" || j.workspace_id !== ws) throw new ToolError("Такого монтажу в цьому кабінеті нема - перевір job.");
+      if (j.status === "running") return "⏳ Ще монтую - зазирни за хвилину.";
+      return montageReport(ws, j);
     },
   },
   {
@@ -1649,7 +1844,7 @@ export const TOOLS: ToolDef[] = [
       else await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [p.id, at.toISOString()]);
       await q(`update post set review='approved' where id=$1`, [p.id]);   // запланований = затверджений
       const fcPlan = commentPlanLines({ ...p, channels: chNow }, on, await commentStates(p.id), await alreadySentNetworks(p.id), await metaGranted(ws));
-      return `🗓 ${short(p.id)} заплановано на ${fmtWhen(at, tz)}: ${publishPlanLine(publishPlan(chNow, p.content))}.${ex ? " Наявний слот перенесено." : ""}`
+      return `🗓 ${short(p.id)} заплановано на ${fmtWhen(at, tz)}: ${planLineFor(chNow, p.content, p.format)}.${ex ? " Наявний слот перенесено." : ""}`
         + bestNote + (fcPlan.length ? "\n" + fcPlan.join("\n") : "");
     },
   },
@@ -1965,6 +2160,7 @@ export const TOOLS: ToolDef[] = [
         try { saved = await saveMediaFile(ws, tmp, { name: name || "upload", source: "upload", dedupe: true }); }
         catch (e: any) { throw new ToolError(e.message); }
         await logEvent("info", "mcp", `файл у медіатеку з Claude (${saved.kind}${saved.existed ? ", уже був" : ""})`, null);
+        if (saved.kind === "audio") return `${saved.existed ? "↩️ Такий файл уже є в медіатеці" : "✅ Завантажено"}: запис голосу ${short(saved.id)}. Далі: montage_video з voice: "audio" і audio: "${short(saved.id)}".`;
         return `${saved.existed ? "↩️ Такий файл уже є в медіатеці" : "✅ Завантажено"}: ${saved.kind === "video" ? "відео" : "фото"} ${short(saved.id)}. Далі: attach_media з id ${short(saved.id)} і id поста.`;
       } finally { await unlink(tmp).catch(() => {}); }
     },
@@ -2073,6 +2269,7 @@ export const SERVER_INSTRUCTIONS = [
   `Карусель: кілька фото в одному пості (до ${MAX_SLIDES}) - attach_media масивом id або append: true у attach_media / attach_stock_photo / generate_image; кадри-картинки зі сценарію «Слайд 1: …» малює render_carousel (безкоштовно), і тоді текст поста - це короткий підпис під каруселлю, не сценарій.`,
   "Відео: власні відео автора - list_media з kind: \"video\" → attach_media з одним id; публікується як Reels в Instagram, відео у Facebook, Threads, Telegram (до 50 МБ) і LinkedIn, а текст поста - підпис. Відео з комп'ютера заливає та сама media_upload_link (великі файли - частинами).",
   "Сторіс: create_draft з format: \"story\" і мережами instagram/facebook (інші сторіс через API не приймають) → кадри через attach_media (фото й відео разом, фото ріжуться 9:16) або render_carousel з рядками «Кадр 1: …»; кожен кадр - окрема сторіс, підпису немає.",
+  "Монтаж: кілька кліпів автора → одна сторіс чи рілс 9:16 із субтитрами. list_media kind: \"video\" → video_frames (аркуш кадрів, speech: true - що говорять) → напиши текст під кадри → montage_video: text до кліпів (підписи), voice: \"clips\" (субтитри зі звуку кліпів), voice: \"audio\" + id голосового автора (list_media kind: \"audio\"), або voice: \"tts\" (AI-голос ElevenLabs). З channels чи post результат одразу стає постом. Кліпи автор найзручніше шле Telegram-боту командою /montage (там же голосове).",
   "Якщо кабінетів кілька (list_workspaces), спершу переконайся, що активний саме той бренд: перемкни switch_workspace або передай workspace у виклику. Кожна відповідь називає кабінет у першому рядку - звіряйся з ним перед публікацією.",
   "У бренді буває кілька акаунтів однієї мережі (особистий і компанії) і кілька каналів Telegram - workspace_info їх перелічує: пост без вибору йде основним, інший чи кілька одразу - accounts у create_draft / update_post (назва Сторінки чи каналу, @нік; масивом - той самий пост у кожен). Пиши текст голосом того акаунта, яким він піде.",
   "Коментарі людей під постами бренду в Instagram, Facebook і Threads - list_comments; відповідь пиши сам голосом бренду (brand_voice) і відправляй reply_to_comment (безкоштовно для кабінету); спам чи «дякую» - skip: true.",

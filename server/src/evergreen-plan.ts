@@ -100,7 +100,9 @@ export type EgPlanned = { at: number; nets: string[]; repeat: boolean };
  * публікують і нема іншого повтору; далі - день без іншого повтору; далі - будь-який. Той самий час
  * ±5 хв у ту саму мережу - ніколи.
  */
-export function pickRepeatTime(o: { now: number; tz: string; leadH: number; horizonDays: number; dows: number[] | null; times: string[]; nets: string[]; planned: EgPlanned[] }): { at: Date; day: string; time: string } | null {
+// soonest - «♻️ Зараз»: людина сама просить повтор якнайшвидше, тож найближчий вільний час (без збігу ±5 хв
+// у тій самій мережі), а не «день без інших постів і повторів» - інакше «зараз» з'їжджало на 2-3 дні
+export function pickRepeatTime(o: { now: number; tz: string; leadH: number; horizonDays: number; dows: number[] | null; times: string[]; nets: string[]; planned: EgPlanned[]; soonest?: boolean }): { at: Date; day: string; time: string } | null {
   const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: o.tz, year: "numeric", month: "2-digit", day: "2-digit" });
   const dayOf = (ms: number) => fmt.format(new Date(ms));
   const byDay = new Map<string, { nets: Set<string>; repeat: boolean }>();
@@ -115,7 +117,7 @@ export function pickRepeatTime(o: { now: number; tz: string; leadH: number; hori
   if (!times.length) times.push("11:00");
   const clash = (at: number) => o.planned.some((p) => Math.abs(p.at - at) <= 5 * 60e3 && p.nets.some((n) => o.nets.includes(n)));
   const [Y, M, D] = dayOf(o.now).split("-").map(Number);
-  for (const pass of [1, 2, 3]) {
+  for (const pass of o.soonest ? [3] : [1, 2, 3]) {
     for (let d = 0; d <= o.horizonDays; d++) {
       const noon = new Date(Date.UTC(Y, M - 1, D + d, 12));
       const day = noon.toISOString().slice(0, 10);

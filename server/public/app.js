@@ -3891,13 +3891,18 @@ async function loadMedia(){
     const sel=MediaSel;
     const bar='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%;margin-bottom:8px">'
       +(sel
-        ?'<button class="ghost" id="mSelAll">Вибрати всі</button><button class="danger" id="mSelDel"'+(sel.size?'':' disabled')+'>🗑 Видалити обрані ('+sel.size+')</button><button class="ghost" id="mSelOff">Скасувати</button>'
-        :'<button class="ghost" id="mSelOn">☑️ Вибрати кілька</button><span style="font-size:12px;color:var(--muted)">для масового видалення</span>')
+        ?(()=>{ const clips=m.filter(x=>sel.has(x.id)&&x.kind!=='audio').length;
+            return '<button class="ghost" id="mSelAll">Вибрати всі</button><button id="mSelMont"'+(clips?'':' disabled')+' title="Склеїти обрані відео й фото (у порядку, як обирав) у сторіс чи рілс 9:16 із субтитрами">🎬 Змонтувати ('+clips+')</button><button class="danger" id="mSelDel"'+(sel.size?'':' disabled')+'>🗑 Видалити обрані ('+sel.size+')</button><button class="ghost" id="mSelOff">Скасувати</button>'; })()
+        :'<button class="ghost" id="mSelOn">☑️ Вибрати кілька</button><span style="font-size:12px;color:var(--muted)">змонтувати відео чи видалити</span>')
       +'</div>';
     o.innerHTML=bar+m.map(x=>{ const on=sel&&sel.has(x.id);
+      const ord=sel&&on?[...sel].indexOf(x.id)+1:0;
       return '<div style="position:relative;cursor:'+(sel?'pointer':'default')+'" data-id="'+x.id+'">'
-        +'<img loading="lazy" src="/thumb/'+esc(x.filename)+'" onerror="this.style.opacity=.3" style="height:90px;min-width:60px;border-radius:8px;background:var(--surface2)'+(on?';outline:3px solid var(--brand)':'')+'">'
+        +(x.kind==='audio'
+          ?'<div class="audtile" title="Запис голосу - озвучка для монтажу" style="height:90px;width:90px;border-radius:8px;background:var(--surface2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:26px'+(on?';outline:3px solid var(--brand)':'')+'">🎙<span style="font-size:12px;color:var(--muted)">'+(fmtDur(x.duration)||'голос')+'</span></div>'
+          :'<img loading="lazy" src="/thumb/'+esc(x.filename)+'" onerror="this.style.opacity=.3" style="height:90px;min-width:60px;border-radius:8px;background:var(--surface2)'+(on?';outline:3px solid var(--brand)':'')+'">')
         +(x.kind==='video'?'<span class="vbadge">▶ '+fmtDur(x.duration)+'</span>':'')
+        +(ord&&x.kind!=='audio'?'<span style="position:absolute;bottom:4px;left:4px;min-width:20px;height:20px;border-radius:10px;background:var(--brand);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;padding:0 5px">'+ord+'</span>':'')
         +(sel?'<span style="position:absolute;top:4px;left:4px;width:20px;height:20px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;background:'+(on?'var(--brand)':'rgba(0,0,0,.55)')+';color:#fff">'+(on?'✓':'')+'</span>'
              :'<button class="mediaDel" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;padding:1px 6px">✕</button>')
         +'</div>'; }).join('');
@@ -3905,6 +3910,7 @@ async function loadMedia(){
       o.querySelectorAll('[data-id]').forEach(c=>{ c.onclick=()=>{ const id=c.dataset.id; if(sel.has(id)) sel.delete(id); else sel.add(id); loadMedia(); }; });
       const all=$('mSelAll'); if(all) all.onclick=(e)=>{ e.stopPropagation(); m.forEach(x=>sel.add(x.id)); loadMedia(); };
       const off=$('mSelOff'); if(off) off.onclick=(e)=>{ e.stopPropagation(); MediaSel=null; loadMedia(); };
+      const mont=$('mSelMont'); if(mont) mont.onclick=(e)=>{ e.stopPropagation(); const ids=[...sel].filter(id=>{ const it=m.find(x=>x.id===id); return it&&it.kind!=='audio'; }); if(ids.length) openMontage(ids,m); };
       const del=$('mSelDel'); if(del) del.onclick=async(e)=>{ e.stopPropagation(); if(!sel.size) return;
         if(!confirm('Видалити '+sel.size+' файл(ів) назавжди? Пости не зламаються - фото просто відкріпиться.')) return;
         del.disabled=true; try{ const r=await api('/media/bulk-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[...sel]})}); flash('🗑 Видалено: '+r.deleted); MediaSel=null; await loadMedia(); }catch(err){ flash('⚠ '+err.message); del.disabled=false; } };
@@ -3913,6 +3919,60 @@ async function loadMedia(){
       o.querySelectorAll('[data-id]').forEach(c=>{ const d=c.querySelector('.mediaDel'); if(d) d.onclick=async()=>{ if(!confirm('Видалити фото?'))return; try{ await api('/media/'+c.dataset.id,{method:'DELETE'}); await loadMedia(); }catch(e){ flash(e.message); } }; });
     }
   }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
+}
+// 🎬 Монтаж: обрані кліпи й фото (у порядку вибору) → сторіс чи рілс 9:16 із субтитрами. Робота йде на
+// сервері 1-2 хв (runAiJob полить), результат - нове відео в медіатеці й затверджений пост у композері.
+async function openMontage(ids, lib){
+  let caps={tts:false,stt:false,vision:false}; try{ caps=await api('/montage/caps'); }catch(e){}
+  const voices=(lib||[]).filter(x=>x.kind==='audio');
+  const items=ids.map(id=>(lib||[]).find(x=>x.id===id)).filter(Boolean);
+  const total=items.reduce((a,x)=>a+(x.kind==='image'?3:Math.min(Number(x.duration)||0,20)),0);
+  const opt=(v,l,dis,why)=>'<option value="'+v+'"'+(dis?' disabled':'')+'>'+l+(dis&&why?' - '+why:'')+'</option>';
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='95';
+  ov.innerHTML='<div class="modal-card" style="max-width:560px;padding:20px"><b>🎬 Змонтувати відео</b>'
+    +'<div style="font-size:13px;color:var(--muted);margin:6px 0 12px">'+items.length+' '+(items.length===1?'кліп':'кліпів')+' у порядку вибору, ≈'+(fmtDur(total)||'0:00')+'. Вертикально 9:16; горизонтальні кадри стануть посередині на розмитому тлі.</div>'
+    +'<div style="display:flex;gap:8px;overflow-x:auto;margin-bottom:12px">'+items.map((x,i)=>'<div style="position:relative;flex:none"><img src="/thumb/'+esc(x.filename)+'" style="height:70px;border-radius:6px"><span style="position:absolute;top:3px;left:3px;background:rgba(0,0,0,.6);color:#fff;border-radius:5px;font-size:11px;padding:0 4px">'+(i+1)+'</span></div>').join('')+'</div>'
+    +'<label style="font-size:13px">Формат</label><div class="btnrow" style="margin:4px 0 10px;justify-content:flex-start"><label><input type="radio" name="mntFmt" value="story" checked> ⚡ Сторіс (Instagram, Facebook)</label><label><input type="radio" name="mntFmt" value="reel"> 🎞 Рілс</label></div>'
+    +'<label style="font-size:13px" for="mntSrc">Текст на відео</label>'
+    +'<select id="mntSrc" style="width:100%;margin:4px 0 8px">'
+    +opt('auto','🔊 Субтитри з того, що говорять у кліпах (мовчать - AI підпише кадри)',!caps.stt&&!caps.vision,'не підключено розшифровку')
+    +opt('captions','📝 AI-підписи з того, що в кадрі',!caps.vision,'не підключено модель')
+    +opt('voiceover','🗣 AI напише озвучку з кадрів і прочитає голосом',!caps.tts||!caps.vision,'не підключено AI-голос (ElevenLabs)')
+    +opt('own','✍ Мій текст'+(caps.tts?' (прочитає AI-голос)':' (стане підписами)'),false)
+    +opt('audio','🎙 Моє голосове з медіатеки',!voices.length,'записів голосу ще нема')
+    +opt('none','Без тексту',false)
+    +'</select>'
+    +'<textarea id="mntText" rows="4" placeholder="Текст для відео: що сказати чи підписати. Кілька речень - розкладуться по кліпах." style="width:100%;display:none"></textarea>'
+    +'<select id="mntAudio" style="width:100%;display:none">'+voices.map(v=>'<option value="'+esc(v.id)+'">🎙 '+esc(fmtDur(v.duration)||'голос')+' · '+esc(new Date(v.created_at).toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+(v.original_name?' · '+esc(v.original_name):'')+'</option>').join('')+'</select>'
+    +'<div id="mntMsg" style="font-size:13px;color:var(--muted);min-height:18px;margin-top:8px"></div>'
+    +'<div class="btnrow"><button class="ghost" id="mntCancel">Скасувати</button><button id="mntGo">🎬 Змонтувати</button></div></div>';
+  document.body.appendChild(ov);
+  const src=ov.querySelector('#mntSrc'), txt=ov.querySelector('#mntText'), aud=ov.querySelector('#mntAudio'), msg=ov.querySelector('#mntMsg'), go=ov.querySelector('#mntGo');
+  const first=[...src.options].find(o=>!o.disabled); if(first) src.value=first.value;
+  const sync=()=>{ txt.style.display=src.value==='own'?'block':'none'; aud.style.display=src.value==='audio'?'block':'none'; };
+  src.onchange=sync; sync();
+  let busy=false;
+  const close=()=>{ if(!busy) ov.remove(); };
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
+  ov.querySelector('#mntCancel').onclick=close;
+  go.onclick=async()=>{
+    const format=(ov.querySelector('input[name="mntFmt"]:checked')||{}).value||'story';
+    const v=src.value, body={clips:ids.map(id=>({id})), format};
+    if(v==='auto'){ body.voice='clips'; body.autoCaptions=true; }
+    else if(v==='captions'){ body.voice='none'; body.aiText='captions'; }
+    else if(v==='voiceover'){ body.voice='tts'; body.aiText='voiceover'; }
+    else if(v==='own'){ const t=txt.value.trim(); if(!t){ msg.textContent='Напиши текст для відео.'; txt.focus(); return; } body.ownText=t; }
+    else if(v==='audio'){ body.voice='audio'; body.audio=aud.value; }
+    else body.voice='none';
+    busy=true; go.disabled=true; msg.textContent='⏳ Монтую… зазвичай 1-2 хвилини';
+    try{
+      const r=await runAiJob('/montage',body,(sec)=>{ msg.textContent='⏳ Монтую… '+sec+' с'; });
+      busy=false; ov.remove();
+      flash('🎬 Готово: '+(fmtDur(r&&r.duration)||'')+((r&&r.warnings&&r.warnings.length)?' · ⚠ '+r.warnings.join('; '):''));
+      MediaSel=null; loadMedia();
+      if(r&&r.postId) openComposer(r.postId);
+    }catch(e){ busy=false; go.disabled=false; msg.textContent='⚠ '+e.message; }
+  };
 }
 // Завантаження пачкою: сервер приймає до 10 файлів за запит, а nginx - до 20 МБ тіла запиту
 // (client_max_body_size), тож ділимо на порції: до 10 файлів і до 18 МБ (запас на обгортку

@@ -255,6 +255,18 @@ test("publishPlanLine: попереджає, коли дослівний тек�
   assert.match(publishPlanLine(publishPlan({ facebook: { on: true } }, "abc")), /спакується моделлю кабінету/);
 });
 
+import { planLineFor } from "../dist/mcp.js";
+test("planLineFor: сторіс без підпису - ні «дослівно», ні «спакується»; мережі без сторіс названо", () => {
+  const ch = { instagram: { on: true }, facebook: { on: true } };
+  const line = planLineFor(ch, "внутрішній опис", "story");
+  assert.match(line, /Instagram, Facebook - сторіс, кожен кадр окремо, без підпису/);
+  assert.doesNotMatch(line, /спакується|дослівно/);
+  assert.match(planLineFor({ ...ch, threads: { on: true } }, "x", "story"), /Threads - сторіс через API не приймає/);
+  // звичайний пост - як і був
+  assert.match(planLineFor({ facebook: { on: true } }, "abc", "post"), /спакується моделлю кабінету/);
+  assert.match(planLineFor({ facebook: { on: true } }, "abc"), /спакується моделлю кабінету/);
+});
+
 // ---- медіатека в конекторі: власні фото автора, безкоштовно, з позначкою «вже в пості» ----
 import { usedList, OWN_MEDIA, GEN_MEDIA } from "../dist/mcp.js";
 

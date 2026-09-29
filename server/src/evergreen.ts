@@ -229,7 +229,8 @@ export async function makeRepeat(ws: string, postId: string, o: { manual?: boole
        from schedule_slot ss join post p on p.id=ss.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
       where s.workspace_id=$1 and ss.status='planned' and ss.scheduled_at between now() - interval '1 day' and now() + interval '${EG_HORIZON_DAYS + 2} days'`, [ws]);
   const planned: EgPlanned[] = plannedRows.map((r) => ({ at: new Date(r.at).getTime(), nets: enabledNets(r.ch), repeat: !!r.rep }));
-  const slot = pickRepeatTime({ now: Date.now(), tz, leadH: o.leadH ?? EG_LEAD_H, horizonDays: EG_HORIZON_DAYS, dows, times, nets, planned });
+  const slot = pickRepeatTime({ now: Date.now(), tz, leadH: o.leadH ?? EG_LEAD_H, horizonDays: EG_HORIZON_DAYS, dows, times, nets, planned,
+    soonest: o.leadH != null && o.leadH < EG_LEAD_H });
   if (!slot) return { ok: false, why: `найближчі ${EG_HORIZON_DAYS} днів нема вільного часу в ${nets.join(", ")}` };
 
   // сам повтор: копія з тими самими фото, кадрами, першим коментарем; одразу затверджений - людина

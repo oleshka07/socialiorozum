@@ -132,3 +132,71 @@ export async function transcribeAudio(buffer: Buffer, filename: string, ws?: str
   // Обидва впали - показуємо ПЕРШУ причину: вона про того провайдера, якого обрали свідомо.
   throw new Error(errors[0] || "не розчув - спробуй ще раз або напиши текстом");
 }
+
+// ---- 🎬 слова з часом: субтитри для монтажу відео ----
+// Той самий порядок провайдерів і той самий відкат, що й для щоденника. Відмінності: мова задається
+// кабінетом (чеський бренд - чеська), а тиша - це відповідь, а не збій: кліп без мови дає порожній
+// список слів, і монтаж просто йде без субтитрів із голосу (другий провайдер тоді не смикаємо).
+export type SttWord = { w: string; s: number; e: number };
+
+/** Слова Deepgram: punctuated_word (з розділовими, бо smart_format) і час кожного слова. */
+export function deepgramWords(j: any): SttWord[] {
+  const alt = j?.results?.channels?.[0]?.alternatives?.[0];
+  const ws: any[] = Array.isArray(alt?.words) ? alt.words : [];
+  return ws.map((w) => ({ w: String(w?.punctuated_word || w?.word || "").trim(), s: Number(w?.start), e: Number(w?.end) }))
+    .filter((w) => w.w && isFinite(w.s) && isFinite(w.e));
+}
+/** Слова Whisper (verbose_json + word): без розділових - їх повертає restorePunct у монтажі. */
+export function whisperWords(j: any): SttWord[] {
+  const ws: any[] = Array.isArray(j?.words) ? j.words : [];
+  return ws.map((w) => ({ w: String(w?.word || "").trim(), s: Number(w?.start), e: Number(w?.end) }))
+    .filter((w) => w.w && isFinite(w.s) && isFinite(w.e));
+}
+
+async function wordsViaDeepgram(buffer: Buffer, filename: string, lang?: string): Promise<{ text: string; words: SttWord[] }> {
+  const p = new URLSearchParams({ model: env.deepgram.model, smart_format: "true", punctuate: "true" });
+  if (lang) p.set("language", lang);
+  else if (env.deepgram.language === "auto") p.set("detect_language", "true");
+  else p.set("language", env.deepgram.language);
+  const res = await withTimeout(180000, "Deepgram", (signal) => fetch(`https://api.deepgram.com/v1/listen?${p}`, {
+    method: "POST", signal,
+    headers: { Authorization: `Token ${env.deepgram.apiKey}`, "Content-Type": audioMime(filename) },
+    body: new Uint8Array(buffer),
+  }));
+  const j: any = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(humanSttError("deepgram", res.status, String(j?.err_msg || j?.error || `HTTP ${res.status}`)));
+  return { text: deepgramText(j), words: deepgramWords(j) };
+}
+
+async function wordsViaWhisper(buffer: Buffer, filename: string, lang?: string): Promise<{ text: string; words: SttWord[] }> {
+  const fd = new FormData();
+  fd.append("file", new Blob([new Uint8Array(buffer)], { type: audioMime(filename) }), filename || "audio.mp3");
+  fd.append("model", "whisper-1");                       // слова з часом уміє лише whisper-1
+  fd.append("response_format", "verbose_json");
+  fd.append("timestamp_granularities[]", "word");
+  if (lang) fd.append("language", lang);
+  const res = await withTimeout(180000, "Whisper", (signal) => fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST", signal, headers: { Authorization: `Bearer ${env.openai.apiKey}` }, body: fd,
+  }));
+  const j: any = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(humanSttError("whisper", res.status, String(j?.error?.message || `HTTP ${res.status}`)));
+  return { text: String(j.text || "").trim(), words: whisperWords(j) };
+}
+
+const RUN_WORDS: Record<SttProvider, (b: Buffer, f: string, lang?: string) => Promise<{ text: string; words: SttWord[] }>> = { deepgram: wordsViaDeepgram, whisper: wordsViaWhisper };
+
+/** Звук → слова з часом. Нема жодного провайдера - null (монтаж іде без субтитрів із голосу). */
+export async function transcribeWords(buffer: Buffer, filename: string, ws?: string, lang?: string):
+  Promise<{ text: string; words: SttWord[]; provider: SttProvider } | null> {
+  const order = sttOrder(await sttChoice(ws), sttAvailable());
+  if (!order.length) return null;
+  const errors: string[] = [];
+  for (let i = 0; i < order.length; i++) {
+    try {
+      const r = await RUN_WORDS[order[i]](buffer, filename, lang);
+      if (i > 0) await logEvent("warn", "stt", `${order[0]} не впорався (${errors[0]}) - слова для субтитрів через ${order[i]}`, null, undefined).catch(() => {});
+      return { ...r, provider: order[i] };
+    } catch (e: any) { errors.push(String(e?.message || e).slice(0, 200)); }
+  }
+  throw new Error(errors[0] || "розшифровка не вдалась");
+}

@@ -58,6 +58,8 @@ export const ffprobeAvailable = (): Promise<boolean> =>
 // інше під чужим заголовком. Такий файл упав би лише при публікації, через кілька хвилин обробки в
 // мережі; відкидаємо одразу, людською мовою.
 const BROKEN_VIDEO = "файл схожий на відео, але не читається (пошкоджений чи обрізаний) - перезбережи або експортуй його ще раз";
+const BROKEN_AUDIO = "файл схожий на запис голосу, але не читається - перезбережи його (M4A, MP3, OGG чи WAV)";
+export const NOT_MEDIA = "Це не зображення, не відео і не запис голосу - приймаємо JPG, PNG, WebP, GIF, HEIC, MP4, MOV, WebM, а голос - M4A, MP3, OGG, WAV";
 
 // кадр відео для мініатюри: 1-ша секунда (перший кадр часто чорний), коротке відео - нульова
 // Кадр для мініатюри відео - не більше 2 ffmpeg одночасно: /thumb відкритий без входу (його тягнуть
@@ -90,7 +92,8 @@ async function videoFrameNow(file: string): Promise<Buffer | null> {
 export const VIDEO_FILE_RX = /\.(mp4|mov|m4v|webm|quick)$/i;
 // розширення за mime: .mov/.mp4, а не обрізане «quick» - за розширенням /media/ віддає Content-Type,
 // і Meta/Telegram тягнуть відео за адресою
-const EXT_BY_MIME: Record<string, string> = { "video/mp4": "mp4", "video/quicktime": "mov", "video/webm": "webm", "image/jpeg": "jpeg", "image/png": "png", "image/gif": "gif", "image/webp": "webp", "image/heic": "heic" };
+const EXT_BY_MIME: Record<string, string> = { "video/mp4": "mp4", "video/quicktime": "mov", "video/webm": "webm", "image/jpeg": "jpeg", "image/png": "png", "image/gif": "gif", "image/webp": "webp", "image/heic": "heic",
+  "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/wav": "wav", "audio/flac": "flac", "audio/aac": "aac", "audio/webm": "weba" };
 const extFor = (mime: string) => EXT_BY_MIME[mime] || (mime.split("/")[1] || "bin").replace(/[^a-z0-9]/gi, "").slice(0, 5) || "bin";
 
 // Мініатюра (≤400px, JPEG) з диск-кешем — щоб бібліотека/сітки не вантажили повні зображення.
@@ -113,7 +116,10 @@ export async function getThumb(name: string): Promise<Buffer | null> {
 
 // Магічні байти замість заявленого mime. Список короткий і свідомий: те, що реально показують
 // мережі й обробляє sharp/ffmpeg. Усе інше - відмова з людською причиною.
-export function sniffKind(b: Buffer): { kind: "image" | "video"; mime: string } | null {
+// 🎙 Аудіо - голос для монтажу відео (голосове з Telegram, диктофон телефона, запис із компʼютера):
+// до поста воно не прикріплюється, лише стає озвучкою змонтованого ролика.
+export type MediaKind = "image" | "video" | "audio";
+export function sniffKind(b: Buffer): { kind: MediaKind; mime: string } | null {
   if (!b || b.length < 12) return null;
   const hex = (o: number, n: number) => b.subarray(o, o + n).toString("hex");
   const asc = (o: number, n: number) => b.subarray(o, o + n).toString("latin1");
@@ -121,14 +127,32 @@ export function sniffKind(b: Buffer): { kind: "image" | "video"; mime: string } 
   if (hex(0, 8) === "89504e470d0a1a0a") return { kind: "image", mime: "image/png" };
   if (asc(0, 4) === "GIF8") return { kind: "image", mime: "image/gif" };
   if (asc(0, 4) === "RIFF" && asc(8, 4) === "WEBP") return { kind: "image", mime: "image/webp" };
+  if (asc(0, 4) === "RIFF" && asc(8, 4) === "WAVE") return { kind: "audio", mime: "audio/wav" };
   if (asc(4, 4) === "ftyp") {
     const brand = asc(8, 4).toLowerCase();
     if (/^(heic|heix|hevc|mif1|msf1|heim|heis)/.test(brand)) return { kind: "image", mime: "image/heic" };
     if (/^(qt)/.test(brand)) return { kind: "video", mime: "video/quicktime" };
-    return { kind: "video", mime: "video/mp4" };   // isom, mp42, avc1, M4V тощо
+    if (/^m4[abp] /.test(brand)) return { kind: "audio", mime: "audio/mp4" };   // диктофон iPhone, .m4a
+    return { kind: "video", mime: "video/mp4" };   // isom, mp42, avc1, M4V тощо (аудіо без відео розпізнає ffprobe)
   }
   if (hex(0, 4) === "1a45dfa3") return { kind: "video", mime: "video/webm" };
+  if (asc(0, 4) === "OggS") return { kind: "audio", mime: "audio/ogg" };       // голосові Telegram (Opus)
+  if (asc(0, 4) === "fLaC") return { kind: "audio", mime: "audio/flac" };
+  if (asc(0, 3) === "ID3") return { kind: "audio", mime: "audio/mpeg" };
+  if (b[0] === 0xff && (b[1] & 0xf6) === 0xf0) return { kind: "audio", mime: "audio/aac" };   // ADTS
+  if (b[0] === 0xff && (b[1] & 0xe0) === 0xe0) return { kind: "audio", mime: "audio/mpeg" };  // MP3 без тегу
   return null;
+}
+
+/** Тривалість звуку (голосове, диктофон). Файл без звукової доріжки - null. */
+export async function probeAudio(file: string): Promise<{ duration: number; codec: string } | null> {
+  try {
+    const j = JSON.parse((await runTool("ffprobe", ["-v", "error", "-print_format", "json", "-show_format", "-show_streams", file], 20000)).toString("utf8"));
+    const a = (j.streams || []).find((x: any) => x.codec_type === "audio");
+    if (!a) return null;
+    const duration = parseFloat(j.format?.duration ?? a.duration) || 0;
+    return { duration: Math.round(duration * 100) / 100, codec: String(a.codec_name || "") };
+  } catch { return null; }
 }
 
 export async function saveMedia(
@@ -162,21 +186,44 @@ export async function saveMedia(
   // зберігався як .jpeg і лежав у бібліотеці сміттям, а прев'ю на ньому падало (спіймано аудитом).
   // nosniff і правильний Content-Type рятували від XSS, але не від сміття й не від бінарників.
   const sniffed = sniffKind(buffer);
-  if (!sniffed) throw new Error("Це не зображення і не відео - приймаємо JPG, PNG, WebP, GIF, HEIC, MP4, MOV, WebM");
+  if (!sniffed) throw new Error(NOT_MEDIA);
   if (sniffed.mime !== mime) mime = sniffed.mime;   // довіряємо байтам, не заголовку
   const id = randomUUID();
   const filename = `${id}.${extFor(mime)}`;
   await writeFile(join(MEDIA_DIR, filename), buffer);
-  const kind = sniffed.kind;
-  const vi = kind === "video" ? await probeVideo(join(MEDIA_DIR, filename)) : null;
-  if (kind === "video" && !vi && await ffprobeAvailable()) { await unlink(join(MEDIA_DIR, filename)).catch(() => {}); throw new Error(BROKEN_VIDEO); }
+  const m = await measure(id, filename, sniffed.kind, mime);
   await q(
     `insert into media_asset(id, workspace_id, kind, mime, original_name, filename, size, source, external_id, duration, width, height)
      values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-    [id, ws, kind, mime, String(opts.name || "").slice(0, 200), filename, buffer.length, opts.source || "upload", opts.externalId || hash,
-     vi?.duration ?? null, vi?.width ?? null, vi?.height ?? null]
+    [id, ws, m.kind, m.mime, String(opts.name || "").slice(0, 200), m.filename, buffer.length, opts.source || "upload", opts.externalId || hash,
+     m.duration, m.width, m.height]
   );
-  return { id, filename, kind };
+  return { id, filename: m.filename, kind: m.kind };
+}
+
+/**
+ * Виміряти збережений файл: відео - тривалість і кадр, звук - тривалість. Контейнер «відео» без
+ * картинки, але зі звуком (m4a з брендом mp42, запис браузера у webm) - це запис голосу: такий файл
+ * дістає kind audio і правильне розширення. Нечитабельний файл видаляється з людською причиною.
+ */
+async function measure(id: string, filename: string, kind: MediaKind, mime: string):
+  Promise<{ kind: MediaKind; mime: string; filename: string; duration: number | null; width: number | null; height: number | null }> {
+  const path = join(MEDIA_DIR, filename);
+  if (kind === "image") return { kind, mime, filename, duration: null, width: null, height: null };
+  const can = await ffprobeAvailable();
+  if (kind === "video") {
+    const vi = await probeVideo(path);
+    if (vi || !can) return { kind, mime, filename, duration: vi?.duration ?? null, width: vi?.width ?? null, height: vi?.height ?? null };
+    const au = await probeAudio(path);
+    if (!au) { await unlink(path).catch(() => {}); throw new Error(BROKEN_VIDEO); }
+    const amime = mime === "video/webm" ? "audio/webm" : "audio/mp4";
+    const next = `${id}.${extFor(amime)}`;
+    await rename(path, join(MEDIA_DIR, next));
+    return { kind: "audio", mime: amime, filename: next, duration: au.duration, width: null, height: null };
+  }
+  const au = await probeAudio(path);
+  if (!au && can) { await unlink(path).catch(() => {}); throw new Error(BROKEN_AUDIO); }
+  return { kind, mime, filename, duration: au?.duration ?? null, width: null, height: null };
 }
 
 async function sha256File(path: string): Promise<string> {
@@ -200,7 +247,7 @@ export async function saveMediaFile(ws: string, path: string, opts: { name?: str
   const fh = await open(path, "r");
   try { await fh.read(head, 0, 64, 0); } finally { await fh.close(); }
   const sniffed = sniffKind(head);
-  if (!sniffed) { await unlink(path).catch(() => {}); throw new Error("Це не зображення і не відео - приймаємо JPG, PNG, WebP, GIF, HEIC, MP4, MOV, WebM"); }
+  if (!sniffed) { await unlink(path).catch(() => {}); throw new Error(NOT_MEDIA); }
   if (sniffed.kind === "image") {
     try {
       // фото обробляється в памʼяті (sharp, HEIC → JPEG), тож межа тут своя, а не 500 МБ від відео:
@@ -222,13 +269,12 @@ export async function saveMediaFile(ws: string, path: string, opts: { name?: str
   const dest = join(MEDIA_DIR, filename);
   await rename(path, dest);
   const size = (await stat(dest)).size;
-  const vi = await probeVideo(dest);
-  if (!vi && await ffprobeAvailable()) { await unlink(dest).catch(() => {}); throw new Error(BROKEN_VIDEO); }
+  const m = await measure(id, filename, sniffed.kind, sniffed.mime);
   await q(
     `insert into media_asset(id, workspace_id, kind, mime, original_name, filename, size, source, external_id, duration, width, height)
-     values($1,$2,'video',$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-    [id, ws, sniffed.mime, String(opts.name || "").slice(0, 200), filename, size, source, hash, vi?.duration ?? null, vi?.width ?? null, vi?.height ?? null]);
-  return { id, filename, kind: "video" };
+     values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+    [id, ws, m.kind, m.mime, String(opts.name || "").slice(0, 200), m.filename, size, source, hash, m.duration, m.width, m.height]);
+  return { id, filename: m.filename, kind: m.kind };
 }
 
 /**

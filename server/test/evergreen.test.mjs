@@ -94,3 +94,17 @@ test("час повтору: перехід на зимовий час не зс
   assert.equal(r.day, "2026-10-26");
   assert.equal(r.at.toISOString(), "2026-10-26T18:00:00.000Z");   // 19:00 за зимовим часом (UTC+1)
 });
+
+test("pickRepeatTime soonest: «♻️ Зараз» бере найближчий вільний час, навіть якщо того дня вже є інший повтор", () => {
+  const TZ = "Europe/Prague";
+  const now = Date.UTC(2026, 8, 29, 12, 0);            // 14:00 у Празі - сьогоднішні 11:00 уже минули
+  const tomorrow11 = Date.UTC(2026, 8, 30, 9, 0);      // 30.09 11:00 у Празі
+  const planned = [{ at: Date.UTC(2026, 8, 30, 17, 30), nets: ["threads"], repeat: true }];
+  const calm = pickRepeatTime({ now, tz: TZ, leadH: 24, horizonDays: 8, dows: null, times: ["11:00"], nets: ["instagram"], planned });
+  assert.ok(calm.at.getTime() > tomorrow11, "плановий повтор уникає дня з іншим повтором");
+  const soon = pickRepeatTime({ now, tz: TZ, leadH: 1, horizonDays: 8, dows: null, times: ["11:00"], nets: ["instagram"], planned, soonest: true });
+  assert.equal(soon.at.getTime(), tomorrow11);
+  // але не на ту саму хвилину в ту саму мережу
+  const busy = pickRepeatTime({ now, tz: TZ, leadH: 1, horizonDays: 8, dows: null, times: ["11:00"], nets: ["instagram"], planned: [{ at: tomorrow11, nets: ["instagram"], repeat: false }], soonest: true });
+  assert.ok(busy.at.getTime() > tomorrow11);
+});
