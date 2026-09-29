@@ -6,6 +6,8 @@ name: beta-check
 # фільтри (ass, zoompan, boxblur, loudnorm, amix, tpad, сегментатор) і шрифт субтитрів. Другий прохід: ffmpeg 8
 # відмовив «-vf crop=…» у пробі - чи працюють ті -vf, що їх викликає рушій (кадри для video_frames, рілс). Третій:
 # причина - не ffmpeg 8, а stdin: скрипт іде в sh через stdin, і ffmpeg без -nostdin з'їдав його байти.
+# Далі: стан Telegram-бота беті до і після деплою 60ae725 (бета бере свого спільного бота) - лише читання:
+# id ботів (без токенів), куди веде вебхук (хост і вид шляху), рядки кабінетів, журнал tgbot.
 
 on:
   push:
@@ -22,7 +24,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Beta Telegram bot state (read-only)
+      - name: Beta Telegram bot after deploy (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -33,39 +35,48 @@ jobs:
             B="${{ secrets.APP_DIR }}-beta"
             echo "зараз $(date -u +%d.%m\ %H:%M) UTC · beta HEAD $(git -C "$B" rev-parse --short HEAD)"
             cd "$B/server"
+            docker compose ps app --format '{{.Name}} {{.Status}}'
+            curl -fsS -o /dev/null -w "health %{http_code}\n" http://127.0.0.1:8081/health || echo "health недоступний"
             JS=$(cat <<'EOF'
             const { q } = await import('/app/dist/db.js');
             const tg = await import('/app/dist/telegram.js');
             const idOf = (t) => String(t || '').split(':')[0];
             const okTok = (t) => /^\d{5,20}:[A-Za-z0-9_-]{30,}$/.test(String(t || ''));
             const envTok = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
-            const adm = (await q("select value from app_secret where name='TELEGRAM_BOT_TOKEN'"))[0]?.value || '';
-            console.log('TELEGRAM_WEBHOOK_OFF=' + (process.env.TELEGRAM_WEBHOOK_OFF || '-') + ' · бот з .env: id ' + (idOf(envTok) || '-') + ' · з адмінки: ' + (adm ? 'id ' + idOf(adm) : 'не задано'));
-            for (const [n, t] of [['.env', envTok], ['адмінка', adm]]) {
-              if (!t) continue;
+            const a = (await q("select value, updated_by, to_char(updated_at at time zone 'UTC','DD.MM HH24:MI') t from app_secret where name='TELEGRAM_BOT_TOKEN'"))[0];
+            const adm = a?.value || '';
+            console.log('бот з .env: id ' + (idOf(envTok) || '-') + ' · з адмінки: ' + (adm ? 'id ' + idOf(adm) + ', записав ' + a.updated_by + ' о ' + a.t + ' UTC' : 'не задано') + (adm && adm === envTok ? ' (той самий токен, що в .env)' : ''));
+            if (adm) {
               try {
-                const me = await tg.getMe(t);
-                const wi = await tg.getWebhookInfo(t);
-                console.log(n + ': @' + me.username + ' живий · вебхук → ' + (wi.url ? wi.url.replace(/\/api\/webhooks\/telegram\/.*/, '/api/webhooks/telegram/…') : '—'));
-              } catch (e) { console.log(n + ': Telegram не прийняв токен (' + String(e.message).slice(0, 90) + ')'); }
+                const me = await tg.getMe(adm);
+                const wi = await tg.getWebhookInfo(adm);
+                const u = String(wi.url || '');
+                const path = u.includes('/api/webhooks/telegram/bot/') ? 'шлях ВЛАСНОГО бота' : u.includes('/api/webhooks/telegram/') ? 'шлях спільного бота' : 'інший шлях';
+                console.log('адмінка: @' + me.username + ' живий · вебхук → ' + (u ? (new URL(u)).host + ' (' + path + ')' : '—') + ' · у черзі ' + (wi.pending_update_count ?? 0) + (wi.last_error_message ? ' · остання помилка: ' + String(wi.last_error_message).slice(0, 100) : ''));
+              } catch (e) { console.log('адмінка: Telegram не прийняв токен (' + String(e.message).slice(0, 90) + ')'); }
             }
             const rows = await q("select bot_token, (channel_chat_id is not null or group_chat_id is not null) as ch from telegram_config");
             const by = {};
+            const alive = {};
             for (const r of rows) {
               const t = r.bot_token || '';
-              const k = !t ? 'без токена' : !okTok(t) ? 'не токен (сміття)' : 'бот ' + idOf(t) + (t === envTok ? ' (токен = .env)' : t === adm ? ' (токен = адмінка)' : ' (інший токен)');
+              const k = !t ? 'без токена' : !okTok(t) ? 'не токен (сміття)' : 'бот ' + idOf(t) + (t === adm ? ' (= спільний з адмінки)' : t === envTok ? ' (= мертвий з .env)' : ' (свій токен)');
               by[k] = (by[k] || 0) + 1;
+              if (okTok(t) && t !== adm && !(idOf(t) in alive)) {
+                alive[idOf(t)] = await tg.getMe(t).then(() => 'живий', (e) => 'мертвий: ' + String(e.message).slice(0, 60));
+              }
             }
             console.log('рядки telegram_config (' + rows.length + '):', JSON.stringify(by));
-            const fs = (await q("select value from app_secret where name='TG_FORMER_SHARED'"))[0]?.value || '{}';
-            console.log('колишні спільні:', Object.keys(JSON.parse(fs)).join(', ') || '-');
-            console.log('tg_owner рядків:', (await q('select count(*)::int n from tg_owner'))[0].n);
+            if (Object.keys(alive).length) console.log('власні боти в рядках:', JSON.stringify(alive));
+            const logs = await q("select level, message, to_char(created_at at time zone 'UTC','DD.MM HH24:MI') t from app_log where scope='tgbot' and created_at > now() - interval '3 hours' order by created_at");
+            for (const l of logs) console.log('журнал ' + l.t + ' [' + l.level + '] ' + String(l.message).slice(0, 230));
+            if (!logs.length) console.log('журнал tgbot за 3 год: порожньо');
             process.exit(0);
             EOF
             )
-            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -12
-            echo "--- журнал беті: бот (останні 2 доби) ---"
-            docker compose logs --since 48h app 2>&1 | grep -iE "tgbot" | tail -12
+            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -20
+            echo "--- консоль беті після рестарту: бот ---"
+            docker compose logs --since 30m app 2>&1 | grep -iE "tgbot|telegram" | tail -12
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
