@@ -22,109 +22,50 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Beta after montage deploy (read-only)
+      - name: Beta Telegram bot state (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 8m
+          command_timeout: 5m
           script: |
             B="${{ secrets.APP_DIR }}-beta"
             echo "зараз $(date -u +%d.%m\ %H:%M) UTC · beta HEAD $(git -C "$B" rev-parse --short HEAD)"
-            echo "health: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/health)"
-            cd "$B/server" && echo "контейнер: $(docker compose ps app --format '{{.Status}}')"
-            echo "маркери: dist=$(docker compose exec -T app ls /app/dist/montage.js /app/dist/montage-plan.js /app/dist/tts.js /app/dist/tgmontage.js 2>/dev/null | wc -l)/4 · app.js openMontage=$(docker compose exec -T app grep -c 'async function openMontage' /app/public/app.js)"
-            echo "шрифт DejaVu у контейнері: $(docker compose exec -T app sh -c 'fc-list 2>/dev/null | grep -ci dejavu')"
-            echo "nice: $(docker compose exec -T app sh -c 'nice -n 10 true && echo так || echo ні')"
-            echo "ffmpeg: $(docker compose exec -T app sh -c 'ffmpeg -hide_banner -version | head -1; ffmpeg -hide_banner -filters 2>/dev/null | grep -cE " (ass|zoompan|boxblur|loudnorm|amix|tpad|adelay|apad|atrim) "') фільтрів із 9"
-            echo "--- пробний монтаж ffmpeg у контейнері (тимчасова тека) ---"
-            cat > /tmp/holos-mtcheck.sh <<'EOS'
-            set -e
-            D=$(mktemp -d); cd $D
-            trap 'cd /; rm -rf "$D"' EXIT
-            F="ffmpeg -hide_banner -nostdin -loglevel error -y"   # скрипт іде в sh через stdin - без -nostdin ffmpeg з'їдає його байти
-            $F -f lavfi -i testsrc2=s=720x1280:r=30:d=3 -f lavfi -i sine=f=440:d=3 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest p.mp4
-            $F -f lavfi -i testsrc=s=1280x720:r=25:d=2 -c:v libx264 -pix_fmt yuv420p l.mp4
-            $F -f lavfi -i color=c=gray:s=1080x1440 -frames:v 1 still.jpg
-            ENC="-r 30 -c:v libx264 -preset ultrafast -crf 18 -pix_fmt yuv420p -g 30 -c:a aac -b:a 160k -ar 48000 -ac 2 -threads 2"
-            nice -n 10 $F -ss 0 -t 3 -i p.mp4 -filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,format=yuv420p,setsar=1[v];[0:a]aresample=48000,aformat=channel_layouts=stereo,apad[a]" -map "[v]" -map "[a]" -t 3 $ENC seg0.mp4
-            nice -n 10 $F -ss 0 -t 2 -i l.mp4 -f lavfi -t 2.5 -i anullsrc=r=48000:cl=stereo -filter_complex "[0:v]split=2[bg0][fg0];[bg0]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=luma_radius=40:luma_power=2,eq=brightness=-0.06[bg];[fg0]scale=1080:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,fps=30,format=yuv420p,setsar=1,tpad=stop_mode=clone:stop_duration=0.5[v]" -map "[v]" -map 1:a -t 2.5 $ENC seg1.mp4
-            nice -n 10 $F -i still.jpg -f lavfi -t 3 -i anullsrc=r=48000:cl=stereo -filter_complex "[0:v]scale=2160:3840:force_original_aspect_ratio=increase,crop=2160:3840,zoompan=z='min(zoom+0.0006,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=90:s=1080x1920:fps=30,format=yuv420p,setsar=1[v]" -map "[v]" -map 1:a -t 3 $ENC seg2.mp4
-            printf "file 'seg0.mp4'\nfile 'seg1.mp4'\nfile 'seg2.mp4'\n" > list.txt
-            # як у рушії: мова кліпів - прямо зі склейки (concat-демуксер), без проміжного файлу
-            $F -f concat -safe 0 -i list.txt -vn -ac 1 -ar 16000 -c:a aac -b:a 64k speech.m4a
-            echo "мова для розшифровки: $(ffprobe -v error -show_entries format=duration -of csv=p=0 speech.m4a)s"
-            cat > subs.ass <<'ASS'
-            [Script Info]
-            ScriptType: v4.00+
-            PlayResX: 1080
-            PlayResY: 1920
-            WrapStyle: 2
-            ScaledBorderAndShadow: yes
-
-            [V4+ Styles]
-            Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-            Style: Word,DejaVu Sans,76,&H00FFFFFF,&H00FFFFFF,&H00141010,&H80000000,-1,0,0,0,100,100,0,0,1,6,2,2,70,70,560,1
-
-            [Events]
-            Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-            Dialogue: 0,0:00:00.20,0:00:04.00,Word,,0,0,0,,{\1c&H003FD2FF&}Fasáda{\r} je hotová, schodiště čeká
-            ASS
-            $F -f lavfi -i sine=f=300:d=4 -c:a libopus voice.ogg
-            $F -f lavfi -i sine=f=500:d=3 -c:a libmp3lame tts.mp3
-            $F -i voice.ogg -i tts.mp3 -filter_complex "[0:a]aresample=48000,aformat=channel_layouts=stereo,adelay=150|150[p0];[1:a]aresample=48000,aformat=channel_layouts=stereo,adelay=4500|4500[p1];[p0][p1]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,apad,atrim=0:8.500,loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[a]" -map "[a]" -c:a pcm_s16le voice.wav
-            nice -n 10 $F -f concat -safe 0 -i list.txt -i voice.wav -filter_complex "[0:v]ass=subs.ass[v];[0:a]volume=0.18[b];[1:a]anull[vo];[b][vo]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,aresample=48000[a]" -map "[v]" -map "[a]" -t 8.5 -r 30 -c:v libx264 -preset veryfast -crf 23 -maxrate 6M -bufsize 12M -profile:v high -pix_fmt yuv420p -g 60 -force_key_frames 3.00 -c:a aac -b:a 128k -ar 48000 -ac 2 -movflags +faststart -threads 2 out.mp4
-            $F -i out.mp4 -map 0 -c copy -f segment -segment_times 3.00 -segment_time_delta 0.05 -reset_timestamps 1 -segment_format_options movflags=+faststart part%02d.mp4
-            for f in out.mp4 part00.mp4 part01.mp4; do echo "$f: $(ffprobe -v error -show_entries format=duration -of csv=p=0 $f)s $(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 $f)"; done
-            # субтитри справді намальовані: кадр із субтитрами відрізняється від кадру без них у зоні тексту
-            $F -ss 1 -i seg0.mp4 -frames:v 1 -filter_complex "[0:v]crop=1080:200:0:1160[c]" -map "[c]" a.png
-            $F -ss 1 -i out.mp4 -frames:v 1 -filter_complex "[0:v]crop=1080:200:0:1160[c]" -map "[c]" b.png
-            echo "субтитри в кадрі: $(cmp -s a.png b.png && echo НІ || echo так)"
-            EOS
-            docker compose exec -T app sh < /tmp/holos-mtcheck.sh 2>&1 | tail -12
-            rm -f /tmp/holos-mtcheck.sh
-            echo "--- -vf у ffmpeg 8 (виклики як у рушії, без оболонки) ---"
-            VF=$(cat <<'EOF'
-            import { spawnSync } from 'node:child_process';
-            import { mkdtempSync, rmSync, readdirSync, existsSync, writeFileSync } from 'node:fs';
-            import { join } from 'node:path';
-            // тека попереднього пробного запуску (він упав до rm -rf) - геть: лише наша, з list.txt і seg0.mp4
-            for (const d of readdirSync('/tmp')) { const p = join('/tmp', d);
-              if (d.startsWith('tmp.') && existsSync(join(p, 'list.txt')) && existsSync(join(p, 'seg0.mp4'))) { rmSync(p, { recursive: true, force: true }); console.log('прибрано теку попереднього запуску', p); } }
-            const D = mkdtempSync('/tmp/vfcheck-');
-            const ff = (args) => { const r = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args], { cwd: D });
-              return { ok: r.status === 0, n: r.stdout ? r.stdout.length : 0, err: String(r.stderr).trim().split('\n').slice(-1)[0] }; };
-            try {
-              ff(['-f', 'lavfi', '-i', 'testsrc2=s=1080x1920:r=30:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', 'v.mp4']);
-              writeFileSync(join(D, 's.ass'), '[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: W,DejaVu Sans,76,&H00FFFFFF,&H00FFFFFF,&H00141010,&H80000000,-1,0,0,0,100,100,0,0,1,6,2,2,70,70,560,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:02.00,W,,0,0,0,,Test\n');
-              const cases = [
-                ['frameAt рушія: -vf scale=270:-2 → mjpeg у pipe', ['-ss', '1', '-i', 'v.mp4', '-frames:v', '1', '-vf', 'scale=270:-2', '-f', 'image2pipe', '-vcodec', 'mjpeg', '-']],
-                ['-vf crop=1080:200:0:1160 → png', ['-ss', '1', '-i', 'v.mp4', '-frames:v', '1', '-vf', 'crop=1080:200:0:1160', 'a.png']],
-                ['-vf crop з іменами опцій → png', ['-ss', '1', '-i', 'v.mp4', '-frames:v', '1', '-vf', 'crop=w=1080:h=200:x=0:y=1160', 'b.png']],
-                ['-vf scale → png', ['-ss', '1', '-i', 'v.mp4', '-frames:v', '1', '-vf', 'scale=270:-2', 'c.png']],
-                ['-vf ass=… (рілс, класичний шлях)', ['-i', 'v.mp4', '-t', '1', '-vf', 'ass=' + join(D, 's.ass'), '-c:v', 'libx264', '-preset', 'ultrafast', 'r.mp4']],
-              ];
-              for (const [name, args] of cases) { const r = ff(args); console.log(name + ': ' + (r.ok ? 'так' + (r.n ? ' (' + r.n + ' байт)' : '') : 'НІ - ' + r.err)); }
-              const sh = spawnSync('sh', ['-c', 'ffmpeg -hide_banner -loglevel error -y -ss 1 -i v.mp4 -frames:v 1 -vf "crop=1080:200:0:1160" d.png'], { cwd: D });
-              console.log('те саме через sh (як у пробі): ' + (sh.status === 0 ? 'так' : 'НІ - ' + String(sh.stderr).trim().split('\n').slice(-1)[0]));
-            } finally { rmSync(D, { recursive: true, force: true }); }
-            process.exit(0);
-            EOF
-            )
-            docker compose exec -T app node --input-type=module -e "$VF" 2>&1 | tail -10
+            cd "$B/server"
             JS=$(cat <<'EOF'
             const { q } = await import('/app/dist/db.js');
-            const t = await q(`select (select count(*) from media_asset where kind='audio')::int as audio,
-                                      (select count(*) from job where kind='montage')::int as montage_jobs,
-                                      (select count(*) from app_secret where name like 'ELEVENLABS%')::int as eleven_keys`);
-            console.log('база:', JSON.stringify(t[0]));
+            const tg = await import('/app/dist/telegram.js');
+            const idOf = (t) => String(t || '').split(':')[0];
+            const okTok = (t) => /^\d{5,20}:[A-Za-z0-9_-]{30,}$/.test(String(t || ''));
+            const envTok = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
+            const adm = (await q("select value from app_secret where name='TELEGRAM_BOT_TOKEN'"))[0]?.value || '';
+            console.log('TELEGRAM_WEBHOOK_OFF=' + (process.env.TELEGRAM_WEBHOOK_OFF || '-') + ' · бот з .env: id ' + (idOf(envTok) || '-') + ' · з адмінки: ' + (adm ? 'id ' + idOf(adm) : 'не задано'));
+            for (const [n, t] of [['.env', envTok], ['адмінка', adm]]) {
+              if (!t) continue;
+              try {
+                const me = await tg.getMe(t);
+                const wi = await tg.getWebhookInfo(t);
+                console.log(n + ': @' + me.username + ' живий · вебхук → ' + (wi.url ? wi.url.replace(/\/api\/webhooks\/telegram\/.*/, '/api/webhooks/telegram/…') : '—'));
+              } catch (e) { console.log(n + ': Telegram не прийняв токен (' + String(e.message).slice(0, 90) + ')'); }
+            }
+            const rows = await q("select bot_token, (channel_chat_id is not null or group_chat_id is not null) as ch from telegram_config");
+            const by = {};
+            for (const r of rows) {
+              const t = r.bot_token || '';
+              const k = !t ? 'без токена' : !okTok(t) ? 'не токен (сміття)' : 'бот ' + idOf(t) + (t === envTok ? ' (токен = .env)' : t === adm ? ' (токен = адмінка)' : ' (інший токен)');
+              by[k] = (by[k] || 0) + 1;
+            }
+            console.log('рядки telegram_config (' + rows.length + '):', JSON.stringify(by));
+            const fs = (await q("select value from app_secret where name='TG_FORMER_SHARED'"))[0]?.value || '{}';
+            console.log('колишні спільні:', Object.keys(JSON.parse(fs)).join(', ') || '-');
+            console.log('tg_owner рядків:', (await q('select count(*)::int n from tg_owner'))[0].n);
             process.exit(0);
             EOF
             )
-            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -5
-            echo "--- журнал беті після рестарту (помилки й попередження) ---"
-            docker compose logs --since 15m app 2>&1 | grep -iE "error|warn|exception" | grep -v "DeprecationWarning" | tail -15
+            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -12
+            echo "--- журнал беті: бот (останні 2 доби) ---"
+            docker compose logs --since 48h app 2>&1 | grep -iE "tgbot" | tail -12
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
