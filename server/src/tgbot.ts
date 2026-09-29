@@ -15,7 +15,8 @@ import { isDiaryPending, appendDiaryText, attachDiaryMedia, attachMediaToEntry, 
 import { cabinetPostLink } from "./permalink.js";
 import * as cmp from "./tgcompose.js";
 import { looksLikeReadyPost } from "./textkind.js";
-import { legacyHosts, isOurHookUrl } from "./brand.js";
+import { legacyHosts, isOurHookUrl, foreignHookHost as foreignHost } from "./brand.js";
+import { setSecret } from "./secrets.js";
 import { getMt, startMt, montageMessage, montageCallback } from "./tgmontage.js";
 const postDeepLink = (postId: string) => cabinetPostLink(env.appBaseUrl, postId);
 
@@ -100,10 +101,72 @@ export async function formerBotName(token: string): Promise<string> {
 }
 
 // Токен бота кабінету: власний бот (введений у Налаштуваннях), якщо він є; інакше спільний. Колишній
-// спільний «власним» не вважається - інакше кабінет не зміг би перейти на нового бота.
+// спільний «власним» не вважається - інакше кабінет не зміг би перейти на нового бота. Не токен узагалі
+// (напр. «-» у полі власного бота) - теж не власний бот: таким нічого не надішлеш.
 export async function wsBotToken(workspaceId: string): Promise<string> {
   const r = await one<{ bot_token: string | null }>(`select bot_token from telegram_config where workspace_id=$1`, [workspaceId]);
-  return (r?.bot_token && !sharedLike(r.bot_token)) ? r.bot_token : env.telegram.botToken;
+  return (r?.bot_token && looksLikeBotToken(r.bot_token) && !sharedLike(r.bot_token)) ? r.bot_token : env.telegram.botToken;
+}
+
+/**
+ * Куди веде вебхук бота, якщо НЕ на цей сервіс (хост), інакше "". Бот, чий вебхук веде на інший живий
+ * сервіс (прод ↔ бета), там і працює: забрати його сюди - мовчки вимкнути його там.
+ */
+export async function foreignHookOf(token: string): Promise<string> {
+  const url = String((await tg.getWebhookInfo(token)).url || "");
+  return foreignHost(url, env.appBaseUrl, legacyHosts(env.appBaseUrl, process.env.LEGACY_HOSTS));
+}
+
+/**
+ * Спільного бота перевипустили в @BotFather (старий токен Telegram більше не визнає), а в .env лишився
+ * старий. Якщо живий токен ТОГО САМОГО бота вже вставили в кабінеті (полем «власний бот») - беремо його
+ * спільним: у бота рівно один живий токен, тож це той самий бот, наш. Пишемо в «Ключі провайдерів»
+ * (видно в адмінці), щоб рестарт не повертав мертвий токен із .env.
+ */
+async function adoptReissuedToken(): Promise<boolean> {
+  const dead = env.telegram.botToken, id = botIdOf(dead);
+  if (!/^\d+$/.test(id)) return false;
+  const rows = await q<{ bot_token: string }>(`select distinct bot_token from telegram_config where bot_token like $1 and bot_token <> $2`, [`${id}:%`, dead]);
+  for (const r of rows) {
+    if (!looksLikeBotToken(r.bot_token)) continue;
+    try {
+      const me = await tg.getMe(r.bot_token);
+      if (String(me.id) !== id) continue;
+      await setSecret("TELEGRAM_BOT_TOKEN", r.bot_token, "system");
+      await logEvent("warn", "tgbot", `спільний бот @${me.username || id}: токен із .env Telegram більше не визнає, а в кабінеті знайшовся живий токен того самого бота - він тепер спільний (Ключі провайдерів)`);
+      return true;
+    } catch { /* і цей токен не живий - шукаємо далі */ }
+  }
+  return false;
+}
+
+/**
+ * Рядки кабінетів, чиїм токеном уже нічого не зробиш, - на живого спільного бота (лише коли Telegram щойно
+ * визнав спільний токен):
+ *  - старий токен ТОГО САМОГО бота: у @BotFather випустили новий, а живий у бота завжди один;
+ *  - не токен узагалі (напр. «-» у полі власного бота);
+ *  - відкликаний токен бота з .env, коли спільного вже поставили в адмінці: кабінети, що підключались
+ *    через нього, інакше публікували б мертвим токеном («токен власного бота недійсний» - хоча свого
+ *    бота в них ніколи не було). Живий бот із .env - колишній спільний, його рядки не чіпаємо.
+ */
+async function normalizeBotRows(): Promise<void> {
+  const cur = env.telegram.botToken, id = botIdOf(cur);
+  if (!cur || !/^\d+$/.test(id)) return;
+  const fixed = await q<{ workspace_id: string }>(
+    `update telegram_config set bot_token=$1, updated_at=now()
+      where bot_token is not null and bot_token <> $1
+        and (split_part(bot_token, ':', 1) = $2 or bot_token !~ '^[0-9]{5,20}:[A-Za-z0-9_-]{30,}$')
+      returning workspace_id`, [cur, id]);
+  let dead: { workspace_id: string }[] = [];
+  const envTok = String(process.env.TELEGRAM_BOT_TOKEN ?? "").trim();
+  if (looksLikeBotToken(envTok) && botIdOf(envTok) !== id) {
+    try { await tg.getMe(envTok); }
+    catch (e: any) {
+      if (deadToken(e)) dead = await q<{ workspace_id: string }>(`update telegram_config set bot_token=$1, updated_at=now() where bot_token=$2 returning workspace_id`, [cur, envTok]);
+    }
+  }
+  const n = fixed.length + dead.length;
+  if (n) await logEvent("info", "tgbot", `кабінетів переведено на спільного бота @${BOT_USERNAME}: ${n} (мертвий токен - старий того ж бота, не токен або відкликаний бот із .env)`);
 }
 
 // Власний бот воркспейсу отримує СВІЙ вебхук → усі DM-фічі (щоденник, дайджест, ідеї) працюють
@@ -185,6 +248,9 @@ export async function refreshOwnBotWebhooks(): Promise<void> {
       verifiedBots.set(String(me.id), token);
       const info = await tg.getWebhookInfo(token);
       const want = ownHookUrl(me.id);
+      // поки ми питали Telegram, цей самий токен міг стати спільним (перевипущений бот, узятий з кабінету) -
+      // тоді його вебхук уже спільний, і переводити його на адресу власного бота не можна
+      if (token === env.telegram.botToken) continue;
       if (info.url && info.url !== want && isOurHookUrl(info.url, env.appBaseUrl, legacy)) {
         await tg.setWebhook(token, want, hookSecret(`bot:${me.id}`));
         await registerMenu(token);
@@ -197,20 +263,49 @@ export async function refreshOwnBotWebhooks(): Promise<void> {
   }
 }
 
-export async function initTelegramBot(): Promise<void> {
+// Чи вебхук спільного бота поставив САМЕ ЦЕЙ інстанс, і якщо ні - чому (для кабінету): "env" - бета не
+// чіпає бота з .env (той самий .env скопійовано з проду); "foreign" - вебхук бота веде на інший сервіс;
+// "dead" - Telegram не визнає токен.
+let sharedHookOk = false;
+let sharedOff: { why: "" | "env" | "foreign" | "dead"; host: string } = { why: "", host: "" };
+/** Спільний бот - той, що в .env (а не поставлений в адмінці саме тут). */
+const sharedFromEnv = (): boolean => env.telegram.botToken === String(process.env.TELEGRAM_BOT_TOKEN ?? "").trim();
+
+export async function initTelegramBot(opts: { force?: boolean } = {}): Promise<void> {
+  sharedHookOk = false; sharedOff = { why: "", host: "" };
   if (!env.telegram.botToken) { console.log("[tgbot] TELEGRAM_BOT_TOKEN не заданий - спільний бот вимкнено"); return; }
   try {
-    const me = await tg.getMe(env.telegram.botToken);
+    let me: { id: number; username?: string };
+    try { me = await tg.getMe(env.telegram.botToken); }
+    catch (e: any) {
+      // токен перевипустили в @BotFather: живий токен того самого бота міг уже лежати в кабінеті
+      if (!deadToken(e)) throw e;
+      if (!(await adoptReissuedToken().catch(() => false))) { sharedOff = { why: "dead", host: "" }; throw e; }
+      me = await tg.getMe(env.telegram.botToken);
+    }
     BOT_ID = me.id; if (me.username) BOT_USERNAME = me.username;
-    if (env.beta.telegramWebhookOff) {
-      // БЕТА зі спільним прод-токеном: webhook НЕ чіпаємо, інакше вкрадемо його в прода.
-      // Публікація в канали з бети працює (прямі API-виклики); DM-фічі бота обробляє прод.
-      console.log(`[tgbot] бот @${BOT_USERNAME} (id ${BOT_ID}); TELEGRAM_WEBHOOK_OFF=1 → webhook лишається за продом`);
-      return;
+    await normalizeBotRows().catch((e: any) => logEvent("warn", "tgbot", `рядки кабінетів із мертвим токеном: ${String(e.message).slice(0, 160)}`));
+    if (env.beta.telegramWebhookOff && !opts.force) {
+      // БЕТА: бота з .env не чіпаємо - той самий .env скопійовано з проду, і вебхук ми вкрали б у прода.
+      // Публікація в канали з бети працює (прямі API-виклики), а DM-фічі цього бота обробляє прод.
+      if (sharedFromEnv()) {
+        sharedOff = { why: "env", host: "" };
+        console.log(`[tgbot] бот @${BOT_USERNAME} (id ${BOT_ID}); TELEGRAM_WEBHOOK_OFF=1 → webhook лишається за продом`);
+        return;
+      }
+      // Бота поставили в адмінці ЦЬОГО інстансу - він тутешній. Але вебхук, що веде на інший сервіс, не
+      // забираємо: там бот живий, і ми мовчки вимкнули б його. Забрати свідомо - з адмінки («забрати»).
+      const away = await foreignHookOf(env.telegram.botToken);
+      if (away) {
+        sharedOff = { why: "foreign", host: away };
+        await logEvent("warn", "tgbot", `спільний бот @${BOT_USERNAME}: його вебхук веде на ${away} - не забираю (там бот працює)`);
+        return;
+      }
     }
     const secret = hookSecret(sharedHookKind());
     await tg.setWebhook(env.telegram.botToken, `${env.appBaseUrl}/api/webhooks/telegram/${secret}`, secret);
     await registerMenu(env.telegram.botToken);
+    sharedHookOk = true;
     console.log(`[tgbot] спільний бот @${BOT_USERNAME} (id ${BOT_ID}); webhook зареєстровано`);
   } catch (e: any) { console.error("[tgbot] init: " + e.message); }
 }
@@ -218,19 +313,24 @@ export async function initTelegramBot(): Promise<void> {
 /**
  * Спільного бота змінили з адмінки (новий токен уже в env). Попередній стає колишнім: публікує далі в
  * канали, де стоїть адміном (новий там не адмін), а його вебхук переходить на адресу власного бота.
- * Потім - новий бот: вебхук, команди й кнопка Mini App. Вертає @нік нового бота.
+ * Спершу новий бот (вебхук, команди, кнопка Mini App, рядки з мертвим токеном того ж бота), потім
+ * колишні - щоб кабінет, де лежав старий токен того самого бота, не зачепило як «власного».
+ * force - адмін свідомо забирає бота, чий вебхук веде на інший сервіс. Вертає @нік нового бота.
  */
-export async function switchSharedBot(prevToken: string): Promise<string> {
+export async function switchSharedBot(prevToken: string, force = false): Promise<string> {
   await rememberFormerShared(prevToken);
+  await initTelegramBot({ force });
   await refreshOwnBotWebhooks();
-  await initTelegramBot();
   return BOT_USERNAME;
 }
 
-// true, якщо СПІЛЬНИЙ бот на цьому інстансі реально приймає повідомлення. На беті webhook свідомо
-// лишається за продом (інакше бета вкрала б його), тож DM-фічі спільного бота тут мертві -
-// і про це треба казати, а не видавати посилання, яке нікуди не веде.
-export const sharedBotDmWorks = (): boolean => !!env.telegram.botToken && !env.beta.telegramWebhookOff;
+// true, якщо СПІЛЬНИЙ бот на цьому інстансі реально приймає повідомлення. На беті бота з .env свідомо
+// лишаємо за продом (інакше бета вкрала б його), тож там DM-фічі живі лише з ботом, якого поставили в
+// адмінці беті й чий вебхук цей інстанс справді поставив. Про мертві DM треба казати, а не видавати
+// посилання, яке нікуди не веде.
+export const sharedBotDmWorks = (): boolean => !!env.telegram.botToken && (!env.beta.telegramWebhookOff || sharedHookOk);
+/** Чому спільний бот тут не приймає повідомлень (для кабінету); why "" - приймає або невідомо. */
+export const sharedDmState = (): { why: "" | "env" | "foreign" | "dead"; host: string } => sharedBotDmWorks() ? { why: "", host: "" } : { ...sharedOff };
 
 // mode 'add' - «＋ Додати канал»: канал, чий пост перешлють боту, ДОДАЄТЬСЯ до бренду (основний лишається)
 export async function createConnectLink(workspaceId: string, userId?: string, mode: "main" | "add" = "main"): Promise<string> {
@@ -239,8 +339,13 @@ export async function createConnectLink(workspaceId: string, userId?: string, mo
   // Найкоштовніша частина цього фіксу: раніше кнопка мовчки видавала t.me-посилання, код якого
   // живе в БАЗІ ЦЬОГО інстансу, а сам /start прилітав на ІНШИЙ інстанс (вебхук у прода) - там
   // такого коду немає, тож бот відповідав загальним привітанням. Людина бачила «бот мене ігнорує».
-  if (token === env.telegram.botToken && !sharedBotDmWorks())
-    throw new Error("На цьому середовищі спільний бот не приймає повідомлень: його вебхук закріплений за основним сервісом (інакше бета вкрала б бота в прода). Підключи ВЛАСНОГО бота: @BotFather → /newbot → токен у «⚙️ Розширені налаштування» нижче. Тоді всі DM-фічі працюватимуть саме тут.");
+  if (token === env.telegram.botToken && !sharedBotDmWorks()) {
+    const st = sharedDmState();
+    throw new Error((st.why === "foreign" ? `Спільний бот @${BOT_USERNAME} зараз працює на ${st.host} (туди веде його вебхук), тож тут повідомлень не приймає.`
+      : st.why === "dead" ? `Telegram не визнає токен спільного бота @${BOT_USERNAME} (його перевипустили в @BotFather).`
+      : "На цьому середовищі спільний бот не приймає повідомлень: той самий бот працює на основному сервісі, і бета його не забирає.")
+      + " Адміністратор може дати цьому середовищу окремого спільного бота: Налаштування → Профіль → 🔑 Ключі провайдерів → 🤖 Telegram-бот. Або підключи ВЛАСНОГО бота бренду: @BotFather → /newbot → токен у «⚙️ Розширені налаштування» нижче.");
+  }
   // deep-link веде на бота, який реально обслуговує цей воркспейс (власний або спільний)
   let username = BOT_USERNAME;
   if (token !== env.telegram.botToken) { try { username = (await tg.getMe(token)).username || username; } catch { /* фолбек на спільного */ } }

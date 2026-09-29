@@ -201,7 +201,7 @@ const API = {
   "GET /sources/recent": [],
   "GET /sources/rss": { feeds: [] },
   "GET /lead-magnets": { magnets: [] },
-  "GET /integrations/telegram": { channelChatId: "-1001234567890", groupChatId: "", hasToken: true, sharedBot: true, sharedDm: false, channelTitle: "Мій канал", bot: "holos_rozum_bot", formerBot: "R_Socialio_bot",
+  "GET /integrations/telegram": { channelChatId: "-1001234567890", groupChatId: "", hasToken: true, sharedBot: true, sharedDm: false, sharedWhy: "env", sharedHost: "", usesShared: true, admin: true, channelTitle: "Мій канал", bot: "holos_rozum_bot", formerBot: "R_Socialio_bot",
     chats: [{ id: "-1001234567890", name: "Мій канал", main: true, kind: "channel", username: "mychan", posts: 0 }, { id: "-1002", name: "Канал компанії", main: false, kind: "extra", username: "", posts: 2 }] },
   "GET /integrations/threads": { connected: true, username: "brand" },
   "GET /integrations/meta": { connected: false },
@@ -258,7 +258,9 @@ const AI_JOB_RESULT = new Map();
 const KEYS = [
   { name: "OPENAI_API_KEY", label: "OpenAI", hint: "тексти й зображення", group: "text", set: true, source: "env", tail: "aB12" },
   { name: "KIE_API_KEY", label: "kie.ai", hint: "AI-відео для рілсів", group: "video", set: false, source: "none", tail: "" },
+  { name: "TELEGRAM_BOT_TOKEN", label: "Спільний Telegram-бот", hint: "один бот на всіх", group: "bot", set: true, source: "env", tail: "old1" },
 ];
+const botPuts = [];   // PUT /admin/keys/TELEGRAM_BOT_TOKEN: з force чи без
 const KIE_VIDEO = [
   { id: "bytedance/seedance-v1-lite-t2v", category: "video", description: "швидка text-to-video", credits: 20, usd: 0.1, unit: "per 5s video", provider: "bytedance" },
   { id: "google/veo3-fast", category: "video", description: "висока якість", credits: 80, usd: 0.4, unit: "per video", provider: "google" },
@@ -511,10 +513,15 @@ function handleApi(method, path, body) {
   if (key === "GET /admin/keys") return { keys: KEYS, kie: { ready: KEYS[1].set, credits: KEYS[1].set ? 1200 : null } };
   if (method === "PUT" && path.startsWith("/admin/keys/")) {
     const name = path.split("/")[3];
+    // спільний бот, чий вебхук веде на інший сервіс: перший раз - 409 з питанням, «забрати» - лише з force
+    if (name === "TELEGRAM_BOT_TOKEN") {
+      botPuts.push(body?.force === true ? "force" : "plain");
+      if (body?.force !== true) return { __status: 409, foreign: "holos.rozum.one", error: "Бот @R_Socialio_bot зараз працює на holos.rozum.one: туди веде його вебхук. Забрати його сюди все одно?" };
+    }
     const k = KEYS.find((x) => x.name === name);
     const v = String((body && body.value) || "");
     if (k && v) { k.set = true; k.source = "admin"; k.tail = v.slice(-4); }
-    return { ok: true };
+    return name === "TELEGRAM_BOT_TOKEN" ? { ok: true, bot: "R_Socialio_bot", dm: true, why: "" } : { ok: true };
   }
   // 🎙 Вибір розшифровки голосу. Whisper навмисно БЕЗ ключа - перевірка стежить, що недоступний
   // провайдер лишається видимим, але заблокованим (інакше незрозуміло, чому вибору немає).
@@ -1503,7 +1510,31 @@ const run = async () => {
   await check("tgSharedOff", async () => {
     const box = await page.$eval("#tgSharedOff", (el) => el.style.display + "|" + el.innerText).catch(() => "none|");
     const dis = await page.$eval("#tgConnectBot", (el) => el.disabled).catch(() => false);
-    return box.startsWith("block") && box.includes("не приймає повідомлень") && dis === true;
+    // адміну - головний шлях: окремий спільний бот цього середовища в «Ключах провайдерів», з кнопкою туди
+    return box.startsWith("block") && box.includes("не приймає повідомлень") && box.includes("Ключі провайдерів") && dis === true
+      && (await has("#tgOpenKeys"));
+  });
+
+  // Причина й порада залежать від того, ЧОМУ бот тут мовчить і ХТО дивиться; бренд із власним живим ботом
+  // від спільного не залежить - у нього кнопка підключення мусить працювати й на беті.
+  await check("tgBetaBot", async () => {
+    const orig = API["GET /integrations/telegram"];
+    const view = async (patch) => {
+      API["GET /integrations/telegram"] = { ...orig, ...patch };
+      await page.evaluate(async () => { await loadTelegram(); });
+      return page.evaluate(() => ({ shown: document.querySelector("#tgSharedOff").style.display === "block", text: document.querySelector("#tgSharedOff").innerText,
+        dis: document.querySelector("#tgConnectBot").disabled, keys: !!document.querySelector("#tgOpenKeys") }));
+    };
+    const foreign = await view({ sharedWhy: "foreign", sharedHost: "holos.rozum.one" });
+    const own = await view({ usesShared: false });
+    const user = await view({ admin: false });
+    API["GET /integrations/telegram"] = orig;
+    await page.evaluate(async () => { await loadTelegram(); });
+    const good = foreign.shown && foreign.text.includes("працює на holos.rozum.one") && foreign.text.includes("забрати") && foreign.keys
+      && !own.shown && own.dis === false
+      && user.shown && user.text.includes("Розширені налаштування") && !user.keys;
+    if (!good) console.log("    tgBetaBot:", JSON.stringify({ foreign, own, user }).slice(0, 600));
+    return good;
   });
 
   // Спільного бота змінили: канал підключено через попереднього. Кабінет мусить сказати, що старий
@@ -1648,6 +1679,23 @@ const run = async () => {
     }, SECRET);
     return before.includes("не заданий") && before.includes("з .env") &&
       !st.leaked && st.tail && st.cleared && st.credits;
+  });
+
+  // Спільний бот, чий вебхук веде на інший сервіс (прод ↔ бета): перший запис - 409 з питанням, і лише
+  // «так» шле force. Без питання адмін мовчки вимкнув би бота там, де він працює.
+  await check("botKeyForce", async () => {
+    botPuts.length = 0;
+    await page.evaluate(() => { window.__conf = ""; window.confirm = (m) => { window.__conf = m; return true; };
+      const c = [...document.querySelectorAll("#admKeys .card")].find((x) => x.getAttribute("data-key") === "TELEGRAM_BOT_TOKEN");
+      c.querySelector("input").value = "8859390932:AAtesttesttesttesttesttesttesttest1"; c.querySelector(".kSave").click(); });
+    await page.waitForFunction(() => {
+      const c = [...document.querySelectorAll("#admKeys .card")].find((x) => x.getAttribute("data-key") === "TELEGRAM_BOT_TOKEN");
+      return c && c.textContent.includes("з адмінки");
+    }, undefined, { timeout: 8000 }).catch(() => {});
+    const conf = await page.evaluate(() => window.__conf);
+    const good = botPuts.join(",") === "plain,force" && conf.includes("працює на holos.rozum.one");
+    if (!good) console.log("    botKeyForce:", JSON.stringify({ botPuts, conf }));
+    return good;
   });
 
   // 📈 Аналітика 2.0: екран малюється з того, що віддає СПРАВЖНІЙ модуль аналітики; фільтр,

@@ -62,7 +62,7 @@ import { contextReview, contextIssueCount, suggestFieldFix } from "./context-che
 import { generateImageForPost, imageProviders, imageCosts, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto, appendCroppedSlide } from "./images.js";
 import { secretStatuses, setSecret, clearSecret, refreshSecrets } from "./secrets.js";
 import { kieCatalog, kieCredits, kieReady } from "./kie.js";
-import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook, sharedBotDmWorks, hookSecret, sameSecret, ownBotToken, refreshOwnBotWebhooks, initHookBase, sharedHookKind, looksLikeBotToken, switchSharedBot, loadFormerShared, isFormerShared, formerBotName, sharedTokens, liveSharedTokens } from "./tgbot.js";
+import { initTelegramBot, createConnectLink, handleUpdate, botEnabled, botUsername, registerOwnBotWebhook, sharedBotDmWorks, sharedDmState, foreignHookOf, hookSecret, sameSecret, ownBotToken, refreshOwnBotWebhooks, initHookBase, sharedHookKind, looksLikeBotToken, switchSharedBot, loadFormerShared, isFormerShared, formerBotName, sharedTokens, liveSharedTokens } from "./tgbot.js";
 import { chat } from "./openrouter.js";
 import { threadsToken, threadsAccounts, saveThreadsLogin, setMainThreads, removeThreadsAccount, metaPages, saveMetaLogin, addMetaPage, setMainPage, removeMetaPage, accountChoices, postsUsingAccount, metaAccountForRow, threadsAccountForRow,
   mainAccountIds, telegramTargets, isAccNet, postAccounts } from "./accounts.js";
@@ -524,15 +524,23 @@ app.put("/api/admin/keys/:name", async (req: any, reply) => {
   const name = String(req.params.name), value = String(req.body?.value ?? "").trim();
   try {
     // спільний бот: спершу питаємо сам Telegram - хибний токен вимкнув би бота всім одразу
+    const force = req.body?.force === true;
     if (name === "TELEGRAM_BOT_TOKEN") {
       if (!looksLikeBotToken(value)) return reply.code(400).send({ error: "Це не схоже на токен бота - він виглядає як 123456789:AA… (@BotFather → /mybots → бот → API Token)" });
-      try { await tg.getMe(value); } catch { return reply.code(400).send({ error: "Telegram не прийняв цей токен - перевір, чи скопіювався повністю, або випусти новий у @BotFather" }); }
+      let me: { username?: string };
+      try { me = await tg.getMe(value); } catch { return reply.code(400).send({ error: "Telegram не прийняв цей токен - перевір, чи скопіювався повністю, або випусти новий у @BotFather" }); }
+      // бот, чий вебхук веде на інший сервіс (прод ↔ бета), там і працює: поставити його тут - вимкнути його
+      // там. Питаємо людину, а не мовчки забираємо; «забрати все одно» - force
+      if (!force) {
+        const away = await foreignHookOf(value).catch(() => "");
+        if (away) return reply.code(409).send({ foreign: away, error: `Бот @${me.username || "?"} зараз працює на ${away}: туди веде його вебхук. Якщо поставити його тут, там він перестане відповідати. Для цього середовища краще окремий бот (@BotFather → /newbot). Забрати його сюди все одно?` });
+      }
     }
     const prevBot = env.telegram.botToken; // попередній спільний бот стане «колишнім», а не зникне
     await setSecret(name, value, String(req.user.email));
     // у лог іде ЛИШЕ імʼя ключа - значення не пишемо нікуди
     await logEvent("info", "admin", `ключ ${name} оновлено з адмінки`);
-    if (name === "TELEGRAM_BOT_TOKEN") return { ok: true, bot: await switchSharedBot(prevBot) };
+    if (name === "TELEGRAM_BOT_TOKEN") { const bot = await switchSharedBot(prevBot, force); return { ok: true, bot, dm: sharedBotDmWorks(), why: sharedDmState().why }; }
     return { ok: true };
   } catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
@@ -543,7 +551,7 @@ app.delete("/api/admin/keys/:name", async (req: any, reply) => {
     const prevBot = env.telegram.botToken;
     await clearSecret(String(req.params.name));
     await logEvent("info", "admin", `ключ ${req.params.name} прибрано з адмінки (діє значення з .env, якщо є)`);
-    if (req.params.name === "TELEGRAM_BOT_TOKEN") return { ok: true, bot: await switchSharedBot(prevBot) };
+    if (req.params.name === "TELEGRAM_BOT_TOKEN") { const bot = await switchSharedBot(prevBot); return { ok: true, bot, dm: sharedBotDmWorks(), why: sharedDmState().why }; }
     return { ok: true };
   } catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
@@ -2293,8 +2301,15 @@ app.get("/api/integrations/telegram", async (req: any) => {
     groupTitle: c?.group_title ?? "",
     sharedBot: botEnabled(),
     bot: botUsername(),
-    // чи працюють DM-фічі спільного бота на ЦЬОМУ інстансі (на беті - ні, вебхук за продом)
+    // чи працюють DM-фічі спільного бота на ЦЬОМУ інстансі і, якщо ні, чому (env - бета не забирає бота
+    // з .env у прода; foreign - вебхук бота веде на інший сервіс; dead - Telegram не визнає токен)
     sharedDm: sharedBotDmWorks(),
+    sharedWhy: sharedDmState().why,
+    sharedHost: sharedDmState().host,
+    // бренд і справді ходить через спільного бота (а не свого власного, живого): лише тоді мертві DM
+    // спільного стосуються його - у бренді з власним ботом «Підключити наш бот» працює й на беті
+    usesShared: !c?.bot_token || !looksLikeBotToken(c.bot_token) || sharedTokens().includes(c.bot_token),
+    admin: env.adminEmails.includes(String(req.user.email).toLowerCase()),
     // канал підключено через попереднього спільного бота: він публікує далі, а в кабінеті - як перейти
     formerBot: c?.bot_token && isFormerShared(c.bot_token) ? await formerBotName(c.bot_token) : null,
     // 📣 усі канали й групи бренду: основні (канал, група) і додаткові - куди можна публікувати; posts -
@@ -2380,7 +2395,8 @@ app.post("/api/integrations/telegram/connect-link", async (req: any, reply) => {
   // імʼя бота - з самого посилання: воно веде в бота, що обслуговує кабінет (власний або спільний)
   // add: «＋ Додати канал» - переслана з каналу публікація ДОДАСТЬ його до бренду, а не замінить основний
   try { const link = await createConnectLink(req.user.workspace_id, req.user.id, req.body?.add === true ? "add" : "main"); return { link, bot: /t\.me\/([^?/]+)/.exec(link)?.[1] || botUsername() }; }
-  catch (e: any) { return reply.code(500).send({ error: e.message }); }
+  // очікувані стани (бот тут не приймає повідомлень, не налаштований) - людська відмова, а не збій сервера
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
 
 app.put("/api/integrations/telegram", async (req: any, reply) => {
@@ -4711,8 +4727,8 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then(async (addr) => {
   startComments();
   startEvergreen();     // ♻️ вічнозелена черга (працює лише в кабінетах, де її увімкнули)
   startMeetingPull();   // погодинна звірка з хмарою власного транскрибатора
-  initTelegramBot();
-  refreshOwnBotWebhooks().catch(() => {});
+  // спершу спільний бот (він міг узяти перевипущений токен того ж бота з кабінету), потім власні
+  initTelegramBot().finally(() => refreshOwnBotWebhooks().catch(() => {}));
   // одноразово полагодити залишкові iPhone HEIF -> JPEG (у фоні; ідемпотентно)
   convertAllHeif().then((n) => { if (n) app.log.info(`HEIF→JPEG конвертовано: ${n}`); }).catch((e: any) => app.log.error("convertAllHeif: " + e.message));
   // відео: «.quick» → «.mov» і тривалість/розмір кадру для завантажених раніше (у фоні; ідемпотентно)

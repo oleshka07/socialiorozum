@@ -3,7 +3,7 @@
 // редірект на ТІЙ САМІЙ адресі (нескінченне коло), або відправник листів, що лишився «socialio».
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BRAND, brandedFrom, legacyHosts, legacyRedirect, isOurHookUrl, hostOf } from "../dist/brand.js";
+import { BRAND, brandedFrom, legacyHosts, legacyRedirect, isOurHookUrl, hostOf, foreignHookHost } from "../dist/brand.js";
 
 const BASE = "https://holos.rozum.one";
 
@@ -66,4 +66,20 @@ test("isOurHookUrl: вебхук власного бота на цьому се�
     assert.equal(isOurHookUrl("https://socialio.rozum.one/api/webhooks/telegram/bot/1", betaBase, legacyHosts(betaBase)), false, betaBase);
   // прод після перемикання: вебхук на беті - чужий
   assert.equal(isOurHookUrl("https://beta.socialio.rozum.one/api/webhooks/telegram/bot/1", BASE, legacy), false);
+});
+
+test("foreignHookHost: бот, що живе на іншому сервісі (прод ↔ бета), - чужий; свій хост і стара адреса - ні", () => {
+  const BETA = "https://beta.holos.rozum.one", betaLegacy = legacyHosts(BETA), prodLegacy = legacyHosts(BASE);
+  // бета не забирає бота, чий вебхук на проді (новій чи старій адресі)
+  assert.equal(foreignHookHost("https://holos.rozum.one/api/webhooks/telegram/abc", BETA, betaLegacy), "holos.rozum.one");
+  assert.equal(foreignHookHost("https://socialio.rozum.one/api/webhooks/telegram/abc", BETA, betaLegacy), "socialio.rozum.one");
+  // і навпаки: прод не забирає бота беті
+  assert.equal(foreignHookHost("https://beta.holos.rozum.one/api/webhooks/telegram/bot/1", BASE, prodLegacy), "beta.holos.rozum.one");
+  // свій: вебхуку нема, власний бот на цьому ж сервісі, стара адреса цього ж сервісу, свій домен з іншим шляхом
+  assert.equal(foreignHookHost("", BETA, betaLegacy), "");
+  assert.equal(foreignHookHost("https://beta.holos.rozum.one/api/webhooks/telegram/bot/8859390932", BETA, betaLegacy), "");
+  assert.equal(foreignHookHost("https://beta.socialio.rozum.one/api/webhooks/telegram/x", BETA, betaLegacy), "");
+  assert.equal(foreignHookHost("https://HOLOS.rozum.one/old-project/hook", BASE, prodLegacy), "");
+  // зовсім чужий сервіс
+  assert.equal(foreignHookHost("https://example.org/tg", BASE, prodLegacy), "example.org");
 });

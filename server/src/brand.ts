@@ -72,3 +72,16 @@ export function isOurHookUrl(url: string, baseUrl: string, legacy: Set<string>):
   const h = hostOf(url);
   return !!h && legacy.has(h) && url.startsWith(`https://${h}${path}`);
 }
+
+/**
+ * На який ЧУЖИЙ сервіс веде вебхук бота (хост) - або "", якщо вебхука нема чи він на цьому сервісі
+ * (нова адреса, стара адреса, будь-який шлях). Забрати бота, чий вебхук веде на інший живий сервіс
+ * (прод ↔ бета), означало б мовчки вимкнути його там. Свій хост з іншим шляхом - не чужий: там нас
+ * ніхто інший не слухає (напр. давній проєкт на тому самому домені).
+ */
+export function foreignHookHost(url: string, baseUrl: string, legacy: Set<string>): string {
+  if (!url) return "";
+  const h = hostOf(url);
+  if (!h) return url.slice(0, 80);
+  return h === hostOf(baseUrl) || legacy.has(h) ? "" : h;
+}

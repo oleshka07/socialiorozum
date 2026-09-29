@@ -3528,7 +3528,7 @@ function renderTgChats(c){ const box=$('tgChatsBox'); if(!box) return; box.style
     +(t.posts?'<span class="sub">'+t.posts+' '+anPlural(t.posts,'пост чекає','пости чекають','постів чекають')+' на нього</span>':'')+'<span class="sp"></span>'
     +'<button class="ghost" data-tgrm="'+esc(t.id)+'" data-nm="'+esc(t.name)+'" data-n="'+(t.posts||0)+'">Прибрати</button></div>').join('')
     :'<div class="hint">Каналу ще нема - додай нижче.</div>';
-  const via=$('tgChatViaBot'); if(via) via.style.display=(c.sharedBot&&c.sharedDm!==false)?'':'none';
+  const via=$('tgChatViaBot'); if(via) via.style.display=(c.sharedBot&&(c.sharedDm!==false||c.usesShared===false))?'':'none';
   $('tgChats').querySelectorAll('[data-tgrm]').forEach(b=>b.onclick=async()=>{ const n=+b.dataset.n;
     if(!confirm('Прибрати «'+b.dataset.nm+'» з бренду? Бот перестане туди публікувати (уже опубліковане лишиться в каналі).'+(n?'\n\n'+n+' '+anPlural(n,'пост обрав','пости обрали','постів обрали')+' саме цей канал - туди вони не вийдуть, поки не обереш інший.':''))) return;
     b.disabled=true;
@@ -3547,11 +3547,26 @@ if($('tgChatViaBot')) $('tgChatViaBot').onclick=async()=>{ const m=$('tgChatMsg'
     m.style.color='var(--ink2)'; m.innerHTML='1) Відкрий <a href="'+esc(r.link)+'" target="_blank" rel="noopener"><b>@'+esc(r.bot)+'</b></a> → Start. 2) Додай бота адміном у новий канал. 3) Перешли боту будь-який пост цього каналу - він додасться до бренду, основний лишиться. Потім онови сторінку.';
     window.open(r.link,'_blank'); }
   catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
+// Чому спільний бот тут не приймає повідомлень і що робити. Адміну - головний шлях: дати цьому середовищу
+// ОКРЕМОГО спільного бота в «Ключах провайдерів» (бета не забирає бота з .env, бо той самий працює на
+// проді); решті - власний бот бренду.
+function renderTgSharedOff(c,off){ const box=$('tgSharedOff'); if(!box) return; box.style.display=off?'block':'none'; if(!off) return;
+  const bot=c.bot?'@'+esc(c.bot):'спільний бот';
+  const why=c.sharedWhy==='foreign'?'⚠️ '+bot+' зараз працює на <b>'+esc(c.sharedHost||'іншому сервісі')+'</b>: туди веде його вебхук, тож тут він повідомлень не приймає.'
+    :c.sharedWhy==='dead'?'⚠️ Telegram не визнає токен спільного бота '+bot+' - його перевипустили в @BotFather.'
+    :'⚠️ У цьому середовищі спільний бот '+bot+' <b>не приймає повідомлень</b>: той самий бот працює на основному сервісі, і бета його не забирає. Публікація в уже підключений канал працює, а підключення через бота й DM-фічі - ні.';
+  const fix=c.admin
+    ?'<div style="margin-top:6px;color:var(--ink2)">Як виправити: дай цьому середовищу окремого спільного бота - <b>Налаштування → Профіль → 🔑 Ключі провайдерів → 🤖 Telegram-бот</b>, токен бота, якого не використовує основний сервіс (@BotFather → /mybots → бот → API Token). Бета одразу візьме його собі для всіх брендів.'+(c.sharedWhy==='foreign'?' Щоб забрати саме цього бота, встав його токен там же й підтвердь «забрати».':'')+' <button class="ghost" id="tgOpenKeys" style="margin-left:4px">🔑 Відкрити ключі</button></div>'
+    :'<div style="margin-top:6px;color:var(--ink2)">Як виправити: свій бот бренду в «⚙️ Розширені налаштування» (@BotFather → /newbot → токен сюди) - він одразу візьме на себе всі DM-фічі саме тут. Або попроси адміністратора дати цьому середовищу окремого спільного бота.</div>';
+  box.innerHTML=why+fix;
+  const k=$('tgOpenKeys'); if(k) k.onclick=()=>{ selectView('settings','profile'); setTimeout(()=>{ const p=$('admKeysPanel'); if(p) p.scrollIntoView({behavior:'smooth',block:'start'}); },250); };
+}
 async function loadTelegram(){ try{ const c=await api('/integrations/telegram'); renderTgChats(c); $('tgChannel').value=c.channelChatId||''; $('tgGroup').value=c.groupChatId||''; if(c.hasToken) $('tgToken').placeholder='•••••••• (токен збережено - лиши порожнім, щоб не міняти)'; if($('tgSharedBox')) $('tgSharedBox').style.display=c.sharedBot?'block':'none';
   // спільний бот є, але його DM мертві на цьому інстансі (бета) - кажемо це ДО кліку, а кнопку
   // підключення глушимо: інакше вона видає посилання, яке нікуди не веде
-  const off=c.sharedBot&&c.sharedDm===false; if($('tgSharedOff')) $('tgSharedOff').style.display=off?'block':'none';
-  if($('tgConnectBot')){ $('tgConnectBot').disabled=!!off; $('tgConnectBot').title=off?'У цьому середовищі спільний бот не приймає повідомлень - підключи власного бота нижче':''; } if($('tgConnMsg')&&c.channelTitle) $('tgConnMsg').innerHTML='✅ підключено: <b>'+esc(c.channelTitle)+'</b>'
+  // (бренд із власним живим ботом від цього не залежить - у нього «Підключити наш бот» веде у свого бота)
+  const off=c.sharedBot&&c.usesShared!==false&&c.sharedDm===false; renderTgSharedOff(c,off);
+  if($('tgConnectBot')){ $('tgConnectBot').disabled=!!off; $('tgConnectBot').title=off?'У цьому середовищі спільний бот не приймає повідомлень - див. пояснення вище':''; } if($('tgConnMsg')&&c.channelTitle) $('tgConnMsg').innerHTML='✅ підключено: <b>'+esc(c.channelTitle)+'</b>'
     // канал підключав попередній спільний бот: він публікує далі, а тут - як перейти на нового
     +(c.formerBot?'<div class="hint">🔁 Канал підключено через попереднього бота <b>@'+esc(c.formerBot)+'</b> - він і далі публікує. Щоб перейти на <b>@'+esc(c.bot||'')+'</b>: натисни «Підключити наш бот», додай його адміном у канал і перешли йому будь-який пост.</div>':''); }catch(e){} }
 if($('tgConnectBot')) $('tgConnectBot').onclick=async()=>{ const m=$('tgConnMsg'); m.style.color='var(--muted)'; m.textContent='…'; try{ const r=await api('/integrations/telegram/connect-link',{method:'POST'}); const steps=$('tgBotSteps'); if(steps){ steps.style.display='block'; steps.innerHTML='1) Відкрий <a href="'+r.link+'" target="_blank"><b>@'+esc(r.bot)+'</b></a> → натисни <b>Start</b>.<br>2) Додай бота <b>адміном</b> у свій канал.<br>3) Перешли боту будь-який пост із каналу.<br>Потім онови цю сторінку - канал зʼявиться тут.'; } m.textContent=''; window.open(r.link,'_blank'); }catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; } };
@@ -4455,8 +4470,15 @@ async function loadAdminKeys(){
       c.querySelector('.kSave').onclick=async()=>{
         const v=inp.value.trim(); if(!v){ msg.style.color='var(--danger)'; msg.textContent='порожньо'; return; }
         msg.style.color='var(--muted)'; msg.textContent='…';
-        try{ const r=await api('/admin/keys/'+name,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:v})});
-          inp.value=''; if(r&&r.bot) flash('✅ Спільний бот тепер @'+r.bot); loadAdminKeys(); }
+        const put=(force)=>api('/admin/keys/'+name,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(force?{value:v,force:true}:{value:v})});
+        try{ let r;
+          try{ r=await put(false); }
+          catch(e){ // бот працює на іншому сервісі: забирати - лише свідомо
+            if(!(e.status===409&&e.body&&e.body.foreign)) throw e;
+            if(!confirm(e.message)){ msg.style.color='var(--muted)'; msg.textContent='не змінено'; return; }
+            r=await put(true); }
+          inp.value=''; if(r&&r.bot) flash('✅ Спільний бот тепер @'+r.bot+(r.dm===false?' · повідомлень тут він поки не приймає (див. Канали → Telegram)':''));
+          loadAdminKeys(); if(r&&r.bot) loadTelegram(); }
         catch(e){ msg.style.color='var(--danger)'; msg.textContent='⚠ '+e.message; }
       };
       const del=c.querySelector('.kDel');
