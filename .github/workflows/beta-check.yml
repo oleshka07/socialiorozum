@@ -1,50 +1,41 @@
 name: beta-check
 
-# Разова діагностика (запуск: push у гілку beta-check). Лише ЧИТАННЯ, нічого не змінює й не перезапускає.
-# 29.09: бета після 5a42944 (🔗 короткі посилання й сторінка в біо) - версія, здоров'я, таблиці, публічні адреси без PIN.
+# Службова гілка. Лише ЧИТАННЯ сервера (діагностика) або заливка файлів у медіатеку кабінету через
+# його ж разове посилання (/mcp/upload/…) - так само, як це робить людина скриптом зі свого компʼютера.
+# 29.09: фото й кадри сторіс Vary Servis з media-drop/ - раннер GitHub має інтернет, а контейнер сесії - ні.
+# Посилання приходить параметром запуску (workflow_dispatch), у git його нема; діє 45 хв і вміє лише ДОДАВАТИ файли.
 
 on:
   push:
     branches: [beta-check]
   workflow_dispatch:
+    inputs:
+      link:
+        description: "Разове посилання для заливки (https://…/mcp/upload/…)"
+        required: false
+        default: ""
 
 jobs:
-  check:
+  noop:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Beta after links deploy (read-only)
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.HETZNER_HOST }}
-          username: ${{ secrets.HETZNER_USER }}
-          key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 5m
-          script: |
-            B="${{ secrets.APP_DIR }}-beta"
-            echo "зараз $(date -u +%d.%m\ %H:%M) UTC · beta HEAD $(git -C "$B" rev-parse --short HEAD)"
-            echo "health: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/health)"
-            cd "$B/server" && echo "контейнер: $(docker compose ps app --format '{{.Status}}')"
-            echo "маркери: app.js loadLinks=$(docker compose exec -T app grep -c 'function loadLinks' /app/public/app.js) · app.html linksPanel=$(docker compose exec -T app grep -c linksPanel /app/public/app.html) · dist links=$(docker compose exec -T app ls /app/dist/links.js /app/dist/linkutil.js 2>/dev/null | wc -l)"
-            echo "--- публічні адреси через nginx, БЕЗ PIN (очікуємо 404 на невідоме, а не сторінку PIN) ---"
-            for u in /s/NoSuch12 /@nobody-here-1; do
-              code=$(curl -s -o /tmp/lk.html -w '%{http_code}' "https://beta.holos.rozum.one$u"); echo "$u → $code · $(grep -o 'Такого посилання нема\|Такої сторінки нема\|PIN' /tmp/lk.html | head -1)"
-            done
-            echo "/app без PIN → $(curl -s https://beta.holos.rozum.one/app | grep -c 'placeholder=\"PIN\"') (1 = сторінка PIN, як і було)"
-            echo "/api/links без PIN → $(curl -s -o /dev/null -w '%{http_code}' https://beta.holos.rozum.one/api/links) (401 = закрито)"
-            echo "стара адреса беті /s/NoSuch12 → $(curl -s -o /dev/null -w '%{http_code}' https://beta.socialio.rozum.one/s/NoSuch12) (404 = працює як була, без переадресації)"
-            echo "/privacy: $(curl -s https://beta.holos.rozum.one/privacy | grep -c 'Short links and bio page') рядок про короткі посилання"
-            JS=$(cat <<'EOF'
-            const { q } = await import('/app/dist/db.js');
-            const t = await q(`select (select count(*) from information_schema.tables where table_name in ('short_link','short_link_day','bio_page','bio_page_day'))::int as tabs,
-                                      (select count(*) from pg_indexes where indexname='uq_short_link_src')::int as uq,
-                                      (select count(*) from short_link)::int as links, (select count(*) from bio_page)::int as bios,
-                                      (select count(*) from settings_block where key='links')::int as settings`);
-            console.log('таблиці й дані:', JSON.stringify(t[0]));
-            const fk = await q(`select confdeltype from pg_constraint where conrelid='short_link'::regclass and contype='f' and confrelid='post'::regclass`);
-            console.log('short_link → post при видаленні:', fk.map((r) => r.confdeltype === 'c' ? 'cascade' : r.confdeltype).join(','));
-            process.exit(0);
-            EOF
-            )
-            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -20
-            echo "--- журнал беті після рестарту (помилки й попередження) ---"
-            docker compose logs --since 15m app 2>&1 | grep -iE "error|warn|exception" | grep -v "DeprecationWarning" | tail -15
+      - run: echo "push - нічого не робимо; заливка - запуском із параметром link"
+
+  drop:
+    if: github.event_name == 'workflow_dispatch' && inputs.link != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upload media-drop via one-time link
+        env:
+          LINK: ${{ inputs.link }}
+        run: |
+          echo "::add-mask::$LINK"
+          case "$LINK" in
+            https://*/mcp/upload/*) ;;
+            *) echo "не схоже на разове посилання заливки"; exit 1 ;;
+          esac
+          ls -la media-drop
+          curl -fsS "$LINK/sh" -o holos-upload.sh
+          sh holos-upload.sh media-drop
