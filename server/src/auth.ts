@@ -1,6 +1,6 @@
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { q, one } from "./db.js";
-import { DEFAULT_SETTINGS, DEFAULT_RUBRICS } from "./defaults.js";
+import { DEFAULT_SETTINGS, DEFAULT_RUBRICS, NEW_WORKSPACE_SETTINGS } from "./defaults.js";
 import { addMember } from "./workspaces.js";
 
 const SESSION_DAYS = 30;
@@ -27,7 +27,7 @@ export const newToken = () => randomBytes(32).toString("hex");
 // ---- workspace із дефолтними блоками (на кожного юзера свій) ----
 // засів дефолтних блоків і рубрик у workspace (новий або скинутий «з чистого листа»)
 export async function seedWorkspaceDefaults(wsId: string): Promise<void> {
-  for (const [key, content] of Object.entries(DEFAULT_SETTINGS)) {
+  for (const [key, content] of Object.entries({ ...DEFAULT_SETTINGS, ...NEW_WORKSPACE_SETTINGS })) {
     await q(
       `insert into settings_block(workspace_id, key, content) values($1,$2,$3)
        on conflict (workspace_id,key) do nothing`,

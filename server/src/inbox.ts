@@ -136,11 +136,17 @@ async function collectThreads(ws: string, done: Set<string>, out: Inbox): Promis
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where s.workspace_id=$1 and tp.status='sent' and tp.media_id is not null
        and tp.created_at > now() - make_interval(days => $2::int) order by tp.created_at desc limit $3`, [ws, WINDOW_DAYS, POSTS_PER_ACCOUNT * Math.max(1, accs.length)]);
+  // акаунти, чий токен ще без дозволу читати відповіді (увійшли до 01.10, коли його почали просити):
+  // їхні пости не смикаємо вдруге, а людині - хто саме має увійти ще раз
+  const lacking = new Map<string, string>();
   for (const p of posts) {
+    let who = "";
     try {
       // коментарі під постом бачить (і відповідає на них) лише акаунт, яким пост опубліковано
       const acc = await threadsAccountForRow(ws, p);
       if (!acc.ok) { if (!out.errors.includes(acc.error)) out.errors.push(acc.error); continue; }
+      who = acc.acc.userId;
+      if (lacking.has(who)) continue;
       for (const r of await threads.mediaReplies(acc.acc.token, p.media_id)) {
         if (!keepComment({ net: "threads", id: r.id, author: r.username, replyAuthors: [] }, own, done)) continue;
         out.items.push({ net: "threads", account: acc.acc.userId, accountName: acc.acc.username ? "@" + acc.acc.username : acc.acc.userId, commentId: r.id, username: r.username,
@@ -148,10 +154,20 @@ async function collectThreads(ws: string, done: Set<string>, out: Inbox): Promis
       }
     } catch (e: any) {
       const m = String(e?.message || e);
-      if (noPerm(m)) { if (!out.needs.some((n) => n.net === "threads")) out.needs.push({ net: "threads", perm: "threads", text: "Threads: щоб читати відповіді під постами, перепідключи Threads (Налаштування → Канали) - дозвіл діє після повторного входу" }); }
+      if (noPerm(m) && who) lacking.set(who, accs.find((a) => a.userId === who)?.username || "");
       else if (!out.errors.some((x) => x.startsWith("Threads"))) out.errors.push(`Threads: ${m.slice(0, 160)}`);
     }
   }
+  if (lacking.size) out.needs.push({ net: "threads", perm: "threads", text: threadsNeedText([...lacking.values()], accs.length) });
+}
+
+/** Хто з акаунтів Threads має увійти ще раз, щоб у токені зʼявився дозвіл читати відповіді. */
+export function threadsNeedText(names: string[], total: number): string {
+  const list = names.map((n) => (n ? "@" + n : "акаунт без ніка")).join(" і ");
+  const how = total > 1
+    ? " Основний - «Підключити», інший - «＋ Додати акаунт», щоразу увійшовши в Threads саме ним: доступ лише оновиться, пости й налаштування лишаються."
+    : " Доступ лише оновиться, пости й налаштування лишаються.";
+  return `Threads: щоб читати й відповідати на коментарі, увійди ще раз ${list} - Налаштування → Канали → Threads. Дозвіл на читання відповідей діє лише після повторного входу.${how}`;
 }
 
 /** Свіжі коментарі людей без відповіді, новіші першими. nets - лише ці мережі; fresh - не брати з памʼяті. */

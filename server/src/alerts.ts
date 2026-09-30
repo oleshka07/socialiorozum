@@ -312,6 +312,16 @@ export async function alertCallback(data: string, fromId: number): Promise<strin
 // ---------------- проби ----------------
 async function probeOpenRouter(): Promise<void> {
   if (!env.openrouter.apiKey) return;
+  // хто ходить через OpenRouter: головні моделі кабінетів і дешева модель, яким маршрут - OpenRouter.
+  // Нікому - баланс не стережемо взагалі (рішення Олега 30.09: не поповнювати, моделі - OpenAI напряму):
+  // інакше «закінчились кошти» нагадувало б щодня про рахунок, яким ніхто не користується.
+  const mm = await q<{ content: string }>(`select distinct content from settings_block where key='main_model'`).catch(() => []);
+  const routed = [...new Set([...mm.map((m) => String(m.content || "").trim()).filter(Boolean), env.cheapModel])].filter((m) => routeFor(m) === "openrouter");
+  if (!routed.length) {
+    const why = "Жодна модель кабінетів не йде через OpenRouter - баланс не стежимо.";
+    for (const fp of ["ai_funds:OpenRouter", "balance:OpenRouter", "ai_key:OpenRouter"]) await probeResolve(fp, why);
+    return;
+  }
   let rem: number | null = null;
   try {
     const r = await fetch(`${env.openrouter.baseUrl}/credits`, { headers: { Authorization: `Bearer ${env.openrouter.apiKey}` }, signal: AbortSignal.timeout(15000) });
@@ -322,16 +332,11 @@ async function probeOpenRouter(): Promise<void> {
     if (typeof d?.total_credits === "number" && typeof d?.total_usage === "number") rem = d.total_credits - d.total_usage;
   } catch { return; }
   if (rem === null) return;
-  // хто ходить через OpenRouter: головні моделі кабінетів і дешева модель, яким маршрут - OpenRouter.
-  // Без цього «лишилось $0» лякало б там, де ним не користуються (лише запасний маршрут і каталог)
-  const mm = await q<{ content: string }>(`select distinct content from settings_block where key='main_model'`).catch(() => []);
-  const routed = [...new Set([...mm.map((m) => String(m.content || "").trim()).filter(Boolean), env.cheapModel])].filter((m) => routeFor(m) === "openrouter");
-  const who = routed.length ? ` Через OpenRouter ідуть: ${routed.slice(0, 5).join(", ")}.` : " Жодна модель кабінетів зараз не йде через OpenRouter (він - запасний маршрут і каталог моделей).";
+  const who = ` Через OpenRouter ідуть: ${routed.slice(0, 5).join(", ")}.`;
   // запасний маршрут підхоплює виклики - сервіс працює, тож це попередження, а не пожежа
   const via = failoverVia();
-  const covered = routed.length && via ? ` Генерація не стоїть: виклики йдуть через ${via}.` : "";
-  const use = { n: routed.length };
-  if (rem < 0.05) await probeRaise("ai_funds:OpenRouter", "ai_funds", use?.n && !via ? "critical" : "warning", "OpenRouter: закінчились кошти", `На рахунку OpenRouter $${Math.max(0, rem).toFixed(2)}.${who}${covered}`, "OpenRouter");
+  const covered = via ? ` Генерація не стоїть: виклики йдуть через ${via}.` : "";
+  if (rem < 0.05) await probeRaise("ai_funds:OpenRouter", "ai_funds", !via ? "critical" : "warning", "OpenRouter: закінчились кошти", `На рахунку OpenRouter $${Math.max(0, rem).toFixed(2)}.${who}${covered}`, "OpenRouter");
   else if (rem < S.orLow) await probeRaise("balance:OpenRouter", "balance", "warning", `OpenRouter: лишилось $${rem.toFixed(2)}`, `Баланс нижче порогу $${S.orLow}.${who}`, "OpenRouter");
   else {
     await probeResolve("balance:OpenRouter", `Баланс OpenRouter $${rem.toFixed(2)}.`);

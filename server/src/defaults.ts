@@ -11,6 +11,13 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   voice_examples: "",
 };
 
+// Лише для НОВИХ кабінетів (і «Почати з чистого листа»): migrate.ts кладе DEFAULT_SETTINGS у найстаріший
+// кабінет, тож те, що має діяти тільки на нових, живе окремо - інакше давній кабінет раптом змінив би поведінку.
+// 🔗 короткі посилання з першого поста (рішення Олега 30.09): переходи видно одразу, вимикається в Інструментах.
+export const NEW_WORKSPACE_SETTINGS: Record<string, string> = {
+  links: JSON.stringify({ auto: true, utm: true }),
+};
+
 // Дефолтні рубрики (контент-мікс) для нового workspace.
 export const DEFAULT_RUBRICS = [
   { name: "Освітнє", emoji: "📚", description: "Гайди, поради, туторіали, галузеві знання", share: 35 },

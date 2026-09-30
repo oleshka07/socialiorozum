@@ -146,8 +146,9 @@ export async function composeCard(ws: string, postId: string, brand = ""): Promi
       text: `${ch[k] && ch[k].on ? "✅" : "⬜"} ${niceNet(k)}`, data: `cn:${postId}:${k}`,
     })));
   }
-  // 👥 у мережі кілька Сторінок / профілів / каналів - обрати, куди саме (той самий пост у кілька - можна)
-  const multi = chosen.filter((k) => isAccNet(k) && choices[k].length > 1);
+  // 👥 у мережі кілька Сторінок / профілів / каналів - обрати, куди саме (той самий пост у кілька - можна).
+  // Telegram - навіть з одним каналом: там же «＋ Додати канал» (без цього вибору в боті не видно взагалі)
+  const multi = chosen.filter((k) => isAccNet(k) && (choices[k].length > 1 || (k === "telegram" && choices[k].length > 0)));
   for (let i = 0; i < multi.length; i += 2)
     rows.push(multi.slice(i, i + 2).map((k) => ({ text: `👥 ${niceNet(k).split(" ")[1]}: ${shortPick(k, ch, choices)} ▸`, data: `cac:${postId}:${k}` })));
   if (brand) rows.push([{ text: `🏢 Бренд: ${brand.slice(0, 28)} ▸`, data: `cb:${postId}` }]);
@@ -197,11 +198,14 @@ export async function accountsCard(ws: string, postId: string, net: string): Pro
     const mark = done ? "✓" : ids.includes(id) ? "✅" : "⬜";
     rows.push([{ text: `${mark} ${a ? a.name : "⚠️ уже не в бренді"}${a?.main ? " (основн.)" : ""}${done ? " - вийшло" : ""}`.slice(0, 60), data: `cat:${postId}:${net}:${id.slice(-8)}` }]);
   }
+  // 📣 ще один канал чи група в бренд - прямо звідси (переслати пост каналу чи @назва)
+  if (net === "telegram") rows.push([{ text: "＋ Додати канал чи групу", data: `cad:${postId}` }]);
   rows.push([{ text: "‹ Назад", data: `cc:${postId}` }]);
   const what = net === "telegram" ? "канали й групи" : net === "facebook" ? "Сторінки" : net === "instagram" ? "акаунти Instagram" : "профілі Threads";
+  const tgNote = net === "telegram" ? (list.length > 1 ? "Типово пост іде в основні канал і групу." : "Зараз у бренді один канал - «＋ Додати» ще один, і тут з'явиться вибір.") : "";
   return { text: `👥 **${niceNet(net)}** - куди цей пост?
 
-Позначені - отримають пост (кожен окремою публікацією зі своєю статистикою). Можна кілька одразу. ${what === "Сторінки" ? "Instagram обирається окремо." : ""}`.trim() + (ids.length ? `
+Позначені - отримають пост (кожен окремою публікацією зі своєю статистикою). Можна кілька одразу. ${what === "Сторінки" ? "Instagram обирається окремо." : tgNote}`.trim() + (ids.length ? `
 
 Зараз: ${ids.map((id) => accName(list, id)).join(" + ")}` : ""), buttons: rows };
 }

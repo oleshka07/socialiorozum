@@ -378,7 +378,7 @@ async function attachChannel(fromId: number, chatId: number, title: string, toke
                  on conflict (workspace_id, chat_id) do update set title=excluded.title`, [row.workspace_id, id, title || null]);
       await q(`delete from tg_connect where workspace_id=$1`, [row.workspace_id]);
       await logEvent("info", "tgbot", `канал додано до бренду: ${title || chatId}`);
-      return `✅ Канал «${title || chatId}» додано до бренду. У композері під Telegram тепер можна обрати, у які канали піде пост.`;
+      return `✅ Канал «${title || chatId}» додано до бренду. Тепер у композері кабінету й у картці поста тут («👥 Telegram») можна обрати, у які канали піде пост.`;
     }
   }
   await q(`insert into telegram_config(workspace_id, bot_token, channel_chat_id, channel_title, updated_at)
@@ -1048,6 +1048,26 @@ async function composeCallback(ws: string, chatId: string, data: string, cbq: an
       const c = await cmp.accountsCard(ws, postId, arg);
       await tg.answerCallbackQuery(token, cbq.id);
       if (c) await liveSend(ws, chatId, "compose", c.text, c.buttons); else await openCompose(ws, chatId, postId, token);
+      return true;
+    }
+    case "cad": {
+      // 📣 «＋ Додати канал» з бота: код підключення в режимі «додати» для бренду, з яким зараз працює бот;
+      // далі людина пересилає пост каналу чи пише @назву - attachChannel знайде цей код і ДОДАСТЬ канал
+      const fromId = Number(cbq.from?.id);
+      const owner = await one<{ user_id: string | null }>(`select user_id from tg_owner where tg_user_id=$1`, [fromId]);
+      await q(`delete from tg_connect where workspace_id=$1`, [ws]);
+      await q(`insert into tg_connect(code, workspace_id, tg_user_id, created_by, mode) values($1,$2,$3,$4,'add')`, [randomBytes(8).toString("hex"), ws, fromId, owner?.user_id ?? null]);
+      await cmp.stopExpecting(ws); // інакше «@канал» пішов би текстом поста, якщо бот ще чекав текст
+      let me = BOT_USERNAME;
+      if (!sharedLike(token)) { try { me = (await tg.getMe(token)).username || me; } catch { /* лишається спільний */ } }
+      await tg.answerCallbackQuery(token, cbq.id);
+      const bl = await brandLabel(ws, chatId).catch(() => "");
+      await liveSend(ws, chatId, "compose", `📣 **Ще один канал чи група${bl ? ` у бренд «${bl}»` : " у бренд"}**
+
+1. Додай мене (@${me}) адміністратором у канал - з правом публікувати.
+2. Перешли сюди будь-який пост із цього каналу. Або надішли його @назву, якщо канал публічний.
+
+Основний канал лишається, новий стане ще одним - і в картці поста зʼявиться галочка для нього.`, [[{ text: "‹ Назад до поста", data: `cc:${postId}` }]]);
       return true;
     }
     case "cat": {

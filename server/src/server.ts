@@ -2563,12 +2563,14 @@ function oauthErrText(qs: any): string {
   return String(qs?.error_description ?? qs?.error_message ?? qs?.error_reason ?? qs?.error ?? "");
 }
 const THREADS_REDIRECT = `${env.appBaseUrl}/api/integrations/threads/callback`;
-// threads_manage_replies: читання коментарів під власними постами + відповіді на них (реплай-коуч);
-// у токен потрапляє після (пере)підключення акаунта.
+// threads_read_replies: читати відповіді (коментарі) людей під власними постами - «💬 Коменти» (без нього
+// GET /{media}/replies відмовляє; Олег додав його в «Access the Threads API» 30.09);
+// threads_manage_replies: відповідати на них (вікно коментарів, реплай-коуч). Нові дозволи потрапляють
+// у токен лише після повторного входу акаунта.
 // ⚠️ App Review застосунку Threads ще НЕ пройдено (24.09 тестер отримав дослівно «requires the
 // threads_basic permission... your user must be in the list of Threads testers»): поки підключитись
 // може лише людина зі списку Threads Testers, а причину кабінет тепер пояснює сам (oauthwhy.ts).
-const THREADS_SCOPES = ["threads_basic", "threads_content_publish", "threads_manage_insights", "threads_manage_replies"];
+const THREADS_SCOPES = ["threads_basic", "threads_content_publish", "threads_manage_insights", "threads_read_replies", "threads_manage_replies"];
 
 // 👥 Акаунтів Threads у бренді може бути кілька (accounts.ts): основний + додаткові. Без userId -
 // основний, як і раніше.

@@ -210,7 +210,7 @@ export async function followerDemographics(token: string, userId: string, breakd
     .sort((a: any, b: any) => b.value - a.value);
 }
 
-// коментарі (відповіді інших людей) під власним постом - потребує threads_manage_replies
+// коментарі (відповіді інших людей) під власним постом - потребує threads_read_replies (відповісти - threads_manage_replies)
 export type ThreadReply = { id: string; text: string; username: string; timestamp: string };
 export async function mediaReplies(token: string, mediaId: string): Promise<ThreadReply[]> {
   const u = new URL(`${GRAPH}/v1.0/${mediaId}/replies`);

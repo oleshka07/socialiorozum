@@ -33,7 +33,9 @@ the Threads API» усередині ROZUM Marketing Pulse; `1347525417441376` -
   для `instagram_manage_comments` переписано: застосунок тепер **читає** коментарі інших людей (раніше
   ми писали, що не читає, - це вже неправда), а для Facebook додано `pages_read_user_content`.
 - **Threads:** додався `threads_manage_replies` (реплай-коуч: відповіді на коментарі під твоїми
-  постами).
+  постами), а з 01.10 - `threads_read_replies` (читати ці коментарі: без нього Threads не віддає
+  відповіді людей під постами, і «💬 Коменти» порожні). Олег додав його в «Access the Threads API»
+  30.09; у токен він потрапляє після повторного входу акаунта Threads.
 - **Правила Meta (з їхньої документації):** окреме відео на кожен дозвіл (одне відео можна
   завантажити до кількох дозволів, якщо воно показує кожен із них); видно вхід через Facebook Login
   і що дозвіл дає користувачу; англійською або з англійськими підписами; висока роздільність, видно
@@ -122,7 +124,7 @@ the Threads API» усередині ROZUM Marketing Pulse; `1347525417441376` -
    Свіжий пост (молодший за 2 доби) позначено «🕐 набирає» - це нормально.
 
 ### Відео 4 - Threads (інший застосунок)
-Дозволи: `threads_basic`, `threads_content_publish`, `threads_manage_insights`, `threads_manage_replies`
+Дозволи: `threads_basic`, `threads_content_publish`, `threads_manage_insights`, `threads_read_replies`, `threads_manage_replies`
 1. Налаштування → «Канали» → **Threads** → «Відключити» → **«Підключити»** → «✓ Підключити цей» →
    вікно Threads, видно дозволи → підтвердити → «Підключено @акаунт» (`threads_basic`).
 2. Чернетка → «✍ Редагувати» → лише **Threads** → перший коментар (у Threads це відповідь автора під
@@ -131,8 +133,8 @@ the Threads API» усередині ROZUM Marketing Pulse; `1347525417441376` -
 3. «Аналітика» → фільтр **Threads** → перегляди, лайки, відповіді, репости по постах
    (`threads_manage_insights`).
 4. «Аналітика» → панель Threads → **«💬 Коменти»** → коментарі інших людей під твоїми постами з
-   чернеткою відповіді → поправити → **«↩ Відповісти»** → показати відповідь у Threads
-   (`threads_manage_replies`).
+   чернеткою відповіді (`threads_read_replies` - що коментарі видно) → поправити → **«↩ Відповісти»**
+   → показати відповідь у Threads (`threads_manage_replies`).
 
 Якщо Threads-акаунт тестера ще не в Threads Testers - спершу додай його (App roles → Roles → Threads
 Testers) і прийми запрошення в Threads: Налаштування → Акаунт → Дозволи вебсайтів → Запрошення.
@@ -165,7 +167,8 @@ Advanced - не чіпай.
 | `threads_basic` | The app authorizes the user's Threads account and reads their basic profile (username) to confirm which account is connected. |
 | `threads_content_publish` | The app publishes the user's own approved posts (text, photos or video) to their Threads account, now or at a scheduled time, and the user's own first reply under that post when the user wrote one. |
 | `threads_manage_insights` | The app reads insights of the user's own Threads posts (views, likes, replies, reposts, quotes) and follower counts to show post performance in the Analytics screen. |
-| `threads_manage_replies` | The app shows the replies other people left under the user's own recent Threads posts and lets the user answer them from the app: it suggests a draft, the user edits it and sends it as a reply from their account. |
+| `threads_read_replies` | The app reads the replies other people left under the user's own recent Threads posts and shows them in one "Comments" window, so the user sees what people ask without opening every post. |
+| `threads_manage_replies` | The app lets the user answer those replies from the app: it suggests a draft, the user edits it and sends it as a reply from their own account. |
 
 ## Інструкція для рецензента (поле Testing instructions, обидві заявки)
 
