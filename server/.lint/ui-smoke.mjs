@@ -388,6 +388,7 @@ const BT_ITEMS = [
 let btAuto = true;
 const btPuts = [];
 let cmNeeds = false;
+let cmNotify = true; const cmNotifyPuts = [];
 function cmInbox(path) {
   const qp = new URL(path, "http://x").searchParams;
   const items = CM_ITEMS.filter((x) => !cmDone.has(x.commentId) && !(cmNeeds && x.net === "facebook"));
@@ -524,6 +525,7 @@ function handleApi(method, path, body) {
   if (method === "GET" && path.startsWith("/best-times")) return { auto: btAuto, tz: "Europe/Kyiv", items: BT_ITEMS, mains: { threads: "thu", instagram: "ig1", facebook: "p1" } };
   if (method === "PUT" && path === "/settings/best_time_auto") { btAuto = String(body?.content) !== "0"; btPuts.push(String(body?.content)); return { ok: true }; }
   if (method === "POST" && path === "/schedule/auto") return { ok: true, count: 3, bestTime: btAuto ? { threads: ["19:30"] } : {} };
+  if (path === "/comments/notify") { if (method === "PUT") { cmNotify = body?.on !== false; cmNotifyPuts.push(cmNotify); } return { on: cmNotify, bot: true }; }
   if (method === "GET" && path.startsWith("/comments/inbox")) return cmInbox(path);
   if (method === "POST" && (path === "/comments/reply" || path === "/comments/skip")) {
     cmCalls.push({ path, body });
@@ -922,6 +924,45 @@ const run = async () => {
     if (!good) console.log("   ↳ commNeeds:", JSON.stringify(st));
     return good;
     } finally { cmNeeds = false; await page.evaluate(() => document.querySelectorAll(".modal").forEach((m) => { if (m.querySelector(".cmModal")) m.remove(); })); }
+  });
+
+  await check("topComments", async () => {
+    // 💬 N угорі (відгук Олега 30.09): видно з будь-якого розділу, клік - те саме вікно коментарів із галочкою
+    // «в Telegram-бот» (PUT /comments/notify); закриття вікна перечитує лічильник; нуль - кнопка ховається;
+    // на телефоні кнопка вміщається в шапку без горизонтального скролу
+    const keep = new Set(cmDone);
+    try {
+      await page.evaluate(() => { selectView("publish"); return loadTopComments(); });
+      await page.waitForFunction(() => { const b = document.getElementById("topComments"); return b && b.style.display !== "none" && document.getElementById("topCommN").textContent === "2"; }, undefined, { timeout: 6000 });
+      const title = await page.$eval("#topComments", (b) => b.title);
+      await page.evaluate(() => document.getElementById("topComments").click());
+      await page.waitForSelector(".cmModal .cmCard", { timeout: 8000 });
+      const cb0 = await page.evaluate(() => { const c = document.getElementById("cmBotOn"); return { on: !!(c && c.checked), hint: !!c && /Підключити наш бот/.test(c.closest("label").textContent), cards: document.querySelectorAll(".cmModal .cmCard").length }; });
+      await page.evaluate(() => { const c = document.getElementById("cmBotOn"); c.checked = false; c.dispatchEvent(new Event("change", { bubbles: true })); });
+      await page.waitForFunction(() => /У бот більше не надсилаю/.test(document.body.textContent), undefined, { timeout: 4000 });
+      CM_ITEMS.forEach((x) => cmDone.add(x.commentId));
+      // закриття має САМЕ перечитати лічильник: рахуємо виклики через глобальне імʼя (таймер старту кабінету
+      // кличе збережену функцію, тож його випадковий запуск у цю мить перевірку не підмінить)
+      await page.evaluate(() => { window.__ltc = 0; window.__ltcOrig = window.loadTopComments; window.loadTopComments = function () { window.__ltc++; return window.__ltcOrig.apply(this, arguments); }; });
+      await page.evaluate(() => document.getElementById("cmX").click());
+      await page.waitForFunction(() => document.getElementById("topComments").style.display === "none", undefined, { timeout: 6000 });
+      const gone = await page.evaluate(() => { const g = !document.querySelector(".cmModal") && window.__ltc >= 1; window.loadTopComments = window.__ltcOrig; return g; });
+      cmDone.clear(); keep.forEach((x) => cmDone.add(x));
+      await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(250);
+      await page.evaluate(() => loadTopComments());
+      await page.waitForFunction(() => document.getElementById("topComments").style.display !== "none", undefined, { timeout: 6000 });
+      const mob = await page.evaluate(() => { const r = document.getElementById("topComments").getBoundingClientRect(); return { right: Math.round(r.right), w: Math.round(r.width), sw: document.documentElement.scrollWidth, vis: r.width > 0 && r.height > 0 }; });
+      if (process.env.SMOKE_SHOTS) await page.screenshot({ path: join(HERE, "top-comments-mobile.png") });
+      const good = /Instagram: 1/.test(title) && /Threads: 1/.test(title) && cb0.on && !cb0.hint && cb0.cards === 2 && cmNotifyPuts.length === 1 && cmNotifyPuts[0] === false
+        && gone && mob.vis && mob.right <= 390 && mob.sw <= 390;
+      if (!good) console.log("   ↳ topComments:", JSON.stringify({ title, cb0, puts: cmNotifyPuts, gone, mob }));
+      return good;
+    } finally {
+      await page.evaluate(() => { if (window.__ltcOrig) window.loadTopComments = window.__ltcOrig; }).catch(() => {});
+      cmDone.clear(); keep.forEach((x) => cmDone.add(x)); cmNotify = true;
+      await page.setViewportSize({ width: 1400, height: 950 });
+      await page.evaluate(() => document.querySelectorAll(".modal").forEach((m) => { if (m.querySelector(".cmModal")) m.remove(); }));
+    }
   });
 
   await check("todayFails", async () =>

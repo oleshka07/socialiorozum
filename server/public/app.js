@@ -214,6 +214,9 @@ function applyRoute(){
   // Фільтри стрічки скидаємо НАВМИСНО: якщо активний фільтр за типом чи стрічкою, потрібний матеріал
   // просто не потрапив би в список, і лінк привів би у порожній екран.
   if(v==='material'&&parts[1]){ const mid=parts[1]; bootReady.then(()=>openMaterialDeep(mid)); return true; }
+  // 💬 з бота «🌐 Усі в кабінеті»: «Сьогодні» і одразу вікно коментарів
+  if(v==='comments'){ _routeSilent=true; try{ selectView('today'); } finally { _routeSilent=false; }
+    bootReady.then(()=>{ if(!document.querySelector('.cmModal')) openComments(); history.replaceState(null,'','#/today'); }); return true; }
   if(!ROUTE_VIEWS.includes(v)) return false;
   if(v!==curView) selectView(v,tab||undefined);
   else if(tab){ const r=ROUTE_TABS[v]; if(r&&r.keys.includes(tab)&&r.get()!==tab) r.set(tab); }
@@ -1776,10 +1779,10 @@ const CM_NET={instagram:['📸','Instagram','--ig'],facebook:['📘','Facebook',
 function cmAgo(ts){ const t=Date.parse(ts); if(!isFinite(t)) return ''; const m=Math.round((Date.now()-t)/60000);
   return m<60?Math.max(1,m)+' хв тому':m<1440?Math.round(m/60)+' год тому':Math.round(m/1440)+' дн. тому'; }
 async function openComments(btn,onlyNet){ const b=btn||null; if(b) b.disabled=true; aiBusy('💬 Збираю коментарі і пишу чернетки відповідей…');
-  let r; try{ r=await api('/comments/inbox'); }catch(e){ flash('⚠ '+e.message); if(b) b.disabled=false; aiDone(); return; }
+  let r, nt={on:true,bot:false}; try{ [r,nt]=await Promise.all([api('/comments/inbox'),api('/comments/notify').catch(()=>({on:true,bot:false}))]); }catch(e){ flash('⚠ '+e.message); if(b) b.disabled=false; aiDone(); return; }
   if(b) b.disabled=false; aiDone();
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
-  function close(){ ov.remove(); }
+  function close(){ ov.remove(); loadTopComments(); }
   let items=r.items||[], filt=onlyNet&&CM_NET[onlyNet]?onlyNet:'all'; const done=new Set(), typed={};
   // лічильники - з сервера (там усі коментарі, а в списку - 30 найновіших) мінус оброблені в цьому вікні
   const counts=()=>{ const c={all:0}, rc=r.counts||{}; Object.keys(CM_NET).forEach(n=>{ c[n]=rc[n]||0; c.all+=c[n]; });
@@ -1804,8 +1807,10 @@ async function openComments(btn,onlyNet){ const b=btn||null; if(b) b.disabled=tr
     ov.innerHTML='<div class="modal-card cmModal">'
       +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:16px">💬 Коментарі під твоїми постами</b><button class="icon" id="cmRefresh" title="Перечитати з мереж" style="margin-left:auto">↻</button><button class="icon" id="cmX">✕</button></div>'
       +'<div class="hint" style="margin-bottom:10px">Відповідь автора повертає людину під пост і розганяє його. Чернетку можна правити перед відправкою; відповідає той акаунт, під чиїм постом коментар.</div>'
+      +'<label class="cmBot"><input type="checkbox" id="cmBotOn"'+(nt.on?' checked':'')+'> 🔔 Нові коментарі - в Telegram-бот, з чернеткою: відповідати просто з чату'+(nt.bot?'':' <span class="hint">(спершу «Підключити наш бот» у Каналах)</span>')+'</label>'
       +chips+needs+cards+empty+more+((r.errors||[]).length?'<div class="hint" style="margin-top:8px;color:var(--amber)">Не прочиталось: '+esc(r.errors.join('; '))+'</div>':'')+'</div>';
     ov.querySelector('#cmX').onclick=close;
+    const cbx=ov.querySelector('#cmBotOn'); if(cbx) cbx.onchange=async()=>{ try{ const rr=await api('/comments/notify',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({on:cbx.checked})}); nt.on=rr.on; flash(rr.on?'🔔 Нові коментарі надсилатиму в бот':'🔕 У бот більше не надсилаю'); }catch(e){ flash('⚠ '+e.message); cbx.checked=!cbx.checked; } };
     ov.querySelector('#cmRefresh').onclick=async()=>{ aiBusy('💬 Перечитую коментарі…'); try{ r=await api('/comments/inbox?fresh=1'); items=(r.items||[]).map(it=>{ const k=it.net+':'+it.commentId; return typed[k]!=null?{...it,draft:typed[k]}:it; }); done.clear(); render(); }catch(e){ flash('⚠ '+e.message); } finally{ aiDone(); } };
     ov.querySelectorAll('[data-cmf]').forEach(x=>x.onclick=()=>{ filt=x.dataset.cmf; render(); });
     ov.querySelectorAll('[data-cmperm]').forEach(x=>x.onclick=()=>connectPopup('/api/integrations/meta/connect?add='+x.dataset.cmperm));
@@ -1824,12 +1829,25 @@ async function openComments(btn,onlyNet){ const b=btn||null; if(b) b.disabled=tr
         catch(e){ m.style.color='var(--danger)'; m.textContent='⚠ '+e.message; kb.disabled=false; } }; }); }
   // лічильники у фільтрах - без перемальовування карток (щоб не губити набраний текст)
   function refreshCounts(){ const c=counts(); ov.querySelectorAll('[data-cmf]').forEach(x=>{ const bb=x.querySelector('b'); if(bb) bb.textContent=String(c[x.dataset.cmf]||0); });
-    const el=$('tdComm'); if(el) el.textContent=String(c.all||0); }
+    const el=$('tdComm'); if(el) el.textContent=String(c.all||0);
+    const tn=$('topCommN'), tb=$('topComments'); if(tn&&tb){ tn.textContent=String(c.all||0); tb.style.display=c.all?'':'none'; } }
   document.body.appendChild(ov);
   ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
   render(); }
 // давня назва (панель Threads в Аналітиці) - те саме вікно, одразу з фільтром Threads
 function openThreadsComments(btn){ return openComments(btn,'threads'); }
+// 💬 N угорі - коментарі без відповіді видно з будь-якого розділу (відгук Олега 30.09). Лічильник
+// дешевий (без моделі) і з 3-хв памʼяті сервера; раз на 10 хв і після закриття вікна - перечитати.
+let _topCommT=0;
+async function loadTopComments(){ const b=$('topComments'); if(!b) return;
+  try{ const r=await api('/comments/inbox?countOnly=1'); const n=+r.count||0;
+    if(!(r.connected||[]).length||!n){ b.style.display='none'; return; }
+    $('topCommN').textContent=String(n); b.style.display='';
+    const per=Object.entries(r.counts||{}).filter(x=>x[1]).map(x=>(CM_NET[x[0]]?CM_NET[x[0]][1]:x[0])+': '+x[1]).join(', ');
+    b.title='Коментарі людей без відповіді'+(per?' - '+per:'')+'. Натисни, щоб відповісти.'; }
+  catch(e){ b.style.display='none'; }
+  clearTimeout(_topCommT); _topCommT=setTimeout(loadTopComments,10*60*1000); }
+if($('topComments')) $('topComments').onclick=()=>openComments($('topComments'));
 // 🔍 розбір ніші: формули з хітів топ-авторів → правила голосу + ідеї в Банк
 if($('thNiche')) $('thNiche').onclick=async()=>{ const b=$('thNiche'); b.disabled=true; aiBusy('🔍 Аналізую хіти твоєї ніші в Threads…');
   try{ const r=await api('/threads/niche-review',{method:'POST'});
@@ -4583,7 +4601,7 @@ async function loadAdminSpend(){
 // ---------- Ключі провайдерів (адмін) ----------
 // Значення сюди НЕ приходить - лише «стоїть/не стоїть», джерело і хвіст із 4 символів.
 // Тому поле завжди порожнє: воно для ВВЕДЕННЯ нового ключа, а не для редагування наявного.
-const KEYGRP={text:'📝 Тексти',image:'🖼 Зображення',video:'🎬 Відео та озвучка',bot:'🤖 Telegram-бот',other:'Інше'};
+const KEYGRP={text:'📝 Тексти',image:'🖼 Зображення',video:'🎬 Відео та озвучка',bot:'🤖 Telegram-бот',social:'🌐 Застосунки мереж (TikTok, LinkedIn)',other:'Інше'};
 async function loadAdminKeys(){
   const box=$('admKeys'); if(!box) return;
   box.innerHTML='<div class="empty">…</div>';
@@ -5057,6 +5075,7 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
   await loadChanStatus();
   try{ await Promise.all([_matsP,_rubP]); }catch(_){ }
   _bootDone();
+  setTimeout(loadTopComments,2500); // 💬 N угорі - не заважає першому малюванню (живі виклики мереж)
   let _onb=true; try{ const st=await api('/settings'); if(!st.some(r=>r.key==='onboarded')){ _onb=false; showOnboarding(); } }catch(e){}
   // 🦉 сова-провідник (лише після онбордингу; не заважає першому налаштуванню)
   if(_onb){ try{ owlInit(); setTimeout(loadGuide,1500); }catch(e){} }

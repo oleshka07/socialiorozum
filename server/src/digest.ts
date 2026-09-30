@@ -10,6 +10,7 @@ import { networkBenchmarks } from "./metrics.js";
 import { weekDiary } from "./diary.js";
 import * as threads from "./threads.js";
 import { threadsAccountForRow } from "./accounts.js";
+import { pendingCount } from "./tgcomments.js";
 
 // «Мультиплікатор ← аналітика»: чи вистрілив хтось із нещодавніх Threads-постів (перегляди ≥1.5× середнього решти).
 // MVP на Threads (там insights найдоступніші); IG/FB додамо, коли буде збір метрик у БД.
@@ -76,6 +77,9 @@ async function sendDigest(ws: string, chatId: string, localDate: string): Promis
   if (nextSlot?.theme) lines.push(`✍️ Найближча тема: «${nextSlot.theme.slice(0, 90)}»`);
   if (ideasCount?.n) lines.push(`💡 У Банку ${ideasCount.n} ідей — зроби пост у 1 тап.`);
   if (!(anyPlan?.n)) lines.push("📭 Контент-плану ще нема — сформуймо кістяк на 2 тижні.");
+  // 💬 коментарі людей без відповіді (Instagram, Facebook, Threads) - відповісти просто з чату
+  const comments = await pendingCount(ws);
+  if (comments) lines.push(`💬 Коментарів без відповіді: ${comments} - відповісти можна тут, у 2 дотики.`);
   // 🔥 пост вистрілив → пропонуємо «Продовження» одразу, поки аудиторія тепла
   let breakout: { postId: string; views: number; title: string } | null = null;
   try { breakout = await findBreakout(ws); } catch { /* аналітика не критична */ }
@@ -136,6 +140,7 @@ async function sendDigest(ws: string, chatId: string, localDate: string): Promis
   }
   if (thConnected && !thToday) buttons.push([{ text: "🧵 3 тейки зараз (урятувати день)", data: "takes_gen" }]);
   if (nextSlot?.id) buttons.push([{ text: "✍️ Зробити пост зараз", data: `slot_post:${nextSlot.id}` }]); // 1 тап: тема слота → чернетка в DM
+  if (comments) buttons.push([{ text: `💬 Відповісти на коментарі (${comments})`, data: `cm:l:${ws.slice(0, 8)}` }]);
   if (ideasCount?.n) buttons.push([{ text: "💡 Показати ідеї", data: "idea_list" }]);
   if (!(anyPlan?.n)) buttons.push([{ text: "⚡ Сформувати план", data: "plan_gen" }]);
   buttons.push([{ text: "🌐 Відкрити застосунок", url: env.appBaseUrl + "/app" }]);

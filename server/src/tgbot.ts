@@ -18,6 +18,7 @@ import { looksLikeReadyPost } from "./textkind.js";
 import { legacyHosts, isOurHookUrl, foreignHookHost as foreignHost } from "./brand.js";
 import { setSecret } from "./secrets.js";
 import { getMt, startMt, montageMessage, montageCallback, moveMtSession } from "./tgmontage.js";
+import { commentCallback, commentText, showComments } from "./tgcomments.js";
 import { botBrands, pickBrand, setBotBrand, homeIfLost, brandOfCallback, brandLabel, moveDraft, type BotBrands } from "./tgbrand.js";
 const postDeepLink = (postId: string) => cabinetPostLink(env.appBaseUrl, postId);
 
@@ -552,7 +553,7 @@ async function sendIdeaList(workspaceId: string, chatId: string): Promise<void> 
 // TG_MENU: підказки в ☰; кнопка ліворуч від поля вводу відкриває Mini App; постійна клавіатура
 // дублює найчастіші дії текстом (натиснув - Telegram надіслав саме цей рядок, ми його роутимо).
 const MINIAPP_URL = `${env.appBaseUrl}/tgapp`;
-const KB_NEW = "✍️ Новий пост", KB_APP = "🚀 Кабінет", KB_IDEAS = "💡 Ідеї", KB_DIARY = "📔 Щоденник", KB_PLAN = "📅 План", KB_DIGEST = "☀️ Зведення", KB_MONTAGE = "🎬 Монтаж";
+const KB_NEW = "✍️ Новий пост", KB_APP = "🚀 Кабінет", KB_IDEAS = "💡 Ідеї", KB_DIARY = "📔 Щоденник", KB_PLAN = "📅 План", KB_DIGEST = "☀️ Зведення", KB_MONTAGE = "🎬 Монтаж", KB_COMMENTS = "💬 Коменти";
 // 🏢 кнопка бренду - з назвою поточного: видно просто над полем вводу, куди зараз ідуть пости
 const KB_BRAND = "🏢 ";
 async function registerMenu(token: string): Promise<void> {
@@ -564,12 +565,13 @@ async function registerMenu(token: string): Promise<void> {
     { command: "diary", description: "Записати в щоденник" },
     { command: "digest", description: "Зведення дня" },
     { command: "drafts", description: "Чернетки: відкрити, дописати, перенести в інший бренд" },
+    { command: "comments", description: "Коментарі людей без відповіді: відповісти просто звідси" },
     { command: "brand", description: "Обрати бренд (якщо їх кілька)" },
   ]);
   await tg.setChatMenuButton(token, MINIAPP_URL, "Кабінет");
 }
 const mainKeyboard = (brand = ""): tg.TgKbButton[][] => [
-  [{ text: KB_NEW }, { text: KB_MONTAGE }, { text: KB_APP, web_app: { url: MINIAPP_URL } }],
+  [{ text: KB_NEW }, { text: KB_COMMENTS }, { text: KB_MONTAGE }, { text: KB_APP, web_app: { url: MINIAPP_URL } }],
   [{ text: KB_PLAN }, { text: KB_IDEAS }, { text: KB_DIARY }, { text: KB_DIGEST }],
   ...(brand ? [[{ text: KB_BRAND + brand.slice(0, 30) }]] : []),
 ];
@@ -753,9 +755,11 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
     }
 
     // кнопки постійної клавіатури приходять звичайним текстом - зводимо їх до тих самих дій
-    if (text === KB_NEW || text === KB_IDEAS || text === KB_DIARY || text === KB_PLAN || text === KB_DIGEST || text === KB_MONTAGE) {
+    if (text === KB_NEW || text === KB_IDEAS || text === KB_DIARY || text === KB_PLAN || text === KB_DIGEST || text === KB_MONTAGE || text === KB_COMMENTS || text.toLowerCase().startsWith("/comments")) {
       const ws = await ownerWorkspace(fromId, token);
       if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos."); return; }
+      // 💬 коментарі людей без відповіді - картка з чернеткою (поточний бренд, а коли там порожньо - інший)
+      if (text === KB_COMMENTS || text.toLowerCase().startsWith("/comments")) { await showComments(fromId, chatId, ws); return; }
       if (text === KB_MONTAGE) { await startMt(ws, chatId); return; }
       if (text === KB_IDEAS) { await sendIdeaList(ws, chatId); return; }
       if (text === KB_DIARY) { await sendDiaryNow(ws, chatId); return; }
@@ -830,6 +834,9 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
       await sendDiaryNow(ws, chatId);
       return;
     }
+
+    // 💬 «✍ Свій текст» під коментарем: наступне повідомлення - відповідь людині під постом
+    if (text && await commentText(fromId, chatId, text)) return;
 
     // 📝 якщо композер чекає на конкретну відповідь (текст/фото/дату) - вона має пріоритет над
     // щоденником і банком ідей: людина щойно натиснула кнопку й відповідає саме на неї
@@ -1130,6 +1137,12 @@ async function handleCallback(cbq: any, tokenOverride?: string): Promise<void> {
   if (data.startsWith("al:")) {
     const { alertCallback } = await import("./alerts.js");
     await tg.answerCallbackQuery(token, cbq.id, (await alertCallback(data, Number(fromId)).catch(() => "")) || undefined);
+    return;
+  }
+  // 💬 коментарі людей: кнопки картки (рядок сповіщення каже, чий він і в якому бренді)
+  if (data.startsWith("cm:")) {
+    try { await commentCallback(data, cbq, token); }
+    catch (e: any) { await tg.answerCallbackQuery(token, cbq.id, ("⚠️ " + String(e?.message || e)).slice(0, 180)).catch(() => {}); }
     return;
   }
   // 🏢 вибір бренду з /brand

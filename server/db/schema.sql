@@ -1122,3 +1122,16 @@ create table if not exists app_setting (
   updated_at timestamptz not null default now()
 );
 
+-- 💬 Коментарі людей у боті (tgcomments.ts): які коментарі вже показали кожній людині (щоб не слати вдруге)
+-- і що з ними сталося. Номер рядка їде в кнопці бота: id коментаря Facebook у 64 байти callback_data не влазить.
+create table if not exists comment_notice (
+  id           bigserial primary key,
+  workspace_id uuid not null references workspace(id) on delete cascade,
+  tg_user_id   bigint not null,
+  network      text not null,                -- instagram | facebook | threads
+  comment_id   text not null,
+  status       text not null default 'new',  -- new | shown | replied | skipped | gone
+  created_at   timestamptz not null default now(),
+  unique (workspace_id, tg_user_id, network, comment_id)
+);
+create index if not exists idx_comment_notice_user on comment_notice(tg_user_id);

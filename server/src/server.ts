@@ -47,6 +47,7 @@ import * as gdrive from "./gdrive.js";
 import { publishPostToChannels, alreadySentNetworks, startReelPublishJob, reelSentNetworks, closeSlotsIfDone, enabledNets, beginShutdown, publishesInFlight, unschedulePost, isPublishingNow } from "./publisher.js";
 import { startLifecycleWorker } from "./lifecycle.js";
 import { startDigest } from "./digest.js";
+import { startCommentNotify, notifyOn, setNotify } from "./tgcomments.js";
 import { startAlerts, alertsView, saveAlertSettings, sendTestAlert, sendDigest, resolveAlert, runProbes, probeBuddy } from "./alerts.js";
 import { botBrands, setBotBrand } from "./tgbrand.js";
 import { moveMtSession } from "./tgmontage.js";
@@ -1484,6 +1485,16 @@ app.post("/api/comments/reply", async (req: any, reply) => {
     await logEvent("warn", "inbox", `${net}: відповідь на коментар не вийшла: ${e.message}`, null, req.user.id);
     return reply.code(400).send({ error: e.message + (net === "threads" && /permission|not authorized|OAuth/i.test(e.message) ? " (перепідключи Threads - нові дозволи діють після повторного підключення)" : "") });
   }
+});
+// 🔔 нові коментарі - в бот (tgcomments.ts): чи ввімкнено для бренду і чи є кому надсилати
+app.get("/api/comments/notify", async (req: any) => {
+  const ws = req.user.workspace_id;
+  const bot = await one<{ n: number }>(`select count(*)::int n from tg_owner o where o.workspace_id=$1 or o.user_id in (select user_id from workspace_member where workspace_id=$1)`, [ws]);
+  return { on: await notifyOn(ws), bot: (bot?.n || 0) > 0 };
+});
+app.put("/api/comments/notify", async (req: any) => {
+  await setNotify(req.user.workspace_id, req.body?.on !== false);
+  return { ok: true, on: await notifyOn(req.user.workspace_id) };
 });
 app.post("/api/comments/skip", async (req: any, reply) => {
   const net = String(req.body?.net || "");
@@ -4831,6 +4842,7 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then(async (addr) => {
   startDiary();
   startThreadsAuto();
   startComments();
+  startCommentNotify(); // 💬 нові коментарі людей - у бот (раз на 20 хв, без нічних сповіщень)
   startEvergreen();     // ♻️ вічнозелена черга (працює лише в кабінетах, де її увімкнули)
   startMeetingPull();   // погодинна звірка з хмарою власного транскрибатора
   startAlerts().catch((e: any) => app.log.error("startAlerts: " + e.message));   // 🔔 сповіщення адміну про збої

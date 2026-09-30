@@ -17,12 +17,14 @@ export type SecretDef = {
   name: string;      // імʼя змінної середовища - те саме, що в .env, щоб не було двох правд
   label: string;
   hint: string;
-  group: "text" | "image" | "video" | "bot" | "other";
+  group: "text" | "image" | "video" | "bot" | "social" | "other";
   apply: (v: string) => void; // куди покласти значення в живому обʼєкті env
 };
 
 // Реєстр керованих ключів. Тут свідомо НЕ всі змінні середовища: пароль до БД, SESSION_SECRET
-// і секрети OAuth-застосунків правляться разом із деплоєм і не мають сенсу в кабінеті.
+// і секрети OAuth-застосунків Meta, Threads і Google правляться разом із деплоєм. Виняток - застосунки
+// TikTok і LinkedIn, які власник реєструє й міняє сам (тестові ключі sandbox → бойові після перевірки):
+// вставити їх у кабінеті простіше й безпечніше, ніж правити .env на сервері.
 export const SECRET_DEFS: SecretDef[] = [
   { name: "OPENAI_API_KEY", label: "OpenAI", group: "text", hint: "Генерація текстів (gpt-4o) напряму + зображення gpt-image-1.", apply: (v) => { env.openai.apiKey = v; } },
   { name: "OPENROUTER_API_KEY", label: "OpenRouter", group: "text", hint: "Запасний маршрут до всіх моделей і каталог для порівняння.", apply: (v) => { env.openrouter.apiKey = v; } },
@@ -36,6 +38,10 @@ export const SECRET_DEFS: SecretDef[] = [
   { name: "ELEVENLABS_VOICE_ID", label: "ElevenLabs: голос (Voice ID)", group: "video", hint: "Яким голосом говорити: ElevenLabs → Voices → обери голос або клонуй свій (Add voice → Instant Voice Cloning, 1-2 хв твого запису) → ⋯ → Copy voice ID. Порожньо - стандартний голос.", apply: (v) => { env.elevenlabs.voiceId = v; } },
   { name: "DEEPGRAM_API_KEY", label: "Deepgram", group: "video", hint: "Розшифровка голосових у щоденник. Швидший і дешевший за Whisper; якщо не спрацює - автоматично піде Whisper.", apply: (v) => { env.deepgram.apiKey = v; } },
   { name: "PEXELS_API_KEY", label: "Pexels", group: "video", hint: "Безкоштовний стоковий b-roll для рілсів.", apply: (v) => { env.pexels.apiKey = v; } },
+  { name: "TIKTOK_CLIENT_KEY", label: "TikTok: Client key", group: "social", hint: "Застосунок Holos на developers.tiktok.com → вкладка застосунку (або Sandbox) → Client key. Потрібен разом із Client secret нижче; до перевірки TikTok - ключі sandbox.", apply: (v) => { env.tiktok.clientKey = v; } },
+  { name: "TIKTOK_CLIENT_SECRET", label: "TikTok: Client secret", group: "social", hint: "Там же: Client secret. Після заміни ключів (sandbox → бойові) людям треба підключити TikTok заново.", apply: (v) => { env.tiktok.clientSecret = v; } },
+  { name: "LINKEDIN_CLIENT_ID", label: "LinkedIn: Client ID", group: "social", hint: "linkedin.com/developers → застосунок → Auth → Client ID. Разом із Client Secret нижче - кнопка «Підключити LinkedIn» у Каналах.", apply: (v) => { env.linkedin.clientId = v; } },
+  { name: "LINKEDIN_CLIENT_SECRET", label: "LinkedIn: Client Secret", group: "social", hint: "Там же: Primary Client Secret.", apply: (v) => { env.linkedin.clientSecret = v; } },
   { name: "TELEGRAM_BOT_TOKEN", label: "Спільний Telegram-бот", group: "bot", hint: "Один бот на всіх: кожен підключає його з кабінету й бачить там свій акаунт - Mini App, щоденник, зведення, публікацію. Токен дає @BotFather → /mybots → бот → API Token. Бот перемикається одразу після збереження; канали, де адміном стоїть попередній бот, публікуються через нього й далі.", apply: (v) => { env.telegram.botToken = v; } },
 ];
 
