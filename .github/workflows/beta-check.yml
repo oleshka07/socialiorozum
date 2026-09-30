@@ -38,63 +38,31 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Beta after montage v3 - version, health, code, cover column, ffmpeg + libass probe (read-only)
+      - name: Beta after montage v3 - journal since deploy (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 5m
+          command_timeout: 3m
           script: |
             echo "зараз $(date -u +%d.%m\ %H:%M) UTC"
             cd "${{ secrets.APP_DIR }}-beta/server"
             echo "HEAD $(git -C .. rev-parse --short HEAD)"
-            docker compose ps app --format '{{.Name}} {{.Status}}'
             curl -s -o /dev/null -w "health %{http_code}\n" http://127.0.0.1:8081/health
-            echo "--- код у контейнері"
-            docker compose exec -T app sh -c 'grep -c "templatePlan\|subLook\|speechKeeps\|endCardText" /app/dist/montage-plan.js; grep -c "setReelCover\|tightenClip\|autoHook" /app/dist/montage.js; grep -c "cover_url" /app/dist/meta.js; grep -c "keepLang" /app/dist/pipeline.js; grep -c "mntTplBtn\|cmpCover" /app/public/app.js; grep -c "mvPanel" /app/public/app.html; grep -o "source not in ([^)]*)" /app/dist/server.js | head -1'
-            echo "--- база: колонка обкладинки й стиль відео"
-            JS=$(cat <<'EOF'
-            const { q } = await import('/app/dist/db.js');
-            const c = await q("select column_name, data_type from information_schema.columns where table_name='post' and column_name='reel_cover'");
-            console.log('post.reel_cover: ' + (c[0] ? c[0].data_type : 'НЕМА'));
-            const s = await q("select count(*)::int as n from settings_block where key='montage_style'");
-            console.log('montage_style рядків: ' + s[0].n);
-            const cov = await q("select count(*)::int as n from media_asset where source='cover'");
-            console.log('обкладинок: ' + cov[0].n);
-            process.exit(0);
-            EOF
-            )
-            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -5
-            echo "--- ffmpeg: фільтри v3"
-            docker compose exec -T app sh -c 'ffmpeg -hide_banner -filters 2>/dev/null | grep -E " (xfade|vstack|drawbox|boxblur|ass|concat|atrim|asplit|afade) " | awk "{print \$2}" | tr "\n" " "; echo'
-            echo "--- проба libass у тимчасовій теці: гачок-плашка кольору бренду, субтитри на плашці, шторка"
-            PROBE=$(cat <<'EOF'
-            const P = await import('/app/dist/montage-plan.js');
-            const { writeFileSync } = await import('node:fs');
-            const look = P.subLook('box', '#FF2F78', 'low');
-            const words = [{w:'Dnes',s:0.2,e:0.6},{w:'řežeme',s:0.6,e:1.1},{w:'beton',s:1.1,e:1.6},{w:'ručně.',s:1.6,e:2.2}];
-            const ev = [...P.karaokeEvents(P.groupCues(words, look.cue), look.style, look.highlight), ...P.hookEvents('Řežeme beton ručně', 0.05, 2.6)];
-            writeFileSync('/tmp/v3probe/s.ass', P.assDoc(look.style, ev));
-            console.log('ass ok ' + ev.length + ' подій');
-            process.exit(0);
-            EOF
-            )
-            docker compose exec -T app sh -c 'rm -rf /tmp/v3probe && mkdir -p /tmp/v3probe'
-            docker compose exec -T app node --input-type=module -e "$PROBE" 2>&1 | tail -3
-            docker compose exec -T app sh -c 'cd /tmp/v3probe && ffmpeg -nostdin -hide_banner -loglevel error -f lavfi -i color=c=0x2266cc:s=1080x1920:d=1.5 -f lavfi -i color=c=0xcc2222:s=1080x1920:d=1.5 -filter_complex "[0:v][1:v]xfade=transition=wipeleft:duration=0.5:offset=1[x];[x]ass=s.ass[v]" -map "[v]" -r 30 -c:v libx264 -preset ultrafast -pix_fmt yuv420p t.mp4 && echo "рендер ok $(ffprobe -v error -show_entries format=duration -of csv=p=0 t.mp4) с"'
-            docker compose exec -T app sh -c 'cd /tmp/v3probe && for t in 1.0 1.4; do ffmpeg -nostdin -hide_banner -loglevel error -ss $t -i t.mp4 -frames:v 1 -vf "crop=4:4:538:450,scale=1:1" -f rawvideo -pix_fmt rgb24 - | od -An -tu1 | tr -s " " | sed "s/^/гачок @$t с RGB:/"; done; ffmpeg -nostdin -hide_banner -loglevel error -ss 1.3 -i t.mp4 -frames:v 1 -vf "crop=4:4:40:1000,scale=1:1" -f rawvideo -pix_fmt rgb24 - | od -An -tu1 | tr -s " " | sed "s/^/шторка зліва @1.3 RGB:/"; ffmpeg -nostdin -hide_banner -loglevel error -ss 1.3 -i t.mp4 -frames:v 1 -vf "crop=4:4:1030:1000,scale=1:1" -f rawvideo -pix_fmt rgb24 - | od -An -tu1 | tr -s " " | sed "s/^/шторка справа @1.3 RGB:/"'
-            docker compose exec -T app sh -c 'rm -rf /tmp/v3probe'
-            echo "--- журнал беті: warn/error за 20 хв"
             JS2=$(cat <<'EOF'
             const { q } = await import('/app/dist/db.js');
-            const r = await q("select created_at, level, source, left(message, 160) as m from app_log where created_at > now() - interval '20 minutes' and level in ('warn','error') order by created_at desc limit 12");
-            for (const x of r) console.log(new Date(x.created_at).toISOString().slice(11, 19) + ' ' + x.level + ' ' + x.source + ': ' + x.m);
-            if (!r.length) console.log('нічого');
+            const r = await q("select created_at, level, scope, left(message, 170) as m from app_log where created_at > now() - interval '40 minutes' and level in ('warn','error') order by created_at desc limit 15");
+            for (const x of r) console.log(new Date(x.created_at).toISOString().slice(11, 19) + ' ' + x.level + ' ' + (x.scope || '-') + ': ' + x.m);
+            if (!r.length) console.log('warn/error: нічого');
+            const s = await q("select created_at, left(message, 170) as m from app_log where created_at > now() - interval '40 minutes' and level='info' and (message ilike '%сповіщення%' or message ilike '%бот%' or scope in ('boot','telegram','montage')) order by created_at desc limit 8");
+            for (const x of s) console.log('info ' + new Date(x.created_at).toISOString().slice(11, 19) + ' ' + x.m);
+            const oa = await q("select count(*)::int as n from ops_alert where resolved_at is null");
+            console.log('відкритих сповіщень: ' + oa[0].n);
             process.exit(0);
             EOF
             )
-            docker compose exec -T app node --input-type=module -e "$JS2" 2>&1 | tail -14
+            docker compose exec -T app node --input-type=module -e "$JS2" 2>&1 | tail -26
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
