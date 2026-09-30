@@ -48,12 +48,13 @@ export async function mediaCounts(postIds: string[]): Promise<Map<string, number
 
 // Похідні файли (кропи, генерації, сток, зібрані слайди) - їх можна прибирати, коли вони ніде не
 // стоять. Власні завантаження людини (upload/gdrive/diary/bot/broll) не видаляються ніколи.
-export const DERIVED_MEDIA = ["ai", "crop", "pexels", "ai-base", "slide"];
+// cover - обкладинка рілса з монтажу (кадр відео з гачком): без свого відео вона нікому не потрібна
+export const DERIVED_MEDIA = ["ai", "crop", "pexels", "ai-base", "slide", "cover"];
 
 /** Чи стоїть файл хоч десь: обкладинкою, базою під текст чи кадром каруселі (будь-якого поста). */
 export async function mediaInUse(mediaId: string, filename: string): Promise<boolean> {
   return !!(await one(
-    `select 1 from post where media_id=$1 or image_base=$2
+    `select 1 from post where media_id=$1 or image_base=$2 or reel_cover=$1
      union all select 1 from post_slide where media_id=$1 limit 1`, [mediaId, filename]));
 }
 
@@ -96,8 +97,8 @@ export async function setPostMediaOrder(ws: string, postId: string, ids: string[
     if (m.kind !== "image" && m.kind !== "video") throw new SlideError("Підтримуються лише фото й відео.");
   }
   // пост - лише цього кабінету (раніше перевірялись тільки файли, а сам пост міг бути чужим)
-  const prev = await one<{ media_id: string | null; image_base: string | null; format: string | null }>(
-    `select p.media_id, p.image_base, p.format from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+  const prev = await one<{ media_id: string | null; image_base: string | null; format: string | null; reel_cover: string | null }>(
+    `select p.media_id, p.image_base, p.format, p.reel_cover from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
       where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
   if (!prev) throw new SlideError("пост не знайдено");
   // 🎬 відео - окремий пост (Reels, відео у Facebook, Threads, Telegram, LinkedIn): поруч із ним фото
@@ -108,6 +109,8 @@ export async function setPostMediaOrder(ws: string, postId: string, ids: string[
   const before = await postMediaList(postId);
   const cover = uniq[0] || null;
   if (cover !== prev.media_id) {
+    // обкладинка рілса - кадр СТАРОГО відео: з новим медіа вона вже не про нього
+    if (prev.reel_cover) await q(`update post set reel_cover=null where id=$1`, [postId]);
     if (opts?.keepBase) await q(`update post set media_id=$2 where id=$1`, [postId, cover]);
     // нова обкладинка - новий «чистий» кадр під текст: база = вона сама, старий напис уже не про неї.
     // На відео текст не накладається - бази нема.
@@ -122,6 +125,7 @@ export async function setPostMediaOrder(ws: string, postId: string, ids: string[
   // що випало зі списку (і стара база під текст, якщо обкладинка змінилась) - прибрати, якщо похідне й ніде не стоїть
   const gone: Array<{ id?: string | null; filename?: string | null }> = before.filter((m) => !uniq.includes(m.id)).map((m) => ({ id: m.id }));
   if (cover !== prev.media_id && prev.image_base && !opts?.keepBase) gone.push({ filename: prev.image_base });
+  if (cover !== prev.media_id && prev.reel_cover) gone.push({ id: prev.reel_cover });
   await dropUnusedDerived(ws, gone);
   return postMediaList(postId);
 }

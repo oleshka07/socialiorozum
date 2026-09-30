@@ -251,13 +251,27 @@ export async function businessDiscovery(igUserId: string, pageToken: string, tar
 // Instagram Reels: контейнер media_type=REELS з video_url → чекаємо обробки відео → media_publish.
 // IG приймає MP4/MOV (H.264 або HEVC, AAC), 3 с - 15 хв; найкраще 9:16. share_to_feed - щоб рілс
 // показувався і в стрічці профілю, а не лише у вкладці Reels.
-export async function publishReelToInstagram(igUserId: string, pageToken: string, videoUrl: string, caption: string, opts?: { shareToFeed?: boolean; collaborators?: string[] }) {
+export async function publishReelToInstagram(igUserId: string, pageToken: string, videoUrl: string, caption: string, opts?: { shareToFeed?: boolean; collaborators?: string[]; coverUrl?: string | null }) {
   // alt-тексту Reels не приймають - лише співавтори
-  const c = await igCreate(igUserId, pageToken, { media_type: "REELS", video_url: videoUrl, caption, share_to_feed: opts?.shareToFeed === false ? "false" : "true" },
-    opts?.collaborators?.length ? { collaborators: opts.collaborators } : undefined);
+  const base: Record<string, string> = { media_type: "REELS", video_url: videoUrl, caption, share_to_feed: opts?.shareToFeed === false ? "false" : "true" };
+  const extras = opts?.collaborators?.length ? { collaborators: opts.collaborators } : undefined;
+  // 🖼 обкладинка (cover_url): Instagram сам тягне JPEG за адресою. Не прийняв її - рілс однаково виходить
+  // (Instagram тоді бере кадр сам), а людина бачить примітку
+  let c: { id: string; dropped?: string };
+  let noCover = "";
+  if (opts?.coverUrl) {
+    try { c = await igCreate(igUserId, pageToken, { ...base, cover_url: opts.coverUrl }, extras); }
+    catch (e: any) {
+      const m = String(e?.message || e);
+      if (!/cover|thumb|image|param|\(#100\)|\(#9004\)/i.test(m)) throw e;
+      noCover = m.slice(0, 160);
+      c = await igCreate(igUserId, pageToken, base, extras);
+    }
+  } else c = await igCreate(igUserId, pageToken, base, extras);
   // відео обробляється асинхронно: публікувати можна лише після status_code=FINISHED (до ~5 хв)
   await igWaitFinished(c.id, pageToken, { tries: 60, everyMs: 5000, what: "відео" });
-  return { ...(await igPublishContainer(igUserId, pageToken, c.id)), dropped: c.dropped };
+  const dropped = [c.dropped, noCover ? `обкладинки - Instagram не прийняв: ${noCover}` : ""].filter(Boolean).join("; ");
+  return { ...(await igPublishContainer(igUserId, pageToken, c.id)), dropped: dropped || undefined };
 }
 
 // 📱 Сторіс Instagram: контейнер STORIES з image_url або video_url - без підпису (у сторіс його нема,

@@ -250,8 +250,9 @@ export function publishPostToChannels(ws: string, postId: string, onlyNets?: str
   return tracked(postId, () => publishPostToChannelsNow(ws, postId, onlyNets));
 }
 async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: string[]): Promise<PubResult[]> {
-  const post = await one<{ content: string; channels: any; format: string | null; first_comment: string | null }>(
-    `select p.content, p.channels, p.intent, p.format, p.first_comment from post p
+  const post = await one<{ content: string; channels: any; format: string | null; first_comment: string | null; cover_file: string | null }>(
+    `select p.content, p.channels, p.intent, p.format, p.first_comment,
+            (select m.filename from media_asset m where m.id=p.reel_cover and m.kind='image') as cover_file from post p
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
   if (!post) throw new Error("пост не знайдено");
@@ -271,6 +272,8 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
   const imageUrls = images.map((f) => `${env.appBaseUrl}/media/${f}`);
   const carousel = images.length >= 2;
   const videoUrl = video ? `${env.appBaseUrl}/media/${video.filename}` : "";
+  // 🖼 обкладинка Reels (Instagram cover_url): кадр змонтованого відео з гачком або обраний людиною
+  const coverUrl = video && post.cover_file ? `${env.appBaseUrl}/media/${post.cover_file}` : null;
   const videoPath = video ? join(MEDIA_DIR, video.filename) : "";
   let videoSize = video ? Number(video.size) || 0 : 0;
   if (video && !videoSize) { try { videoSize = (await stat(videoPath)).size; } catch { /* файлу нема - впаде нижче людською помилкою */ } }
@@ -520,7 +523,7 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
           // 👥 співавтори (до 3) - на фото, карусель і Reels; власний нік співавтором бути не може
           const collab = normCollaborators(ch.instagram?.collaborators, mt.ig_username).ok;
           const r = video
-            ? await meta.publishReelToInstagram(mt.ig_user_id, mt.page_token, videoUrl, textOf(k), { collaborators: collab })
+            ? await meta.publishReelToInstagram(mt.ig_user_id, mt.page_token, videoUrl, textOf(k), { collaborators: collab, coverUrl })
             : carousel
             ? await meta.publishCarouselToInstagram(mt.ig_user_id, mt.page_token, safeUrls, textOf(k), { collaborators: collab, altTexts: alts })
             : await meta.publishToInstagram(mt.ig_user_id, mt.page_token, safeUrls[0], textOf(k), { collaborators: collab, altText: alts[0] });
@@ -683,8 +686,9 @@ export function publishReelToChannels(ws: string, postId: string, nets: string[]
   return tracked(postId, () => publishReelToChannelsNow(ws, postId, nets));
 }
 async function publishReelToChannelsNow(ws: string, postId: string, nets: string[]): Promise<PubResult[]> {
-  const post = await one<{ content: string; channels: any; reel_video: string | null; own_video: string | null }>(
-    `select p.content, p.channels, p.reel_video, (select m.filename from media_asset m where m.id=p.media_id and m.kind='video') as own_video
+  const post = await one<{ content: string; channels: any; reel_video: string | null; own_video: string | null; cover_file: string | null }>(
+    `select p.content, p.channels, p.reel_video, (select m.filename from media_asset m where m.id=p.media_id and m.kind='video') as own_video,
+            (select m.filename from media_asset m where m.id=p.reel_cover and m.kind='image') as cover_file
        from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
   if (!post) throw new Error("пост не знайдено");
@@ -718,7 +722,8 @@ async function publishReelToChannelsNow(ws: string, postId: string, nets: string
         if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
         if (rv === "busy") throw new Error(BUSY);
         try {
-          const r = await meta.publishReelToInstagram(acc.acc.igUserId!, acc.acc.pageToken, videoUrl, caption);
+          const r = await meta.publishReelToInstagram(acc.acc.igUserId!, acc.acc.pageToken, videoUrl, caption,
+            { coverUrl: ownVideo && post.cover_file ? `${env.appBaseUrl}/media/${post.cover_file}` : null });
           await q(`update meta_publish set external_id=$2, status='sent' where id=$1`, [rv.id, r.mediaId]);
         } catch (e: any) { await q(`delete from meta_publish where id=$1`, [rv.id]); throw e; }
       } else if (k === "facebook") {

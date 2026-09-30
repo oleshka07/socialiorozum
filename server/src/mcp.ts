@@ -52,9 +52,9 @@ import { getThumb } from "./media.js";
 import sharp from "sharp";
 import { accountChoices, matchAccount, postAccount, postAccounts, isAccNet, metaAccountFor, mainAccountIds, MULTI_NETS, ACC_NETS, type AccountChoice } from "./accounts.js";
 import { collectInbox, replyToComment, skipComment, isInboxNet, INBOX_NETS } from "./inbox.js";
-import { startMontage, contactSheet, clipSpeech, MONTAGE_MAX_CLIPS, type MontageResult } from "./montage.js";
+import { startMontage, contactSheet, clipSpeech, MONTAGE_MAX_CLIPS, setReelCover, MontageError, type MontageResult } from "./montage.js";
 import { ttsReady, musicReady } from "./tts.js";
-import { normTransition, normMood, TRANSITIONS } from "./montage-plan.js";
+import { normTransition, normMood, TRANSITIONS, normTemplate, normSubPreset, normSubPos, normHex, TEMPLATES } from "./montage-plan.js";
 
 // ============================================================================
 // 1. ПРОТОКОЛ (чисті функції - саме вони під юнітами в test/mcp.test.mjs)
@@ -476,10 +476,14 @@ export function commentPlanLines(post: { first_comment?: string | null; channels
 async function igExtrasLine(p: PostRow): Promise<string> {
   if (!p.channels?.instagram?.on || p.format === "story") return "";
   const collab = Array.isArray(p.channels.instagram.collaborators) ? p.channels.instagram.collaborators : [];
-  const photos = (await postMediaList(p.id)).filter((m) => m.kind !== "video");
+  const media = await postMediaList(p.id);
+  const photos = media.filter((m) => m.kind !== "video");
   const alt = photos.filter((m) => m.alt_text).length;
+  // 🖼 обкладинка Reels (відео-пост): є своя - кажемо, нема - Instagram візьме кадр сам
+  const cover = media[0]?.kind === "video" ? (await one<{ reel_cover: string | null }>(`select reel_cover from post where id=$1`, [p.id]))?.reel_cover : undefined;
   return `📸 Instagram: ${collab.length ? `співавтори ${collab.map((u: string) => "@" + u).join(", ")}` : "без співавторів"}` +
-    (photos.length ? ` · опис фото (alt): ${alt} з ${photos.length}` : "");
+    (photos.length ? ` · опис фото (alt): ${alt} з ${photos.length}` : "") +
+    (cover !== undefined ? ` · обкладинка Reels: ${cover ? short(cover) : "кадр вибере Instagram (update_post з cover_at - свій)"}` : "");
 }
 
 const COMMENT_UA: Record<string, string> = { sent: "✓", failed: "⚠️ не вийшов", pending: "⏳ повторимо", sending: "⏳ надсилається" };
@@ -783,7 +787,9 @@ async function montageReport(ws: string, j: { status: string; result: any; error
   return {
     text: [
       `🎬 Готово: ${vids.length > 1 ? `${vids.length} частини сторіс (${vids.map((v) => `${short(v.id)} ${fmtDur(v.duration)}`).join(", ")})` : `відео ${short(vids[0]?.id || "")} · ${fmtDur(r.duration)}`} · 9:16 · ${voiceLabel} · ${subLabel}.`,
-      [r.transition && r.transition !== "none" ? `переходи: ${TRANSITIONS[r.transition]}` : "", r.music ? `музика: ${r.music}` : "", r.smart ? `найкращі моменти взято з ${r.smart} кліп(ів)` : ""].filter(Boolean).join(" · "),
+      [r.template && r.template !== "standard" ? `шаблон: ${TEMPLATES[r.template].label}` : "", r.transition && r.transition !== "none" ? `переходи: ${TRANSITIONS[r.transition]}` : "", r.music ? `музика: ${r.music}` : "", r.smart ? `найкращі моменти взято з ${r.smart} кліп(ів)` : ""].filter(Boolean).join(" · "),
+      [r.hook ? `🪝 гачок: «${r.hook}»` : "", r.cut ? `✂️ вирізано паузи й «еее»: -${r.cut.saved} с у ${r.cut.clips} кліп(ах)` : "", r.endCard ? "🏁 фінальна картка бренду" : "",
+        r.cover ? `🖼 обкладинка Reels - кадр із гачком ${short(r.cover.id)} (інший кадр: update_post з cover_at)` : ""].filter(Boolean).join(" · "),
       r.transcript ? `Текст: «${oneLine(r.transcript, 400)}»` : "",
       r.warnings?.length ? `⚠️ ${r.warnings.join("; ")}.` : "",
       r.postId ? `Уже в пості ${short(r.postId)}${post?.format === "story" ? " (сторіс - кожна частина окремим кадром)" : ""}. Далі: schedule_post чи publish_post.`
@@ -792,6 +798,16 @@ async function montageReport(ws: string, j: { status: string; result: any; error
     ].filter(Boolean).join("\n"),
     images,
   };
+}
+
+/** «так/ні/свій текст» монтажу: true, «auto»/«on» - так; false, «off» - ні; інше - свій текст; порожньо - як у стилі бренду. */
+function onOff(v: unknown, max: number): string | boolean | null {
+  if (typeof v === "boolean") return v;
+  const s = str(v, max);
+  if (!s) return null;
+  if (/^(auto|on|true|yes|так|ano)$/i.test(s)) return true;
+  if (/^(off|false|no|none|ні|без|ne)$/i.test(s)) return false;
+  return s;
 }
 
 // 🎙 Записи голосу в медіатеці (голосові з бота, диктофон) - озвучка для montage_video.
@@ -1158,11 +1174,21 @@ export const TOOLS: ToolDef[] = [
       alt_texts: ALT_ARG,
       approve: { type: "boolean", description: "true - затвердити, false - зняти затвердження." },
       evergreen: { type: "boolean", description: "true - додати опублікований пост у вічнозелену чергу (повертатиметься через тижні зі свіжим першим рядком), false - прибрати звідти." },
+      cover_at: { type: "number", description: "Обкладинка Reels (відео-пост): кадр на цій секунді відео. Instagram покаже його в сітці профілю (обрізає 9:16 до 3:4 - головне тримай по центру)." },
+      cover_media: S("Обкладинка Reels з фото медіатеки (list_media): ріжеться 9:16 туди, де цікаве. Порожній рядок - прибрати обкладинку (Instagram візьме кадр сам)."),
     },
     required: ["id"],
     run: async (ws, a) => {
       const p = await findPost(ws, a.id);
       const done: string[] = [];
+      if (a.cover_at !== undefined || a.cover_media !== undefined) {
+        try {
+          const media = a.cover_media ? (await libraryMediaId(ws, a.cover_media)).id : null;
+          const at = a.cover_at !== undefined && Number.isFinite(Number(a.cover_at)) ? Number(a.cover_at) : null;
+          const c = await setReelCover(ws, p.id, media || at != null ? { media, at } : null);
+          done.push(c ? `обкладинка Reels: ${media ? "фото " + short(media) : `кадр ${at} с`} (${short(c.id)})` : "обкладинку прибрано - Instagram візьме кадр сам");
+        } catch (e: any) { if (e instanceof MontageError) throw new ToolError(e.message); throw e; }
+      }
       if (typeof a.evergreen === "boolean") {
         if (a.evergreen) {
           const r = await addEvergreen(ws, p.id, "user");
@@ -1226,7 +1252,7 @@ export const TOOLS: ToolDef[] = [
         // незатверджений текст не має лишатись у календарі: автопостер відправив би його в мережу
         if (!a.approve) { const n = await unschedulePost(p.id); if (n) done.push(`знято з розкладу (${n})`); }
       }
-      if (!done.length) throw new ToolError("Нічого не змінено - передай text, channels, rubric, format, first_comment, instagram_collaborators, accounts, alt_texts, approve або evergreen.");
+      if (!done.length) throw new ToolError("Нічого не змінено - передай text, channels, rubric, format, first_comment, instagram_collaborators, accounts, alt_texts, approve, evergreen або cover_at / cover_media.");
       return `${short(p.id)}: ${done.join(", ")}.`;
     },
   },
@@ -1437,7 +1463,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "montage_video",
     title: "Змонтувати сторіс чи рілс із кліпів (з субтитрами)",
-    description: "Склеїти кліпи (і фото) з медіатеки у вертикальне відео 9:16 із субтитрами. Текст на відео: text кожного кліпу - підписи (voice: none); звук самих кліпів - субтитри слово в слово (voice: clips); запис голосу автора з медіатеки (voice: audio + audio) - озвучка й субтитри з неї; AI-голос ElevenLabs (voice: tts) читає text кліпів або script. Спершу подивись кліпи через video_frames - текст має відповідати кадрам. Кліп довший за свій шматок обрізається (from/to - вирізати самому), коротший - трохи сповільнюється, а коли відео набагато коротше за голос - кліпи йдуть по колу (відповідь про це попередить); фото стоїть 3 с (seconds - інакше). Монтаж на сервері займає 1-2 хв: якщо не встигне - відповідь дасть job для montage_status. Результат - нове відео в медіатеці; з post - одразу в пості, з channels - новий пост (затверджений, лишається schedule_post). Сторіс довша за 60 с ріжеться на кілька кадрів. З кожного кліпу береться найкращий шматок (різкий, світлий, без трясіння; smart_cut: false - середина), між кліпами - переходи (transition, типово fade). Фонова музика: music - свій трек із медіатеки (list_media kind: \"audio\") або music_mood - AI-музика ElevenLabs під настрій (~$0.15 за хвилину); під голосом музика сама притихає. Безкоштовно, крім voice: tts (ElevenLabs - за символи), music_mood і розшифровки (копійки).",
+    description: "Склеїти кліпи (і фото) з медіатеки у вертикальне відео 9:16 із субтитрами. Текст на відео: text кожного кліпу - підписи (voice: none); звук самих кліпів - субтитри слово в слово (voice: clips); запис голосу автора з медіатеки (voice: audio + audio) - озвучка й субтитри з неї; AI-голос ElevenLabs (voice: tts) читає text кліпів або script. Спершу подивись кліпи через video_frames - текст має відповідати кадрам. Кліп довший за свій шматок обрізається (from/to - вирізати самому), коротший - трохи сповільнюється, а коли відео набагато коротше за голос - кліпи йдуть по колу (відповідь про це попередить); фото стоїть 3 с (seconds - інакше). Монтаж на сервері займає 1-2 хв: якщо не встигне - відповідь дасть job для montage_status. Результат - нове відео в медіатеці; з post - одразу в пості, з channels - новий пост (затверджений, лишається schedule_post). Сторіс довша за 60 с ріжеться на кілька кадрів. З кожного кліпу береться найкращий шматок (різкий, світлий, без трясіння; smart_cut: false - середина), між кліпами - переходи (transition; не задано - як у шаблоні: standard - fade, talking - без, process - мікс). Фонова музика: music - свій трек із медіатеки (list_media kind: \"audio\") або music_mood - AI-музика ElevenLabs під настрій (~$0.15 за хвилину); під голосом музика сама притихає. Шаблони (template): standard, before_after (спершу кліпи «до», потім «після»: мітки, шторка, кадр порівняння), talking (говорять у камеру: мова цілком, voice: clips), process (короткі прискорені шматки роботи). Гачок (hook) - великий текст на перші ~2,5 с: свій текст або true - AI напише з тексту ролика; фінальна картка (end_card) - назва й нік бренду наприкінці; cut_pauses - вирізати паузи й «еее» (voice: clips); subtitle_style і color - стиль субтитрів і колір бренду. Не задане - зі стилю відео бренду. Рілс отримує обкладинку - кадр із гачком. Безкоштовно, крім voice: tts (ElevenLabs - за символи), music_mood і розшифровки (копійки).",
     properties: {
       clips: {
         type: "array", minItems: 1, maxItems: 20,
@@ -1465,10 +1491,18 @@ export const TOOLS: ToolDef[] = [
       post: S("Прикріпити результат до цього поста (замість його медіа)."),
       channels: { ...NETS_ARG, description: "Створити НОВИЙ пост із результатом у цих мережах (сторіс - instagram і facebook)." },
       text: S("Текст нового поста (підпис рілса); для сторіс не публікується."),
-      transition: { type: "string", enum: ["fade", "slide", "zoom", "flash", "mix", "none"], description: "Переходи між кліпами: fade (типово) - плавне перетікання, slide - зсув, zoom - наближення, flash - спалах, mix - щоразу інший, none - різкий стик." },
+      transition: { type: "string", enum: ["fade", "slide", "zoom", "flash", "mix", "none"], description: "Переходи між кліпами: fade - плавне перетікання, slide - зсув, zoom - наближення, flash - спалах, mix - щоразу інший, none - різкий стик. Не задано - як у шаблоні (standard - fade)." },
       music: S("Фонова музика - id треку з медіатеки (list_media kind: \"audio\"), на весь ролик, під голосом притихає. Права на трек - за автором."),
       music_mood: { type: "string", enum: ["upbeat", "calm", "inspiring", "energetic", "warm"], description: "Або AI-музика ElevenLabs під настрій (платно, ~$0.15 за хвилину): upbeat - бадьора, calm - спокійна, inspiring - натхненна, energetic - енергійна, warm - тепла. Не вийде (нема права Music Generation у ключа) - ролик буде без музики з поясненням." },
       smart_cut: { type: "boolean", description: "Брати з кліпів найкращі моменти (типово так); false - середину кліпу." },
+      template: { type: "string", enum: ["standard", "before_after", "talking", "process"], description: "Шаблон: standard (типово); before_after - спершу кліпи «до», потім «після» (мітки мовою ролика, шторка на стику, кадр порівняння); talking - людина говорить у камеру (voice: clips): мова цілком, без переходів; process - короткі прискорені шматки роботи, динамічні переходи." },
+      hook: S("Гачок - великий текст на перші ~2,5 с: свій текст (3-7 слів, мовою ролика), \"auto\" - AI напише з тексту ролика, \"off\" - без. Не задано - як у стилі відео бренду (типово auto)."),
+      end_card: S("Фінальна картка 2,2 с (розмитий останній кадр, назва й нік бренду): \"on\" - зі стилю бренду, \"off\" - без, або свій текст (два рядки - через перенос рядка). Не задано - як у стилі бренду."),
+      cut_pauses: { type: "boolean", description: "Вирізати паузи й «еее» в кліпах, де говорять (лише voice: clips; типово так)." },
+      subtitle_style: { type: "string", enum: ["classic", "brand", "box", "big", "minimal"], description: "Стиль субтитрів: classic - білі з обводкою, поточне слово жовтим; brand - поточне слово кольором бренду; box - на темній плашці; big - по 1-2 слова великими посередині; minimal - дрібніші без підсвічування." },
+      subtitle_position: { type: "string", enum: ["low", "middle"], description: "Де субтитри: low (типово) - над полем відповіді сторіс і підписом рілса; middle - посередині." },
+      color: S("Колір бренду #RRGGBB: плашка гачка, мітка «після», слово в субтитрах «brand»/«big»."),
+      before_count: { type: "number", description: "before_after: скільки перших кліпів - «до» (типово половина)." },
     },
     required: ["clips"],
     run: async (ws, a) => {
@@ -1513,7 +1547,14 @@ export const TOOLS: ToolDef[] = [
       const opts = { clips, voice, audio, script: str(a.script, 5000) || null, voiceId: str(a.voice_id, 60) || null,
         subtitles: ["karaoke", "lines", "none"].includes(String(a.subtitles)) ? String(a.subtitles) as "karaoke" : null,
         keepSound: a.keep_sound === false ? false : null, format,
-        transition: normTransition(a.transition, "fade"), smart: a.smart_cut === false ? false : null, music, musicMood };
+        transition: a.transition ? normTransition(a.transition, "fade") : null, smart: a.smart_cut === false ? false : null, music, musicMood,
+        template: normTemplate(a.template),
+        hook: onOff(a.hook, 120),
+        endCard: onOff(a.end_card, 200),
+        cutPauses: typeof a.cut_pauses === "boolean" ? a.cut_pauses : null,
+        subStyle: a.subtitle_style ? normSubPreset(a.subtitle_style) : null, subPos: a.subtitle_position ? normSubPos(a.subtitle_position) : null,
+        color: normHex(a.color), beforeCount: num(a.before_count) };
+      if (opts.template === "before_after" && clips.length < 2) throw new ToolError("Для before_after потрібно щонайменше 2 кліпи: спершу «до», потім «після».");
       const job = await startMontage(ws, opts, { postId, create: !postId && nets.length ? { nets, text: str(a.text, 5000) } : null });
       const waitMs = Number(process.env.MCP_MONTAGE_WAIT_MS) || 45_000;
       let j = await getJob(job.id);

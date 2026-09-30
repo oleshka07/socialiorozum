@@ -255,7 +255,7 @@ function setBTab(b){
   if($('brandVoice')) $('brandVoice').style.display=b==='voice'?'':'none';
   if($('brandVisual')) $('brandVisual').style.display=b==='visual'?'':'none';
   if($('brandStratHost')) $('brandStratHost').style.display=b==='strat'?'':'none';
-  if(b==='visual'){ try{ loadBroll(); }catch(e){} }
+  if(b==='visual'){ try{ loadBroll(); }catch(e){} try{ loadMontageStyle(); }catch(e){} }
 }
 // переселення розділу «Стратегія» у вкладку Бренду (вузол той самий - обробники живі)
 (function(){ const host=$('brandStratHost'), sec=document.querySelector('.viewsec[data-view="strategy"]');
@@ -2159,6 +2159,43 @@ async function bulkReview(status){
 async function openImageEditor(postId, onDone){
   openPhotoTool(postId, '', (fn)=>{ if(onDone)onDone(fn); try{loadStudioPosts();}catch(e){} });
 }
+// 🎬 Стиль відео бренду (Бренд → Візуал): субтитри, колір, гачок, фінальна картка, паузи. Типові значення для
+// кожного монтажу - кабінет, бот і Claude беруть їх, якщо в самому монтажі не сказано інакше.
+let MvSubs=null;
+async function loadMontageStyle(){
+  const box=$('mvPanel'); if(!box) return;
+  let caps=null; try{ caps=await api('/montage/caps'); }catch(e){ return; }
+  const st=caps.style||{}; MvSubs=caps.subStyles||[];
+  $('mvSub').innerHTML=MvSubs.map(x=>'<option value="'+esc(x.id)+'">'+esc(x.label)+'</option>').join('');
+  $('mvSub').value=st.subtitle||'classic'; $('mvPos').value=st.position||'low';
+  $('mvColor').value=st.color||'#FFD23F'; $('mvColorHex').value=st.color||'#FFD23F';
+  $('mvHook').checked=st.hook!==false; $('mvCut').checked=st.cut!==false; $('mvEnd').checked=st.end!==false;
+  $('mvEndText').value=st.endText||'';
+  mvPreview(caps.endPreview||null);
+  let tm=null;
+  const save=()=>{ clearTimeout(tm); tm=setTimeout(async()=>{
+    try{ const r=await api('/montage/style',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({subtitle:$('mvSub').value,position:$('mvPos').value,color:$('mvColorHex').value,hook:$('mvHook').checked,cut:$('mvCut').checked,end:$('mvEnd').checked,endText:$('mvEndText').value})});
+      if(r&&r.color){ $('mvColor').value=r.color; $('mvColorHex').value=r.color; } mvPreview(r&&r.endPreview||null); flashSaved(); }catch(e){ flash('⚠ '+e.message); } },400); };
+  ['mvSub','mvPos','mvHook','mvCut','mvEnd'].forEach(id=>{ $(id).onchange=()=>{ mvPreview(); save(); }; });
+  $('mvColor').oninput=()=>{ $('mvColorHex').value=$('mvColor').value.toUpperCase(); mvPreview(); save(); };
+  $('mvColorHex').oninput=()=>{ const v=$('mvColorHex').value.trim(); if(/^#?[0-9a-f]{6}$/i.test(v)){ $('mvColor').value=(v[0]==='#'?v:'#'+v); mvPreview(); save(); } };
+  $('mvEndText').oninput=save;
+}
+// Прев'ю «на телефоні»: плашка гачка кольором бренду, субтитри в обраному стилі, текст фінальної картки
+function mvPreview(endP){
+  const c=$('mvColorHex')?$('mvColorHex').value:'#FFD23F', sub=$('mvSub')?$('mvSub').value:'classic';
+  const hex=/^#?[0-9a-f]{6}$/i.test(c)?(c[0]==='#'?c:'#'+c):'#FFD23F';
+  const rgb=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4));
+  const lum=0.2126*rgb[0]+0.7152*rgb[1]+0.0722*rgb[2];
+  const hk=$('mvPrevHook'), sb=$('mvPrevSub');
+  if(hk){ hk.style.display=$('mvHook')&&$('mvHook').checked?'':'none'; hk.style.background=hex; hk.style.color=(lum+0.05)/0.05>=1.05/(lum+0.05)?'#101014':'#fff'; }
+  if(sb){ sb.className='mvSubs '+(sub==='classic'||sub==='brand'?'':sub)+($('mvPos')&&$('mvPos').value==='middle'&&sub!=='big'?' mid':'');
+    // слово, що звучить: класичні - жовте, мінімальні - без підсвічування, решта - кольором бренду
+    const b=sb.querySelector('b'); if(b) b.style.color=sub==='classic'?'#FFD23F':sub==='minimal'?'#fff':hex; }
+  const h=$('mvSubHint'); if(h&&MvSubs){ const x=MvSubs.find(y=>y.id===sub); h.textContent=x?x.hint:''; }
+  const eh=$('mvEndHint');
+  if(eh&&endP!==undefined) eh.innerHTML=!$('mvEnd').checked?'Фінальної картки не буде.':endP?'Зараз на картці: «'+esc([endP.title,endP.sub].filter(Boolean).join(' · '))+'»'+($('mvEndText').value.trim()?'':' - з назви кабінету й ніка в Instagram/Threads'):'Нема що показати: напиши свій текст вище (назва кабінету - пошта, а ніка в Instagram чи Threads ще нема).';
+}
 async function loadImageProvider(){ const sel=$('imgProv'); if(!sel) return; try{ const c=await api('/integrations/images'); const A=c.available||{}; const opts=[['cloudflare','Cloudflare FLUX.2 - безкоштовно ~100/день',A.cloudflare],['openai','OpenAI gpt-image-1',A.openai],['fal','FLUX schnell (fal.ai)',A.fal],['gemini','Nano Banana (Gemini)',A.gemini]]; sel.innerHTML=opts.map(o=>'<option value="'+o[0]+'"'+(c.provider===o[0]?' selected':'')+(o[2]?'':' disabled')+'>'+o[1]+(o[2]?'':' - нема ключа')+'</option>').join(''); sel.onchange=async()=>{ try{ await api('/integrations/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:sel.value})}); flashSaved(); }catch(e){ flash('⚠ '+e.message); } }; }catch(e){} }
 // 🎙 Кому віддати перевагу в розшифровці голосових. «Авто» = Deepgram, якщо ключ є, інакше Whisper.
 // Провайдер без ключа лишається видимим, але заблокованим - інакше незрозуміло, чому вибору немає.
@@ -2479,6 +2516,7 @@ async function openComposer(postId, opts){
   let fcMaster=full.first_comment||''; let savedFc=fcMaster; let cmStates=ps.comments||[]; let metaInfo=null; let onMeta=null;
   // 🖼 кадри поста (обкладинка першою); 2+ = карусель
   let media=(full.media||[]).filter(m=>m&&m.filename); let slidesText=full.slides_text||'';
+  let coverFile=full.cover_filename||null; // 🖼 обкладинка Reels (кадр із гачком з монтажу чи обраний тут)
   const pvIdx={}; // яким кадром гортати прев'ю каруселі в Instagram
   let thSnap=null; // мережі, вимкнені режимом «🧵 Гілкою» (відновлюються при вимкненні режиму)
   const initDate=opts.scheduledAt?locDate(opts.scheduledAt):''; const initTime=opts.scheduledAt?locHM(opts.scheduledAt):'11:00';
@@ -2683,7 +2721,19 @@ async function openComposer(postId, opts){
     if(isVideo()){ const v=media[0], warn=videoWarn(v);
       box.innerHTML='<div class="slides-strip"><div class="slide-th"><img src="/thumb/'+esc(v.filename)+'" onerror="this.style.opacity=.25"><span class="sn">▶ '+(fmtDur(v.duration)||'відео')+'</span><button class="sx" id="cmpVidRm" title="Прибрати відео">✕</button></div></div>'
         +'<div style="font-size:11.5px;color:var(--muted);margin-top:6px">🎬 Відео'+(v.size?' · '+Math.round(v.size/1048576)+' МБ':'')+(v.width&&v.height?' · '+v.width+'×'+v.height:'')+'. Instagram - Reels, Facebook - відео Сторінки, Threads, Telegram, LinkedIn; текст поста - підпис.</div>'
-        +(warn?'<div id="cmpVidWarn" style="font-size:11.5px;color:var(--danger);margin-top:4px">⚠ '+esc(warn)+'</div>':'');
+        +(warn?'<div id="cmpVidWarn" style="font-size:11.5px;color:var(--danger);margin-top:4px">⚠ '+esc(warn)+'</div>':'')
+        +'<div class="cmpCover" id="cmpCover"><div class="cmpCoverTh">'+(coverFile?'<img src="/thumb/'+esc(coverFile)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(coverFile)+'\'">':'<span>кадр<br>вибере<br>Instagram</span>')+'</div>'
+        +'<div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600">🖼 Обкладинка Reels</div><div style="font-size:11.5px;color:var(--muted);margin:2px 0 6px">Її видно в сітці профілю Instagram (там кадр 3:4 - головне тримай посередині).</div>'
+        +'<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="dashbtn" id="cmpCovFrame">🎞 Кадр із відео</button><button class="dashbtn" id="cmpCovPhoto">🖼 Фото з медіатеки</button>'+(coverFile?'<button class="dashbtn" id="cmpCovClear" title="Instagram візьме кадр сам">✕</button>':'')+'</div>'
+        +'<div id="cmpCovPick" style="display:none;margin-top:8px"><video id="cmpCovVid" src="/media/'+esc(v.filename)+'" muted playsinline preload="metadata" style="width:120px;border-radius:8px;background:#000;display:block"></video>'
+        +'<input type="range" id="cmpCovAt" min="0" max="'+Math.max(0.1,(Number(v.duration)||1)-0.1).toFixed(1)+'" step="0.1" value="1" style="width:100%;margin-top:6px;accent-color:var(--brand)"><div style="display:flex;gap:6px;align-items:center"><span id="cmpCovT" style="font-size:12px;color:var(--muted)">1,0 с</span><button class="dashbtn" id="cmpCovOk">✅ Цей кадр</button></div></div></div></div>';
+      const covSet=async(body,btn)=>{ if(btn) btn.disabled=true; try{ const r=await api('/posts/'+postId+'/cover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); coverFile=r.cover?r.cover.filename:null; renderMedia(); renderPrev(); setMsg(r.cover?'обкладинку збережено ✓':'обкладинку прибрано - Instagram візьме кадр сам','var(--brand)'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); if(btn) btn.disabled=false; } };
+      box.querySelector('#cmpCovFrame').onclick=()=>{ const pk=box.querySelector('#cmpCovPick'); pk.style.display=pk.style.display==='none'?'block':'none';
+        const vid=box.querySelector('#cmpCovVid'), rg=box.querySelector('#cmpCovAt'), tl=box.querySelector('#cmpCovT');
+        const seek=()=>{ tl.textContent=Number(rg.value).toFixed(1).replace('.',',')+' с'; try{ vid.currentTime=Number(rg.value); }catch(e){} };
+        rg.oninput=seek; vid.onloadedmetadata=seek; box.querySelector('#cmpCovOk').onclick=(e)=>covSet({at:Number(rg.value)},e.target); };
+      box.querySelector('#cmpCovPhoto').onclick=async()=>{ const pick=await chooseMedia(); if(pick&&pick.id) covSet({media:pick.id}); };
+      const cc=box.querySelector('#cmpCovClear'); if(cc) cc.onclick=(e)=>covSet({clear:true},e.target);
       box.querySelector('#cmpVidRm').onclick=async(e)=>{ e.target.disabled=true; try{ const r=await api('/posts/'+postId+'/video',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:null})}); setMedia(r.media); renderMedia(); renderPrev(); setMsg('відео прибрано'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); e.target.disabled=false; } };
       renderCarBlock(); return; }
     const st=isStory();
@@ -3939,6 +3989,8 @@ async function loadMedia(){
 // сервері 1-2 хв (runAiJob полить), результат - нове відео в медіатеці й затверджений пост у композері.
 async function openMontage(ids, lib){
   let caps={tts:false,stt:false,vision:false}; try{ caps=await api('/montage/caps'); }catch(e){}
+  // 🎬 v3: шаблони, гачок, фінальна картка, паузи, стиль субтитрів - типові значення зі стилю відео бренду
+  const bst=caps.style||{}, tpls=caps.templates||[], subs=caps.subStyles||[], endP=caps.endPreview||null;
   const voices=(lib||[]).filter(x=>x.kind==='audio');
   const items=ids.map(id=>(lib||[]).find(x=>x.id===id)).filter(Boolean);
   const total=items.reduce((a,x)=>a+(x.kind==='image'?3:Math.min(Number(x.duration)||0,20)),0);
@@ -3947,6 +3999,8 @@ async function openMontage(ids, lib){
   ov.innerHTML='<div class="modal-card" style="max-width:560px;padding:20px"><b>🎬 Змонтувати відео</b>'
     +'<div style="font-size:13px;color:var(--muted);margin:6px 0 12px">'+items.length+' '+(items.length===1?'кліп':'кліпів')+' у порядку вибору, ≈'+(fmtDur(total)||'0:00')+'. Вертикально 9:16; горизонтальні кадри стануть посередині на розмитому тлі.</div>'
     +'<div style="display:flex;gap:8px;overflow-x:auto;margin-bottom:12px">'+items.map((x,i)=>'<div style="position:relative;flex:none"><img src="/thumb/'+esc(x.filename)+'" style="height:70px;border-radius:6px"><span style="position:absolute;top:3px;left:3px;background:rgba(0,0,0,.6);color:#fff;border-radius:5px;font-size:11px;padding:0 4px">'+(i+1)+'</span></div>').join('')+'</div>'
+    +(tpls.length?'<label style="font-size:13px">🧩 Шаблон</label><div id="mntTpl" class="mntTpl">'+tpls.map((x,i)=>'<button type="button" class="mntTplBtn'+(i===0?' on':'')+'" data-t="'+esc(x.id)+'"'+(x.id==='before_after'&&items.length<2?' disabled title="потрібно щонайменше 2 кліпи"':'')+'><b>'+esc(x.label)+'</b><span>'+esc(x.hint)+'</span></button>').join('')+'</div>':'')
+    +'<div id="mntBaRow" style="display:none;font-size:13px;margin:0 0 10px">↔️ Скільки перших кліпів - «до»: <input type="number" class="txt" id="mntBa" min="1" max="'+Math.max(1,items.length-1)+'" value="'+Math.max(1,Math.ceil(items.length/2))+'" style="width:72px;padding:6px 10px;display:inline-block"> <span id="mntBaHint" style="color:var(--muted)"></span></div>'
     +'<label style="font-size:13px">Формат</label><div class="btnrow" style="margin:4px 0 10px;justify-content:flex-start"><label><input type="radio" name="mntFmt" value="story" checked> ⚡ Сторіс (Instagram, Facebook)</label><label><input type="radio" name="mntFmt" value="reel"> 🎞 Рілс</label></div>'
     +'<label style="font-size:13px" for="mntSrc">Текст на відео</label>'
     +'<select id="mntSrc" style="width:100%;margin:4px 0 8px">'
@@ -3959,8 +4013,14 @@ async function openMontage(ids, lib){
     +'</select>'
     +'<textarea id="mntText" rows="4" placeholder="Текст для відео: що сказати чи підписати. Кілька речень - розкладуться по кліпах." style="width:100%;display:none"></textarea>'
     +'<select id="mntAudio" style="width:100%;display:none">'+voices.map(v=>'<option value="'+esc(v.id)+'">🎙 '+esc(fmtDur(v.duration)||'голос')+' · '+esc(new Date(v.created_at).toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+(v.original_name?' · '+esc(v.original_name):'')+'</option>').join('')+'</select>'
+    +'<label id="mntCutRow" style="font-size:13px;display:flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="mntCut"'+(bst.cut!==false?' checked':'')+'> ✂️ Вирізати паузи й «еее» там, де говорять</label>'
     +'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">'
-    +'<label style="font-size:13px;flex:1;min-width:180px">✨ Переходи між кліпами<select id="mntTr" style="width:100%;margin-top:4px">'
+    +'<label style="font-size:13px;flex:1;min-width:180px">🪝 Гачок на перші секунди<select id="mntHook" style="width:100%;margin-top:4px"><option value="auto">AI напише з тексту ролика</option><option value="own">Свій текст…</option><option value="off">Без гачка</option></select>'
+    +'<input id="mntHookText" class="txt" maxlength="60" placeholder="3-7 слів, напр.: Ріжемо бетон за один день" style="width:100%;margin-top:4px;display:none"></label>'
+    +'<label style="font-size:13px;flex:1;min-width:180px">🔤 Субтитри<select id="mntSub" style="width:100%;margin-top:4px">'+subs.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===(bst.subtitle||'classic')?' selected':'')+' title="'+esc(x.hint)+'">'+esc(x.label)+'</option>').join('')+'</select></label></div>'
+    +'<label style="font-size:13px;display:flex;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" id="mntEnd"'+(endP&&bst.end!==false?' checked':'')+(endP?'':' disabled')+'> 🏁 Фінальна картка: '+(endP?'«'+esc([endP.title,endP.sub].filter(Boolean).join(' · '))+'»':'<span style="color:var(--muted)">нема що показати - назва й нік бренду в Бренд → Візуал → «🎬 Стиль відео»</span>')+'</label>'
+    +'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">'
+    +'<label style="font-size:13px;flex:1;min-width:180px">✨ Переходи між кліпами<select id="mntTr" style="width:100%;margin-top:4px"><option value="">Як у шаблоні</option>'
     +[['fade','Плавні (перетікання)'],['slide','Зсув'],['zoom','Наближення'],['flash','Спалах'],['mix','Мікс - щоразу інший'],['none','Без переходів (різкий стик)']].map(([v,l])=>'<option value="'+v+'">'+l+'</option>').join('')+'</select></label>'
     +'<label style="font-size:13px;flex:1;min-width:180px">🎵 Фонова музика<select id="mntMusic" style="width:100%;margin-top:4px"><option value="">Без музики</option>'
     +voices.map(v=>'<option value="t:'+esc(v.id)+'">🎵 '+esc(v.original_name||('трек '+(fmtDur(v.duration)||'')))+'</option>').join('')
@@ -3972,9 +4032,23 @@ async function openMontage(ids, lib){
     +'<div class="btnrow"><button class="ghost" id="mntCancel">Скасувати</button><button id="mntGo">🎬 Змонтувати</button></div></div>';
   document.body.appendChild(ov);
   const src=ov.querySelector('#mntSrc'), txt=ov.querySelector('#mntText'), aud=ov.querySelector('#mntAudio'), msg=ov.querySelector('#mntMsg'), go=ov.querySelector('#mntGo');
+  const hookSel=ov.querySelector('#mntHook'), hookTxt=ov.querySelector('#mntHookText'), baIn=ov.querySelector('#mntBa');
+  let tpl='standard';
+  hookSel.value=bst.hook===false?'off':'auto';
   const first=[...src.options].find(o=>!o.disabled); if(first) src.value=first.value;
-  const sync=()=>{ txt.style.display=src.value==='own'?'block':'none'; aud.style.display=src.value==='audio'?'block':'none'; };
-  src.onchange=sync; sync();
+  const baHint=()=>{ const n=items.length, b=Math.min(Math.max(1,Number(baIn.value)||1),Math.max(1,n-1)), sp=(a,z)=>a===z?String(a):a+'-'+z;
+    ov.querySelector('#mntBaHint').textContent='ДО: '+sp(1,b)+' · ПІСЛЯ: '+sp(b+1,n); };
+  const sync=()=>{ txt.style.display=src.value==='own'?'block':'none'; aud.style.display=src.value==='audio'?'block':'none';
+    ov.querySelector('#mntCutRow').style.display=src.value==='auto'&&tpl!=='process'?'flex':'none';
+    hookTxt.style.display=hookSel.value==='own'?'block':'none';
+    ov.querySelector('#mntBaRow').style.display=tpl==='before_after'?'block':'none'; baHint(); };
+  src.onchange=sync; hookSel.onchange=()=>{ sync(); if(hookSel.value==='own') hookTxt.focus(); }; baIn.oninput=baHint;
+  ov.querySelectorAll('.mntTplBtn').forEach(b=>{ b.onclick=()=>{ if(b.disabled) return; tpl=b.dataset.t;
+    ov.querySelectorAll('.mntTplBtn').forEach(x=>x.classList.toggle('on',x===b));
+    // «говорю в камеру» - текст зі звуку кліпів (там і ріжуться паузи)
+    if(tpl==='talking'&&!src.querySelector('option[value="auto"]').disabled) src.value='auto';
+    sync(); }; });
+  sync();
   let busy=false;
   const close=()=>{ if(!busy) ov.remove(); };
   ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
@@ -3988,8 +4062,16 @@ async function openMontage(ids, lib){
     else if(v==='own'){ const t=txt.value.trim(); if(!t){ msg.textContent='Напиши текст для відео.'; txt.focus(); return; } body.ownText=t; }
     else if(v==='audio'){ body.voice='audio'; body.audio=aud.value; }
     else body.voice='none';
-    body.transition=ov.querySelector('#mntTr').value;
+    const tr=ov.querySelector('#mntTr').value; if(tr) body.transition=tr;
     body.smart=ov.querySelector('#mntSmart').checked;
+    body.template=tpl;
+    if(tpl==='before_after') body.beforeCount=Number(baIn.value)||null;
+    const hv=hookSel.value;
+    if(hv==='own'){ const h=hookTxt.value.trim(); if(!h){ msg.textContent='Напиши свій гачок (3-7 слів) або обери «AI напише».'; hookTxt.focus(); return; } body.hook=h; }
+    else body.hook=hv!=='off';
+    body.endCard=ov.querySelector('#mntEnd').checked;
+    if(v==='auto') body.cutPauses=ov.querySelector('#mntCut').checked;
+    body.subStyle=ov.querySelector('#mntSub').value||null;
     const mu=ov.querySelector('#mntMusic').value;
     if(mu.startsWith('t:')) body.music=mu.slice(2); else if(mu.startsWith('m:')) body.musicMood=mu.slice(2);
     if(body.music&&body.music===body.audio){ msg.textContent='Цей запис уже озвучка - для музики обери інший трек.'; return; }
@@ -3997,7 +4079,7 @@ async function openMontage(ids, lib){
     try{
       const r=await runAiJob('/montage',body,(sec)=>{ msg.textContent='⏳ Монтую… '+sec+' с'; });
       busy=false; ov.remove();
-      flash('🎬 Готово: '+(fmtDur(r&&r.duration)||'')+((r&&r.warnings&&r.warnings.length)?' · ⚠ '+r.warnings.join('; '):''));
+      flash('🎬 Готово: '+(fmtDur(r&&r.duration)||'')+(r&&r.cut?' · ✂️ паузи -'+r.cut.saved+' с':'')+(r&&r.hook?' · 🪝 «'+r.hook+'»':'')+((r&&r.warnings&&r.warnings.length)?' · ⚠ '+r.warnings.join('; '):''));
       MediaSel=null; loadMedia();
       if(r&&r.postId) openComposer(r.postId);
     }catch(e){ busy=false; go.disabled=false; msg.textContent='⚠ '+e.message; }

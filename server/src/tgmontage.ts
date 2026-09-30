@@ -15,10 +15,10 @@ import * as tg from "./telegram.js";
 import { saveMedia, MEDIA_DIR } from "./media.js";
 import { connectedNets } from "./tgcompose.js";
 import { liveSend } from "./tgbot.js";
-import { startMontage, MONTAGE_MAX_CLIPS, type MontageOpts, type MontageResult } from "./montage.js";
+import { startMontage, MONTAGE_MAX_CLIPS, montageStyle, brandEndText, type MontageOpts, type MontageResult } from "./montage.js";
 import { ttsReady } from "./tts.js";
 import { getJob } from "./jobs.js";
-import { spreadText, MAX_SLOW, TRANSITIONS, MUSIC_MOODS, type TransitionMode, type MusicMood } from "./montage-plan.js";
+import { spreadText, MAX_SLOW, TRANSITIONS, MUSIC_MOODS, TEMPLATES, TEMPLATE_ORDER, SUB_PRESETS, SUB_ORDER, templatePlan, baSplit, cleanHook, type TransitionMode, type MusicMood, type TemplateId, type SubPreset, type EndText } from "./montage-plan.js";
 import { musicReady } from "./tts.js";
 import { plural } from "./analytics.js";
 import { brandLabel, moveMedia } from "./tgbrand.js";
@@ -39,6 +39,14 @@ export type MtState = {
   music?: { id: string; name: string; dur: number } | null;   // 🎵 свій трек
   mood?: MusicMood | null;                              // 🎵 або AI-музика під настрій
   ownMusic?: { id: string; name: string; dur: number } | null; // надісланий трек, поки обрано інше (щоб «▸» міг повернутись)
+  // 🎬 v3 (початкові значення - зі стилю відео бренду, картка показує саме те, що буде)
+  template?: TemplateId;
+  hook?: string;              // "auto" - AI з тексту ролика, "off" - без, інше - свій текст («гачок: …»)
+  ownHook?: string | null;    // свій гачок, поки обрано «AI» чи «без» (щоб «▸» міг до нього повернутись)
+  end?: boolean;              // 🏁 фінальна картка
+  cut?: boolean;              // ✂️ вирізати паузи й «еее» (коли текст - зі звуку кліпів)
+  sub?: SubPreset;            // 🔤 стиль субтитрів
+  before?: number | null;     // ↔️ скільки перших кліпів - «до»
 };
 const TTL = 3 * 3600_000;
 const TEXT_WINDOW = 30 * 60_000;
@@ -93,8 +101,24 @@ export function loopHint(st: MtState): string {
   return `🔁 Голосове (${dur(st.voice.dur)}) довше за відео (${dur(foot)}) - кліпи підуть по колу. Щоб без повторів, додай ще кліпи.`;
 }
 
-function mtCard(st: MtState, brand = ""): { text: string; buttons: tg.TgButton[][] } {
+// ↔️ «ДО: кліпи 1-2 · ПІСЛЯ: 3-4»
+export function baLine(st: MtState): string {
+  const n = st.clips.length;
+  if (n < 2) return "↔️ Для «до / після» потрібно щонайменше 2 кліпи: спершу «до», потім «після».";
+  const b = baSplit(n, st.before);
+  const span = (a: number, z: number) => (a === z ? `${a}` : `${a}-${z}`);
+  return `↔️ ДО: ${b === 1 ? "кліп" : "кліпи"} ${span(1, b)} · ПІСЛЯ: ${n - b === 1 ? "кліп" : "кліпи"} ${span(b + 1, n)}`;
+}
+/** Звідки текст на відео - чи ріжуться паузи (лише коли текст - зі звуку самих кліпів). */
+const clipsVoice = (st: MtState) => !st.voice && !st.script && st.mode === "auto";
+function hookLabel(st: MtState): string {
+  const h = st.hook || "auto";
+  return h === "off" ? "без" : h === "auto" ? "AI з тексту ролика" : `«${h.slice(0, 40)}»`;
+}
+
+function mtCard(st: MtState, brand = "", endPreview: EndText | null = null): { text: string; buttons: tg.TgButton[][] } {
   const tts = ttsReady();
+  const tpl = st.template || "standard";
   const total = st.clips.reduce((a, c) => a + (c.kind === "image" ? 3 : c.dur), 0);
   const list = st.clips.map((c, i) => `${i + 1}. ${c.kind === "image" ? "фото" : `відео ${dur(c.dur)}`}`).join(" · ");
   const text = [
@@ -103,11 +127,16 @@ function mtCard(st: MtState, brand = ""): { text: string; buttons: tg.TgButton[]
     st.clips.length ? `Кліпи (${st.clips.length}, ≈${dur(total)}): ${list}` : "Кліпів ще нема.",
     mtTextPlan(st, tts),
     ...(loopHint(st) ? [loopHint(st)] : []),
-    `✨ Переходи: ${TRANSITIONS[st.transition || "fade"]} · 🎵 Музика: ${musicLabel(st)}`,
-    "🎯 З кожного кліпу беру найкращий шматок: різкий, світлий, без трясіння.",
+    `🧩 Шаблон: ${TEMPLATES[tpl].label.replace(/^\S+\s/, "")} - ${TEMPLATES[tpl].hint}`,
+    ...(tpl === "before_after" ? [baLine(st)] : []),
+    `🪝 Гачок: ${hookLabel(st)} · 🔤 Субтитри: ${SUB_PRESETS[st.sub || "classic"].label.toLowerCase()}`,
+    `🏁 Фінальна картка: ${st.end === false ? "без" : endPreview ? [endPreview.title, endPreview.sub].filter(Boolean).join(" · ") : "нема що показати (назва й нік бренду - у Бренд → Візуал)"}`,
+    ...(clipsVoice(st) && tpl !== "process" ? [`✂️ Паузи й «еее» в кліпах, де говорять: ${st.cut === false ? "лишаю" : "вирізаю"}`] : []),
+    `✨ Переходи: ${tpl === "talking" && !st.transition ? "без (шаблон)" : TRANSITIONS[st.transition || templatePlan(tpl).transition]} · 🎵 Музика: ${musicLabel(st)}${!st.music && !st.mood && templatePlan(tpl).mood && musicReady() ? ` (до шаблону пасує ${MUSIC_MOODS[templatePlan(tpl).mood!].label.split(" ").slice(1).join(" ").toLowerCase()})` : ""}`,
+    tpl === "talking" ? "🗣 Мова йде цілком, без обрізання." : "🎯 З кожного кліпу беру найкращий шматок: різкий, світлий, без трясіння.",
     "",
     st.clips.length
-      ? "Ще відео (до 20 МБ) чи фото - надсилай. Голосове - стане озвучкою, mp3 - фоновою музикою, текст - словами для відео. Готово - «✂️ Змонтувати»."
+      ? "Ще відео (до 20 МБ) чи фото - надсилай. Голосове - стане озвучкою, mp3 - фоновою музикою, текст - словами для відео, «гачок: …» - своїм гачком. Готово - «✂️ Змонтувати»."
       : "Надсилай відео з галереї (до 20 МБ кожне) чи фото - по черзі або альбомом. Потім голосове (озвучка), mp3 (музика) або текст - і «✂️ Змонтувати».",
   ].join("\n");
   const fmt: tg.TgButton[] = [
@@ -119,7 +148,14 @@ function mtCard(st: MtState, brand = ""): { text: string; buttons: tg.TgButton[]
   const buttons: tg.TgButton[][] = [];
   if (st.clips.length) buttons.push([{ text: "✂️ Змонтувати", data: "mt:build" }]);
   buttons.push(fmt, modes);
-  buttons.push([{ text: `✨ ${TRANSITIONS[st.transition || "fade"]} ▸`, data: "mt:tr" }, { text: `🎵 ${musicLabel(st)} ▸`, data: "mt:mus" }]);
+  buttons.push([{ text: `🧩 ${TEMPLATES[tpl].label.replace(/^\S+\s/, "")} ▸`, data: "mt:tpl" }, { text: `🪝 Гачок: ${st.hook === "off" ? "без" : st.hook && st.hook !== "auto" ? "свій" : "AI"} ▸`, data: "mt:hook" }]);
+  if (tpl === "before_after" && st.clips.length >= 3) buttons.push([{ text: `↔️ «До»: ${baSplit(st.clips.length, st.before)} ${plural(baSplit(st.clips.length, st.before), "кліп", "кліпи", "кліпів")} ▸`, data: "mt:ba" }]);
+  buttons.push([{ text: `🔤 ${SUB_PRESETS[st.sub || "classic"].label} ▸`, data: "mt:sub" }, { text: st.end === false ? "🏁 Картка: без ▸" : "🏁 Картка: так ▸", data: "mt:end" }]);
+  const row: tg.TgButton[] = [];
+  if (clipsVoice(st) && tpl !== "process") row.push({ text: st.cut === false ? "✂️ Паузи: лишаю ▸" : "✂️ Паузи: вирізаю ▸", data: "mt:cut" });
+  row.push({ text: `✨ ${tpl === "talking" && !st.transition ? "без переходів" : TRANSITIONS[st.transition || templatePlan(tpl).transition]} ▸`, data: "mt:tr" });
+  buttons.push(row);
+  buttons.push([{ text: `🎵 ${musicLabel(st)} ▸`, data: "mt:mus" }]);
   // аудіофайл розпізнано не так - одна кнопка міняє роль
   if (st.music) buttons.push([{ text: "🔁 Це голос, а не музика", data: "mt:swap" }]);
   else if (st.voice?.file) buttons.push([{ text: "🔁 Це музика, а не голос", data: "mt:swap" }]);
@@ -147,7 +183,8 @@ export function nextMusic(st: MtState, own: { id: string; name: string; dur: num
 const TR_ORDER: TransitionMode[] = ["fade", "slide", "zoom", "flash", "mix", "none"];
 
 async function showCard(ws: string, chatId: string, st: MtState, note = ""): Promise<void> {
-  const c = mtCard(st, await brandLabel(ws, chatId).catch(() => ""));
+  const style = await montageStyle(ws).catch(() => null);
+  const c = mtCard(st, await brandLabel(ws, chatId).catch(() => ""), await brandEndText(ws, style?.endText).catch(() => null));
   await liveSend(ws, chatId, "montage", (note ? note + "\n\n" : "") + c.text, c.buttons);
 }
 
@@ -181,7 +218,10 @@ export function startMt(ws: string, chatId: string): Promise<void> {
   return mtLocked(ws, async () => {
     const cur = await getMt(ws);
     if (cur) { cur.chat = chatId; await saveMt(ws, cur); await showCard(ws, chatId, cur); return; }
-    const st: MtState = { chat: chatId, clips: [], voice: null, script: null, mode: "auto", format: "story", at: Date.now() };
+    // 🎨 гачок, фінальна картка, паузи й субтитри - як у стилі відео бренду (картка каже, що саме буде)
+    const style = await montageStyle(ws);
+    const st: MtState = { chat: chatId, clips: [], voice: null, script: null, mode: "auto", format: "story", at: Date.now(),
+      template: "standard", hook: style.hook ? "auto" : "off", end: style.end, cut: style.cut, sub: style.subtitle, before: null };
     await saveMt(ws, st);
     await showCard(ws, chatId, st);
   });
@@ -239,13 +279,25 @@ export async function montageMessage(ws: string, chatId: string, msg: any, _st: 
         await showCard(ws, chatId, cur, `🎙 ${msg.voice ? "Голосове" : "Запис"} (${dur(d)}) - буде озвучкою, субтитри з нього.`);
         return true;
       }
-      if (!cur.clips.some((c) => c.id === saved.id)) {
+      // той самий файл (повтор вебхука чи те саме відео вдруге) - другим кліпом не стає, і людина це бачить
+      const had = cur.clips.findIndex((c) => c.id === saved.id);
+      if (had < 0) {
         cur.clips.push({ id: saved.id, kind: saved.kind === "image" ? "image" : "video", dur: d, mid: Number(msg.message_id) || 0 });
         // порядок - як людина надсилала (у альбомі - як розклала), а не як Telegram доставив
         cur.clips.sort((a, b) => (a.mid || 0) - (b.mid || 0));
       }
       await saveMt(ws, cur);
-      await showCard(ws, chatId, cur, `✅ ${saved.kind === "image" ? "Фото" : `Відео ${dur(d)}`} додано - кліпів: ${cur.clips.length}.`);
+      const what = saved.kind === "image" ? "Фото" : `Відео ${dur(d)}`;
+      await showCard(ws, chatId, cur, had < 0 ? `✅ ${what} додано - кліпів: ${cur.clips.length}.`
+        : `ℹ️ ${saved.kind === "image" ? "Це фото" : "Це відео"} вже в монтажі (кліп ${had + 1}) - вдруге не додаю. Кліпів: ${cur.clips.length}.`);
+      return true;
+    }
+    // 🪝 «гачок: …» - свій гачок (великий текст на перші секунди), а не слова для відео
+    const hm = /^\s*(?:🪝\s*)?(?:гачок|hook|háček)\s*[:：-]\s*(.+)$/is.exec(text);
+    if (hm) {
+      cur.hook = cleanHook(hm[1]) || "auto";
+      await saveMt(ws, cur);
+      await showCard(ws, chatId, cur, `🪝 Гачок: «${cur.hook}» - великим текстом на перші секунди.`);
       return true;
     }
     // текст - слова для відео, поки людина щойно працювала з монтажем (інакше - звичайна ідея чи щоденник)
@@ -266,7 +318,10 @@ async function netsFor(ws: string): Promise<string[]> {
 
 export function mtOpts(st: MtState, tts: boolean): { opts: MontageOpts; aiText: { mode: "captions" | "voiceover" } | null } {
   const clips = st.clips.map((c) => ({ id: c.id }));
-  const base = { clips, format: st.format, transition: st.transition || "fade", music: st.music?.id || null, musicMood: st.music ? null : st.mood || null } as const;
+  const h = st.hook || "auto";
+  const base = { clips, format: st.format, transition: st.transition || null, music: st.music?.id || null, musicMood: st.music ? null : st.mood || null,
+    template: st.template || "standard", hook: h === "off" ? false : h === "auto" ? true : h, endCard: st.end !== false,
+    cutPauses: st.cut !== false, subStyle: st.sub || null, beforeCount: st.before ?? null } as const;
   if (st.voice) return { opts: { ...base, voice: "audio", audio: st.voice.id }, aiText: null };
   if (st.script) {
     if (tts) return { opts: { ...base, voice: "tts", script: st.script }, aiText: null };
@@ -292,8 +347,36 @@ async function montageTap(ws: string, chatId: string, data: string, cbq: any, to
   if (cmd === "mode") { st.mode = arg === "ai-voice" ? "ai-voice" : arg === "captions" ? "captions" : "auto"; st.voice = null; st.script = null; await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id); await showCard(ws, chatId, st); return true; }
   if (cmd === "clear") { st.voice = null; st.script = null; st.mode = "auto"; await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id); await showCard(ws, chatId, st); return true; }
   if (cmd === "undo") { st.clips.pop(); await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id, "Прибрав останній кліп"); await showCard(ws, chatId, st); return true; }
+  if (cmd === "tpl") {
+    st.template = TEMPLATE_ORDER[(TEMPLATE_ORDER.indexOf(st.template || "standard") + 1) % TEMPLATE_ORDER.length];
+    st.transition = undefined;   // перехід - той, що пасує шаблону (його можна змінити кнопкою «✨»)
+    st.before = null;
+    await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id, `Шаблон: ${TEMPLATES[st.template].label.replace(/^\S+\s/, "")}`); await showCard(ws, chatId, st); return true;
+  }
+  if (cmd === "hook") {
+    // AI → без → (свій, якщо був) → AI
+    const own = st.hook && st.hook !== "auto" && st.hook !== "off" ? st.hook : st.ownHook || null;
+    if (own) st.ownHook = own;
+    st.hook = st.hook === "auto" || !st.hook ? "off" : st.hook === "off" ? (own || "auto") : "auto";
+    await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id, `Гачок: ${hookLabel(st)}`); await showCard(ws, chatId, st); return true;
+  }
+  if (cmd === "end" || cmd === "cut") {
+    if (cmd === "end") st.end = st.end === false; else st.cut = st.cut === false;
+    await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id); await showCard(ws, chatId, st); return true;
+  }
+  if (cmd === "sub") {
+    st.sub = SUB_ORDER[(SUB_ORDER.indexOf(st.sub || "classic") + 1) % SUB_ORDER.length];
+    await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id, `Субтитри: ${SUB_PRESETS[st.sub].label.toLowerCase()} - ${SUB_PRESETS[st.sub].hint}`); await showCard(ws, chatId, st); return true;
+  }
+  if (cmd === "ba") {
+    const n = st.clips.length;
+    const b = baSplit(n, st.before);
+    st.before = b + 1 > n - 1 ? 1 : b + 1;
+    await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id); await showCard(ws, chatId, st); return true;
+  }
   if (cmd === "tr") {
-    st.transition = TR_ORDER[(TR_ORDER.indexOf(st.transition || "fade") + 1) % TR_ORDER.length];
+    const tplTr = templatePlan(st.template || "standard").transition;
+    st.transition = TR_ORDER[(TR_ORDER.indexOf(st.transition || tplTr) + 1) % TR_ORDER.length];
     await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id, `Переходи: ${TRANSITIONS[st.transition]}`); await showCard(ws, chatId, st); return true;
   }
   if (cmd === "mus") {
@@ -335,7 +418,10 @@ async function montageTap(ws: string, chatId: string, data: string, cbq: any, to
 }
 
 async function sendResult(ws: string, chatId: string, r: MontageResult, token: string): Promise<void> {
-  const sub = [r.subtitles === "karaoke" ? "субтитри під голос" : r.subtitles === "lines" ? "підписи" : "без тексту",
+  const sub = [r.template && r.template !== "standard" ? TEMPLATES[r.template].label : "",
+    r.subtitles === "karaoke" ? "субтитри під голос" : r.subtitles === "lines" ? "підписи" : "без тексту",
+    r.hook ? `🪝 «${r.hook}»` : "", r.cut ? `✂️ паузи -${String(r.cut.saved).replace(".", ",")} с` : "", r.endCard ? "🏁 фінальна картка" : "",
+    r.cover ? "🖼 обкладинка Reels - кадр із гачком (інший кадр - у кабінеті)" : "",
     r.transition && r.transition !== "none" ? `✨ ${TRANSITIONS[r.transition]}` : "", r.music ? `🎵 ${r.music}` : "",
     r.smart ? `🎯 найкращі моменти: ${r.smart} ${plural(r.smart, "кліп", "кліпи", "кліпів")}` : ""].filter(Boolean).join(" · ");
   const many = r.videos.length > 1;

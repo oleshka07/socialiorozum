@@ -256,6 +256,19 @@ let pubPolls = 0;
 // відповіді, а саме синхронність і давала 504 на nginx.
 let aiJobPolls = 0;
 const mtCalls = [];
+// 🎬 монтаж v3: стиль відео бренду й обкладинка Reels
+const styleCalls = [], coverCalls = [];
+let MV_STYLE = { subtitle: "classic", color: "#FFD23F", position: "low", hook: true, end: true, endText: "", cut: true };
+const MV_CAPS_EXTRA = {
+  templates: [
+    { id: "standard", label: "🎬 Стандарт", hint: "кліпи по черзі, найкращі моменти, плавні переходи", mood: null },
+    { id: "before_after", label: "↔️ До / після", hint: "спершу кліпи «до», потім «після»", mood: "upbeat" },
+    { id: "talking", label: "🗣 Говорю в камеру", hint: "мова цілком, без пауз і «еее»", mood: null },
+    { id: "process", label: "⚡ Процес", hint: "короткі прискорені шматки роботи", mood: "energetic" },
+  ],
+  subStyles: [["classic", "Класичні"], ["brand", "Колір бренду"], ["box", "На плашці"], ["big", "Великі слова"], ["minimal", "Мінімальні"]].map(([id, label]) => ({ id, label, hint: "підказка " + id })),
+};
+const MV_END = { title: "Vary Servis & Úklid", sub: "Karlovy Vary · @servisvary" };
 const alertCalls = [];
 const AI_JOB_RESULT = new Map();
 
@@ -607,7 +620,7 @@ function handleApi(method, path, body) {
   let m = /^\/posts\/([0-9a-f-]+)\/full$/.exec(path);
   if (m) {
     const p = m[1] === P4 ? P4POST : m[1] === P5 ? P5POST : m[1] === P7 ? P7POST : m[1] === P8 ? P8POST : m[1] === P9 ? P9POST : (POSTS.find((x) => x.id === m[1]) || POSTS[0]);
-    return { ...p, image_prompt: "", headline: "", has_base: false, slides_text: "", media: CAR.get(p.id) || (p.media_filename ? [{ id: "c0", filename: p.media_filename }] : []) };
+    return { ...p, image_prompt: "", headline: "", has_base: false, slides_text: "", cover_filename: p.id === P5 ? "cov0.jpg" : null, media: CAR.get(p.id) || (p.media_filename ? [{ id: "c0", filename: p.media_filename }] : []) };
   }
   m = /^\/posts\/([0-9a-f-]+)\/publish-state$/.exec(path);
   if (m) {
@@ -645,7 +658,10 @@ function handleApi(method, path, body) {
   m = /^\/posts\/([0-9a-f-]+)$/.exec(path);
   if (method === "PUT" && m) { postPuts.push({ id: m[1], body }); return { ok: true }; }
   if (method === "POST" && path === "/ab/generate") return AB_RESULT;
-  if (method === "GET" && path === "/montage/caps") return { tts: true, stt: true, vision: true, music: true, maxClips: 20 };
+  if (method === "GET" && path === "/montage/caps") return { tts: true, stt: true, vision: true, music: true, maxClips: 20, ...MV_CAPS_EXTRA, style: MV_STYLE, endPreview: MV_STYLE.end ? (MV_STYLE.endText ? { title: MV_STYLE.endText.split("\n")[0], sub: MV_STYLE.endText.split("\n")[1] || "" } : MV_END) : MV_END };
+  if (method === "PUT" && path === "/montage/style") { styleCalls.push(body); MV_STYLE = { ...MV_STYLE, ...body }; return { ...MV_STYLE, endPreview: MV_STYLE.endText ? { title: MV_STYLE.endText.split("\n")[0], sub: MV_STYLE.endText.split("\n")[1] || "" } : MV_END }; }
+  const cvm = /^\/posts\/([0-9a-f-]+)\/cover$/.exec(path);
+  if (cvm && method === "POST") { coverCalls.push({ pid: cvm[1], ...body }); return { ok: true, cover: body.clear ? null : { id: "cv" + coverCalls.length, filename: "cov" + coverCalls.length + ".jpg" } }; }
   if (method === "PUT" && path === "/admin/alerts") { alertCalls.push({ put: body }); return { ok: true, settings: { ...API["GET /admin/alerts"].settings, ...body } }; }
   if (method === "POST" && path === "/admin/alerts/test") { alertCalls.push({ test: true }); return { ok: true, tg: 1, email: true, err: "", to: ["o.stepeniev@swipescape.eu"] }; }
   if (method === "POST" && /^\/admin\/alerts\/\d+\/resolve$/.test(path)) { alertCalls.push({ resolve: path.split("/")[3] }); API["GET /admin/alerts"].open = []; return { ok: true }; }
@@ -2866,9 +2882,114 @@ const run = async () => {
     const good = tile.includes("🎙") && tile.includes("0:35") && dis0 === true && btn.t === "🎬 Змонтувати (2)" && !btn.d
       && order.sort().join(",") === "md2:1,mv1:2" && opts.length === 6 && opts.includes("audio") && txtShown && /Напиши текст/.test(emptyMsg)
       && sent.format === "reel" && sent.ownText === "Fasáda hotová. Teď chodba." && JSON.stringify(sent.clips) === JSON.stringify([{ id: "md2" }, { id: "mv1" }])
-      && trOpts.join(",") === "fade,slide,zoom,flash,mix,none" && muOpts[0] === "" && muOpts.includes("t:ma1") && muOpts.filter((x) => x.startsWith("m:") && !x.endsWith("!")).length === 5
-      && smartOn && sent.transition === "fade" && sent.smart === true && sent.musicMood === "calm" && !sent.music;
+      && trOpts.join(",") === ",fade,slide,zoom,flash,mix,none" && muOpts[0] === "" && muOpts.includes("t:ma1") && muOpts.filter((x) => x.startsWith("m:") && !x.endsWith("!")).length === 5
+      && smartOn && sent.transition === undefined && sent.smart === true && sent.musicMood === "calm" && !sent.music
+      && sent.template === "standard" && sent.hook === true && sent.endCard === true && sent.subStyle === "classic" && sent.cutPauses === undefined;
     if (!good) console.log("   ↳ montageLib:", JSON.stringify({ tile, dis0, btn, order, opts, txtShown, emptyMsg, sent, trOpts, muOpts, smartOn }));
+    return good;
+  });
+
+  await check("montageV3", async () => {
+    // 🧩 шаблони в діалозі монтажу: «до / після» з розподілом кліпів, свій гачок, без фінальної картки,
+    // субтитри на плашці, «лишити паузи» - і все це йде на сервер
+    await page.evaluate(() => { MediaSel = new Set(); selectView("settings"); setSTab("sources"); return loadMedia(); });
+    await page.waitForSelector("#mSelMont", { timeout: 5000 });
+    for (const id of ["md2", "mv1"]) { await page.click(`#mediaGrid [data-id="${id}"]`); await page.waitForTimeout(150); }
+    await page.click("#mSelMont");
+    await page.waitForSelector(".mntTplBtn", { timeout: 5000 });
+    const tpls = await page.$$eval(".mntTplBtn", (b) => b.map((x) => x.dataset.t + (x.classList.contains("on") ? "*" : "")));
+    const endLbl = await page.$eval("#mntEnd", (c) => c.closest("label").textContent);
+    await page.click('.mntTplBtn[data-t="before_after"]');
+    const ba = await page.evaluate(() => ({ shown: document.querySelector("#mntBaRow").style.display !== "none", hint: document.querySelector("#mntBaHint").textContent }));
+    await page.selectOption("#mntHook", "own");
+    const hookShown = await page.$eval("#mntHookText", (i) => i.style.display !== "none");
+    if (process.env.SMOKE_SHOTS) {
+      await page.screenshot({ path: join(HERE, "montage-v3.png") });
+      await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(300);
+      await page.screenshot({ path: join(HERE, "montage-v3-mobile.png") });
+      await page.setViewportSize({ width: 1400, height: 950 }); await page.waitForTimeout(200);
+    }
+    await page.click("#mntGo");
+    const needHook = await page.$eval("#mntMsg", (m) => m.textContent);
+    await page.fill("#mntHookText", "Ріжемо бетон за день");
+    await page.selectOption("#mntSub", "box");
+    await page.click("#mntEnd");
+    await page.selectOption("#mntSrc", "auto");
+    const cutShown = await page.$eval("#mntCutRow", (r) => r.style.display !== "none");
+    await page.click("#mntCut");
+    await page.click('.mntTplBtn[data-t="talking"]');
+    const talkSrc = await page.$eval("#mntSrc", (s) => s.value);
+    await page.click('.mntTplBtn[data-t="before_after"]');
+    await page.click("#mntGo");
+    await page.waitForFunction(() => !document.querySelector("#mntSrc"), undefined, { timeout: 10000 });
+    const sent = mtCalls[mtCalls.length - 1] || {};
+    await page.evaluate(() => { document.querySelector(".cmp-ov")?.remove(); MediaSel = null; });
+    const good = tpls.join(",") === "standard*,before_after,talking,process" && /Vary Servis & Úklid · Karlovy Vary · @servisvary/.test(endLbl)
+      && ba.shown && ba.hint === "ДО: 1 · ПІСЛЯ: 2" && hookShown && /свій гачок/.test(needHook) && cutShown && talkSrc === "auto"
+      && sent.template === "before_after" && sent.beforeCount === 1 && sent.hook === "Ріжемо бетон за день" && sent.endCard === false
+      && sent.subStyle === "box" && sent.cutPauses === false && sent.voice === "clips";
+    if (!good) console.log("   ↳ montageV3:", JSON.stringify({ tpls, endLbl, ba, hookShown, needHook, cutShown, talkSrc, sent }));
+    return good;
+  });
+
+  await check("videoStyle", async () => {
+    // 🎨 Бренд → Візуал → «🎬 Стиль відео»: значення з сервера, прев'ю міняється одразу, збереження автоматичне
+    await page.evaluate(() => { selectView("brand"); setBTab("visual"); });
+    await page.waitForFunction(() => document.querySelector("#mvSub") && document.querySelector("#mvSub").options.length === 5, undefined, { timeout: 5000 });
+    const init = await page.evaluate(() => ({ sub: $("mvSub").value, hook: $("mvHook").checked, end: $("mvEndHint").textContent, hk: getComputedStyle($("mvPrevHook")).display }));
+    const n0 = styleCalls.length;
+    await page.selectOption("#mvSub", "box");
+    await page.fill("#mvColorHex", "#ff2f78");
+    await page.click("#mvHook");
+    for (let i = 0; i < 40 && styleCalls.length <= n0; i++) await page.waitForTimeout(100);
+    await page.waitForTimeout(600);
+    const after = await page.evaluate(() => ({ cls: $("mvPrevSub").className, hk: getComputedStyle($("mvPrevHook")).display, word: $("mvPrevSub").querySelector("b").style.color }));
+    if (process.env.SMOKE_SHOTS) {
+      await page.$eval("#mvPanel", (el) => el.scrollIntoView({ block: "start" })); await page.waitForTimeout(200);
+      const el = await page.$("#mvPanel");
+      await el.screenshot({ path: join(HERE, "video-style-light.png") });
+      const th = await page.evaluate(() => document.body.getAttribute("data-theme"));
+      await page.evaluate(() => setTheme("dark")); await page.waitForTimeout(200);
+      await el.screenshot({ path: join(HERE, "video-style-dark.png") });
+      await page.evaluate((x) => setTheme(x || "light"), th);
+      await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(300);
+      await page.$eval("#mvPanel", (el) => el.scrollIntoView({ block: "start" }));
+      const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+      if (sw > 391) console.log("   ↳ videoStyle: горизонтальний скрол на телефоні", sw);
+      await page.screenshot({ path: join(HERE, "video-style-mobile.png") });
+      await page.setViewportSize({ width: 1400, height: 950 }); await page.waitForTimeout(200);
+    }
+    const last = styleCalls[styleCalls.length - 1] || {};
+    const good = init.sub === "classic" && init.hook && /Vary Servis & Úklid · Karlovy Vary · @servisvary/.test(init.end) && init.hk !== "none"
+      && /box/.test(after.cls) && after.hk === "none" && /255, 47, 120|ff2f78/i.test(after.word)
+      && last.subtitle === "box" && last.hook === false && /ff2f78/i.test(last.color);
+    if (!good) console.log("   ↳ videoStyle:", JSON.stringify({ init, after, last, calls: styleCalls.length - n0 }));
+    return good;
+  });
+
+  await check("coverPicker", async () => {
+    // 🖼 обкладинка Reels у композері відео-поста: поточна (кадр із гачком з монтажу), свій кадр повзунком, прибрати
+    await closeComposers();
+    await page.waitForTimeout(150);
+    await page.evaluate((id) => openComposer(id), P5);
+    await page.waitForSelector(".cmp-ov #cmpCover", { timeout: 6000 });
+    const th0 = await page.$eval("#cmpCover .cmpCoverTh img", (i) => i.getAttribute("src")).catch(() => "");
+    await page.click("#cmpCovFrame");
+    if (process.env.SMOKE_SHOTS) { await page.$eval("#cmpCover", (el) => el.scrollIntoView({ block: "center" })); await page.waitForTimeout(300); await page.screenshot({ path: join(HERE, "cover-picker.png") }); }
+    await page.$eval("#cmpCovAt", (r) => { r.value = "2.5"; r.dispatchEvent(new Event("input")); });
+    const tl = await $t("#cmpCovT");
+    await page.click("#cmpCovOk");
+    await page.waitForFunction(() => /cov\d+\.jpg/.test(document.querySelector("#cmpCover .cmpCoverTh img")?.getAttribute("src") || "") && !/cov0/.test(document.querySelector("#cmpCover .cmpCoverTh img").getAttribute("src")), undefined, { timeout: 4000 }).catch(() => {});
+    const th1 = await page.$eval("#cmpCover .cmpCoverTh img", (i) => i.getAttribute("src")).catch(() => "");
+    const c1 = coverCalls[coverCalls.length - 1] || {};
+    await page.click("#cmpCovClear");
+    await page.waitForFunction(() => !document.querySelector("#cmpCover .cmpCoverTh img"), undefined, { timeout: 4000 }).catch(() => {});
+    const th2 = await $t("#cmpCover .cmpCoverTh");
+    const c2 = coverCalls[coverCalls.length - 1] || {};
+    await closeComposers();
+    const good = th0 === "/thumb/cov0.jpg" && tl === "2,5 с" && c1.pid === P5 && c1.at === 2.5 && /\/thumb\/cov\d+\.jpg/.test(th1) && th1 !== th0
+      && c2.clear === true && /вибере/.test(th2 || "");
+    if (!good) console.log("   ↳ coverPicker:", JSON.stringify({ th0, tl, c1, th1, c2, th2 }));
     return good;
   });
 

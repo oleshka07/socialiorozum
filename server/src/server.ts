@@ -37,8 +37,8 @@ import { normalizeMeeting, saveMeeting } from "./meetings.js";
 import { spendStatus, SpendCapError, CAPS } from "./spend.js";
 import { spreadTimes, topicAngles } from "./textkind.js";
 import { startJob, getJob, getJobByKey, jobView, markLostJobs } from "./jobs.js";
-import { startMontage, MONTAGE_MAX_CLIPS } from "./montage.js";
-import { spreadText, normTransition, normMood } from "./montage-plan.js";
+import { startMontage, MONTAGE_MAX_CLIPS, montageStyle, brandEndText, setReelCover, MontageError } from "./montage.js";
+import { spreadText, normTransition, normMood, normTemplate, normSubPreset, normSubPos, normHex, normMontageStyle, TEMPLATES, TEMPLATE_ORDER, templatePlan, SUB_PRESETS, SUB_ORDER } from "./montage-plan.js";
 import { ttsReady, musicReady } from "./tts.js";
 import { readdir, stat } from "node:fs/promises";
 import { startMeetingPull, testPull, pullOnce } from "./meetings-pull.js";
@@ -59,7 +59,7 @@ import { startComments, commentStates, queueMissingComments, processDue as proce
 import { collectInbox, replyToComment, skipComment, isInboxNet, inboxDrafts, INBOX_NETS, type InboxNet } from "./inbox.js";
 import { cleanAlt } from "./igextras.js";
 import { BRAND, legacyHosts, legacyRedirect } from "./brand.js";
-import { getSettingText, getSetting } from "./settings.js";
+import { getSettingText, getSetting, setSetting } from "./settings.js";
 import { runAbTest, modelCatalog, abSpend } from "./abtest.js";
 import { contextReview, contextIssueCount, suggestFieldFix } from "./context-check.js";
 import { generateImageForPost, imageProviders, imageCosts, overlayForPost, attachCroppedImage, stockPhotoOptions, attachStockPhoto, appendCroppedSlide } from "./images.js";
@@ -786,20 +786,57 @@ app.post("/api/montage", async (req: any, reply) => {
   }
   if ((voice === "tts" || ai?.mode === "voiceover") && !ttsReady()) return reply.code(400).send({ error: "AI-голос не підключено: адмін додає ключ ElevenLabs у Налаштування → Профіль → Ключі провайдерів" });
   const nets = Array.isArray(b.nets) ? b.nets.map(String).filter((n: string) => ["instagram", "facebook", "threads", "telegram", "linkedin"].includes(n)) : [];
+  // 🎬 v3: шаблон, гачок (true - AI, false - без, рядок - свій), фінальна картка, паузи, стиль субтитрів.
+  // Не задане - з шаблону і стилю відео бренду (Бренд → Візуал → «🎬 Стиль відео»)
+  const tri = (x: unknown, max: number) => (x === true || x === false ? x : typeof x === "string" && x.trim() ? x.trim().slice(0, max) : null);
+  const bc = Number(b.beforeCount);
   const job = await startMontage(ws, {
     clips, voice: ai?.mode === "voiceover" ? "tts" : voice, audio: b.audio ? String(b.audio) : null,
     script, subtitles: ["karaoke", "lines", "none"].includes(b.subtitles) ? b.subtitles : null,
     keepSound: b.keepSound === false ? false : null, format, autoCaptions: b.autoCaptions === true,
-    transition: normTransition(b.transition, "fade"), smart: b.smart === false ? false : null,
+    transition: b.transition ? normTransition(b.transition, "fade") : null, smart: b.smart === false ? false : null,
     music: b.music && /^[0-9a-f-]{36}$/i.test(String(b.music)) ? String(b.music) : null, musicMood: normMood(b.musicMood),
+    template: normTemplate(b.template), hook: tri(b.hook, 120), endCard: tri(b.endCard, 200),
+    cutPauses: typeof b.cutPauses === "boolean" ? b.cutPauses : null,
+    subStyle: b.subStyle ? normSubPreset(b.subStyle) : null, subPos: b.subPos ? normSubPos(b.subPos) : null, color: normHex(b.color),
+    beforeCount: Number.isFinite(bc) && bc > 0 ? bc : null,
   }, { create: b.create === false ? null : { nets: nets.length ? nets : (await connectedNets(ws)).filter((n) => n === "instagram" || n === "facebook"), text: String(b.text || "").slice(0, 5000) }, aiText: ai });
   return { jobId: job.id };
 });
 
 // що доступно для монтажу на цьому сервері (кабінет вмикає/пояснює варіанти тексту)
-app.get("/api/montage/caps", async () => {
+app.get("/api/montage/caps", async (req: any) => {
+  const ws = req.user.workspace_id;
   const stt = sttAvailable();
-  return { tts: ttsReady(), stt: stt.deepgram || stt.whisper, vision: !!(env.openai.apiKey || env.openrouter.apiKey || env.gemini.apiKey), music: musicReady(), maxClips: MONTAGE_MAX_CLIPS };
+  const style = await montageStyle(ws);
+  return { tts: ttsReady(), stt: stt.deepgram || stt.whisper, vision: !!(env.openai.apiKey || env.openrouter.apiKey || env.gemini.apiKey), music: musicReady(), maxClips: MONTAGE_MAX_CLIPS,
+    templates: TEMPLATE_ORDER.map((id) => ({ id, ...TEMPLATES[id], mood: templatePlan(id).mood })),
+    subStyles: SUB_ORDER.map((id) => ({ id, ...SUB_PRESETS[id] })),
+    style, endPreview: await brandEndText(ws, style.endText) };
+});
+// 🎨 Стиль відео бренду: субтитри, колір, гачок, фінальна картка, вирізання пауз - типові для всіх монтажів
+app.get("/api/montage/style", async (req: any) => {
+  const ws = req.user.workspace_id, style = await montageStyle(ws);
+  return { ...style, endPreview: await brandEndText(ws, style.endText) };
+});
+app.put("/api/montage/style", async (req: any) => {
+  const ws = req.user.workspace_id, style = normMontageStyle(req.body);
+  await setSetting(ws, "montage_style", style);
+  return { ...style, endPreview: await brandEndText(ws, style.endText) };
+});
+// 🖼 Обкладинка Reels: { at: секунда відео } | { media: id фото } | { clear: true }
+app.post("/api/posts/:postId/cover", async (req: any, reply) => {
+  const b = req.body || {};
+  const media = b.media && isUuid(String(b.media)) ? String(b.media) : null;
+  const at = b.at != null && Number.isFinite(Number(b.at)) ? Number(b.at) : null;
+  if (!b.clear && !media && at == null) return reply.code(400).send({ error: "обери кадр (at) чи фото (media)" });
+  try {
+    const c = await setReelCover(req.user.workspace_id, req.params.postId, b.clear ? null : { at, media });
+    return { ok: true, cover: c ? { id: c.id, filename: c.filename } : null };
+  } catch (e: any) {
+    if (e instanceof MontageError) return reply.code(/не знайдено/.test(e.message) ? 404 : 400).send({ error: e.message });
+    throw e;
+  }
 });
 
 app.get("/api/jobs/:id", async (req: any, reply) => {
@@ -987,10 +1024,11 @@ app.put("/api/media/chunk", async (req: any, reply) => {
 });
 
 // технічні копії (ig-safe: JPEG-версія для Instagram API) в бібліотеці не показуємо -
-// вони дублювали кожне опубліковане фото і засмічували медіатеку
+// вони дублювали кожне опубліковане фото і засмічували медіатеку. Так само обкладинки рілсів (cover):
+// це кадр змонтованого відео, він живе в композері поста, а не серед фото автора
 app.get("/api/media", async (req: any) =>
   q(`select id, kind, mime, original_name, filename, size, source, created_at, duration, width, height from media_asset
-     where workspace_id=$1 and source not in ('ig-safe','ai-base','slide') order by created_at desc limit 200`, [req.user.workspace_id]));
+     where workspace_id=$1 and source not in ('ig-safe','ai-base','slide','cover') order by created_at desc limit 200`, [req.user.workspace_id]));
 
 // 📸 alt-текст фото (опис для незрячих і пошуку): іде в Instagram (фото й кадри каруселі) і LinkedIn.
 // Порожній рядок прибирає опис.
@@ -1080,7 +1118,8 @@ app.get("/api/channels/status", async (req: any) => {
 
 // повний стан поста для композера (текст, канали, фото)
 app.get("/api/posts/:postId/full", async (req: any, reply) => {
-  const p = await one(`select p.id, p.content, p.review, p.channels, p.headline, p.rubric, p.intent, p.format, p.image_prompt, p.slides_text, p.first_comment, (p.image_base is not null) as has_base, ma.filename as media_filename
+  const p = await one(`select p.id, p.content, p.review, p.channels, p.headline, p.rubric, p.intent, p.format, p.image_prompt, p.slides_text, p.first_comment, (p.image_base is not null) as has_base, ma.filename as media_filename,
+       (select c.filename from media_asset c where c.id=p.reel_cover) as cover_filename
      from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      left join media_asset ma on ma.id=p.media_id
      where p.id=$1 and s.workspace_id=$2`, [req.params.postId, req.user.workspace_id]);

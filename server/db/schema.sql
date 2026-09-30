@@ -335,6 +335,8 @@ alter table media_asset add column if not exists height int;
 -- 📸 опис фото для незрячих і пошуку (alt-текст): Instagram (фото й кадри каруселі) і LinkedIn.
 -- Живе на файлі: те саме фото в іншому пості описується так само.
 alter table media_asset add column if not exists alt_text text;
+-- 🖼 обкладинка Reels (кадр змонтованого відео з гачком, або обраний людиною кадр/фото): cover_url для Instagram
+alter table post add column if not exists reel_cover uuid references media_asset(id) on delete set null;
 alter table post add column if not exists media_id uuid references media_asset(id) on delete set null;
 alter table post add column if not exists channels jsonb;   -- {telegram:{on,text}, instagram:{...}, ...} для композера
 alter table post add column if not exists rubric text;      -- тег-рубрика (штампується при генерації; фільтри Студії/календаря)
