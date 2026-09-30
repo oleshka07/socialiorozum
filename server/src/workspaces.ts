@@ -58,7 +58,9 @@ export async function revokeAccess(wsId: string, userId: string): Promise<{ ok: 
   if (!row) return { ok: false, error: "Доступу й так немає." };
   if (row.role === "owner") return { ok: false, error: "Власника кабінету прибрати не можна." };
   await q(`delete from workspace_member where workspace_id=$1 and user_id=$2`, [wsId, userId]);
-  // разом із доступом - і Telegram: бот і Mini App цієї людини більше не відкривають кабінет
+  // разом із доступом - і Telegram: бот і Mini App цієї людини більше не відкривають кабінет. Якщо бот
+  // стояв на цьому бренді (🏢 /brand), він вертається в її домашній кабінет, а не відвʼязується зовсім
+  await botToHome(wsId, userId);
   await q(`delete from tg_owner where workspace_id=$1 and user_id=$2`, [wsId, userId]);
   await q(`delete from tg_connect where workspace_id=$1 and created_by=$2`, [wsId, userId]);
   // сесії, що сиділи в цьому кабінеті, самі впадуть у домашній: resolve у userBySession робить
@@ -84,7 +86,16 @@ export async function isAnyonesHome(wsId: string): Promise<boolean> {
 // не видалився, прибере нічна зачистка сиріт. Файл, на який посилається ІНШИЙ кабінет, не чіпаємо.
 // Сесії та конектори, що сиділи в цьому кабінеті, отримують null (FK on delete set null) і самі
 // падають у домашній кабінет наступним же запитом.
+/** Бот людини стоїть на бренді, який у неї забирають: назад у її домашній кабінет (якщо він інший). */
+async function botToHome(wsId: string, userId: string | null): Promise<void> {
+  await q(`update tg_owner o set workspace_id = u.workspace_id from app_user u
+            where o.workspace_id=$1 and u.id=o.user_id and ($2::uuid is null or o.user_id=$2)
+              and u.workspace_id is not null and u.workspace_id <> $1
+              and exists (select 1 from workspace_member m where m.user_id=u.id and m.workspace_id=u.workspace_id)`, [wsId, userId]);
+}
+
 export async function purgeWorkspace(wsId: string): Promise<void> {
+  await botToHome(wsId, null);   // інакше каскад стер би привʼязку Telegram - людина мусила б підключати бота наново
   const files = await q<{ filename: string }>(
     `select distinct a.filename from media_asset a where a.workspace_id=$1
         and not exists (select 1 from media_asset b where b.filename=a.filename and b.workspace_id<>$1)`, [wsId]);

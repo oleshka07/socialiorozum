@@ -13,7 +13,8 @@ import { getSetting, setSetting } from "./settings.js";
 import { saveMedia } from "./media.js";
 import { postMediaList, setPostMediaOrder, setPostVideo, MAX_SLIDES } from "./slides.js";
 import { appendCroppedSlide } from "./images.js";
-import { publishPostToChannels, enabledNets, closeSlotsIfDone, alreadySentNetworks, PUB_NETS, unschedulePost, type PubResult } from "./publisher.js";
+import { publishPostToChannels, enabledNets, closeSlotsIfDone, alreadySentNetworks, sentAccountKeys, PUB_NETS, unschedulePost, type PubResult } from "./publisher.js";
+import { accountChoices, postAccounts, isAccNet, type AccNet, type AccountChoice } from "./accounts.js";
 import { rewritePost } from "./pipeline.js";
 import { logEvent } from "./log.js";
 
@@ -115,7 +116,7 @@ export async function loadPost(ws: string, postId: string): Promise<PostRow | nu
 }
 
 // ---- картка поста: що зараз є + що можна зробити ----
-export async function composeCard(ws: string, postId: string): Promise<{ text: string; buttons: tg.TgButton[][] } | null> {
+export async function composeCard(ws: string, postId: string, brand = ""): Promise<{ text: string; buttons: tg.TgButton[][] } | null> {
   const p = await loadPost(ws, postId);
   if (!p) return null;
   const ch = p.channels || {};
@@ -131,10 +132,11 @@ export async function composeCard(ws: string, postId: string): Promise<{ text: s
   const frames = list.length, isVideo = list[0]?.kind === "video";
   // розмітка **…** (sendMessage сам перекладає її в HTML і екранує текст): власні <b> і &amp; тут
   // екранувались удруге, і людина бачила буквальні «<b>Чернетка</b>» та «R&amp;D»
-  const text = `📝 **${p.review === "approved" ? "Затверджено" : "Чернетка"}**\n\n${body}\n\n`
+  const choices = await accountChoices(ws);
+  const text = `📝 **${p.review === "approved" ? "Затверджено" : "Чернетка"}**${brand ? ` · 🏢 ${brand}` : ""}\n\n${body}\n\n`
     + (isVideo ? `🎬 Відео${list[0].duration ? ` ${Math.floor(Number(list[0].duration) / 60)}:${String(Math.round(Number(list[0].duration)) % 60).padStart(2, "0")}` : ""}\n`
       : `🖼 Фото: ${frames > 1 ? `карусель, ${frames} кадрів` : p.filename ? "є" : "нема"}\n`)
-    + `📢 Канали: ${chosen.length ? chosen.map(niceNet).join(", ") : "не обрано"}`
+    + `📢 Куди: ${chosen.length ? chosen.map((k) => niceNet(k) + accountsLabel(k, ch, choices)).join(" · ") : "не обрано"}`
     + (when ? `\n🗓 Заплановано: ${when}` : "");
 
   // ряд каналів: тумблери ✅/⬜ по 2 в рядок, щоб кнопки лишались читабельними на телефоні
@@ -144,6 +146,11 @@ export async function composeCard(ws: string, postId: string): Promise<{ text: s
       text: `${ch[k] && ch[k].on ? "✅" : "⬜"} ${niceNet(k)}`, data: `cn:${postId}:${k}`,
     })));
   }
+  // 👥 у мережі кілька Сторінок / профілів / каналів - обрати, куди саме (той самий пост у кілька - можна)
+  const multi = chosen.filter((k) => isAccNet(k) && choices[k].length > 1);
+  for (let i = 0; i < multi.length; i += 2)
+    rows.push(multi.slice(i, i + 2).map((k) => ({ text: `👥 ${niceNet(k).split(" ")[1]}: ${shortPick(k, ch, choices)} ▸`, data: `cac:${postId}:${k}` })));
+  if (brand) rows.push([{ text: `🏢 Бренд: ${brand.slice(0, 28)} ▸`, data: `cb:${postId}` }]);
   // альбом, надісланий у відповідь на «Додати фото», стає каруселлю (перше фото - обкладинка)
   rows.push([{ text: isVideo ? "🎬 Змінити відео" : p.filename ? "🖼 Змінити фото" : "🖼 Фото, альбом чи відео", data: `cp:${postId}` },
              { text: "✍ Текст", data: `ce:${postId}` }]);
@@ -151,6 +158,78 @@ export async function composeCard(ws: string, postId: string): Promise<{ text: s
              { text: p.review === "approved" ? "↩ У чернетки" : "✅ Затвердити", data: `ca:${postId}` }]);
   rows.push([{ text: "🚀 Опублікувати", data: `cgo:${postId}` }, { text: "🗓 Запланувати", data: `cs:${postId}` }]);
   return { text, buttons: rows };
+}
+
+// ---- 👥 які саме акаунти мережі (Сторінки Facebook, їхній Instagram, профілі Threads, канали Telegram) ----
+// Вибір - той самий `channels.<мережа>.accounts`, що в кабінеті й конекторі: порожньо = за замовчуванням
+// (основний акаунт; у Telegram - основні канал і група).
+function picked(net: string, ch: any, choices: Record<AccNet, AccountChoice[]>): { list: AccountChoice[]; ids: string[] } {
+  const list = isAccNet(net) ? choices[net] : [];
+  const want = postAccounts(ch, net);
+  if (want.length) return { list, ids: want };
+  const dflt = net === "telegram" ? list.filter((a) => a.main) : [list.find((a) => a.main) || list[0]].filter(Boolean) as AccountChoice[];
+  return { list, ids: dflt.map((a) => a.id) };
+}
+const accName = (list: AccountChoice[], id: string) => list.find((a) => a.id === id)?.name || "⚠️ акаунт, якого вже нема в бренді";
+function accountsLabel(net: string, ch: any, choices: Record<AccNet, AccountChoice[]>): string {
+  if (!isAccNet(net) || !choices[net].length) return "";
+  const { list, ids } = picked(net, ch, choices);
+  return ids.length ? ` (${ids.map((id) => accName(list, id)).join(" + ")})` : "";
+}
+function shortPick(net: string, ch: any, choices: Record<AccNet, AccountChoice[]>): string {
+  const { list, ids } = picked(net, ch, choices);
+  const first = ids.length ? accName(list, ids[0]).slice(0, 16) : "-";
+  return ids.length > 1 ? `${first} +${ids.length - 1}` : first;
+}
+
+/** Картка вибору акаунтів мережі: галочка на кожен, опубліковане - ✓ і не знімається. */
+export async function accountsCard(ws: string, postId: string, net: string): Promise<{ text: string; buttons: tg.TgButton[][] } | null> {
+  const p = await loadPost(ws, postId);
+  if (!p || !isAccNet(net)) return null;
+  const choices = await accountChoices(ws);
+  const { list, ids } = picked(net, p.channels || {}, choices);
+  const sent = await sentAccountKeys(ws, postId);
+  const rows: tg.TgButton[][] = [];
+  // обраний раніше акаунт, якого вже нема в бренді, - теж рядком: його треба могти зняти
+  for (const id of [...list.map((a) => a.id), ...ids.filter((x) => !list.some((a) => a.id === x))]) {
+    const a = list.find((x) => x.id === id);
+    const done = sent.has(`${net}|${id}`);
+    const mark = done ? "✓" : ids.includes(id) ? "✅" : "⬜";
+    rows.push([{ text: `${mark} ${a ? a.name : "⚠️ уже не в бренді"}${a?.main ? " (основн.)" : ""}${done ? " - вийшло" : ""}`.slice(0, 60), data: `cat:${postId}:${net}:${id.slice(-8)}` }]);
+  }
+  rows.push([{ text: "‹ Назад", data: `cc:${postId}` }]);
+  const what = net === "telegram" ? "канали й групи" : net === "facebook" ? "Сторінки" : net === "instagram" ? "акаунти Instagram" : "профілі Threads";
+  return { text: `👥 **${niceNet(net)}** - куди цей пост?
+
+Позначені - отримають пост (кожен окремою публікацією зі своєю статистикою). Можна кілька одразу. ${what === "Сторінки" ? "Instagram обирається окремо." : ""}`.trim() + (ids.length ? `
+
+Зараз: ${ids.map((id) => accName(list, id)).join(" + ")}` : ""), buttons: rows };
+}
+
+/** Галочка акаунта. Вертає пояснення, якщо змінити не можна (опубліковано / останній). */
+export async function toggleAccount(ws: string, postId: string, net: string, suffix: string): Promise<string> {
+  const p = await loadPost(ws, postId);
+  if (!p || !isAccNet(net)) return "Пост не знайдено";
+  const ch = p.channels || {};
+  const choices = await accountChoices(ws);
+  const { list, ids } = picked(net, ch, choices);
+  const id = [...list.map((a) => a.id), ...ids].find((x) => x.slice(-8) === suffix);
+  if (!id) return "Цього акаунта вже нема - онови картку";
+  let sel = [...ids];
+  if (sel.includes(id)) {
+    if ((await sentAccountKeys(ws, postId)).has(`${net}|${id}`)) return "Сюди вже опубліковано - лишається";
+    if (sel.length === 1) return "Хоч один має лишитись. Щоб не публікувати в цю мережу, вимкни її в картці";
+    sel = sel.filter((x) => x !== id);
+  } else sel.push(id);
+  // порядок - як у списку бренду; рівно «за замовчуванням» не памʼятаємо (зміниться основний - пост піде за ним)
+  sel = [...list.map((a) => a.id).filter((x) => sel.includes(x)), ...sel.filter((x) => !list.some((a) => a.id === x))];
+  const dflt = net === "telegram" ? list.filter((a) => a.main).map((a) => a.id) : [(list.find((a) => a.main) || list[0])?.id].filter(Boolean) as string[];
+  const same = sel.length === dflt.length && sel.every((x) => dflt.includes(x));
+  ch[net] = { ...(ch[net] && typeof ch[net] === "object" ? ch[net] : { on: true }) };
+  delete ch[net].account;
+  if (same) delete ch[net].accounts; else ch[net].accounts = sel;
+  await q(`update post set channels=$2 where id=$1`, [postId, JSON.stringify(ch)]);
+  return "";
 }
 
 // «затверджено» - той самий прапорець `review`, що в Студії й Mini App: пост, схвалений з телефона,

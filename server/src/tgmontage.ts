@@ -21,6 +21,7 @@ import { getJob } from "./jobs.js";
 import { spreadText, MAX_SLOW, TRANSITIONS, MUSIC_MOODS, type TransitionMode, type MusicMood } from "./montage-plan.js";
 import { musicReady } from "./tts.js";
 import { plural } from "./analytics.js";
+import { brandLabel, moveMedia } from "./tgbrand.js";
 
 export type MtMode = "auto" | "captions" | "ai-voice";
 export type MtState = {
@@ -92,12 +93,13 @@ export function loopHint(st: MtState): string {
   return `🔁 Голосове (${dur(st.voice.dur)}) довше за відео (${dur(foot)}) - кліпи підуть по колу. Щоб без повторів, додай ще кліпи.`;
 }
 
-function mtCard(st: MtState): { text: string; buttons: tg.TgButton[][] } {
+function mtCard(st: MtState, brand = ""): { text: string; buttons: tg.TgButton[][] } {
   const tts = ttsReady();
   const total = st.clips.reduce((a, c) => a + (c.kind === "image" ? 3 : c.dur), 0);
   const list = st.clips.map((c, i) => `${i + 1}. ${c.kind === "image" ? "фото" : `відео ${dur(c.dur)}`}`).join(" · ");
   const text = [
     `🎬 **Монтаж** · ${st.format === "story" ? "⚡ сторіс (Instagram і Facebook, частини до 60 с)" : "🎞 рілс"}`,
+    ...(brand ? [`🏢 Бренд: ${brand} (інший - /brand, сесія переїде разом)`] : []),
     st.clips.length ? `Кліпи (${st.clips.length}, ≈${dur(total)}): ${list}` : "Кліпів ще нема.",
     mtTextPlan(st, tts),
     ...(loopHint(st) ? [loopHint(st)] : []),
@@ -145,8 +147,33 @@ export function nextMusic(st: MtState, own: { id: string; name: string; dur: num
 const TR_ORDER: TransitionMode[] = ["fade", "slide", "zoom", "flash", "mix", "none"];
 
 async function showCard(ws: string, chatId: string, st: MtState, note = ""): Promise<void> {
-  const c = mtCard(st);
+  const c = mtCard(st, await brandLabel(ws, chatId).catch(() => ""));
   await liveSend(ws, chatId, "montage", (note ? note + "\n\n" : "") + c.text, c.buttons);
+}
+
+/**
+ * 🏢 Людина перемкнула бренд посеред монтажу: сесія (кліпи, голосове, музика) їде з нею - монтаж для
+ * нового бренду, а не для старого. Монтаж, що вже йде, не чіпаємо: його пост можна перенести кнопкою
+ * «🏢» у картці. Вертає, що сталося, - для відповіді людині.
+ */
+export async function moveMtSession(from: string, to: string): Promise<"none" | "moved" | "busy" | "taken"> {
+  if (from === to) return "none";
+  return mtLocked(from, async () => {
+    const st = await getMt(from);
+    if (!st) return "none";
+    if (st.job) { const j = await getJob(st.job); if (j?.status === "running") return "busy"; }
+    if (await getMt(to)) return "taken";
+    const map = await moveMedia([...st.clips.map((c) => c.id), st.voice?.id || "", st.music?.id || "", st.ownMusic?.id || ""], from, to);
+    const re = (id: string) => map.get(id) || id;
+    st.clips = st.clips.filter((c) => map.has(c.id)).map((c) => ({ ...c, id: re(c.id) }));
+    if (st.voice) st.voice = map.has(st.voice.id) ? { ...st.voice, id: re(st.voice.id) } : null;
+    if (st.music) st.music = map.has(st.music.id) ? { ...st.music, id: re(st.music.id) } : null;
+    if (st.ownMusic) st.ownMusic = map.has(st.ownMusic.id) ? { ...st.ownMusic, id: re(st.ownMusic.id) } : null;
+    st.job = null;
+    await mtLocked(to, () => saveMt(to, st));
+    await clearMt(from);
+    return "moved";
+  });
 }
 
 /** /montage чи кнопка «🎬 Монтаж»: відкрита сесія - показуємо її, інакше нова. */

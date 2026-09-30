@@ -284,8 +284,12 @@ const TGP = {
   channels: { telegram: { on: true } },
   review: null, rubric: null, filename: null, scheduled_at: null, slot_id: null, sent: [], links: {},
 };
+const TG_BRAND = { cur: "w1", calls: [] };
 function handleTg(method, path, body) {
-  if (path === "/me") return { ok: true, drafts: 2, materials: 2, nets: ["telegram", "threads"], tz: "Europe/Kyiv" };
+  // 🏢 два бренди: перемикач угорі Mini App (той самий вибір, що /brand у боті)
+  if (path === "/me") return { ok: true, drafts: 2, materials: 2, nets: ["telegram", "threads"], tz: "Europe/Kyiv",
+    brand: TG_BRAND.cur, brands: [{ id: "w1", title: "oleg@test.dev" }, { id: "w2", title: "Vary Servis & Úklid" }] };
+  if (method === "POST" && path === "/brand") { TG_BRAND.calls.push(body?.id); TG_BRAND.cur = body?.id; return { ok: true, title: "Vary Servis & Úklid" }; }
   if (path === "/materials") return { items: [{ id: "m1", title: "📔 Щоденник, 30 липня", origin: "diary", ai_score: 9, created_at: iso(0, 8), transcript: "Дзвінок з постачальником." }] };
   if (path === "/drafts") {
     return { items: [
@@ -2387,6 +2391,18 @@ const run = async () => {
     // матеріал → пост іде джобою і одразу відкриває редактор із написаним текстом
     await tgPage.waitForSelector(".sheet #et", { timeout: 15000 });
     return (await tgPage.$eval(".sheet #et", (el) => el.value.length > 5));
+  });
+
+  await check("tgappBrand", async () => {
+    // 🏢 кілька брендів: вибір угорі; зміна - POST /brand і перезавантаження вже з новим брендом
+    const opts = await tgPage.$$eval("#brandSel option", (els) => els.map((e) => ({ v: e.value, t: e.textContent, s: e.selected })));
+    const shown = await tgPage.$eval("#brandBar", (el) => getComputedStyle(el).display !== "none");
+    await Promise.all([tgPage.waitForNavigation({ timeout: 8000 }).catch(() => null), tgPage.selectOption("#brandSel", "w2")]);
+    await tgPage.waitForFunction(() => document.querySelector("#view textarea") && document.getElementById("brandSel")?.value, undefined, { timeout: 10000 });
+    const after = await tgPage.$eval("#brandSel", (el) => el.value);
+    const good = shown && opts.length === 2 && opts[0].s && opts[1].t === "Vary Servis & Úklid" && TG_BRAND.calls.join() === "w2" && after === "w2";
+    if (!good) console.log("   ↳ tgappBrand:", JSON.stringify({ opts, shown, calls: TG_BRAND.calls, after }));
+    return good;
   });
 
   await check("fcMetaExtras", async () => {

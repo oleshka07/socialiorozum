@@ -17,7 +17,8 @@ import * as cmp from "./tgcompose.js";
 import { looksLikeReadyPost } from "./textkind.js";
 import { legacyHosts, isOurHookUrl, foreignHookHost as foreignHost } from "./brand.js";
 import { setSecret } from "./secrets.js";
-import { getMt, startMt, montageMessage, montageCallback } from "./tgmontage.js";
+import { getMt, startMt, montageMessage, montageCallback, moveMtSession } from "./tgmontage.js";
+import { botBrands, pickBrand, setBotBrand, homeIfLost, brandOfCallback, brandLabel, moveDraft, type BotBrands } from "./tgbrand.js";
 const postDeepLink = (postId: string) => cabinetPostLink(env.appBaseUrl, postId);
 
 let BOT_ID = 0;
@@ -399,9 +400,14 @@ async function attachChannel(fromId: number, chatId: number, title: string, toke
 async function ownerWorkspace(fromId: number, token: string): Promise<string | null> {
   const own = !sharedLike(token);
   const o = own
-    ? await one<{ workspace_id: string }>(`select o.workspace_id from tg_owner o join telegram_config c on c.workspace_id=o.workspace_id and c.bot_token=$2 where o.tg_user_id=$1`, [fromId, token])
-    : await one<{ workspace_id: string }>(`select workspace_id from tg_owner where tg_user_id=$1`, [fromId]);
-  if (o) { touchWorkspaceActive(o.workspace_id); return o.workspace_id; } // бот - теж активність у кабінеті
+    ? await one<{ workspace_id: string; user_id: string | null }>(`select o.workspace_id, o.user_id from tg_owner o join telegram_config c on c.workspace_id=o.workspace_id and c.bot_token=$2 where o.tg_user_id=$1`, [fromId, token])
+    : await one<{ workspace_id: string; user_id: string | null }>(`select workspace_id, user_id from tg_owner where tg_user_id=$1`, [fromId]);
+  if (o) {
+    // 🏢 бот стоїть на бренді, до якого людину вже не пускають (доступ забрали) - назад у її домашній
+    const ws = (await homeIfLost(fromId, o.workspace_id, o.user_id)) || o.workspace_id;
+    touchWorkspaceActive(ws); // бот - теж активність у кабінеті
+    return ws;
+  }
   const c = own
     ? await one<{ workspace_id: string }>(`select t.workspace_id from tg_connect t join telegram_config c on c.workspace_id=t.workspace_id and c.bot_token=$2 where t.tg_user_id=$1 order by t.created_at desc limit 1`, [fromId, token])
     : await one<{ workspace_id: string }>(`select workspace_id from tg_connect where tg_user_id=$1 order by created_at desc limit 1`, [fromId]);
@@ -523,11 +529,12 @@ async function captureIdea(workspaceId: string, chatId: string, text: string): P
   // та, що відповідає тексту: готовий пост → «як є» (фідбек тестера: «написав одне - опублікувалось інше»
   // це якраз натиснута верхня кнопка AI на готовому тексті), коротка думка → AI.
   const ready = looksLikeReadyPost(text);
+  const brand = await brandLabel(workspaceId, chatId).catch(() => "");
   const raw = { text: "📝 Опублікувати як є (мій текст без змін)", data: `idea_raw:${r!.id}` };
   const ai = { text: ready ? "✨ Переписати AI (зміст збережу)" : "✨ Зробити пост з думки (AI)", data: `idea_post:${r!.id}` };
   await liveSend(workspaceId, chatId, "capture",
-    (ready ? `📝 Схоже на готовий пост. Зберіг у Банк ідей:\n«${text.slice(0, 140)}…»\n\nОпублікувати як є - текст піде без змін.`
-           : `💡 Збережено в Банк ідей:\n«${text.slice(0, 140)}»`),
+    (ready ? `📝 Схоже на готовий пост. Зберіг у Банк ідей${brand ? ` бренду «${brand}»` : ""}:\n«${text.slice(0, 140)}…»\n\nОпублікувати як є - текст піде без змін.`
+           : `💡 Збережено в Банк ідей${brand ? ` бренду «${brand}»` : ""}:\n«${text.slice(0, 140)}»`),
     ready ? [[raw], [ai], [{ text: "📋 Усі ідеї", data: "idea_list" }]]
           : [[ai], [raw], [{ text: "📋 Усі ідеї", data: "idea_list" }]]);
 }
@@ -546,6 +553,8 @@ async function sendIdeaList(workspaceId: string, chatId: string): Promise<void> 
 // дублює найчастіші дії текстом (натиснув - Telegram надіслав саме цей рядок, ми його роутимо).
 const MINIAPP_URL = `${env.appBaseUrl}/tgapp`;
 const KB_NEW = "✍️ Новий пост", KB_APP = "🚀 Кабінет", KB_IDEAS = "💡 Ідеї", KB_DIARY = "📔 Щоденник", KB_PLAN = "📅 План", KB_DIGEST = "☀️ Зведення", KB_MONTAGE = "🎬 Монтаж";
+// 🏢 кнопка бренду - з назвою поточного: видно просто над полем вводу, куди зараз ідуть пости
+const KB_BRAND = "🏢 ";
 async function registerMenu(token: string): Promise<void> {
   await tg.setMyCommands(token, [
     { command: "post", description: "Новий пост: текст, фото, канали, публікація" },
@@ -554,13 +563,51 @@ async function registerMenu(token: string): Promise<void> {
     { command: "idea", description: "Банк ідей" },
     { command: "diary", description: "Записати в щоденник" },
     { command: "digest", description: "Зведення дня" },
+    { command: "brand", description: "Обрати бренд (якщо їх кілька)" },
   ]);
   await tg.setChatMenuButton(token, MINIAPP_URL, "Кабінет");
 }
-const mainKeyboard = (): tg.TgKbButton[][] => [
+const mainKeyboard = (brand = ""): tg.TgKbButton[][] => [
   [{ text: KB_NEW }, { text: KB_MONTAGE }, { text: KB_APP, web_app: { url: MINIAPP_URL } }],
   [{ text: KB_PLAN }, { text: KB_IDEAS }, { text: KB_DIARY }, { text: KB_DIGEST }],
+  ...(brand ? [[{ text: KB_BRAND + brand.slice(0, 30) }]] : []),
 ];
+
+// ---- 🏢 бренд: з яким кабінетом працює бот ----
+const brandsOf = (fromId: number, token: string): Promise<BotBrands> => botBrands(fromId, !sharedLike(token), token);
+/** Назва для кнопки меню: лише коли брендів кілька (одному бренду кнопка ні до чого). */
+async function kbBrand(fromId: number, token: string): Promise<string> {
+  const b = await brandsOf(fromId, token).catch(() => null);
+  return b && b.list.length > 1 ? b.list.find((x) => x.id === b.current)?.title || "" : "";
+}
+async function sendBrandPicker(fromId: number, chatId: string, token: string): Promise<void> {
+  const b = await brandsOf(fromId, token);
+  if (!b.current) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos (кнопка «Підключити наш бот»)."); return; }
+  const cur = b.list.find((x) => x.id === b.current);
+  if (!b.linked) {
+    await tg.sendMessage(token, chatId, `🏢 Зараз я працюю з брендом «${cur?.title || "кабінет"}».\n\nЩоб перемикати бренди, мені треба знати твій акаунт Holos: відкрий кабінет → Налаштування → Канали → «Підключити наш бот» і натисни Start. Після цього /brand покаже всі твої бренди.`,
+      [[{ text: "🌐 Відкрити Канали", url: `${env.appBaseUrl}/app#/settings/channels` }]]);
+    return;
+  }
+  if (b.list.length < 2) { await tg.sendMessage(token, chatId, `🏢 У тебе один бренд - «${cur?.title || "кабінет"}», я працюю з ним. Новий бренд додається в кабінеті: меню аватара → «＋ Додати бренд».`); return; }
+  await liveSend(b.current, chatId, "brand", `🏢 **З яким брендом працювати?**\n\nЗараз: «${cur?.title || "?"}». Нові пости, монтаж, ідеї, щоденник і ранкове зведення - у вибраному бренді. Відкрита сесія монтажу переїде разом із брендом.`,
+    b.list.map((x) => [{ text: `${x.id === b.current ? "✓ " : ""}${x.title}`.slice(0, 60), data: `br:${x.id.slice(0, 8)}` }]));
+}
+async function switchBrand(fromId: number, chatId: string, token: string, short: string): Promise<string> {
+  const b = await brandsOf(fromId, token);
+  const target = pickBrand(b, short);
+  if (!target) return "Цього бренду в тебе нема";
+  if (target.id === b.current) return `Уже працюю з «${target.title}»`;
+  await setBotBrand(fromId, target.id);
+  const mt = b.current ? await moveMtSession(b.current, target.id).catch(() => "none" as const) : "none";
+  const note = mt === "moved" ? "\n🎬 Сесію монтажу перенесено сюди ж - кліпи на місці."
+    : mt === "busy" ? "\n🎬 Монтаж у попередньому бренді ще йде - готовий пост можна буде перенести кнопкою «🏢» у його картці."
+    : mt === "taken" ? "\n🎬 Тут уже є відкрита сесія монтажу - попередня лишилась у тому бренді."
+    : "";
+  await tg.sendWithKeyboard(token, chatId, `✅ Тепер працюю з брендом «${target.title}».\nНові пости, монтаж, ідеї, щоденник і зведення - тут. Повернутись: /brand чи кнопка «🏢» унизу.${note}`, mainKeyboard(target.title));
+  await logEvent("info", "tgbot", `бот перемкнуто на інший бренд (${mt === "moved" ? "з сесією монтажу" : "без сесії монтажу"})`, { ws: target.id });
+  return "";
+}
 
 // 📅 Що заплановано. Запланувати з бота було можна ще раніше, а ПОБАЧИТИ чергу - ніде: людина
 // не пам'ятала, що вже стоїть у розкладі, і планувала двічі або не планувала зовсім.
@@ -585,7 +632,8 @@ async function sendPlan(ws: string, chatId: string): Promise<void> {
   });
   // кнопка веде в композер того самого поста - звідти можна перенести час або опублікувати одразу
   const buttons = rows.slice(0, 4).map((r) => [{ text: `✍ ${fmt.format(new Date(r.scheduled_at))}`, data: `cc:${r.post_id}` }]);
-  await liveSend(ws, chatId, "plan", `📅 **Найближчі публікації**\n\n${lines.join("\n\n")}`, buttons);
+  const brand = await brandLabel(ws, chatId).catch(() => "");
+  await liveSend(ws, chatId, "plan", `📅 **Найближчі публікації**${brand ? ` · 🏢 ${brand}` : ""}\n\n${lines.join("\n\n")}`, buttons);
 }
 
 export async function handleUpdate(update: any, tokenOverride?: string): Promise<void> {
@@ -645,7 +693,8 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
            returning t.workspace_id, t.created_by`, own ? [code, fromId, token] : [code, fromId]);
         if (row) {
           await setOwner(fromId, row.workspace_id, chatId, row.created_by);
-          await tg.sendWithKeyboard(token, chatId, "Вітаю! 🤝 Я тепер твій контент-помічник.\n\n• Надішли будь-яку думку — збережу як ідею в Банк.\n• /idea — твої ідеї, зробити з них пост у 1 тап.\n• /post — написати пост прямо тут: текст, фото, канали, публікація зараз або за розкладом.\n• 🎬 /montage — надішли кліпи й голосове, я змонтую сторіс чи рілс із субтитрами.\n• 📔 Двічі на день спитаю, що відбувалося: відповідай текстом, ГОЛОСОМ, фото чи відео — усе ляже в щоденник і стане живим джерелом постів. /diary — спитати зараз.\n\nЩоб публікувати у свій канал: додай мене АДМІНОМ у канал і перешли сюди будь-який пост із нього.", mainKeyboard());
+          const kb = await kbBrand(fromId, token);
+          await tg.sendWithKeyboard(token, chatId, (kb ? `🏢 Бренд: «${kb}» (інший - /brand)\n\n` : "") + "Вітаю! 🤝 Я тепер твій контент-помічник.\n\n• Надішли будь-яку думку — збережу як ідею в Банк.\n• /idea — твої ідеї, зробити з них пост у 1 тап.\n• /post — написати пост прямо тут: текст, фото, канали, публікація зараз або за розкладом.\n• 🎬 /montage — надішли кліпи й голосове, я змонтую сторіс чи рілс із субтитрами.\n• 📔 Двічі на день спитаю, що відбувалося: відповідай текстом, ГОЛОСОМ, фото чи відео — усе ляже в щоденник і стане живим джерелом постів. /diary — спитати зараз.\n\nЩоб публікувати у свій канал: додай мене АДМІНОМ у канал і перешли сюди будь-який пост із нього.", mainKeyboard(kb));
           await registerMenu(token);
           return;
         }
@@ -659,7 +708,8 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
       }
       // людина вже привʼязана (напр., прийшла з попереднього спільного бота) - просто вітаємо з кнопками
       if (await ownerWorkspace(fromId, token)) {
-        await tg.sendWithKeyboard(token, chatId, "Вітаю! 🤝 Кабінет уже підключено.\n\n• Надішли будь-яку думку — збережу як ідею.\n• /post — новий пост, /montage — сторіс чи рілс із кліпів, /idea — ідеї, /diary — щоденник, /plan — що заплановано.\n\nЩоб публікувати у свій канал через мене: додай мене АДМІНОМ у канал і перешли сюди будь-який пост із нього.", mainKeyboard());
+        const kb = await kbBrand(fromId, token);
+        await tg.sendWithKeyboard(token, chatId, (kb ? `🏢 Бренд: «${kb}» (інший - /brand)\n\n` : "") + "Вітаю! 🤝 Кабінет уже підключено.\n\n• Надішли будь-яку думку — збережу як ідею.\n• /post — новий пост, /montage — сторіс чи рілс із кліпів, /idea — ідеї, /diary — щоденник, /plan — що заплановано.\n\nЩоб публікувати у свій канал через мене: додай мене АДМІНОМ у канал і перешли сюди будь-який пост із нього.", mainKeyboard(kb));
         return;
       }
       await tg.sendMessage(token, chatId, "Привіт! Щоб під'єднати мене до твого кабінету, відкрий посилання «Підключити наш бот» у Holos.");
@@ -675,6 +725,12 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
         const pending = await one(`select 1 from tg_connect where tg_user_id=$1 and created_at > now() - interval '1 day'`, [fromId]);
         if (pending) { await tg.sendMessage(token, chatId, await attachChannel(fromId, fwd.id, fwd.title, token)); return; }
       }
+    }
+
+    // 🏢 /brand чи кнопка бренду в меню - вибір бренду, з яким працює бот
+    if (text.toLowerCase().startsWith("/brand") || (text.startsWith(KB_BRAND) && text.length > KB_BRAND.length)) {
+      await sendBrandPicker(fromId, chatId, token);
+      return;
     }
 
     // кнопки постійної клавіатури приходять звичайним текстом - зводимо їх до тих самих дій
@@ -712,7 +768,7 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
     // /menu — повернути кнопки (якщо юзер їх колись сховав)
     if (text.toLowerCase().startsWith("/menu")) {
       await registerMenu(token);
-      await tg.sendWithKeyboard(token, chatId, "Кнопки на місці 👇", mainKeyboard());
+      await tg.sendWithKeyboard(token, chatId, "Кнопки на місці 👇", mainKeyboard(await kbBrand(fromId, token)));
       return;
     }
 
@@ -832,7 +888,7 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
 // Картка поста живе «одним живим меседжем» (liveSend category='compose'): кожна дія оновлює ту саму
 // картку, а не плодить нові - інакше після п'яти натискань чат перетворюється на стрічку копій.
 async function openCompose(ws: string, chatId: string, postId: string, token: string): Promise<void> {
-  const card = await cmp.composeCard(ws, postId);
+  const card = await cmp.composeCard(ws, postId, await brandLabel(ws, chatId).catch(() => ""));
   if (!card) { await cmp.clearCompose(ws); await tg.sendMessage(token, chatId, "Пост не знайдено - можливо, його видалили в кабінеті."); return; }
   await cmp.expect(ws, postId, null, chatId);
   await liveSend(ws, chatId, "compose", card.text, [...card.buttons, [{ text: "🌐 Відкрити в кабінеті", url: postDeepLink(postId) }]]);
@@ -960,6 +1016,47 @@ async function composeCallback(ws: string, chatId: string, data: string, cbq: an
       await tg.answerCallbackQuery(token, cbq.id);
       await liveSend(ws, chatId, "compose", w.text, w.buttons); return true;
     }
+    case "cac": {
+      // 👥 які Сторінки / профілі / канали мережі отримають пост
+      const c = await cmp.accountsCard(ws, postId, arg);
+      await tg.answerCallbackQuery(token, cbq.id);
+      if (c) await liveSend(ws, chatId, "compose", c.text, c.buttons); else await openCompose(ws, chatId, postId, token);
+      return true;
+    }
+    case "cat": {
+      const [, , net, suffix] = data.split(":");
+      const why = await cmp.toggleAccount(ws, postId, net, suffix);
+      await tg.answerCallbackQuery(token, cbq.id, why || undefined);
+      const c = await cmp.accountsCard(ws, postId, net);
+      if (c) await liveSend(ws, chatId, "compose", c.text, c.buttons);
+      return true;
+    }
+    case "cb": {
+      // 🏢 у який бренд цей пост (чернетку, що ще нікуди не вийшла, можна перенести)
+      const b = await brandsOf(Number(cbq.from?.id), token);
+      await tg.answerCallbackQuery(token, cbq.id);
+      if (b.list.length < 2) { await openCompose(ws, chatId, postId, token); return true; }
+      const rows: tg.TgButton[][] = b.list.map((x) => [{ text: `${x.id === ws ? "✓ " : ""}${x.title}`.slice(0, 60), data: `cbm:${postId}:${x.id.slice(0, 8)}` }]);
+      rows.push([{ text: "‹ Назад", data: `cc:${postId}` }]);
+      await liveSend(ws, chatId, "compose", "🏢 **У який бренд цей пост?**\n\nЧернетка переїде разом із фото чи відео. Мережі - ті, що підключені в новому бренді (версії тексту під мережі складуться заново його голосом). Бот теж перемкнеться на цей бренд.", rows);
+      return true;
+    }
+    case "cbm": {
+      const fromId = Number(cbq.from?.id);
+      const b = await brandsOf(fromId, token);
+      const target = pickBrand(b, arg);
+      if (!target) { await tg.answerCallbackQuery(token, cbq.id, "Цього бренду в тебе нема"); return true; }
+      if (target.id === ws) { await tg.answerCallbackQuery(token, cbq.id, "Пост уже в цьому бренді"); await openCompose(ws, chatId, postId, token); return true; }
+      const r = await moveDraft(postId, ws, target.id);
+      if (!r.ok) { await tg.answerCallbackQuery(token, cbq.id, r.error.slice(0, 190)); await openCompose(ws, chatId, postId, token); return true; }
+      await tg.answerCallbackQuery(token, cbq.id, `Перенесено в «${target.title}»`.slice(0, 190));
+      if (b.current !== target.id) await setBotBrand(fromId, target.id);
+      await cmp.stopExpecting(ws);
+      await logEvent("info", "tgbot", "чернетку перенесено в інший бренд з бота", { ws: target.id });
+      await tg.sendWithKeyboard(token, chatId, `✅ Чернетку перенесено в «${target.title}», і я тепер працюю з ним.`, mainKeyboard(target.title));
+      await openCompose(target.id, chatId, postId, token);
+      return true;
+    }
     case "cwx": await cmp.expect(ws, postId, "when", chatId); await tg.answerCallbackQuery(token, cbq.id); await tg.sendMessage(token, chatId, "🗓 Напиши дату й час: «01.08 14:30», «завтра 09:00» або «2026-08-01 18:00»."); return true;
     case "cw": {
       await tg.answerCallbackQuery(token, cbq.id);
@@ -988,8 +1085,17 @@ async function handleCallback(cbq: any, tokenOverride?: string): Promise<void> {
     await tg.answerCallbackQuery(token, cbq.id, (await alertCallback(data, Number(fromId)).catch(() => "")) || undefined);
     return;
   }
-  const ws = await ownerWorkspace(fromId, token);
-  if (!ws) { await tg.answerCallbackQuery(token, cbq.id, "Спершу під'єднай кабінет Holos"); return; }
+  // 🏢 вибір бренду з /brand
+  if (data.startsWith("br:")) {
+    const why = await switchBrand(Number(fromId), chatId, token, data.slice(3)).catch((e: any) => String(e?.message || e).slice(0, 150));
+    await tg.answerCallbackQuery(token, cbq.id, why || "Готово");
+    return;
+  }
+  const active = await ownerWorkspace(fromId, token);
+  if (!active) { await tg.answerCallbackQuery(token, cbq.id, "Спершу під'єднай кабінет Holos"); return; }
+  // кнопка зі старого повідомлення після перемикання бренду - діє в бренді свого запису (якщо людина має туди доступ)
+  const who = await one<{ user_id: string | null }>(`select user_id from tg_owner where tg_user_id=$1`, [fromId]);
+  const ws = await brandOfCallback(data, active, who?.user_id || null, !sharedLike(token), token);
   try {
     if (data.startsWith("idea_raw:")) {
       const it = await one<{ text: string }>(`select text from idea_bank where id=$1 and workspace_id=$2`, [data.slice(9), ws]);

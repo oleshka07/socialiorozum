@@ -23,6 +23,8 @@
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
      padding:0 0 calc(16px + env(safe-area-inset-bottom))}
 .tabs{display:flex;gap:5px;padding:9px 10px;position:sticky;top:0;background:var(--bg);z-index:5;border-bottom:1px solid var(--line)}
+.brandbar{display:flex;gap:8px;align-items:center;padding:8px 12px 0;font-size:13px;color:var(--muted)}
+.brandbar select{flex:1;min-width:0;padding:7px 9px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--fg);font:inherit;font-weight:600}
 .tab{flex:1;text-align:center;padding:8px 2px;border-radius:10px;background:var(--card);font-size:12.5px;font-weight:600;cursor:pointer;user-select:none}
 .tab.on{background:var(--btn);color:var(--btn-fg)}
 .wrap{padding:12px}
@@ -73,6 +75,7 @@ button.go.danger{background:transparent;color:var(--bad);border:1px solid var(--
 </style>
 </head>
 <body>
+<div class="brandbar" id="brandBar" style="display:none">🏢 <select id="brandSel" aria-label="Бренд"></select></div>
 <div class="tabs">
   <div class="tab on" data-t="new">✍️ Новий</div>
   <div class="tab" data-t="drafts">📝 Пости</div>
@@ -609,6 +612,17 @@ async function doPublish() {
   if (!INIT) { $('view').innerHTML = '<div class="empty">Відкрий це вікно кнопкою в боті — так Telegram передасть підпис для входу.</div>'; return; }
   try {
     const me = await api('/me');
+    // 🏢 кілька брендів: вибір угорі - той самий, що /brand у боті (пости, чернетки, план - обраного бренду)
+    if ((me.brands || []).length > 1) {
+      const sel = $('brandSel');
+      sel.innerHTML = me.brands.map((b) => '<option value="' + esc(b.id) + '"' + (b.id === me.brand ? ' selected' : '') + '>' + esc(b.title) + '</option>').join('');
+      $('brandBar').style.display = '';
+      sel.onchange = async () => {
+        sel.disabled = true;
+        try { await api('/brand', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: sel.value }) }); haptic('success'); location.reload(); }
+        catch (e) { sel.value = me.brand; sel.disabled = false; alert('⚠️ ' + e.message); }
+      };
+    }
     NETS = me.nets || [];
     TZ = me.tz || TZ;
     draft.nets = NETS.includes('telegram') ? ['telegram'] : [];

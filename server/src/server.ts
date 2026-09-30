@@ -48,6 +48,8 @@ import { publishPostToChannels, alreadySentNetworks, startReelPublishJob, reelSe
 import { startLifecycleWorker } from "./lifecycle.js";
 import { startDigest } from "./digest.js";
 import { startAlerts, alertsView, saveAlertSettings, sendTestAlert, sendDigest, resolveAlert, runProbes, probeBuddy } from "./alerts.js";
+import { botBrands, setBotBrand } from "./tgbrand.js";
+import { moveMtSession } from "./tgmontage.js";
 import { startMetrics, networkBenchmarks, collectWorkspace, analyticsFor, bestTimesFor, bestTimeAuto } from "./metrics.js";
 import { scheduleConflicts, describeConflicts } from "./schedule.js";
 import { briefMismatch, brandTextOf } from "./textkind.js";
@@ -4355,7 +4357,7 @@ app.post("/api/integrations/mcp/revoke", async (req: any) => {
 // підписаний `initData` (див. tgauth.ts), а воркспейс береться з tg_owner: той самий звʼязок
 // «цей телеграм-юзер = цей кабінет», що вже закріплюється при підключенні бота.
 // Тому ці роути свідомо ЗВІЛЬНЕНІ від кукі-хука (їхня перевірка не слабша, а інша).
-async function tgUser(req: any): Promise<{ ws: string; tgId: number } | null> {
+async function tgUser(req: any): Promise<{ ws: string; tgId: number; token: string; own: boolean } | null> {
   const initData = String(req.headers["x-tg-init-data"] || req.body?.initData || "");
   if (!initData) return null;
   // Спільний бот (і колишній спільний - Mini App відкривають і з його меню): підпис зробив сам
@@ -4364,7 +4366,7 @@ async function tgUser(req: any): Promise<{ ws: string; tgId: number } | null> {
     const u = verifyInitData(initData, t);
     if (u) {
       const own = await one<{ workspace_id: string }>(`select workspace_id from tg_owner where tg_user_id=$1`, [u.id]);
-      return own ? { ws: own.workspace_id, tgId: u.id } : null;
+      return own ? { ws: own.workspace_id, tgId: u.id, token: t, own: false } : null;
     }
   }
   // Власний бот: його токен знає власник кабінету, тож таким підписом можна «назватись» будь-ким.
@@ -4376,7 +4378,7 @@ async function tgUser(req: any): Promise<{ ws: string; tgId: number } | null> {
     if (!u) continue;
     const row = await one<{ workspace_id: string }>(
       `select o.workspace_id from tg_owner o join telegram_config c on c.workspace_id=o.workspace_id and c.bot_token=$2 where o.tg_user_id=$1`, [u.id, r.bot_token]);
-    return row ? { ws: row.workspace_id, tgId: u.id } : null;
+    return row ? { ws: row.workspace_id, tgId: u.id, token: r.bot_token, own: true } : null;
   }
   return null;
 }
@@ -4398,7 +4400,23 @@ app.get("/api/tg/me", async (req: any, reply) => {
   const tz = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='timezone'`, [u.ws]);
   // таймзона потрібна клієнту, щоб «завтра о 9:00» означало 9:00 у ПОЯСІ ВОРКСПЕЙСУ, а не в
   // тому, який стоїть на телефоні (людина в подорожі планувала б пости не туди)
-  return { ok: true, drafts: +(drafts?.c || 0), materials: +(mats?.c || 0), nets, tz: tz?.content || "Europe/Kyiv" };
+  // 🏢 кілька брендів - перемикач угорі (той самий вибір, що /brand у боті)
+  const b = await botBrands(u.tgId, u.own, u.token).catch(() => null);
+  return { ok: true, drafts: +(drafts?.c || 0), materials: +(mats?.c || 0), nets, tz: tz?.content || "Europe/Kyiv",
+    brand: u.ws, brands: b && b.linked && b.list.length > 1 ? b.list : [] };
+});
+
+// 🏢 перемкнути бренд із Mini App: бот і Mini App працюють з одним і тим самим брендом
+app.post("/api/tg/brand", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const b = await botBrands(u.tgId, u.own, u.token);
+  const target = b.list.find((x) => x.id === String(req.body?.id || ""));
+  if (!b.linked || !target) return reply.code(400).send({ error: "Цього бренду в тебе нема" });
+  if (target.id !== u.ws) {
+    await setBotBrand(u.tgId, target.id);
+    await moveMtSession(u.ws, target.id).catch(() => "none");
+  }
+  return { ok: true, title: target.title };
 });
 
 // 📥 джерела/матеріали: свіже зверху, коротким тілом (у телефоні довгі полотна ніхто не читає)
