@@ -16,6 +16,8 @@ name: beta-check
 # монтажі й чи має ключ ElevenLabs право Music (навмисно кривий запит - нічого не генерує).
 # Далі - після 9bee32a (бренд у боті): версія, здоров'я, код у контейнері, команди бота (getMyCommands), привʼязки,
 # сповіщення й warn/error журналу за 20 хв.
+# Далі - ПРОД після промоушну 455af3c (усе з беті): версія, health, сторінки, стара адреса, журнал старту, ffmpeg і шрифт,
+# нові таблиці, бот (команди, вебхук), привʼязки, сповіщення, кількість даних і warn/error за 25 хв.
 
 on:
   push:
@@ -32,7 +34,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: After 9bee32a - brand in bot, commands, logs (read-only)
+      - name: Prod after promotion 455af3c (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -41,31 +43,40 @@ jobs:
           command_timeout: 6m
           script: |
             echo "зараз $(date -u +%d.%m\ %H:%M) UTC"
-            cd "${{ secrets.APP_DIR }}-beta/server"
+            cd "${{ secrets.APP_DIR }}/server"
             echo "HEAD $(git -C .. rev-parse --short HEAD)"
-            docker compose ps app --format '{{.Name}} {{.Status}}'
-            curl -s -o /dev/null -w "health %{http_code}\n" "http://127.0.0.1:$(grep -E '^APP_PORT=' .env | cut -d= -f2 | grep . || echo 8081)/health"
-            docker compose exec -T app sh -c 'ls -la /app/dist/tgbrand.js | cut -c1-80; grep -c "sendBrandPicker\|sendDrafts" /app/dist/tgbot.js'
-            docker compose logs --since 15m app 2>&1 | grep -aiE "error|warn|alerts|tgbot" | grep -avE "DeprecationWarning" | tail -12
+            docker compose ps --format '{{.Name}} {{.Status}}'
+            curl -s -o /dev/null -w "health %{http_code}\n" http://127.0.0.1:8080/health
+            for u in / /app /login /privacy /tgapp /robots.txt; do curl -s -o /dev/null -w "$u %{http_code}\n" "https://holos.rozum.one$u"; done
+            curl -s -o /dev/null -w "стара адреса / → %{http_code} %{redirect_url}\n" https://socialio.rozum.one/
+            curl -s -o /dev/null -w "beta health %{http_code}\n" https://beta.holos.rozum.one/health
+            docker compose logs --since 20m app 2>&1 | grep -aiE "alerts|tgbot|migrat|error|warn" | grep -avE "DeprecationWarning" | tail -15
+            docker compose exec -T app sh -c 'ffmpeg -hide_banner -version | head -1; fc-list 2>/dev/null | grep -c DejaVu; ls /app/dist/tgbrand.js /app/dist/alerts.js /app/dist/montage.js | wc -l'
             JS=$(cat <<'EOF'
             const { q } = await import('/app/dist/db.js');
-            const { env } = await import('/app/dist/env.js');
-            const sec = (await q("select value from app_secret where name='TELEGRAM_BOT_TOKEN'"))[0]?.value || process.env.TELEGRAM_BOT_TOKEN || '';
-            const tok = sec;
-            const r = await fetch('https://api.telegram.org/bot' + tok + '/getMyCommands').then((x) => x.json()).catch((e) => ({ err: e.message }));
-            console.log('команди бота: ' + (r.result || []).map((c) => '/' + c.command).join(' ') + (r.ok ? '' : ' ' + JSON.stringify(r).slice(0, 120)));
+            const t = ["ops_alert","app_setting","meta_page","threads_account","telegram_chat","evergreen_item","short_link","bio_page","comment_reply"];
+            const r = await q("select string_agg(n, ',') ok from unnest($1::text[]) n where to_regclass(n) is not null", [t]);
+            console.log('таблиці: ' + r[0].ok);
+            const tok = (await q("select value from app_secret where name='TELEGRAM_BOT_TOKEN'"))[0]?.value || process.env.TELEGRAM_BOT_TOKEN || '';
             const me = await fetch('https://api.telegram.org/bot' + tok + '/getMe').then((x) => x.json()).catch(() => ({}));
-            console.log('бот: @' + (me.result?.username || '?'));
-            const o = await q("select o.workspace_id, o.user_id is not null linked, (select count(*)::int from workspace_member m where m.user_id=o.user_id) brands from tg_owner o order by o.created_at");
-            console.log('tg_owner: ' + o.map((x) => String(x.workspace_id).slice(0, 8) + (x.linked ? ' (акаунт відомий, брендів ' + x.brands + ')' : ' (без акаунта)')).join(' · '));
-            const al = await q("select id, severity, kind, left(title,80) t, count, notified_at is not null sent, resolved_at is not null res from ops_alert order by last_at desc limit 5");
-            for (const a of al) console.log('  alert #' + a.id + ' ' + a.severity + ' ' + a.kind + ' ×' + a.count + ' sent=' + a.sent + ' res=' + a.res + ' ' + a.t);
-            const lg = await q("select level, scope, left(message,160) m, to_char(created_at at time zone 'UTC','HH24:MI') c from app_log where created_at > now() - interval '20 minutes' and level in ('warn','error') order by created_at desc limit 10");
-            for (const l of lg) console.log('  ' + l.c + ' ' + l.level[0] + ' ' + l.scope + ': ' + l.m.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g, '***'));
+            const cm = await fetch('https://api.telegram.org/bot' + tok + '/getMyCommands').then((x) => x.json()).catch(() => ({}));
+            const wh = await fetch('https://api.telegram.org/bot' + tok + '/getWebhookInfo').then((x) => x.json()).catch(() => ({}));
+            let host = '?'; try { host = new URL(wh.result?.url || '').host; } catch { /* */ }
+            console.log('бот: @' + (me.result?.username || '?') + ' · команди: ' + (cm.result || []).map((c) => '/' + c.command).join(' ') + ' · вебхук: ' + host + ', черга ' + (wh.result?.pending_update_count ?? '?') + (wh.result?.last_error_message ? ', остання помилка: ' + wh.result.last_error_message.slice(0, 80) : ''));
+            const ow = await q("select count(*)::int n, count(*) filter (where user_id is not null)::int linked from tg_owner");
+            console.log('tg_owner: ' + ow[0].n + ' (з акаунтом ' + ow[0].linked + ')');
+            const bots = await q("select left(coalesce(bot_token,''), 10) b, count(*)::int n from telegram_config group by 1");
+            console.log('боти кабінетів (id): ' + bots.map((x) => (x.b.split(':')[0] || '-') + '×' + x.n).join(' · '));
+            const al = await q("select id, severity, kind, left(title,80) t, count, notified_at is not null sent from ops_alert order by last_at desc limit 6");
+            for (const a of al) console.log('  alert #' + a.id + ' ' + a.severity + ' ' + a.kind + ' ×' + a.count + ' sent=' + a.sent + ' ' + a.t);
+            const pubs = await q("select (select count(*) from threads_publish)::int th, (select count(*) from meta_publish)::int me, (select count(*) from telegram_publish)::int tg, (select count(*) from post)::int p, (select count(*) from workspace)::int w");
+            console.log('дані: ' + JSON.stringify(pubs[0]));
+            const lg = await q("select level, scope, left(message,170) m, to_char(created_at at time zone 'UTC','HH24:MI') c from app_log where created_at > now() - interval '25 minutes' and level in ('warn','error') order by created_at desc limit 12");
+            for (const l of lg) console.log('  ' + l.c + ' ' + l.level[0] + ' ' + l.scope + ': ' + l.m.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g, '***').replace(/\d{6,}:[A-Za-z0-9_-]{20,}/g, '<token>'));
             process.exit(0);
             EOF
             )
-            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -25
+            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -30
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
