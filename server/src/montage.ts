@@ -18,7 +18,7 @@ import { q, one } from "./db.js";
 import { env } from "./env.js";
 import { MEDIA_DIR, probeVideo, probeAudio, saveMediaFile } from "./media.js";
 import { transcribeWords } from "./stt.js";
-import { synthesizeAll } from "./tts.js";
+import { synthesizeAll, composeMusic } from "./tts.js";
 import { chat, extractJsonObject } from "./openrouter.js";
 import { getSettingText } from "./settings.js";
 import { startJob, type JobRow } from "./jobs.js";
@@ -42,11 +42,16 @@ export type MontageOpts = {
   lang?: string | null;        // код мови; без нього - мова контенту кабінету
   // voice: clips, а мови в кліпах не чути - AI пише підписи з кадрів (режим бота «як вийде»)
   autoCaptions?: boolean | null;
+  transition?: P.TransitionMode | null;  // переходи між кадрами (типово - плавні)
+  smart?: boolean | null;                // шукати в кліпах найкращі моменти (типово так); false - середина кліпу
+  music?: string | null;                 // фонова музика: id треку з медіатеки
+  musicMood?: P.MusicMood | null;        // або AI-музика ElevenLabs під настрій (платно, ~$0.15/хв)
 };
 export type MontageVideo = { id: string; filename: string; duration: number };
 export type MontageResult = {
   videos: MontageVideo[]; duration: number; transcript: string; subtitles: SubMode; voice: VoiceMode;
   provider?: string; warnings: string[]; clips: number; postId?: string | null;
+  transition?: P.TransitionMode; music?: string; smart?: number;   // що зроблено: переходи, музика, скільки кліпів «розумно» обрізано
 };
 export class MontageError extends Error {}
 
@@ -139,9 +144,16 @@ const padChain = (inLabel: string, outLabel: string) =>
   `${inLabel}split=2[bg0][fg0];[bg0]${coverChain},boxblur=luma_radius=40:luma_power=2,eq=brightness=-0.06[bg];[fg0]scale=${W}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2${outLabel}`;
 const isPortrait = (s: Src) => s.height > 0 && s.width / s.height <= 0.8;
 
-async function renderSegment(dir: string, i: number, src: Src, fit: { offset: number; take: number; speed: number; freeze: number }, dur: number, withSound: boolean): Promise<string> {
+// ✨ вхід кадру переходом: із ОСТАННЬОГО кадру попереднього сегмента (frame) - xfade name тривалістю d
+type Enter = { name: string; d: number; frame: string };
+const still2 = (enter?: Enter | null): string[] => enter ? ["-loop", "1", "-framerate", String(FPS), "-t", enter.d.toFixed(3), "-i", enter.frame] : [];
+const withEnter = (graph: string, idx: number, enter?: Enter | null): string => !enter ? graph
+  : graph.replace(/\[v\]$/, "[vn]") + `;[${idx}:v]scale=${W}:${H},fps=${FPS},format=yuv420p,setsar=1,settb=AVTB[pv];[vn]settb=AVTB[vn2];[pv][vn2]xfade=transition=${enter.name}:duration=${enter.d.toFixed(3)}:offset=0[v]`;
+
+async function renderSegment(dir: string, i: number, src: Src, fit: { offset: number; take: number; speed: number; freeze: number }, dur: number, withSound: boolean, enter?: Enter | null): Promise<string> {
   const out = `seg${i}.mp4`;
   const d = dur.toFixed(3);
+
   const enc = ["-t", d, "-r", String(FPS), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p", "-g", String(FPS),
     "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2", "-threads", "2", out];
   if (src.kind === "image") {
@@ -154,7 +166,7 @@ async function renderSegment(dir: string, i: number, src: Src, fit: { offset: nu
       ? `[0:v]scale=${W * 2}:${H * 2}:force_original_aspect_ratio=increase,crop=${W * 2}:${H * 2},zoompan=z='min(zoom+0.0006,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${W}x${H}:fps=${FPS},format=yuv420p,setsar=1[v]`
       : `${padChain("[0:v]", "")},format=yuv420p,setsar=1[v]`;
     const input = isPortrait(src) ? ["-i", still] : ["-loop", "1", "-framerate", String(FPS), "-t", d, "-i", still];
-    await ff([...input, "-f", "lavfi", "-t", d, "-i", "anullsrc=r=48000:cl=stereo", "-filter_complex", graph, "-map", "[v]", "-map", "1:a", ...enc], dir);
+    await ff([...input, "-f", "lavfi", "-t", d, "-i", "anullsrc=r=48000:cl=stereo", ...still2(enter), "-filter_complex", withEnter(graph, 2, enter), "-map", "[v]", "-map", "1:a", ...enc], dir);
     return out;
   }
   const pre = fit.speed !== 1 ? `setpts=${fit.speed}*PTS,` : "";
@@ -164,11 +176,32 @@ async function renderSegment(dir: string, i: number, src: Src, fit: { offset: nu
   const vg = isPortrait(src) ? `[0:v]${pre}${coverChain},${tail}` : `${padChain(`[0:v]${pre}`, ",")}${tail}`.replace(",,", ",");
   // звук кліпу - лише коли він іде у звичайній швидкості (сповільнений голос звучить як зі старого магнітофона)
   const sound = withSound && src.audio && fit.speed === 1;
-  const ag = sound ? `;[0:a]aresample=48000,aformat=channel_layouts=stereo,apad[a]` : "";
+  // мʼякі краї звуку (20-40 мс): на стику кліпів не клацає
+  const ag = sound ? `;[0:a]aresample=48000,aformat=channel_layouts=stereo,apad,atrim=0:${d},afade=t=in:d=0.02,afade=t=out:st=${Math.max(0, dur - 0.04).toFixed(3)}:d=0.04[a]` : "";
   const args = ["-ss", fit.offset.toFixed(3), "-t", fit.take.toFixed(3), "-i", join(MEDIA_DIR, src.filename)];
   if (!sound) args.push("-f", "lavfi", "-t", d, "-i", "anullsrc=r=48000:cl=stereo");
-  await ff([...args, "-filter_complex", vg + ag, "-map", "[v]", "-map", sound ? "[a]" : "1:a", ...enc], dir);
+  await ff([...args, ...still2(enter), "-filter_complex", withEnter(vg, sound ? 1 : 2, enter) + ag, "-map", "[v]", "-map", sound ? "[a]" : "1:a", ...enc], dir);
   return out;
+}
+
+/** Останній кадр сегмента - з нього заходить перехід наступного. */
+async function lastFrame(dir: string, seg: string, i: number): Promise<string> {
+  const out = `last${i}.jpg`;
+  await ff(["-sseof", "-0.4", "-i", seg, "-an", "-update", "1", "-q:v", "2", out], dir, 60000);
+  return out;
+}
+
+// ---- 🎯 найкращі моменти: 4 кадри на секунду - різкість, світло, рух (див. P.momentScores) ----
+const STAT_STEP = 0.25;
+async function analyzeClip(dir: string, src: Src, from: number, avail: number, i: number): Promise<number[] | null> {
+  const out = `stats${i}.txt`;
+  try {
+    await ff(["-ss", from.toFixed(3), "-t", avail.toFixed(3), "-i", join(MEDIA_DIR, src.filename), "-an", "-threads", "2",
+      "-vf", `fps=${1 / STAT_STEP},scale=270:-2,signalstats,blurdetect,metadata=print:file=${out}`, "-f", "null", "-"], dir, 180000);
+    const stats = P.parseFrameStats(await readFile(join(dir, out), "utf8"));
+    const sc = P.momentScores(stats, avail);
+    return sc.length >= 3 ? sc : null;
+  } catch { return null; }   // аналіз - покращення, не умова: не вийшов - беремо середину, як раніше
 }
 
 // ---- 2. голос: доріжка рівно на тривалість ролику ----
@@ -362,7 +395,21 @@ export async function buildMontage(ws: string, o: MontageOpts): Promise<MontageR
     // кадри: кліпи по порядку, а коли відео коротше за голос - по колу, а не стоп-кадр на останньому кадрі
     const withVoice = voiceParts.length > 0;
     const continuous = (o.voice === "audio" || (o.voice === "tts" && !!String(o.script || "").trim())) && !slots.some((s) => s.want != null && s.want > 0);
-    const plan = P.planShots(srcs.map((s, i) => ({ avail: trims[i].avail, still: s.kind === "image", fromGiven: trims[i].fromGiven })), durs, continuous);
+    const shotClips: P.ShotClip[] = srcs.map((s, i) => ({ avail: trims[i].avail, still: s.kind === "image", fromGiven: trims[i].fromGiven }));
+    let plan = P.planShots(shotClips, durs, continuous);
+    // 🎯 кліп довший за свій шматок - є вибір, звідки брати: дивимось кадри й беремо найкращий шматок
+    let smart = 0;
+    if (o.smart !== false) {
+      for (let i = 0; i < srcs.length; i++) {
+        const s = srcs[i];
+        if (s.kind !== "video" || trims[i].fromGiven) continue;
+        if (!plan.shots.some((sh) => sh.clip === i && sh.speed === 1 && trims[i].avail > sh.dur + 0.2)) continue;
+        const sc = await analyzeClip(dir, s, trims[i].from, trims[i].avail, i);
+        if (sc) { shotClips[i] = { ...shotClips[i], scores: sc, step: STAT_STEP }; smart++; }
+      }
+      if (smart) plan = P.planShots(shotClips, durs, continuous);
+    }
+    const trMode = P.normTransition(o.transition, "fade");
     if (plan.shots.length > MONTAGE_MAX_SHOTS) throw new MontageError(`Відео замало для такої довгої озвучки: кліпи довелось би повторити ${plan.passes} разів. Додай ще кліпів або скороти текст.`);
     if (plan.passes > 1) {
       const foot = srcs.reduce((a, s, i) => a + (s.kind === "image" ? 0 : trims[i].avail), 0);
@@ -370,14 +417,26 @@ export async function buildMontage(ws: string, o: MontageOpts): Promise<MontageR
     }
     const segs: string[] = [];
     const rendered = new Map<string, string>();   // однаковий кадр (повтор цілого кліпу) рендеримо раз
-    for (const sh of plan.shots) {
+    const lastOf = new Map<string, string>();     // останній кадр сегмента - з нього заходить перехід наступного
+    for (let j = 0; j < plan.shots.length; j++) {
+      const sh = plan.shots[j];
       const src = srcs[sh.clip];
       const fit = { offset: sh.offset, take: sh.take, speed: sh.speed, freeze: sh.freeze };
       if (src.kind === "video") fit.offset = Math.round((trims[sh.clip].from + fit.offset) * 1000) / 1000;
-      const key = [sh.clip, fit.offset, fit.take, fit.speed, sh.dur.toFixed(3)].join(":");
+      // ✨ перехід: з останнього кадру попереднього сегмента (той самий кліп підряд - теж, це інший шматок)
+      const tname = j > 0 ? P.transitionAt(trMode, j) : null;
+      const td = tname ? P.transitionDur(sh.dur) : 0;
+      let enter: Enter | null = null;
+      if (tname && td > 0) {
+        const prev = segs[j - 1];
+        let fr = lastOf.get(prev);
+        if (!fr) { fr = await lastFrame(dir, prev, lastOf.size).catch(() => ""); if (fr) lastOf.set(prev, fr); }
+        if (fr) enter = { name: tname, d: td, frame: fr };
+      }
+      const key = [sh.clip, fit.offset, fit.take, fit.speed, sh.dur.toFixed(3), enter ? `${enter.name}<${segs[j - 1]}` : ""].join(":");
       let file = rendered.get(key);
       if (!file) {
-        file = await renderSegment(dir, rendered.size, src, fit, sh.dur, o.voice !== "tts" || o.keepSound !== false);
+        file = await renderSegment(dir, rendered.size, src, fit, sh.dur, o.voice !== "tts" || o.keepSound !== false, enter);
         rendered.set(key, file);
       }
       segs.push(file);
@@ -426,14 +485,41 @@ export async function buildMontage(ws: string, o: MontageOpts): Promise<MontageR
     let voiceFile = "";
     if (withVoice) voiceFile = await buildVoiceTrack(dir, voiceParts, total);
 
+    // 🎵 фонова музика: свій трек із медіатеки або AI-музика ElevenLabs під настрій
+    let musicFile = "", musicNote = "";
+    if (o.music) {
+      const a = await one<{ filename: string; kind: string; original_name: string | null }>(`select filename, kind, original_name from media_asset where id=$1 and workspace_id=$2`, [o.music, ws]);
+      if (!a) throw new MontageError(`Треку ${shortId(o.music)} у медіатеці цього кабінету немає.`);
+      const path = join(MEDIA_DIR, a.filename);
+      const info = a.kind === "video" ? await probeVideo(path).then((v) => (v?.acodec ? { duration: v.duration } : null)) : a.kind === "audio" ? await probeAudio(path) : null;
+      if (!info?.duration) throw new MontageError(`У ${shortId(o.music)} нема звуку, який можна взяти за музику.`);
+      musicFile = path;
+      musicNote = a.original_name ? `свій трек «${a.original_name.slice(0, 60)}»` : "свій трек";
+    } else if (o.musicMood && P.MUSIC_MOODS[o.musicMood]) {
+      try {
+        await composeMusic(P.musicPrompt(o.musicMood), Math.ceil(total) + 1, join(dir, "music.mp3"));
+        musicFile = "music.mp3";
+        musicNote = `AI-музика: ${P.MUSIC_MOODS[o.musicMood].label}`;
+      } catch (e: any) {
+        // ролик без музики - краще, ніж жодного: кажемо чому, і в журнал (звідти - адміну, якщо це ключ чи кошти)
+        warnings.push("музику не згенеровано: " + String(e?.message || e).slice(0, 200));
+        await logEvent("warn", "montage", "AI-музика не вийшла: " + String(e?.message || e).slice(0, 300), { ws }).catch(() => {});
+      }
+    }
+
     // де різати довгу сторіс
     const cuts = o.format === "story" ? P.splitPoints(total, plan.shots.slice(1).map((x) => x.start), sub === "none" ? [] : (cues.length ? cues : captions), STORY_PART_SEC) : [];
 
     // фінал
-    const keep = o.keepSound === false ? 0 : 0.18;
+    // звук кліпів: під озвучкою - тихо (18%); з музикою без голосу - наполовину (фон кліпу, не мова); інакше як є
+    // (або зовсім без, якщо так попросили). Музика притихає під голосом і під МОВОЮ в кліпах (voice: clips), а
+    // під шумом кліпів (вітер, вулиця) - ні: інакше вона б не звучала зовсім
+    const keep = o.keepSound === false ? 0 : withVoice ? 0.18 : musicFile && o.voice !== "clips" ? 0.5 : 1;
     const vChain = ass ? "[0:v]ass=subs.ass[v]" : "[0:v]null[v]";
-    const aChain = withVoice ? `[0:a]volume=${keep}[b];[1:a]anull[vo];[b][vo]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,aresample=48000[a]` : "[0:a]anull[a]";
-    await ff([...CAT, ...(withVoice ? ["-i", voiceFile] : []), "-filter_complex", `${vChain};${aChain}`, "-map", "[v]", "-map", "[a]",
+    const aChain = P.audioGraph({ total, voice: withVoice ? 1 : null, music: musicFile ? (withVoice ? 2 : 1) : null, keep,
+      duckOnClips: !withVoice && o.voice === "clips" && keep > 0 && srcs.some((s) => s.audio) });
+    await ff([...CAT, ...(withVoice ? ["-i", voiceFile] : []), ...(musicFile ? ["-stream_loop", "-1", "-i", musicFile] : []),
+      "-filter_complex", `${vChain};${aChain}`, "-map", "[v]", "-map", "[a]",
       "-t", total.toFixed(3), "-r", String(FPS), "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-maxrate", "6M", "-bufsize", "12M",
       "-profile:v", "high", "-pix_fmt", "yuv420p", "-g", String(FPS * 2),
       ...(cuts.length ? ["-force_key_frames", cuts.map((c) => c.toFixed(2)).join(",")] : []),
@@ -455,8 +541,8 @@ export async function buildMontage(ws: string, o: MontageOpts): Promise<MontageR
       videos.push({ id: m.id, filename: m.filename, duration: Math.round(Number(d) * 10) / 10 });
     }
     const transcript = words.length ? P.wordsText(words) : clipTexts.filter(Boolean).join(" ");
-    await logEvent("info", "montage", `змонтовано ${srcs.length} кліпів → ${videos.length} відео, ${Math.round(total)} с (${o.voice}, ${sub})`, { ws });
-    return { videos, duration: total, transcript, subtitles: sub, voice: o.voice, provider, warnings, clips: srcs.length };
+    await logEvent("info", "montage", `змонтовано ${srcs.length} кліпів → ${videos.length} відео, ${Math.round(total)} с (${o.voice}, ${sub}, переходи ${trMode}${smart ? `, найкращі моменти ${smart}` : ""}${musicNote ? `, ${musicNote}` : ""})`, { ws });
+    return { videos, duration: total, transcript, subtitles: sub, voice: o.voice, provider, warnings, clips: srcs.length, transition: trMode, music: musicNote || undefined, smart };
   } finally {
     // MONTAGE_KEEP_TMP=1 - лишити робочу теку (налагодження: сегменти, субтитри, проміжні файли)
     if (process.env.MONTAGE_KEEP_TMP === "1") console.log("[montage] робоча тека:", dir);

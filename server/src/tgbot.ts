@@ -982,6 +982,12 @@ const repTapped = new Map<string, number>();
 async function handleCallback(cbq: any, tokenOverride?: string): Promise<void> {
   const token = tokenOverride || env.telegram.botToken;
   const fromId = cbq.from?.id; const chatId = String(cbq.message?.chat?.id ?? fromId); const data = String(cbq.data || "");
+  // 🔔 кнопки сповіщення про збій («✓ Вирішено», «🔕 Тиша») - лише адміну, перевіряє alerts.ts
+  if (data.startsWith("al:")) {
+    const { alertCallback } = await import("./alerts.js");
+    await tg.answerCallbackQuery(token, cbq.id, (await alertCallback(data, Number(fromId)).catch(() => "")) || undefined);
+    return;
+  }
   const ws = await ownerWorkspace(fromId, token);
   if (!ws) { await tg.answerCallbackQuery(token, cbq.id, "Спершу під'єднай кабінет Holos"); return; }
   try {

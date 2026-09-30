@@ -53,7 +53,8 @@ import sharp from "sharp";
 import { accountChoices, matchAccount, postAccount, postAccounts, isAccNet, metaAccountFor, mainAccountIds, MULTI_NETS, ACC_NETS, type AccountChoice } from "./accounts.js";
 import { collectInbox, replyToComment, skipComment, isInboxNet, INBOX_NETS } from "./inbox.js";
 import { startMontage, contactSheet, clipSpeech, MONTAGE_MAX_CLIPS, type MontageResult } from "./montage.js";
-import { ttsReady } from "./tts.js";
+import { ttsReady, musicReady } from "./tts.js";
+import { normTransition, normMood, TRANSITIONS } from "./montage-plan.js";
 
 // ============================================================================
 // 1. ПРОТОКОЛ (чисті функції - саме вони під юнітами в test/mcp.test.mjs)
@@ -782,6 +783,7 @@ async function montageReport(ws: string, j: { status: string; result: any; error
   return {
     text: [
       `🎬 Готово: ${vids.length > 1 ? `${vids.length} частини сторіс (${vids.map((v) => `${short(v.id)} ${fmtDur(v.duration)}`).join(", ")})` : `відео ${short(vids[0]?.id || "")} · ${fmtDur(r.duration)}`} · 9:16 · ${voiceLabel} · ${subLabel}.`,
+      [r.transition && r.transition !== "none" ? `переходи: ${TRANSITIONS[r.transition]}` : "", r.music ? `музика: ${r.music}` : "", r.smart ? `найкращі моменти взято з ${r.smart} кліп(ів)` : ""].filter(Boolean).join(" · "),
       r.transcript ? `Текст: «${oneLine(r.transcript, 400)}»` : "",
       r.warnings?.length ? `⚠️ ${r.warnings.join("; ")}.` : "",
       r.postId ? `Уже в пості ${short(r.postId)}${post?.format === "story" ? " (сторіс - кожна частина окремим кадром)" : ""}. Далі: schedule_post чи publish_post.`
@@ -1435,7 +1437,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "montage_video",
     title: "Змонтувати сторіс чи рілс із кліпів (з субтитрами)",
-    description: "Склеїти кліпи (і фото) з медіатеки у вертикальне відео 9:16 із субтитрами. Текст на відео: text кожного кліпу - підписи (voice: none); звук самих кліпів - субтитри слово в слово (voice: clips); запис голосу автора з медіатеки (voice: audio + audio) - озвучка й субтитри з неї; AI-голос ElevenLabs (voice: tts) читає text кліпів або script. Спершу подивись кліпи через video_frames - текст має відповідати кадрам. Кліп довший за свій шматок обрізається (from/to - вирізати самому), коротший - трохи сповільнюється, а коли відео набагато коротше за голос - кліпи йдуть по колу (відповідь про це попередить); фото стоїть 3 с (seconds - інакше). Монтаж на сервері займає 1-2 хв: якщо не встигне - відповідь дасть job для montage_status. Результат - нове відео в медіатеці; з post - одразу в пості, з channels - новий пост (затверджений, лишається schedule_post). Сторіс довша за 60 с ріжеться на кілька кадрів. Безкоштовно, крім voice: tts (ElevenLabs - за символи) і розшифровки (копійки).",
+    description: "Склеїти кліпи (і фото) з медіатеки у вертикальне відео 9:16 із субтитрами. Текст на відео: text кожного кліпу - підписи (voice: none); звук самих кліпів - субтитри слово в слово (voice: clips); запис голосу автора з медіатеки (voice: audio + audio) - озвучка й субтитри з неї; AI-голос ElevenLabs (voice: tts) читає text кліпів або script. Спершу подивись кліпи через video_frames - текст має відповідати кадрам. Кліп довший за свій шматок обрізається (from/to - вирізати самому), коротший - трохи сповільнюється, а коли відео набагато коротше за голос - кліпи йдуть по колу (відповідь про це попередить); фото стоїть 3 с (seconds - інакше). Монтаж на сервері займає 1-2 хв: якщо не встигне - відповідь дасть job для montage_status. Результат - нове відео в медіатеці; з post - одразу в пості, з channels - новий пост (затверджений, лишається schedule_post). Сторіс довша за 60 с ріжеться на кілька кадрів. З кожного кліпу береться найкращий шматок (різкий, світлий, без трясіння; smart_cut: false - середина), між кліпами - переходи (transition, типово fade). Фонова музика: music - свій трек із медіатеки (list_media kind: \"audio\") або music_mood - AI-музика ElevenLabs під настрій (~$0.15 за хвилину); під голосом музика сама притихає. Безкоштовно, крім voice: tts (ElevenLabs - за символи), music_mood і розшифровки (копійки).",
     properties: {
       clips: {
         type: "array", minItems: 1, maxItems: 20,
@@ -1463,6 +1465,10 @@ export const TOOLS: ToolDef[] = [
       post: S("Прикріпити результат до цього поста (замість його медіа)."),
       channels: { ...NETS_ARG, description: "Створити НОВИЙ пост із результатом у цих мережах (сторіс - instagram і facebook)." },
       text: S("Текст нового поста (підпис рілса); для сторіс не публікується."),
+      transition: { type: "string", enum: ["fade", "slide", "zoom", "flash", "mix", "none"], description: "Переходи між кліпами: fade (типово) - плавне перетікання, slide - зсув, zoom - наближення, flash - спалах, mix - щоразу інший, none - різкий стик." },
+      music: S("Фонова музика - id треку з медіатеки (list_media kind: \"audio\"), на весь ролик, під голосом притихає. Права на трек - за автором."),
+      music_mood: { type: "string", enum: ["upbeat", "calm", "inspiring", "energetic", "warm"], description: "Або AI-музика ElevenLabs під настрій (платно, ~$0.15 за хвилину): upbeat - бадьора, calm - спокійна, inspiring - натхненна, energetic - енергійна, warm - тепла. Не вийде (нема права Music Generation у ключа) - ролик буде без музики з поясненням." },
+      smart_cut: { type: "boolean", description: "Брати з кліпів найкращі моменти (типово так); false - середину кліпу." },
     },
     required: ["clips"],
     run: async (ws, a) => {
@@ -1495,9 +1501,19 @@ export const TOOLS: ToolDef[] = [
       const nets = pickNets(a.channels);
       if (!postId && format === "story" && nets.some((n) => !STORY_NETS.includes(n)))
         throw new ToolError("Сторіс через API приймають лише Instagram і Facebook - прибери інші мережі або зроби format: reel.");
+      let music: string | null = null;
+      if (a.music) {
+        const m = await libraryMediaId(ws, a.music);
+        if (m.kind === "image") throw new ToolError(`${short(m.id)} - фото, а не трек.`);
+        if (m.id === audio) throw new ToolError(`${short(m.id)} уже озвучка - для музики потрібен інший трек.`);
+        music = m.id;
+      }
+      const musicMood = music ? null : normMood(a.music_mood);
+      if (musicMood && !musicReady()) throw new ToolError("AI-музику не підключено: адмін додає ключ ElevenLabs (з правом Music Generation). Поки що - music: id свого треку з медіатеки.");
       const opts = { clips, voice, audio, script: str(a.script, 5000) || null, voiceId: str(a.voice_id, 60) || null,
         subtitles: ["karaoke", "lines", "none"].includes(String(a.subtitles)) ? String(a.subtitles) as "karaoke" : null,
-        keepSound: a.keep_sound === false ? false : null, format };
+        keepSound: a.keep_sound === false ? false : null, format,
+        transition: normTransition(a.transition, "fade"), smart: a.smart_cut === false ? false : null, music, musicMood };
       const job = await startMontage(ws, opts, { postId, create: !postId && nets.length ? { nets, text: str(a.text, 5000) } : null });
       const waitMs = Number(process.env.MCP_MONTAGE_WAIT_MS) || 45_000;
       let j = await getJob(job.id);

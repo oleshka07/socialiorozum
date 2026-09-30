@@ -312,3 +312,110 @@ test("слова з розшифровки: Deepgram (з розділовими)
   assert.deepEqual(deepgramWords({}), []);
   assert.deepEqual(whisperWords(null), []);
 });
+
+// ---------------- 30.09: найкращі моменти, переходи, музика ----------------
+import { parseFrameStats, momentScores, bestWindows, planShots as planShots2, normTransition, transitionAt, transitionDur, audioGraph, musicPrompt, normMood, MUSIC_MOODS } from "../dist/montage-plan.js";
+
+test("parseFrameStats: вивід ffmpeg metadata=print → час, рух, світло, різкість кадру", () => {
+  const txt = "frame:0    pts:0       pts_time:0\nlavfi.signalstats.YAVG=83.9\nlavfi.signalstats.YDIF=0\nlavfi.blur=4.77\nframe:1    pts:3840    pts_time:0.25\nlavfi.signalstats.YAVG=90\nlavfi.signalstats.YDIF=5.5\nlavfi.blur=3.1\n";
+  const st = parseFrameStats(txt);
+  assert.equal(st.length, 2);
+  assert.deepEqual(st[1], { t: 0.25, ydif: 5.5, yavg: 90, blur: 3.1 });
+  assert.deepEqual(parseFrameStats(""), []);
+});
+
+// синтетичний кліп 9 с: 0-4 с темно, 4-7 с різко й рівно, 7-9 с камеру трясе
+const clip9 = () => Array.from({ length: 36 }, (_, i) => {
+  const t = i * 0.25;
+  if (t < 4) return { t, ydif: 2, yavg: 12, blur: 4 };
+  if (t < 7) return { t, ydif: 3, yavg: 120, blur: 2 };
+  return { t, ydif: 40, yavg: 120, blur: 9 };
+});
+
+test("momentScores: темне і трясуче - низько, різке й освітлене - високо; краї кліпу нижче", () => {
+  const sc = momentScores(clip9(), 9);
+  const avg = (a, b) => { const x = sc.slice(a * 4, b * 4); return x.reduce((p, c) => p + c, 0) / x.length; };
+  assert.ok(avg(4.5, 6.5) > avg(1, 3.5) + 0.3, "світле й різке краще за темне");
+  assert.ok(avg(4.5, 6.5) > avg(7.25, 8.5) + 0.3, "рівне краще за трясуче");
+  const flat = momentScores(Array.from({ length: 20 }, (_, i) => ({ t: i * 0.25, ydif: 3, yavg: 120, blur: 3 })), 5);
+  assert.ok(flat[0] < flat[10], "перші пів секунди - нижче");
+});
+
+test("bestWindows: шматок 3 с - там, де кадр найкращий, а не посередині", () => {
+  const sc = momentScores(clip9(), 9);
+  const [w] = bestWindows(sc, 0.25, 9, 3, 1);
+  assert.ok(w >= 3.9 && w <= 4.2, "найкраще - з 4 с (середина дала б 3 с, де ще темно): " + w);
+  // рівний кліп - без переваг: лишається звична середина
+  assert.equal(bestWindows(Array(36).fill(0.8), 0.25, 9, 3, 1), null);
+  // кліп рівно на шматок - вибору нема
+  assert.deepEqual(bestWindows(sc, 0.25, 3.02, 3, 2), [0, 0]);
+});
+
+test("bestWindows: для повторів по колу - різні найкращі шматки, по порядку в кліпі", () => {
+  // два добрі місця: 1-3 с і 6-8 с, решта темна
+  const st = Array.from({ length: 40 }, (_, i) => { const t = i * 0.25; const good = (t >= 1 && t < 3) || (t >= 6 && t < 8); return { t, ydif: 3, yavg: good ? 120 : 10, blur: good ? 2 : 6 }; });
+  const w = bestWindows(momentScores(st, 10), 0.25, 10, 2, 2);
+  assert.equal(w.length, 2);
+  assert.ok(w[0] >= 0.8 && w[0] <= 1.3 && w[1] >= 5.8 && w[1] <= 6.3, "обидва добрі місця, по порядку: " + w);
+});
+
+test("planShots: з оцінками кадрів - шматок із найкращого місця; from людини не чіпаємо", () => {
+  const sc = momentScores(clip9(), 9);
+  const p = planShots2([{ avail: 9, scores: sc, step: 0.25 }, { avail: 4 }], [3, 3], false);
+  assert.ok(p.shots[0].offset >= 3.9 && p.shots[0].offset <= 4.2, "кліп 1 - з 4 с: " + p.shots[0].offset);
+  assert.equal(p.shots[1].offset, 0.5, "кліп без оцінок - середина, як раніше");
+  const g = planShots2([{ avail: 9, scores: sc, step: 0.25, fromGiven: true }], [3], false);
+  assert.equal(g.shots[0].offset, 0, "from задала людина - з нього");
+  const slow = planShots2([{ avail: 2, scores: [1, 0, 1, 0, 1, 0, 1, 0], step: 0.25 }], [3], false);
+  assert.ok(slow.shots[0].speed > 1 && slow.shots[0].offset === 0, "кліп коротший за шматок - вибору нема");
+});
+
+test("переходи: режими, xfade-назви, тривалість", () => {
+  assert.equal(normTransition("SLIDE"), "slide");
+  assert.equal(normTransition("щось"), "fade");
+  assert.equal(normTransition(undefined, "none"), "none");
+  assert.equal(transitionAt("fade", 0), null, "перший кадр - без переходу");
+  assert.equal(transitionAt("fade", 3), "fade");
+  assert.equal(transitionAt("slide", 1), "slideleft");
+  assert.equal(transitionAt("zoom", 1), "zoomin");
+  assert.equal(transitionAt("flash", 1), "fadewhite");
+  assert.equal(transitionAt("none", 2), null);
+  assert.deepEqual([1, 2, 3, 4, 5].map((k) => transitionAt("mix", k)), ["fade", "slideleft", "zoomin", "smoothleft", "fade"]);
+  assert.equal(transitionDur(3), 0.3);
+  assert.equal(transitionDur(0.7), 0.245);
+  assert.equal(transitionDur(0.5), 0, "кадр пів секунди - різкий стик");
+});
+
+test("audioGraph: музика притихає під голосом, під мовою кліпів, без голосу - просто фон", () => {
+  const none = audioGraph({ total: 20, voice: null, music: null, keep: 1, duckOnClips: false });
+  assert.equal(none, "[0:a]anull[a]");
+  const v = audioGraph({ total: 20, voice: 1, music: 2, keep: 0.18, duckOnClips: false });
+  assert.match(v, /\[1:a\]asplit=2\[vo\]\[vsc\]/);
+  assert.match(v, /\[2:a\].*atrim=0:20\.000.*afade=t=in.*afade=t=out:st=18\.200:d=1\.8.*volume=0\.35\[m0\]/);
+  assert.match(v, /\[m0\]\[vsc\]sidechaincompress/);
+  assert.match(v, /amix=inputs=3.*alimiter/);
+  const c = audioGraph({ total: 12, voice: null, music: 1, keep: 1, duckOnClips: true });
+  assert.match(c, /\[0:a\]asplit=2\[b\]\[bsc\]/);
+  assert.match(c, /\[m0\]\[bsc\]sidechaincompress/);
+  const m = audioGraph({ total: 12, voice: null, music: 1, keep: 0, duckOnClips: false });
+  assert.match(m, /\[0:a\]volume=0\[b\]/);
+  assert.match(m, /volume=0\.8\[m0\]/, "без голосу музика гучніша");
+  assert.ok(!/sidechaincompress/.test(m));
+});
+
+test("музика: настрої і промт без імен", () => {
+  assert.equal(normMood("UPBEAT"), "upbeat");
+  assert.equal(normMood("rock"), null);
+  for (const k of Object.keys(MUSIC_MOODS)) {
+    const p = musicPrompt(k);
+    assert.match(p, /Instrumental/); assert.match(p, /no vocals/);
+    assert.ok(p.length < 400);
+  }
+});
+
+test("bestWindows: шматок довший за гарну частину - гарне на початку, темне в кінці (гачок!)", () => {
+  // 12 с: 0-7 темно, 7-11 світло, 11-12 темно; шматок 4,65 с - 0,65 с темряви неминучі: хай будуть у кінці
+  const st = Array.from({ length: 48 }, (_, i) => { const t = i * 0.25; const good = t >= 7 && t < 11; return { t, ydif: good ? 2 : 0, yavg: good ? 126 : 20, blur: good ? 4 : null }; });
+  const [w] = bestWindows(momentScores(st, 12), 0.25, 12, 4.65, 1);
+  assert.ok(w >= 6.9 && w <= 7.1, "починається зі світлого (7 с), а не з темряви (6,35): " + w);
+});

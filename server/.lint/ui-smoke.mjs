@@ -187,6 +187,12 @@ const API = {
   },
   "GET /admin/health": { errorCount: 2, warnCount: 5, spendToday: 1.23, runningJobs: 1, lostJobs: 0, lastBackup: "socialio-db-20260902-0320.dump (164K)",
     errors: [{ level: "error", scope: "publish", message: "Telegram відмовив у доступі (403)", n: 2 }, { level: "warn", scope: "meeting", message: "хеш транскрипта не збігся", n: 5 }] },
+  "GET /admin/alerts": { instance: "Holos · бета",
+    settings: { tg: true, email: true, emailAll: false, emails: [], digest: true, digestHour: 9, tz: "Europe/Prague", failover: true, orLow: 2, muteUntil: null, watchUrl: "" },
+    channels: { tg: { bot: "R_Socialio_bot", chats: 1 }, email: { to: ["o.stepeniev@swipescape.eu"], ok: true } },
+    failover: { on: true, via: "OpenAI (gpt-4o)" }, buddy: { url: "https://holos.rozum.one/health", fails: 0 },
+    open: [{ id: "7", fp: "ai_funds:OpenRouter", severity: "critical", title: "OpenRouter: закінчились кошти", count: 1440, first_at: "2026-09-26T05:59:00Z", last_at: "2026-09-30T05:00:00Z", notified_at: "2026-09-30T05:00:05Z",
+      hint: "Поповни рахунок OpenRouter: https://openrouter.ai/settings/credits." }], recent: [] },
   "GET /admin/spend": { defaults: { day: 3, month: 30, callsPerMin: 40 },
     cli: { up: true, tokenSet: true, busy: 0, queued: 0, cooldown: "" },
     workspaces: [
@@ -250,6 +256,7 @@ let pubPolls = 0;
 // відповіді, а саме синхронність і давала 504 на nginx.
 let aiJobPolls = 0;
 const mtCalls = [];
+const alertCalls = [];
 const AI_JOB_RESULT = new Map();
 
 // Пости: /full і /publish-state обслуговуються окремо (шлях із id).
@@ -634,7 +641,10 @@ function handleApi(method, path, body) {
   m = /^\/posts\/([0-9a-f-]+)$/.exec(path);
   if (method === "PUT" && m) { postPuts.push({ id: m[1], body }); return { ok: true }; }
   if (method === "POST" && path === "/ab/generate") return AB_RESULT;
-  if (method === "GET" && path === "/montage/caps") return { tts: true, stt: true, vision: true, maxClips: 20 };
+  if (method === "GET" && path === "/montage/caps") return { tts: true, stt: true, vision: true, music: true, maxClips: 20 };
+  if (method === "PUT" && path === "/admin/alerts") { alertCalls.push({ put: body }); return { ok: true, settings: { ...API["GET /admin/alerts"].settings, ...body } }; }
+  if (method === "POST" && path === "/admin/alerts/test") { alertCalls.push({ test: true }); return { ok: true, tg: 1, email: true, err: "", to: ["o.stepeniev@swipescape.eu"] }; }
+  if (method === "POST" && /^\/admin\/alerts\/\d+\/resolve$/.test(path)) { alertCalls.push({ resolve: path.split("/")[3] }); API["GET /admin/alerts"].open = []; return { ok: true }; }
   if (method === "POST" && path === "/montage") {
     mtCalls.push(body);
     aiJobPolls = 0;
@@ -1976,6 +1986,32 @@ const run = async () => {
     return t.includes("помилок за добу") && t.includes("$1.23") && t.includes("Telegram відмовив") && t.includes("20260902-0320");
   });
 
+  await check("adminAlerts", async () => {
+    // 🔔 сповіщення про збої: куди йдуть (Telegram бота, пошта), запасний маршрут, відкрите з підказкою;
+    // «Надіслати тест» спершу зберігає, «✓ Вирішено» закриває і панель перемальовується
+    // відкриття Налаштувань саме перемальовує панель: чекаємо саме ЦЕЙ рендер (лічильник), інакше набране
+    // в поля затер би рендер, що ще в дорозі
+    const n0 = await page.evaluate(() => loadAdminAlerts._n || 0);
+    await page.evaluate(() => { selectView("settings"); setSTab("profile"); });
+    await page.waitForFunction((n) => (loadAdminAlerts._n || 0) > n && document.querySelector("#admAlerts")?.dataset.v === String(loadAdminAlerts._n)
+      && document.querySelector("#admAlerts .alRow"), n0, { timeout: 8000 });
+    const t = await $t("#admAlerts");
+    await page.evaluate(() => { document.querySelector("#alEmails").value = "o.stepeniev@swipescape.eu, ops@rozum.one"; document.querySelector("#alFo").checked = false; });
+    await page.click("#alTest");
+    await page.waitForFunction(() => /^Тест:/.test(document.querySelector("#toast")?.textContent || ""), undefined, { timeout: 6000 });
+    const toast = await $t("#toast");
+    await page.click("#admAlerts .alOk");
+    await page.waitForFunction(() => !document.querySelector("#admAlerts .alRow"), undefined, { timeout: 6000 });
+    const after = await $t("#admAlerts");
+    const put = alertCalls.find((c) => c.put)?.put || {};
+    const good = t.includes("@R_Socialio_bot") && t.includes("o.stepeniev@swipescape.eu") && t.includes("через OpenAI (gpt-4o)")
+      && t.includes("OpenRouter: закінчились кошти") && t.includes("×1440") && t.includes("openrouter.ai/settings/credits")
+      && put.failover === false && put.emails === "o.stepeniev@swipescape.eu, ops@rozum.one" && alertCalls.some((c) => c.test)
+      && /Telegram ✓/.test(toast) && /пошта ✓/.test(toast) && alertCalls.some((c) => c.resolve === "7") && after.includes("усе гаразд");
+    if (!good) console.log("   ↳ adminAlerts:", JSON.stringify({ t: t.slice(0, 400), toast, put, alertCalls, after: after.slice(-120) }));
+    return good;
+  });
+
   await check("imgCost", async () => {
     // питання Олега було «спершу зрозуміти вартість» - панель мусить давати ЦИФРУ, а не обіцянку
     await page.evaluate(() => { selectView("brand"); setBTab("visual"); });
@@ -2802,14 +2838,21 @@ const run = async () => {
     const emptyMsg = await page.$eval("#mntMsg", (m) => m.textContent);
     await page.fill("#mntText", "Fasáda hotová. Teď chodba.");
     await page.click('input[name="mntFmt"][value="reel"]');
+    // ✨ переходи (типово плавні) і 🎵 музика: свій трек із медіатеки + 5 AI-настроїв; 🎯 найкращі моменти - увімкнено
+    const trOpts = await page.$$eval("#mntTr option", (o) => o.map((x) => x.value));
+    const muOpts = await page.$$eval("#mntMusic option", (o) => o.map((x) => x.value + (x.disabled ? "!" : "")));
+    const smartOn = await page.$eval("#mntSmart", (c) => c.checked);
+    await page.selectOption("#mntMusic", "m:calm");
     await page.click("#mntGo");
     await page.waitForFunction(() => !document.querySelector("#mntSrc") && !!document.querySelector(".cmp-ov"), undefined, { timeout: 10000 });
     const sent = mtCalls[mtCalls.length - 1] || {};
     await page.evaluate(() => { document.querySelector(".cmp-ov")?.remove(); MediaSel = null; });
     const good = tile.includes("🎙") && tile.includes("0:35") && dis0 === true && btn.t === "🎬 Змонтувати (2)" && !btn.d
       && order.sort().join(",") === "md2:1,mv1:2" && opts.length === 6 && opts.includes("audio") && txtShown && /Напиши текст/.test(emptyMsg)
-      && sent.format === "reel" && sent.ownText === "Fasáda hotová. Teď chodba." && JSON.stringify(sent.clips) === JSON.stringify([{ id: "md2" }, { id: "mv1" }]);
-    if (!good) console.log("   ↳ montageLib:", JSON.stringify({ tile, dis0, btn, order, opts, txtShown, emptyMsg, sent }));
+      && sent.format === "reel" && sent.ownText === "Fasáda hotová. Teď chodba." && JSON.stringify(sent.clips) === JSON.stringify([{ id: "md2" }, { id: "mv1" }])
+      && trOpts.join(",") === "fade,slide,zoom,flash,mix,none" && muOpts[0] === "" && muOpts.includes("t:ma1") && muOpts.filter((x) => x.startsWith("m:") && !x.endsWith("!")).length === 5
+      && smartOn && sent.transition === "fade" && sent.smart === true && sent.musicMood === "calm" && !sent.music;
+    if (!good) console.log("   ↳ montageLib:", JSON.stringify({ tile, dis0, btn, order, opts, txtShown, emptyMsg, sent, trOpts, muOpts, smartOn }));
     return good;
   });
 

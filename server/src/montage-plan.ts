@@ -321,7 +321,8 @@ export function fitClip(avail: number, d: number, fromGiven: boolean, k = 0, n =
   return { offset: 0, take: r2(avail), speed: r2(speed), freeze: r2(freeze) };
 }
 
-export type ShotClip = { avail: number; still?: boolean; fromGiven?: boolean };
+// scores/step - оцінки кадрів кліпу (momentScores): з ними шматок береться там, де кадр найкращий, а не з середини
+export type ShotClip = { avail: number; still?: boolean; fromGiven?: boolean; scores?: number[] | null; step?: number };
 export type Shot = { clip: number; start: number; dur: number; offset: number; take: number; speed: number; freeze: number };
 
 /**
@@ -341,15 +342,187 @@ export function planShots(clips: ShotClip[], durs: number[], continuous: boolean
   if (continuous) { for (let k = 0; k < passes; k++) clips.forEach((_, i) => order.push([i, k, passes])); }
   else clips.forEach((_, i) => { for (let k = 0; k < need[i]; k++) order.push([i, k, need[i]]); });
   const shots: Shot[] = [];
+  const wins = new Map<number, number[] | null>();   // найкращі шматки кліпу - раз на кліп
   let t = 0;
   for (const [i, k, n] of order) {
     const c = clips[i];
     const dur = durs[i] / n;
-    const fit = c.still ? { offset: 0, take: dur, speed: 1, freeze: 0 } : fitClip(c.avail, dur, !!c.fromGiven, k, n);
+    let fit = c.still ? { offset: 0, take: dur, speed: 1, freeze: 0 } : fitClip(c.avail, dur, !!c.fromGiven, k, n);
+    // 🎯 є вибір (кліп довший за шматок) і оцінки кадрів - беремо найкращий шматок, а не середину;
+    // початок, який задала людина (from), не чіпаємо
+    if (!c.still && !c.fromGiven && c.scores?.length && fit.speed === 1 && c.avail > dur + 0.05) {
+      if (!wins.has(i)) wins.set(i, bestWindows(c.scores, c.step || 0.25, c.avail, dur, n));
+      const w = wins.get(i);
+      if (w && w[k] != null) fit = { ...fit, offset: r2(w[k]) };
+    }
     shots.push({ clip: i, start: t, dur, ...fit });
     t += dur;
   }
   return { shots, passes: continuous ? passes : Math.max(1, ...need) };
+}
+
+// ---------------- 🎯 найкращі моменти кліпу ----------------
+// 30.09 Олег: «рушій не дивиться відео і не шукає найкращі моменти (просто бере середину кліпу)».
+// Тепер дивиться: ffmpeg проходить кліп 4 кадри на секунду і міряє, наскільки кадр різкий (blurdetect),
+// чи не темний/пересвічений (signalstats YAVG) і скільки руху від попереднього кадру (YDIF): трохи руху -
+// живий кадр, ривок камери - погано. Безкоштовно, без моделі.
+export type FrameStat = { t: number; ydif: number; yavg: number; blur: number | null };
+const quant = (arr: number[], p: number): number => {
+  if (!arr.length) return 0;
+  const srt = [...arr].sort((a, b) => a - b);
+  return srt[Math.min(srt.length - 1, Math.max(0, Math.round((srt.length - 1) * p)))];
+};
+const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+
+/** Вивід ffmpeg metadata=print: блок «frame:N pts:… pts_time:T», далі рядки lavfi.*=значення. */
+export function parseFrameStats(txt: string): FrameStat[] {
+  const out: FrameStat[] = [];
+  let cur: FrameStat | null = null;
+  for (const line of String(txt || "").split(/\r?\n/)) {
+    const m = /^frame:\s*\d+\s+pts:\s*\S+\s+pts_time:\s*([0-9.]+)/.exec(line);
+    if (m) { if (cur) out.push(cur); cur = { t: Number(m[1]), ydif: 0, yavg: 128, blur: null }; continue; }
+    const kv = cur && /^lavfi\.([A-Za-z_.]+)=(-?[0-9.]+(?:e[-+]?\d+)?)/.exec(line.trim());
+    if (!cur || !kv) continue;
+    const v = Number(kv[2]);
+    if (!Number.isFinite(v)) continue;
+    if (kv[1] === "signalstats.YDIF") cur.ydif = v;
+    else if (kv[1] === "signalstats.YAVG") cur.yavg = v;
+    else if (kv[1] === "blur") cur.blur = v;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+/** Оцінка кожного кадру 0..1: різкий, нормально освітлений, з рухом, але без ривка камери. Перші й останні
+ *  пів секунди кліпу - нижче: там зазвичай натискають «запис» і опускають телефон. */
+export function momentScores(stats: FrameStat[], dur: number): number[] {
+  if (!stats.length) return [];
+  const med = quant(stats.map((s) => s.ydif), 0.5);
+  const blurs = stats.map((s) => s.blur).filter((b): b is number => b != null && Number.isFinite(b));
+  const b5 = quant(blurs, 0.05), b95 = quant(blurs, 0.95);
+  const jerk = Math.max(2.5 * med, 6);
+  return stats.map((s) => {
+    // blurdetect мовчить на кадрі без жодного контуру (темрява, стіна) - такий кадр нецікавий; якщо ж він не
+    // дав жодного значення на весь кліп (старий ffmpeg) - різкість не враховуємо
+    const sharp = !blurs.length ? 0.6 : s.blur == null ? 0.15 : b95 - b5 < 1e-6 ? 0.6 : 1 - clamp01((s.blur - b5) / (b95 - b5));
+    const shake = clamp01((s.ydif - jerk) / jerk);
+    const motion = clamp01(s.ydif / Math.max(1.5 * med, 1.5));
+    // яскравість у відео - 16..235 (чорний = 16): темніше ~18% - «темно», світліше ~94% - «пересвічено»
+    const lum = clamp01((s.yavg - 16) / 219);
+    const expo = lum < 0.18 ? lum / 0.18 : lum > 0.94 ? clamp01((1 - lum) / 0.06) : 1;
+    const edge = s.t < 0.5 || s.t > dur - 0.5 ? 0.6 : 1;
+    return Math.max(0, 0.4 * sharp + 0.2 * motion + 0.4 * expo - 0.7 * shake) * edge;
+  });
+}
+
+/**
+ * n найкращих шматків довжиною take із кліпу довжиною avail за оцінками кадрів (крок step с): шматки по
+ * можливості не перекриваються (для повторів по колу - щоразу інший найкращий), початки - по порядку в
+ * кліпі. null - оцінок нема або всі шматки однакові (тоді лишається звична середина).
+ */
+export function bestWindows(scores: number[], step: number, avail: number, take: number, n = 1): number[] | null {
+  if (!scores.length || !(step > 0) || !(take > 0)) return null;
+  const room = avail - take;
+  if (room <= 0.05) return Array.from({ length: n }, () => 0);
+  // початок шматка важить трохи більше за кінець (1,2 → 0,8): перші секунди кадру - те, що людина
+  // бачить на стику (а в першому кадрі ролику - гачок); серед рівних шматків кращий той, що з доброго починається
+  const pre = [0], preI = [0];
+  scores.forEach((x, i) => { pre.push(pre[i] + x); preI.push(preI[i] + i * x); });
+  const idx = (t: number) => Math.min(scores.length, Math.max(0, Math.round(t / step)));
+  const nC = Math.max(2, Math.min(400, Math.floor(room / step) + 1));
+  const cand: Array<{ s: number; v: number }> = [];
+  for (let c = 0; c < nC; c++) {
+    const st = room * c / (nC - 1);
+    const a = idx(st), b = Math.max(a + 1, idx(st + take));
+    const bb = Math.min(b, scores.length), aa = Math.min(a, bb - 1), L = Math.max(1, bb - aa);
+    const S = pre[bb] - pre[aa], SI = preI[bb] - preI[aa];
+    // Σ (1.2 - 0.4·(i-aa)/L)·s_i  /  Σ (1.2 - 0.4·(i-aa)/L)
+    const num = 1.2 * S - (0.4 / L) * (SI - aa * S);
+    const den = 1.2 * L - (0.4 / L) * (L * (L - 1) / 2);
+    cand.push({ s: st, v: num / Math.max(1e-9, den) });
+  }
+  const vs = cand.map((c) => c.v);
+  if (Math.max(...vs) - Math.min(...vs) < 0.02) return null;
+  const picked: number[] = [];
+  for (let k = 0; k < n; k++) {
+    let best: { s: number; v: number } | null = null;
+    for (const c of cand) {
+      if (picked.some((p) => Math.abs(p - c.s) < take * 0.7)) continue;
+      if (!best || c.v > best.v + 1e-9) best = c;
+    }
+    if (!best) break;
+    picked.push(best.s);
+  }
+  while (picked.length < n) picked.push(n > 1 ? room * picked.length / (n - 1) : room / 2);
+  return picked.map((x) => Math.round(x * 1000) / 1000).sort((a, b) => a - b);
+}
+
+// ---------------- ✨ переходи між кліпами ----------------
+// Кожен кадр (крім першого) заходить переходом xfade із ОСТАННЬОГО кадру попереднього: попередній кліп на
+// мить зупиняється й перетікає в новий. Так переходу не треба перекривати сегменти на таймлайні (голос і
+// субтитри стоять де стояли) і не треба відкривати всі кліпи разом (сервер спільний, памʼять береже).
+export type TransitionMode = "none" | "fade" | "slide" | "zoom" | "flash" | "mix";
+export const TRANSITIONS: Record<TransitionMode, string> = {
+  none: "без переходів", fade: "плавні", slide: "зсув", zoom: "наближення", flash: "спалах", mix: "мікс",
+};
+const XF: Record<string, string> = { fade: "fade", slide: "slideleft", zoom: "zoomin", flash: "fadewhite" };
+const MIX = ["fade", "slideleft", "zoomin", "smoothleft"];
+export function normTransition(x: unknown, dflt: TransitionMode = "fade"): TransitionMode {
+  const v = String(x ?? "").trim().toLowerCase();
+  return (v in TRANSITIONS ? v : dflt) as TransitionMode;
+}
+/** xfade-перехід на вході кадру k (k ≥ 1); null - різкий стик. */
+export function transitionAt(mode: TransitionMode, k: number): string | null {
+  if (mode === "none" || k < 1) return null;
+  if (mode === "mix") return MIX[(k - 1) % MIX.length];
+  return XF[mode] || "fade";
+}
+/** Скільки триває перехід: до 0,3 с, не більше третини кадру; зовсім короткий кадр - без переходу. */
+export function transitionDur(shotDur: number): number {
+  return shotDur < 0.6 ? 0 : Math.round(Math.min(0.3, shotDur * 0.35) * 1000) / 1000;
+}
+
+// ---------------- 🎵 фонова музика ----------------
+export type MusicMood = "calm" | "upbeat" | "inspiring" | "energetic" | "warm";
+export const MUSIC_MOODS: Record<MusicMood, { label: string; prompt: string }> = {
+  calm: { label: "🌿 Спокійна", prompt: "calm, soft acoustic guitar and light piano, gentle and relaxed" },
+  upbeat: { label: "☀️ Бадьора", prompt: "upbeat, bright modern pop with light claps and warm synths, positive" },
+  inspiring: { label: "✨ Натхненна", prompt: "inspiring, uplifting cinematic with piano and soft strings, slowly building" },
+  energetic: { label: "⚡ Енергійна", prompt: "energetic, punchy modern electronic beat, driving" },
+  warm: { label: "☕ Тепла", prompt: "warm lo-fi, mellow keys, soft drums, cozy" },
+};
+export function normMood(x: unknown): MusicMood | null {
+  const v = String(x ?? "").trim().toLowerCase();
+  return v in MUSIC_MOODS ? (v as MusicMood) : null;
+}
+/** Промт для AI-музики. Без назв брендів, імен і артистів - ElevenLabs такі промти відхиляє. */
+export function musicPrompt(mood: MusicMood): string {
+  return `Instrumental background music for a short vertical social media video. ${MUSIC_MOODS[mood].prompt}. Steady tempo, no vocals, no lyrics, mixed to sit quietly under a voiceover.`;
+}
+
+/**
+ * Звук фіналу. Вхід 0 - склеєні кліпи (їхній звук), далі - голос (якщо є) і музика (якщо є).
+ * Музика: по колу на весь ролик, мʼякий початок і згасання в кінці; під голосом (озвучка чи мова в кліпах)
+ * вона сама притихає (sidechaincompress), у паузах повертається. alimiter - щоб сума не хрипіла.
+ */
+export function audioGraph(o: { total: number; voice: number | null; music: number | null; keep: number; duckOnClips: boolean; musicVol?: number }): string {
+  const T = o.total.toFixed(3);
+  const L = ["alimiter=limit=0.95", "aresample=48000"].join(",");
+  if (o.music == null) {
+    return o.voice == null ? "[0:a]anull[a]"
+      : `[0:a]volume=${o.keep}[b];[${o.voice}:a]anull[vo];[b][vo]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,aresample=48000[a]`;
+  }
+  const duck = o.voice != null || o.duckOnClips;
+  const mv = o.musicVol ?? (duck ? 0.35 : 0.8);
+  const fadeOut = Math.max(0, o.total - 1.8).toFixed(3);
+  const m = `[${o.music}:a]aresample=48000,aformat=channel_layouts=stereo,atrim=0:${T},asetpts=N/SR/TB,afade=t=in:st=0:d=0.8,afade=t=out:st=${fadeOut}:d=1.8,volume=${mv}[m0]`;
+  // під голосом музика тихішає на ~12 дБ (не зникає зовсім) і повертається за 0,35 с після паузи
+  const comp = "sidechaincompress=threshold=0.03:ratio=10:attack=10:release=350";
+  if (o.voice != null) {
+    return `[0:a]volume=${o.keep}[b];[${o.voice}:a]asplit=2[vo][vsc];${m};[m0][vsc]${comp}[md];[b][vo][md]amix=inputs=3:duration=first:dropout_transition=0:normalize=0,${L}[a]`;
+  }
+  if (o.duckOnClips) return `[0:a]asplit=2[b][bsc];${m};[m0][bsc]${comp}[md];[b][md]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,${L}[a]`;
+  return `[0:a]volume=${o.keep}[b];${m};[b][m0]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,${L}[a]`;
 }
 
 // ---- де різати довгу сторіс ----

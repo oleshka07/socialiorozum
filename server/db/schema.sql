@@ -1089,3 +1089,34 @@ create table if not exists bio_page_day (
   views        int not null default 0,
   primary key (workspace_id, day)
 );
+
+-- ============================================================================
+-- 🔔 Сповіщення адміну про збої (alerts.ts): одна проблема = один рядок із відбитком fp, лічильником і
+-- часом останнього сповіщення (нагадування не частіше ніж раз на 6 год / добу, «вирішено» - кнопкою
+-- чи пробою). Налаштування сповіщень і інші службові налаштування сервісу - app_setting (не секрети).
+create table if not exists ops_alert (
+  id             bigserial primary key,
+  fp             text not null unique,
+  kind           text not null,
+  severity       text not null default 'warning',    -- critical|warning
+  title          text not null,
+  detail         text,
+  hint           text,
+  scope          text,
+  source         text not null default 'log',        -- log|probe
+  count          int not null default 1,
+  first_at       timestamptz not null default now(),
+  last_at        timestamptz not null default now(),
+  notified_at    timestamptz,
+  notified_count int not null default 0,
+  resolved_at    timestamptz,
+  muted_until    timestamptz
+);
+create index if not exists idx_ops_alert_open on ops_alert(resolved_at, last_at desc);
+create table if not exists app_setting (
+  name       text primary key,
+  value      jsonb,
+  updated_by text,
+  updated_at timestamptz not null default now()
+);
+

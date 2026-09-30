@@ -130,3 +130,54 @@ export async function synthesizeAll(texts: string[], dests: string[], o: { lang:
   // обидва впали - причина ПЕРШОГО: його обрали свідомо (ключ ElevenLabs), і саме про нього треба знати
   throw new Error(first || "озвучка не вдалась");
 }
+
+// ---------------- 🎵 AI-музика (ElevenLabs Music) ----------------
+// POST /v1/music: промт + довжина → готовий трек (mp3). Лише інструментал (force_instrumental), ~$0.15 за
+// хвилину на платному тарифі; ключ має мати право Music Generation (ключ «лише Text to Speech» - 401/403).
+// Музика генерується під КОЖЕН ролик окремо: умови ElevenLabs не дозволяють робити з неї спільну бібліотеку.
+
+/** Відмова ElevenLabs Music → що робити людині. */
+export function humanMusicError(status: number, body: any): string {
+  const d = body?.detail;
+  const code = String((d && typeof d === "object" ? d.status || d.code : "") || "");
+  const msg = String((d && typeof d === "object" ? d.message : d) || body?.message || "");
+  if (code === "missing_permissions" || /missing the permission|music_generation/i.test(msg))
+    return "ElevenLabs: у ключа нема права Music Generation - увімкни його (ElevenLabs → Developers → API Keys → ключ → Edit) або надішли свій трек";
+  if (code === "quota_exceeded" || /quota|credits? (are|is) (exhausted|insufficient)|not enough credits/i.test(msg))
+    return "ElevenLabs: на рахунку скінчились кредити - поповни тариф або надішли свій трек";
+  if (status === 402 || code === "payment_required" || /paid|upgrade|subscription|not available on (the )?free/i.test(msg))
+    return "ElevenLabs: AI-музика - лише на платному тарифі (від Starter); або надішли свій трек";
+  if (code === "invalid_api_key" || (status === 401 && !msg)) return "ElevenLabs: ключ не прийнято - перевір його в Налаштування → Профіль → Ключі провайдерів";
+  if (status === 429) return "ElevenLabs: забагато запитів одночасно - спробуй за хвилину";
+  if (status >= 500) return "ElevenLabs тимчасово недоступний - спробуй за хвилину";
+  return `ElevenLabs: ${(msg || `HTTP ${status}`).slice(0, 160)}`;
+}
+
+export const musicReady = (): boolean => !!env.elevenlabs.apiKey;
+
+/** Згенерувати трек на seconds секунд у dest (mp3). Кидає людську помилку. */
+export async function composeMusic(prompt: string, seconds: number, dest: string): Promise<void> {
+  if (!env.elevenlabs.apiKey) throw new Error("AI-музику не підключено: адмін додає ключ ElevenLabs (з правом Music Generation) у Налаштування → Профіль → Ключі провайдерів. Або надішли свій трек.");
+  const len = Math.max(3000, Math.min(600000, Math.round(seconds * 1000)));
+  const call = (p: string) => fetch("https://api.elevenlabs.io/v1/music?output_format=mp3_44100_128", {
+    method: "POST", signal: AbortSignal.timeout(240000),
+    headers: { "xi-api-key": env.elevenlabs.apiKey, "Content-Type": "application/json", Accept: "audio/mpeg" },
+    body: JSON.stringify({ prompt: p, music_length_ms: len, model_id: "music_v1", force_instrumental: true }),
+  });
+  let res: Response;
+  try {
+    res = await call(prompt);
+    // «bad_prompt» (модель побачила в промті щось про артиста) - ще раз із найпростішим промтом
+    if (res.status === 400 || res.status === 422) {
+      const j: any = await res.clone().json().catch(() => ({}));
+      if (/bad_prompt|bad_composition/i.test(JSON.stringify(j))) res = await call("Instrumental background music, positive and modern, steady tempo, no vocals.");
+    }
+  } catch (e: any) {
+    throw new Error(e?.name === "TimeoutError" || e?.name === "AbortError" ? "ElevenLabs не встиг згенерувати музику за 4 хв - спробуй ще раз" : "ElevenLabs недоступний - спробуй за хвилину");
+  }
+  if (!res.ok) throw new Error(humanMusicError(res.status, await res.json().catch(() => ({}))));
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length < 2000) throw new Error("ElevenLabs повернув порожню музику - спробуй ще раз");
+  await writeFile(dest, buf);
+}
+

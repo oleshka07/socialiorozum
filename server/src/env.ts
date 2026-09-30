@@ -107,6 +107,20 @@ export const env = {
   },
   adminEmails: (process.env.ADMIN_EMAILS ?? "o.stepeniev@swipescape.eu,stepenievgroup@gmail.com")
     .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+  // 🛟 Запасний маршрут AI: у провайдера закінчились кошти чи не прийнято ключ - той самий виклик іде
+  // іншим провайдером (OpenRouter → OpenAI напряму і навпаки), а адміну летить сповіщення. Вимикається
+  // в адмінці (Сповіщення про збої) або LLM_FAILOVER=0; failover міняє alerts.ts за налаштуванням.
+  llm: {
+    failover: process.env.LLM_FAILOVER !== "0",
+    failoverModel: process.env.LLM_FAILOVER_MODEL || "openai/gpt-4o",
+  },
+  // 🔔 Сповіщення про збої: кому писати листи (типово - адміни) і сусідній інстанс для взаємної перевірки
+  alerts: {
+    emails: (process.env.ALERT_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+    watchUrl: process.env.ALERT_WATCH_URL ?? "",
+    tickMs: Number(process.env.ALERT_TICK_MS ?? 600_000),     // проби (баланси, бекап, диск, бот) - раз на 10 хв
+    buddyMs: Number(process.env.ALERT_BUDDY_MS ?? 120_000),   // сусідній інстанс - раз на 2 хв
+  },
 };
 
 if (!env.databaseUrl) console.warn("[env] DATABASE_URL не заданий");

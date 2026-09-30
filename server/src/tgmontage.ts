@@ -18,7 +18,8 @@ import { liveSend } from "./tgbot.js";
 import { startMontage, MONTAGE_MAX_CLIPS, type MontageOpts, type MontageResult } from "./montage.js";
 import { ttsReady } from "./tts.js";
 import { getJob } from "./jobs.js";
-import { spreadText, MAX_SLOW } from "./montage-plan.js";
+import { spreadText, MAX_SLOW, TRANSITIONS, MUSIC_MOODS, type TransitionMode, type MusicMood } from "./montage-plan.js";
+import { musicReady } from "./tts.js";
 import { plural } from "./analytics.js";
 
 export type MtMode = "auto" | "captions" | "ai-voice";
@@ -26,12 +27,17 @@ export type MtState = {
   chat: string;
   // mid - message_id повідомлення з кліпом: за ним тримається порядок (альбом доходить не по порядку)
   clips: Array<{ id: string; kind: "video" | "image"; dur: number; mid?: number }>;
-  voice: { id: string; dur: number } | null;
+  // file - прийшов аудіофайлом (а не голосовим): такий можна перемкнути в музику
+  voice: { id: string; dur: number; file?: boolean; name?: string } | null;
   script: string | null;
   mode: MtMode;
   format: "story" | "reel";
   at: number;
   job?: string | null;
+  transition?: TransitionMode;                          // ✨ переходи (типово плавні)
+  music?: { id: string; name: string; dur: number } | null;   // 🎵 свій трек
+  mood?: MusicMood | null;                              // 🎵 або AI-музика під настрій
+  ownMusic?: { id: string; name: string; dur: number } | null; // надісланий трек, поки обрано інше (щоб «▸» міг повернутись)
 };
 const TTL = 3 * 3600_000;
 const TEXT_WINDOW = 30 * 60_000;
@@ -95,10 +101,12 @@ function mtCard(st: MtState): { text: string; buttons: tg.TgButton[][] } {
     st.clips.length ? `Кліпи (${st.clips.length}, ≈${dur(total)}): ${list}` : "Кліпів ще нема.",
     mtTextPlan(st, tts),
     ...(loopHint(st) ? [loopHint(st)] : []),
+    `✨ Переходи: ${TRANSITIONS[st.transition || "fade"]} · 🎵 Музика: ${musicLabel(st)}`,
+    "🎯 З кожного кліпу беру найкращий шматок: різкий, світлий, без трясіння.",
     "",
     st.clips.length
-      ? "Ще відео (до 20 МБ) чи фото - надсилай. Голосове - стане озвучкою, текст - словами для відео. Готово - «✂️ Змонтувати»."
-      : "Надсилай відео з галереї (до 20 МБ кожне) чи фото - по черзі або альбомом. Потім голосове (озвучка) або текст - і «✂️ Змонтувати».",
+      ? "Ще відео (до 20 МБ) чи фото - надсилай. Голосове - стане озвучкою, mp3 - фоновою музикою, текст - словами для відео. Готово - «✂️ Змонтувати»."
+      : "Надсилай відео з галереї (до 20 МБ кожне) чи фото - по черзі або альбомом. Потім голосове (озвучка), mp3 (музика) або текст - і «✂️ Змонтувати».",
   ].join("\n");
   const fmt: tg.TgButton[] = [
     { text: st.format === "story" ? "⚡ Сторіс ✓" : "⚡ Сторіс", data: "mt:fmt:story" },
@@ -109,6 +117,10 @@ function mtCard(st: MtState): { text: string; buttons: tg.TgButton[][] } {
   const buttons: tg.TgButton[][] = [];
   if (st.clips.length) buttons.push([{ text: "✂️ Змонтувати", data: "mt:build" }]);
   buttons.push(fmt, modes);
+  buttons.push([{ text: `✨ ${TRANSITIONS[st.transition || "fade"]} ▸`, data: "mt:tr" }, { text: `🎵 ${musicLabel(st)} ▸`, data: "mt:mus" }]);
+  // аудіофайл розпізнано не так - одна кнопка міняє роль
+  if (st.music) buttons.push([{ text: "🔁 Це голос, а не музика", data: "mt:swap" }]);
+  else if (st.voice?.file) buttons.push([{ text: "🔁 Це музика, а не голос", data: "mt:swap" }]);
   const tail: tg.TgButton[] = [];
   if (st.voice || st.script) tail.push({ text: st.voice ? "🔇 Без голосового" : "🧹 Без тексту", data: "mt:clear" });
   if (st.clips.length) tail.push({ text: "↩ Прибрати останній", data: "mt:undo" });
@@ -116,6 +128,21 @@ function mtCard(st: MtState): { text: string; buttons: tg.TgButton[][] } {
   buttons.push(tail);
   return { text, buttons };
 }
+
+function musicLabel(st: MtState): string {
+  if (st.music) return `свій трек «${st.music.name.slice(0, 30)}»`;
+  if (st.mood && MUSIC_MOODS[st.mood]) return `AI ${MUSIC_MOODS[st.mood].label.split(" ").slice(1).join(" ").toLowerCase()}`;
+  return "без музики";
+}
+// 🎵 «▸» перебирає: без музики → свій трек (якщо надіслано) → AI-настрої (якщо підключено ElevenLabs) → знову без
+export function nextMusic(st: MtState, own: { id: string; name: string; dur: number } | null, ai: boolean): Pick<MtState, "music" | "mood"> {
+  const opts: Array<Pick<MtState, "music" | "mood">> = [{ music: null, mood: null }];
+  if (own) opts.push({ music: own, mood: null });
+  if (ai) for (const m of Object.keys(MUSIC_MOODS) as MusicMood[]) opts.push({ music: null, mood: m });
+  const cur = opts.findIndex((o) => (o.music?.id || null) === (st.music?.id || null) && (o.mood || null) === (st.mood || null));
+  return opts[(cur + 1) % opts.length];
+}
+const TR_ORDER: TransitionMode[] = ["fade", "slide", "zoom", "flash", "mix", "none"];
 
 async function showCard(ws: string, chatId: string, st: MtState, note = ""): Promise<void> {
   const c = mtCard(st);
@@ -145,7 +172,11 @@ export async function montageMessage(ws: string, chatId: string, msg: any, _st: 
   const docMime = String(doc?.mime_type || "");
   const vid = msg.video || msg.video_note || msg.animation || (doc && /^video\//.test(docMime) ? doc : null);
   const photo = msg.photo?.length ? msg.photo[msg.photo.length - 1] : (doc && /^image\//.test(docMime) ? doc : null);
-  const voice = msg.voice || msg.audio || (doc && /^audio\//.test(docMime) ? doc : null);
+  // голосове - озвучка; аудіофайл із назвою/виконавцем чи mp3 - музика; решта аудіофайлів (диктофон) - озвучка,
+  // картка дає кнопку поміняти роль
+  const audFile = msg.audio || (doc && /^audio\//.test(docMime) ? doc : null);
+  const voice = msg.voice || audFile;
+  const isMusic = !msg.voice && !!audFile && (!!(audFile.title || audFile.performer) || /mpeg|mp3/i.test(String(audFile.mime_type || "")) || /\.mp3$/i.test(String(audFile.file_name || "")));
   const file = vid || photo || voice;
   const text = String(msg.text || "").trim();
   if (!file && !(text && !text.startsWith("/"))) return false;
@@ -167,9 +198,18 @@ export async function montageMessage(ws: string, chatId: string, msg: any, _st: 
       const row = await one<{ duration: number | null }>(`select duration from media_asset where id=$1`, [saved.id]);
       const d = Number(row?.duration) || 0;
       if (saved.kind === "audio") {
-        cur.voice = { id: saved.id, dur: d };
+        const title = String(audFile?.title || audFile?.file_name || "").replace(/\.[a-z0-9]{2,4}$/i, "").slice(0, 60) || "трек";
+        if (isMusic) {
+          cur.music = { id: saved.id, name: [audFile?.performer, title].filter(Boolean).join(" - ").slice(0, 60), dur: d };
+          cur.ownMusic = cur.music;
+          cur.mood = null;
+          await saveMt(ws, cur);
+          await showCard(ws, chatId, cur, `🎵 Музика «${cur.music.name}» (${dur(d)}) - піде фоном на весь ролик, під голосом притихне.`);
+          return true;
+        }
+        cur.voice = { id: saved.id, dur: d, file: !msg.voice, name: title };
         await saveMt(ws, cur);
-        await showCard(ws, chatId, cur, `🎙 Голосове (${dur(d)}) - буде озвучкою, субтитри з нього.`);
+        await showCard(ws, chatId, cur, `🎙 ${msg.voice ? "Голосове" : "Запис"} (${dur(d)}) - буде озвучкою, субтитри з нього.`);
         return true;
       }
       if (!cur.clips.some((c) => c.id === saved.id)) {
@@ -199,7 +239,7 @@ async function netsFor(ws: string): Promise<string[]> {
 
 export function mtOpts(st: MtState, tts: boolean): { opts: MontageOpts; aiText: { mode: "captions" | "voiceover" } | null } {
   const clips = st.clips.map((c) => ({ id: c.id }));
-  const base = { clips, format: st.format } as const;
+  const base = { clips, format: st.format, transition: st.transition || "fade", music: st.music?.id || null, musicMood: st.music ? null : st.mood || null } as const;
   if (st.voice) return { opts: { ...base, voice: "audio", audio: st.voice.id }, aiText: null };
   if (st.script) {
     if (tts) return { opts: { ...base, voice: "tts", script: st.script }, aiText: null };
@@ -225,6 +265,22 @@ async function montageTap(ws: string, chatId: string, data: string, cbq: any, to
   if (cmd === "mode") { st.mode = arg === "ai-voice" ? "ai-voice" : arg === "captions" ? "captions" : "auto"; st.voice = null; st.script = null; await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id); await showCard(ws, chatId, st); return true; }
   if (cmd === "clear") { st.voice = null; st.script = null; st.mode = "auto"; await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id); await showCard(ws, chatId, st); return true; }
   if (cmd === "undo") { st.clips.pop(); await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id, "Прибрав останній кліп"); await showCard(ws, chatId, st); return true; }
+  if (cmd === "tr") {
+    st.transition = TR_ORDER[(TR_ORDER.indexOf(st.transition || "fade") + 1) % TR_ORDER.length];
+    await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id, `Переходи: ${TRANSITIONS[st.transition]}`); await showCard(ws, chatId, st); return true;
+  }
+  if (cmd === "mus") {
+    // свій трек памʼятаємо й тоді, коли тимчасово обрали AI чи «без музики»
+    const own = st.music || st.ownMusic || null;
+    if (st.music) st.ownMusic = st.music;
+    Object.assign(st, nextMusic(st, own, musicReady()));
+    await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id, `Музика: ${musicLabel(st)}`); await showCard(ws, chatId, st); return true;
+  }
+  if (cmd === "swap") {
+    if (st.music) { st.voice = { id: st.music.id, dur: st.music.dur, file: true, name: st.music.name }; st.music = null; st.ownMusic = null; st.script = null; }
+    else if (st.voice?.file) { st.music = { id: st.voice.id, name: st.voice.name || "трек", dur: st.voice.dur }; st.voice = null; st.mood = null; }
+    await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id); await showCard(ws, chatId, st); return true;
+  }
   if (cmd !== "build") return false;
   if (!st.clips.length) { await tg.answerCallbackQuery(token, cbq.id, "Спершу надішли кліпи"); return true; }
   if (st.job) {
@@ -252,7 +308,9 @@ async function montageTap(ws: string, chatId: string, data: string, cbq: any, to
 }
 
 async function sendResult(ws: string, chatId: string, r: MontageResult, token: string): Promise<void> {
-  const sub = r.subtitles === "karaoke" ? "субтитри під голос" : r.subtitles === "lines" ? "підписи" : "без тексту";
+  const sub = [r.subtitles === "karaoke" ? "субтитри під голос" : r.subtitles === "lines" ? "підписи" : "без тексту",
+    r.transition && r.transition !== "none" ? `✨ ${TRANSITIONS[r.transition]}` : "", r.music ? `🎵 ${r.music}` : "",
+    r.smart ? `🎯 найкращі моменти: ${r.smart} ${plural(r.smart, "кліп", "кліпи", "кліпів")}` : ""].filter(Boolean).join(" · ");
   const many = r.videos.length > 1;
   for (let k = 0; k < r.videos.length; k++) {
     const v = r.videos[k];

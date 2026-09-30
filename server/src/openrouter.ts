@@ -61,7 +61,9 @@ async function geminiChat(model: string, system: string, user: string, ctx?: Cha
     const t = await res.text();
     // 429 RESOURCE_EXHAUSTED - це не збій коду, а вичерпані кредити/квота проєкту в AI Studio.
     // Сира портянка JSON тут нічого не пояснює людині, яка просто хоче зрозуміти, що робити далі.
-    if (res.status === 429) throw new Error("Gemini: вичерпано квоту або кредити проєкту - поповни в Google AI Studio (ai.studio/projects) чи обери іншу модель");
+    if (res.status === 429) throw new ProviderDown("Gemini: вичерпано квоту або кредити проєкту - поповни в Google AI Studio (ai.studio/projects) чи обери іншу модель", "Gemini", "funds");
+    if (res.status === 401 || res.status === 403 || /API_KEY_INVALID|API key not valid/i.test(t))
+      throw new ProviderDown("Gemini: ключ не прийнято - перевір його в Налаштування → Профіль → Ключі провайдерів", "Gemini", "key");
     throw new Error(`Gemini ${res.status}: ${t.slice(0, 300)}`);
   }
   const j: any = await res.json();
@@ -123,6 +125,47 @@ export function fixUnsupportedParam(apiModel: string, body: any, errText: string
   return false;
 }
 
+// 🛟 Провайдер «лежить надовго»: закінчились кошти або не прийнято ключ. На відміну від 429/5xx це не
+// минає за хвилину - без поповнення кожен наступний виклик впаде так само (тейки на беті 26.09 падали
+// щохвилини). Такий збій - привід піти запасним маршрутом (див. chat) і написати адміну (alerts.ts).
+export class ProviderDown extends Error {
+  constructor(message: string, public provider: string, public why: "funds" | "key") { super(message); }
+}
+// «Кошти закінчились» у різних провайдерів звучить по-різному; OpenAI 30.09 відповідав 429 з «You have no
+// credits remaining» - раніше це читалось як «тимчасово недоступна, спробуй за хвилину».
+export const FUNDS_TEXT = /insufficient_quota|requires more credits|credit balance|Insufficient credits|no credits remaining|exceeded your current quota|billing_hard_limit|insufficient funds/i;
+
+type Route = "gemini" | "openai" | "openrouter";
+const ROUTE_NAME: Record<Route, string> = { gemini: "Gemini", openai: "OpenAI", openrouter: "OpenRouter" };
+/** Куди піде модель: google/* і openai/* - напряму, якщо є ключ; решта - OpenRouter. */
+export function routeFor(model: string): Route | null {
+  if (model.startsWith("google/") && env.gemini.apiKey) return "gemini";
+  if (model.startsWith("openai/") && env.openai.apiKey) return "openai";
+  return env.openrouter.apiKey ? "openrouter" : null;
+}
+/** Запасний маршрут для провайдера, що «лежить»: інший провайдер, у якого є ключ. */
+export function failoverFor(route: Route, model: string): { route: Route; model: string } | null {
+  const fm = env.llm.failoverModel;
+  if (route === "openrouter") {
+    if (env.openai.apiKey) return { route: "openai", model: fm.startsWith("openai/") ? fm : "openai/gpt-4o" };
+    if (env.gemini.apiKey) return { route: "gemini", model: "google/gemini-2.5-flash" };
+    return null;
+  }
+  if (route === "openai") {
+    if (env.openrouter.apiKey) return { route: "openrouter", model };   // та сама модель через OpenRouter
+    if (env.gemini.apiKey) return { route: "gemini", model: "google/gemini-2.5-flash" };
+    return null;
+  }
+  if (env.openrouter.apiKey) return { route: "openrouter", model };
+  if (env.openai.apiKey) return { route: "openai", model: "openai/gpt-4o-mini" };
+  return null;
+}
+// провайдер → до якого часу вважаємо його «лежачим»: ці 10 хв виклики йдуть одразу запасним маршрутом,
+// без марного запиту щоразу; потім пробуємо знову (раптом уже поповнили)
+const DOWN = new Map<Route, number>();
+const DOWN_MS = 10 * 60_000;
+export function _resetFailover(): void { DOWN.clear(); }
+
 export async function chat(model: string, system: string, user: string, ctx?: ChatCtx): Promise<string> {
   // 🤖 "claude-cli/*" → Claude через ПІДПИСКУ (сайдкар із Claude Code CLI), без оплати токенів.
   // Стоїть ПЕРЕД доларовою стелею свідомо: цей виклик грошей не витрачає, тож блокувати його
@@ -149,10 +192,26 @@ export async function chat(model: string, system: string, user: string, ctx?: Ch
   // Виклики без воркспейсу (їх нема, але про всяк випадок) не капаються - і не обліковуються.
   if (ctx?.workspaceId) await assertSpend(ctx.workspaceId);
   // "google/*" → напряму в Gemini, якщо є GEMINI_API_KEY; інакше падає у OpenRouter (він теж уміє google/gemini-*)
-  if (model.startsWith("google/") && env.gemini.apiKey) return geminiChat(model, system, user, ctx);
   // моделі "openai/*" ідуть напряму в OpenAI, якщо заданий OPENAI_API_KEY (дешевше за наценку OpenRouter)
-  const useOpenAI = model.startsWith("openai/") && !!env.openai.apiKey;
-  if (!useOpenAI && !env.openrouter.apiKey) throw new Error("Не задано ні OPENAI_API_KEY, ні OPENROUTER_API_KEY");
+  const route = routeFor(model);
+  if (!route) throw new Error("Не задано ні OPENAI_API_KEY, ні OPENROUTER_API_KEY");
+  // 🛟 Запасний маршрут: кошти закінчились чи ключ не прийнято - той самий виклик іде іншим провайдером,
+  // а в журнал (і звідти адміну) - попередження. Людина отримує пост, адмін - сповіщення поповнити.
+  const alt = env.llm.failover ? failoverFor(route, model) : null;
+  if (alt && (DOWN.get(route) || 0) > Date.now()) return callRoute(alt.route, alt.model, system, user, ctx);
+  try {
+    return await callRoute(route, model, system, user, ctx);
+  } catch (e: any) {
+    if (!(e instanceof ProviderDown) || !alt) throw e;
+    DOWN.set(route, Date.now() + DOWN_MS);
+    logEvent("warn", "llm", `${e.provider}: ${e.why === "funds" ? "закінчились кошти" : "ключ не прийнято"} - запасний маршрут ${alt.model} (${ROUTE_NAME[alt.route]}) на ${DOWN_MS / 60000} хв. ${e.message.slice(0, 200)}`).catch(() => {});
+    return callRoute(alt.route, alt.model, system, user, ctx);
+  }
+}
+
+async function callRoute(route: Route, model: string, system: string, user: string, ctx?: ChatCtx): Promise<string> {
+  if (route === "gemini") return geminiChat(model, system, user, ctx);
+  const useOpenAI = route === "openai";
   const provider = useOpenAI ? "OpenAI" : "OpenRouter";
   const url = useOpenAI ? "https://api.openai.com/v1/chat/completions" : `${env.openrouter.baseUrl}/chat/completions`;
   const apiModel = useOpenAI ? model.replace(/^openai\//, "") : model;
@@ -205,8 +264,11 @@ export async function chat(model: string, system: string, user: string, ctx?: Ch
     const t = await res.text();
     // гроші на рахунку провайдера скінчились - це не «спробуй за хвилину»: без поповнення чи іншої
     // моделі кожна наступна спроба впаде так само (так тейки на беті падали 840 разів за два тижні)
-    if (res.status === 402 || /insufficient_quota|requires more credits|credit balance|Insufficient credits/i.test(t))
-      throw new Error(`На рахунку провайдера моделі (${provider}) закінчились кошти - обери іншу модель в Інструментах («Головна модель») або поповни рахунок.`);
+    if (res.status === 402 || FUNDS_TEXT.test(t))
+      throw new ProviderDown(`На рахунку провайдера моделі (${provider}) закінчились кошти - обери іншу модель в Інструментах («Головна модель») або поповни рахунок.`, provider, "funds");
+    // ключ відкликали/не той - так само «надовго», і так само привід піти запасним маршрутом
+    if (res.status === 401 || /invalid[_ ]api[_ ]key|incorrect api key|No auth credentials|User not found/i.test(t))
+      throw new ProviderDown(`${provider}: ключ не прийнято (HTTP ${res.status}) - перевір його в Налаштування → Профіль → Ключі провайдерів.`, provider, "key");
     // 5xx і 429 у провайдера - не наша помилка і не назавжди: кажемо людині саме це, а деталь
     // лишаємо після крапки для оператора (вона потрапляє в журнал разом із повідомленням)
     if (res.status >= 500 || res.status === 429)

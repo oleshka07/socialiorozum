@@ -38,8 +38,8 @@ import { spendStatus, SpendCapError, CAPS } from "./spend.js";
 import { spreadTimes, topicAngles } from "./textkind.js";
 import { startJob, getJob, getJobByKey, jobView, markLostJobs } from "./jobs.js";
 import { startMontage, MONTAGE_MAX_CLIPS } from "./montage.js";
-import { spreadText } from "./montage-plan.js";
-import { ttsReady } from "./tts.js";
+import { spreadText, normTransition, normMood } from "./montage-plan.js";
+import { ttsReady, musicReady } from "./tts.js";
 import { readdir, stat } from "node:fs/promises";
 import { startMeetingPull, testPull, pullOnce } from "./meetings-pull.js";
 import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
@@ -47,6 +47,7 @@ import * as gdrive from "./gdrive.js";
 import { publishPostToChannels, alreadySentNetworks, startReelPublishJob, reelSentNetworks, closeSlotsIfDone, enabledNets, beginShutdown, publishesInFlight, unschedulePost, isPublishingNow } from "./publisher.js";
 import { startLifecycleWorker } from "./lifecycle.js";
 import { startDigest } from "./digest.js";
+import { startAlerts, alertsView, saveAlertSettings, sendTestAlert, sendDigest, resolveAlert, runProbes, probeBuddy } from "./alerts.js";
 import { startMetrics, networkBenchmarks, collectWorkspace, analyticsFor, bestTimesFor, bestTimeAuto } from "./metrics.js";
 import { scheduleConflicts, describeConflicts } from "./schedule.js";
 import { briefMismatch, brandTextOf } from "./textkind.js";
@@ -259,7 +260,13 @@ app.setErrorHandler((err: any, req: any, reply) => {
   if (err?.code === "22P02") return reply.code(404).send({ error: "не знайдено" });
   if (err?.validation) return reply.code(400).send({ error: err.message });
   const status = Number(err?.statusCode) || 500;
-  if (status >= 500) { req.log.error({ err, url: req.raw?.url }, "unhandled"); return reply.code(status).send({ error: "Внутрішня помилка сервера - спробуй ще раз, ми вже бачимо її в журналі" }); }
+  if (status >= 500) {
+    req.log.error({ err, url: req.raw?.url }, "unhandled");
+    // у журнал подій (і звідти - сповіщення адміну, якщо повторюється): шаблон маршруту, а не сира
+    // адреса - у ній буває токен конектора (/mcp/<токен>) чи посилання заливки
+    logEvent("error", "http", `${req.method} ${req.routeOptions?.url || "?"}: ${String(err?.message || err).slice(0, 300)}`, null, req.user?.id).catch(() => {});
+    return reply.code(status).send({ error: "Внутрішня помилка сервера - спробуй ще раз, ми вже бачимо її в журналі" });
+  }
   return reply.code(status).send({ error: err?.message || "помилка" });
 });
 
@@ -617,6 +624,39 @@ app.get("/api/admin/health", async (req: any, reply) => {
            runningJobs: jobs?.running || 0, lostJobs: jobs?.lost || 0, lastBackup, errors };
 });
 
+// ---- адмін: 🔔 сповіщення про збої (alerts.ts) ----
+app.get("/api/admin/alerts", async (req: any, reply) => {
+  if (!adminOnly(req, reply)) return;
+  return alertsView();
+});
+app.put("/api/admin/alerts", async (req: any, reply) => {
+  if (!adminOnly(req, reply)) return;
+  try { const s = await saveAlertSettings(req.body || {}, String(req.user.email)); await logEvent("info", "admin", "налаштування сповіщень про збої змінено"); return { ok: true, settings: s }; }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+app.post("/api/admin/alerts/test", async (req: any, reply) => {
+  if (!adminOnly(req, reply)) return;
+  const r = await sendTestAlert();
+  if (!r.tg && !r.email) return reply.code(400).send({ error: "Не дійшло нікуди: " + (r.err || "немає каналу") });
+  return { ok: true, ...r };
+});
+app.post("/api/admin/alerts/digest", async (req: any, reply) => {
+  if (!adminOnly(req, reply)) return;
+  const r = await sendDigest(true);
+  return { ok: true, sent: r.sent, text: r.text };
+});
+// «🔄 Перевірити зараз»: усі проби одразу (баланси, бекап, диск, бот, сусідній сервер), не чекаючи 10 хв
+app.post("/api/admin/alerts/probe", async (req: any, reply) => {
+  if (!adminOnly(req, reply)) return;
+  await Promise.all([runProbes(), probeBuddy()]);
+  return alertsView();
+});
+app.post("/api/admin/alerts/:id/resolve", async (req: any, reply) => {
+  if (!adminOnly(req, reply)) return;
+  const r = await resolveAlert(String(req.params.id));
+  return { ok: !!r, snoozed: r === "probe" };
+});
+
 // ---- скільки коштує одне зображення / одне відео ----
 // Питання Олега було саме таким: перш ніж міняти провайдера картинок, треба бачити ціну.
 // Наші три провайдери мають фіксовану ціну в коді, каталог kie тягнеться живим (ціни там міняються).
@@ -748,6 +788,8 @@ app.post("/api/montage", async (req: any, reply) => {
     clips, voice: ai?.mode === "voiceover" ? "tts" : voice, audio: b.audio ? String(b.audio) : null,
     script, subtitles: ["karaoke", "lines", "none"].includes(b.subtitles) ? b.subtitles : null,
     keepSound: b.keepSound === false ? false : null, format, autoCaptions: b.autoCaptions === true,
+    transition: normTransition(b.transition, "fade"), smart: b.smart === false ? false : null,
+    music: b.music && /^[0-9a-f-]{36}$/i.test(String(b.music)) ? String(b.music) : null, musicMood: normMood(b.musicMood),
   }, { create: b.create === false ? null : { nets: nets.length ? nets : (await connectedNets(ws)).filter((n) => n === "instagram" || n === "facebook"), text: String(b.text || "").slice(0, 5000) }, aiText: ai });
   return { jobId: job.id };
 });
@@ -755,7 +797,7 @@ app.post("/api/montage", async (req: any, reply) => {
 // що доступно для монтажу на цьому сервері (кабінет вмикає/пояснює варіанти тексту)
 app.get("/api/montage/caps", async () => {
   const stt = sttAvailable();
-  return { tts: ttsReady(), stt: stt.deepgram || stt.whisper, vision: !!(env.openai.apiKey || env.openrouter.apiKey || env.gemini.apiKey), maxClips: MONTAGE_MAX_CLIPS };
+  return { tts: ttsReady(), stt: stt.deepgram || stt.whisper, vision: !!(env.openai.apiKey || env.openrouter.apiKey || env.gemini.apiKey), music: musicReady(), maxClips: MONTAGE_MAX_CLIPS };
 });
 
 app.get("/api/jobs/:id", async (req: any, reply) => {
@@ -4703,6 +4745,11 @@ async function shutdown(sig: string): Promise<void> {
 }
 process.on("SIGTERM", () => { void shutdown("SIGTERM"); });
 process.on("SIGINT", () => { void shutdown("SIGINT"); });
+// Проміс без catch у фоновій роботі раніше просто валив процес (Node так робить за замовчуванням), і
+// ніхто, крім журналу docker, про це не дізнавався. Тепер - у журнал подій, а звідти адміну.
+process.on("unhandledRejection", (r: any) => {
+  logEvent("error", "process", `unhandledRejection: ${String(r?.stack || r?.message || r).slice(0, 400)}`).catch(() => {});
+});
 
 await initHookBase(); // секрети вебхуків Telegram - до першого апдейту
 // усе, що «бігло» до рестарту, робота вже не виконує - позначаємо ДО прийому запитів, інакше щойно
@@ -4727,6 +4774,7 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then(async (addr) => {
   startComments();
   startEvergreen();     // ♻️ вічнозелена черга (працює лише в кабінетах, де її увімкнули)
   startMeetingPull();   // погодинна звірка з хмарою власного транскрибатора
+  startAlerts().catch((e: any) => app.log.error("startAlerts: " + e.message));   // 🔔 сповіщення адміну про збої
   // спершу спільний бот (він міг узяти перевипущений токен того ж бота з кабінету), потім власні
   initTelegramBot().finally(() => refreshOwnBotWebhooks().catch(() => {}));
   // одноразово полагодити залишкові iPhone HEIF -> JPEG (у фоні; ідемпотентно)

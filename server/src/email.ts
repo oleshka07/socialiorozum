@@ -29,6 +29,15 @@ const button = (link: string, label: string) =>
   `<p><a href="${link}" style="display:inline-block;background:#5b8cff;color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:600">${label}</a></p>
    <p style="color:#999;font-size:12px;word-break:break-all">Або відкрийте посилання: ${link}</p>`;
 
+// 🔔 Лист адміну про збій (alerts.ts): свій вигляд, без «якщо ви цього не робили» - це не дія людини.
+export function sendOpsEmail(to: string, subject: string, bodyHtml: string) {
+  return send(to, subject,
+    `<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;color:#1a1a1a;padding:8px">
+       <div style="font-size:20px;font-weight:800;color:#5b8cff">${BRAND} · сповіщення про збої</div>${bodyHtml}
+       <p style="color:#999;font-size:12px;margin-top:26px">Налаштувати, куди й що приходить: кабінет → Налаштування → Профіль → «🔔 Сповіщення про збої».</p>
+     </div>`);
+}
+
 export function sendVerifyEmail(to: string, link: string) {
   return send(to, `Підтвердіть пошту - ${BRAND}`,
     wrap("Підтвердження пошти",

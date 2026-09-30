@@ -3959,6 +3959,15 @@ async function openMontage(ids, lib){
     +'</select>'
     +'<textarea id="mntText" rows="4" placeholder="Текст для відео: що сказати чи підписати. Кілька речень - розкладуться по кліпах." style="width:100%;display:none"></textarea>'
     +'<select id="mntAudio" style="width:100%;display:none">'+voices.map(v=>'<option value="'+esc(v.id)+'">🎙 '+esc(fmtDur(v.duration)||'голос')+' · '+esc(new Date(v.created_at).toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+(v.original_name?' · '+esc(v.original_name):'')+'</option>').join('')+'</select>'
+    +'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">'
+    +'<label style="font-size:13px;flex:1;min-width:180px">✨ Переходи між кліпами<select id="mntTr" style="width:100%;margin-top:4px">'
+    +[['fade','Плавні (перетікання)'],['slide','Зсув'],['zoom','Наближення'],['flash','Спалах'],['mix','Мікс - щоразу інший'],['none','Без переходів (різкий стик)']].map(([v,l])=>'<option value="'+v+'">'+l+'</option>').join('')+'</select></label>'
+    +'<label style="font-size:13px;flex:1;min-width:180px">🎵 Фонова музика<select id="mntMusic" style="width:100%;margin-top:4px"><option value="">Без музики</option>'
+    +voices.map(v=>'<option value="t:'+esc(v.id)+'">🎵 '+esc(v.original_name||('трек '+(fmtDur(v.duration)||'')))+'</option>').join('')
+    +[['upbeat','☀️ Бадьора'],['calm','🌿 Спокійна'],['inspiring','✨ Натхненна'],['energetic','⚡ Енергійна'],['warm','☕ Тепла']].map(([v,l])=>opt('m:'+v,'AI: '+l,!caps.music,'не підключено ElevenLabs')).join('')
+    +'</select></label></div>'
+    +'<div class="hint" style="margin-top:4px">AI-музика генерується під ролик (ElevenLabs, ~$0.15 за хвилину); свій трек - mp3 з медіатеки (завантаж його, як фото). Під голосом музика сама притихає.</div>'
+    +'<label style="font-size:13px;display:flex;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" id="mntSmart" checked> 🎯 Брати з кліпів найкращі моменти (різкі, світлі, без трясіння), а не середину</label>'
     +'<div id="mntMsg" style="font-size:13px;color:var(--muted);min-height:18px;margin-top:8px"></div>'
     +'<div class="btnrow"><button class="ghost" id="mntCancel">Скасувати</button><button id="mntGo">🎬 Змонтувати</button></div></div>';
   document.body.appendChild(ov);
@@ -3979,6 +3988,11 @@ async function openMontage(ids, lib){
     else if(v==='own'){ const t=txt.value.trim(); if(!t){ msg.textContent='Напиши текст для відео.'; txt.focus(); return; } body.ownText=t; }
     else if(v==='audio'){ body.voice='audio'; body.audio=aud.value; }
     else body.voice='none';
+    body.transition=ov.querySelector('#mntTr').value;
+    body.smart=ov.querySelector('#mntSmart').checked;
+    const mu=ov.querySelector('#mntMusic').value;
+    if(mu.startsWith('t:')) body.music=mu.slice(2); else if(mu.startsWith('m:')) body.musicMood=mu.slice(2);
+    if(body.music&&body.music===body.audio){ msg.textContent='Цей запис уже озвучка - для музики обери інший трек.'; return; }
     busy=true; go.disabled=true; msg.textContent='⏳ Монтую… зазвичай 1-2 хвилини';
     try{
       const r=await runAiJob('/montage',body,(sec)=>{ msg.textContent='⏳ Монтую… '+sec+' с'; });
@@ -4375,8 +4389,58 @@ $('ffImport').onclick=async()=>{
 async function loadAccount(){
   try{ const a=await api('/account'); const mb=(a.media.bytes/1048576).toFixed(1);
     $('accInfo').innerHTML='Email: <b>'+esc(a.email||'')+'</b>'+(a.emailVerified?' ✓':' (не підтверджено)')+' · Медіа: '+a.media.count+' файлів ('+mb+' МБ)'+(a.hasPassword?'':' · вхід лише через Google');
-    if(a.admin && $('admKeysPanel')){ $('admKeysPanel').style.display=''; loadAdminKeys(); loadAdminSpend(); loadAdminHealth(); }
+    if(a.admin && $('admKeysPanel')){ $('admKeysPanel').style.display=''; loadAdminKeys(); loadAdminSpend(); loadAdminHealth(); loadAdminAlerts(); }
   }catch(e){ $('accInfo').textContent='-'; }
+}
+
+// ---------- 🔔 Сповіщення про збої (адмін) ----------
+// Куди йдуть сповіщення, що зараз відкрите і кнопки: тест, звіт, тиша. Самі правила - на сервері (alerts-plan.ts).
+async function loadAdminAlerts(){
+  const box=$('admAlerts'); if(!box) return;
+  // панель перемальовують і відкриття Налаштувань, і кнопки; відповідь старішого запиту, що прийшла пізніше,
+  // не має затирати новішу (і вже набране в полях)
+  const seq=loadAdminAlerts._n=(loadAdminAlerts._n||0)+1;
+  try{
+    const r=await api('/admin/alerts'); if(seq!==loadAdminAlerts._n) return; const st=r.settings||{}; const ch=r.channels||{};
+    const muted=st.muteUntil && new Date(st.muteUntil)>new Date();
+    const tgLine=ch.tg&&ch.tg.chats
+      ? '✓ Telegram: @'+esc(ch.tg.bot||'бот')+' пише тобі в приват'+(ch.tg.chats>1?' ('+ch.tg.chats+' чати)':'')
+      : '⚠ Telegram: твій Telegram не привʼязано до твого кабінету - Налаштування → Канали → «Підключити наш бот» і Start. Поки що - лише пошта.';
+    const mailLine=(ch.email&&ch.email.ok)?'✓ Пошта: '+esc((ch.email.to||[]).join(', ')||'-'):'⚠ Пошта: RESEND_API_KEY не заданий - листи не підуть';
+    const fo=r.failover||{};
+    let h='<div class="hint" style="line-height:1.7;margin-bottom:8px">'+tgLine+'<br>'+mailLine
+      +(r.buddy&&r.buddy.url?'<br>👀 Стежу за сусіднім сервером: <code>'+esc(r.buddy.url)+'</code>'+(r.buddy.fails?' - <b style="color:var(--danger)">'+r.buddy.fails+' невдач поспіль</b>':' - відповідає'):'')
+      +'<br>🛟 Запасний маршрут AI: '+(fo.on?(fo.via?'увімкнено - якщо в провайдера закінчаться кошти, виклики підуть через '+esc(fo.via):'увімкнено, але запасного провайдера нема (потрібні ключі OpenAI і OpenRouter)'):'вимкнено')
+      +(muted?'<br>🔕 <b>Тиша до '+esc(new Date(st.muteUntil).toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+'</b> - сповіщення чекають, потім прийдуть':'')+'</div>';
+    const cb=(id,on,label,tip)=>'<label style="display:inline-flex;gap:6px;align-items:center;margin:0 14px 6px 0" title="'+esc(tip||'')+'"><input type="checkbox" id="'+id+'"'+(on?' checked':'')+'>'+label+'</label>';
+    h+='<div>'+cb('alTg',st.tg!==false,'Telegram')+cb('alMail',st.email!==false,'Пошта','Критичне, «вирішено» і все, що не дійшло в Telegram')+cb('alMailAll',!!st.emailAll,'пошта і на попередження')
+      +cb('alDigest',st.digest!==false,'Звіт раз на добу о')+'<input class="txt" id="alHour" style="width:52px;padding:4px 6px" value="'+esc(String(st.digestHour??9))+'">:00 '
+      +cb('alFo',st.failover!==false,'🛟 Запасний маршрут AI','OpenRouter без коштів → OpenAI напряму і навпаки; тобі - сповіщення')+'</div>';
+    h+='<div style="display:flex;gap:10px;flex-wrap:wrap;margin:6px 0">'
+      +'<label class="hint">Пошта для сповіщень <input class="txt" id="alEmails" style="width:260px;padding:4px 6px" value="'+esc((st.emails&&st.emails.length?st.emails:(ch.email&&ch.email.to)||[]).join(', '))+'"></label>'
+      +'<label class="hint">Попередити, коли на OpenRouter менше $ <input class="txt" id="alOrLow" style="width:64px;padding:4px 6px" value="'+esc(String(st.orLow??2))+'"></label></div>';
+    h+='<div class="btnrow" style="margin:4px 0 10px"><button class="primary" id="alSave">💾 Зберегти</button><button class="ghost" id="alTest">📨 Надіслати тест</button><button class="ghost" id="alDigestNow">🗒 Звіт зараз</button><button class="ghost" id="alProbe">🔄 Перевірити зараз</button>'
+      +(muted?'<button class="ghost" id="alUnmute">🔔 Зняти тишу</button>':'<button class="ghost" id="alMute">🔕 Тиша 8 год</button>')+'</div>';
+    const open=r.open||[];
+    if(open.length){
+      h+='<div style="font-size:12.5px">'+open.map(a=>'<div class="alRow" data-id="'+esc(String(a.id))+'" style="padding:6px 0;border-top:1px solid var(--line2)"><div style="display:flex;gap:8px;align-items:center">'
+        +'<span>'+(a.severity==='critical'?'🔴':'🟠')+'</span><b style="flex:1">'+esc(a.title)+'</b><span style="color:var(--faint)">×'+a.count+' · з '+esc(new Date(a.first_at).toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+(a.notified_at?'':' · ще не надіслано')+'</span>'
+        +'<button class="ghost alOk" style="padding:2px 8px">✓ Вирішено</button></div>'
+        +(a.hint?'<div class="hint" style="margin:3px 0 0 24px">'+esc(a.hint)+'</div>':'')+'</div>').join('')+'</div>';
+    } else h+='<div class="hint">Зараз нічого відкритого - усе гаразд.</div>';
+    box.innerHTML=h; box.dataset.v=String(seq);
+    const body=()=>({tg:$('alTg').checked,email:$('alMail').checked,emailAll:$('alMailAll').checked,digest:$('alDigest').checked,digestHour:$('alHour').value.trim(),failover:$('alFo').checked,emails:$('alEmails').value,orLow:$('alOrLow').value.trim()});
+    const put=async(b)=>api('/admin/alerts',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+    $('alSave').onclick=async()=>{ try{ await put(body()); flashSaved(); loadAdminAlerts(); }catch(e){ alert('⚠ '+e.message); } };
+    $('alTest').onclick=async()=>{ const b=$('alTest'); b.disabled=true; try{ await put(body()); const t=await api('/admin/alerts/test',{method:'POST'});
+      flash('Тест: '+(t.tg?'Telegram ✓':'Telegram ✗')+' · '+(t.email?'пошта ✓ ('+(t.to||[]).join(', ')+')':'пошта ✗')+(t.err?' - '+t.err:'')); }catch(e){ alert('⚠ '+e.message); } b.disabled=false; };
+    $('alDigestNow').onclick=async()=>{ try{ const t=await api('/admin/alerts/digest',{method:'POST'}); flash(t.text?(t.sent?'Звіт надіслано':'Звіт зібрано, але не надіслано'):'За добу нема про що звітувати - тиша'); }catch(e){ alert('⚠ '+e.message); } };
+    $('alProbe').onclick=async()=>{ const b=$('alProbe'); b.disabled=true; try{ await api('/admin/alerts/probe',{method:'POST'}); flash('Перевірено'); loadAdminAlerts(); }catch(e){ alert('⚠ '+e.message); b.disabled=false; } };
+    if($('alMute')) $('alMute').onclick=async()=>{ try{ await put({muteHours:8}); loadAdminAlerts(); }catch(e){ alert('⚠ '+e.message); } };
+    if($('alUnmute')) $('alUnmute').onclick=async()=>{ try{ await put({muteHours:0}); loadAdminAlerts(); }catch(e){ alert('⚠ '+e.message); } };
+    box.querySelectorAll('.alRow').forEach(row=>{ row.querySelector('.alOk').onclick=async()=>{ try{ const x=await api('/admin/alerts/'+row.getAttribute('data-id')+'/resolve',{method:'POST'});
+      if(x&&x.snoozed) flash('Притишено на добу: це автоматична перевірка - вона сама закриє проблему, коли все мине'); loadAdminAlerts(); }catch(e){ alert('⚠ '+e.message); } }; });
+  }catch(e){ if(seq===loadAdminAlerts._n) box.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }
 
 // ---------- Стан сервісу (адмін) ----------
@@ -4394,7 +4458,7 @@ async function loadAdminHealth(){
       +'<div class="card"><b style="font-size:14px">'+(h.lastBackup?esc(h.lastBackup):'не видно')+'</b><div class="hint">останній бекап'+(h.lastBackup?'':' - тека не змонтована або ще жодного')+'</div></div></div>';
     if(errs.length) out+='<div style="font-size:12.5px">'+errs.map(e=>'<div style="display:flex;gap:8px;padding:3px 0;border-top:1px solid var(--line2)"><span style="color:'+(e.level==='error'?'var(--danger)':'var(--amber)')+';min-width:44px">'+esc(e.level)+'</span><span style="min-width:90px;color:var(--muted)">'+esc(e.scope)+'</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(e.message)+'">'+esc(e.message)+'</span><span style="color:var(--faint)">×'+e.n+'</span></div>').join('')+'</div>';
     else out+='<div class="hint">За добу - жодної помилки в журналі.</div>';
-    out+='<div class="hint" style="margin-top:8px">Зовнішню перевірку доступності (UptimeRobot / Better Stack на <code>/health</code>) сервіс сам поставити не може - це одна дія в їхньому кабінеті.</div>';
+    out+='<div class="hint" style="margin-top:8px">Прод і бета стежать один за одним (див. «🔔 Сповіщення про збої»). Якщо ляже весь сервер разом - сказати буде нікому: для цього зовнішня перевірка (UptimeRobot / Better Stack на <code>/health</code>), одна дія в їхньому кабінеті.</div>';
     box.innerHTML=out;
   }catch(e){ box.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
 }

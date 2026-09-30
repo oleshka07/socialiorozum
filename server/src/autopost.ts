@@ -2,6 +2,7 @@ import { q, one } from "./db.js";
 import { logEvent } from "./log.js";
 import { publishPostToChannels, isStopping, pubLabel } from "./publisher.js";
 import { publishQuestions } from "./pipeline.js";
+import { notifyPublishFailed } from "./alerts.js";
 
 // тексти тимчасових збоїв (людські - з humanTgError/humanMetaError/humanNetError - і сирі мережеві)
 const TRANSIENT = /зачекати|забагато|не відповів|не відповіла|тимчасово|перезапуска|саме зараз публікується|timeout|HTTP 5\d\d|fetch failed|ECONNRESET|ETIMEDOUT|socket hang up/i;
@@ -58,6 +59,8 @@ async function tick(): Promise<void> {
       if (anyOk) await logEvent("info", "autopost", `slot ${slot.id} → ${ok}${err ? ` (помилки: ${err})` : ""}`);
       else if (benign) await logEvent("info", "autopost", `slot ${slot.id}: усі мережі вже опубліковано (${skip})`);
       else await logEvent("warn", "autopost", `slot ${slot.id} не опубліковано: ${err || "немає каналів"}`);
+      // власнику кабінету - у Telegram, з причиною й кнопкою на пост (раніше - лише в «Сьогодні»)
+      if (!benign && errs.length) notifyPublishFailed(slot.workspace_id, slot.post_id, errs.map((r) => ({ net: pubLabel(r), error: String(r.error || "") }))).catch(() => {});
     } catch (e: any) {
       await q(`update schedule_slot set status='failed', result=$2, updated_at=now() where id=$1`, [slot.id, e.message]);
       await logEvent("error", "autopost", `slot ${slot.id}: ${e.message}`);
