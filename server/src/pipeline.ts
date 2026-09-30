@@ -586,6 +586,13 @@ export async function rewriteWithStep(workspaceId: string, step: StepKey, text: 
   return chat(tpl.model, system, `---\n${text}`, { workspaceId, step });
 }
 
+// 30.09: Олег написав у боті текст чеською в українському бренді - і при публікації «пакування під мережі»
+// переклало його українською (правило «Мова: мова бренду»). Функції, що ПЕРЕРОБЛЯЮТЬ уже написаний текст
+// (пакування під мережі, гілка Threads, переписати, де-AI, гачки, заголовок, підпис рілса, повтор хіта),
+// лишають його мову; мова бренду - лише для нового тексту і коли мову тексту не визначити.
+export const keepLang = (lang: string): string =>
+  `Мова: та сама, якою написано вихідний текст - не перекладай (хіба що про це прямо просить інструкція); якщо текст мішаний чи мову не визначити - ${lang}.`;
+
 // AI-адаптація поста під кожну соцмережу (один виклик -> JSON {channel: text})
 export async function adaptForChannels(workspaceId: string, content: string, channels: string[], intent?: string): Promise<Record<string, string>> {
   const rules: Record<string, string> = {
@@ -649,7 +656,7 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
     (brief ? `\n\n<strategy_brief>\n${brief}\n</strategy_brief>` : "") +
     tone + examples + deai + playbooks + critique + goalRule(s) + ctaRule + offerLadder(s) + structRules + fmtRule + QUESTION_RULE + FACTS_RULE +
     "\n\nЖОРСТКІ ліміти довжини версій (НЕ перевищуй, це технічні ліміти мереж): telegram 1024, threads 500, instagram 2200, facebook 2000, linkedin 3000 символів." +
-    NO_DASH_RULE + ANTI_AI_RULE + `\n\nПоверни ЛИШЕ валідний JSON-обʼєкт виду {${want.map((c) => `"${c}":"…"`).join(",")}}. Мова: ${lang}.`;
+    NO_DASH_RULE + ANTI_AI_RULE + `\n\nПоверни ЛИШЕ валідний JSON-обʼєкт виду {${want.map((c) => `"${c}":"…"`).join(",")}}. ${keepLang(lang)}`;
   const raw = await chat(v2 ? "openai/gpt-4o" : "openai/gpt-4o-mini", system, `Пост:\n---\n${content}`, { workspaceId, step: "format" });
   const obj = extractJsonObject(raw) as Record<string, string>;
   const out: Record<string, string> = {};
@@ -661,7 +668,7 @@ export async function adaptForChannels(workspaceId: string, content: string, cha
     if (!out[c] || !lim || out[c].length <= lim) continue;
     try {
       const short = await chat(v2 ? "openai/gpt-4o" : "openai/gpt-4o-mini",
-        `Скороти пост до МАКСИМУМ ${lim - 40} символів (жорсткий технічний ліміт мережі ${c}), зберігши гачок, головну думку, голос і заклик.` + NO_DASH_RULE + `\nПоверни лише текст поста. Мова: ${lang}.`,
+        `Скороти пост до МАКСИМУМ ${lim - 40} символів (жорсткий технічний ліміт мережі ${c}), зберігши гачок, головну думку, голос і заклик.` + NO_DASH_RULE + `\nПоверни лише текст поста. ${keepLang(lang)}`,
         out[c], { workspaceId, step: "format" });
       if (short && short.trim()) out[c] = short.length <= lim ? short.trim() : short.slice(0, lim - 1).replace(/\s+\S*$/, "") + "…";
     } catch { /* лишаємо як є - композер підсвітить перевищення червоним */ }
@@ -969,7 +976,7 @@ export async function threadsSplit(workspaceId: string, content: string, numberi
     `\nПравила: кожна частина ≤450 символів і читається САМОСТІЙНО (людина може побачити її без сусідніх); частина 1 = гачок + обіцянка того, що буде далі (БЕЗ спойлера висновку); далі одна теза/крок на частину${numbering ? ", нумеруй «2/», «3/»…" : " (БЕЗ нумерації частин)"}; остання частина - висновок + мʼяке питання до читача. Якщо автор УЖЕ розбив текст порожніми рядками на логічні блоки - тримайся його поділу. Разом 2-6 частин. НЕ вигадуй нового змісту - лише перепаковуй.` +
     (s.tone_of_voice ? `\nГолос бренду (зберігай): ${s.tone_of_voice}` : "") + voicePassport(s) +
     NO_DASH_RULE + ANTI_AI_RULE +
-    `\nПоверни ЛИШЕ валідний JSON-масив рядків: ["частина 1","частина 2",…]. Мова: ${lang}.`;
+    `\nПоверни ЛИШЕ валідний JSON-масив рядків: ["частина 1","частина 2",…]. ${keepLang(lang)}`;
   let parts: string[] = [];
   try {
     const raw = await chat("openai/gpt-4o", system, `Пост:\n---\n${content}`, { workspaceId, step: "threads_split" });
@@ -1044,7 +1051,7 @@ export async function repeatVariant(workspaceId: string, content: string): Promi
   const out = await chat(env.cheapModel,
     "Перепиши ЛИШЕ перший рядок/абзац поста (гачок) - іншими словами, інший кут заходу, та сама суть. Решту тексту поверни ДОСЛІВНО без змін." +
     (s.tone_of_voice ? `\nГолос бренду: ${s.tone_of_voice}` : "") + NO_DASH_RULE +
-    `\nПоверни лише повний текст поста. Мова: ${lang}.`,
+    `\nПоверни лише повний текст поста. ${keepLang(lang)}`,
     content, { workspaceId, step: "repeat" });
   const t = (out || "").trim();
   // guard: модель могла повернути сміття - тоді краще дослівний повтор, ніж зіпсований
@@ -1060,7 +1067,7 @@ export async function expandTake(workspaceId: string, content: string): Promise<
     (s.marketing_context ? `\nБренд і аудиторія: ${s.marketing_context}` : "") +
     (s.tone_of_voice ? `\nГолос бренду (суворо): ${s.tone_of_voice}` : "") + voicePassport(s) + brandDna(s) +
     goalRule(s) + NO_DASH_RULE + ANTI_AI_RULE +
-    `\nПоверни лише текст поста. Мова: ${lang}.`,
+    `\nПоверни лише текст поста. ${keepLang(lang)}`,
     content, { workspaceId, step: "expand_take" });
   const t = (out || "").trim();
   if (!t) throw new Error("Не вдалося розгорнути тейк");
@@ -1432,7 +1439,7 @@ export async function rewritePost(workspaceId: string, text: string, instruction
     (s.deai_rules ? `\n\nПравила «без AI»: ${s.deai_rules}` : "") +
     goalRule(s) + ANTI_AI_RULE + FACTS_RULE + QUESTION_RULE +
     (OWN_WORDS_ORIGINS.includes(String(origin || "")) ? OWN_WORDS_RULE : "") +
-    NO_DASH_RULE + `\n\nПоверни лише текст поста. Мова: ${lang}.`;
+    NO_DASH_RULE + `\n\nПоверни лише текст поста. ${keepLang(lang)}`;
   return chat(mainModel(s), system, `---\n${text}`, { workspaceId, step: "regenerate" });
 }
 
@@ -1617,7 +1624,7 @@ export async function deAiFix(workspaceId: string, content: string): Promise<{ c
     const list = toFix.map((f, i) => `${i + 1}. [${f.pattern}] фрагмент: «${f.quote}»${HARD_BAN_HINTS.get(f.pattern) ? ` → ${HARD_BAN_HINTS.get(f.pattern)}` : ""}`).join("\n");
     const system = "Ти редактор точкових правок. У тексті знайдено сліди AI - виправ ЛИШЕ перелічені фрагменти (мінімальна заміна за підказкою після «→»), а РЕШТУ тексту відтвори ДОСЛІВНО, символ у символ: не перефразовуй, не скорочуй, не «покращуй» нічого поза списком. Заміна має природно вписатись у речення." +
       (s.tone_of_voice ? `\nГолос бренду (для замін): ${s.tone_of_voice.slice(0, 400)}` : "") +
-      NO_DASH_RULE + `\n\nСПИСОК ПРАВОК:\n${list}\n\nПоверни ЛИШЕ повний виправлений текст. Мова: ${lang}.`;
+      NO_DASH_RULE + `\n\nСПИСОК ПРАВОК:\n${list}\n\nПоверни ЛИШЕ повний виправлений текст. ${keepLang(lang)}`;
     const fixed = (await chat("openai/gpt-4o", system, `---\n${text}`, { workspaceId, step: "deai_fix" })).trim();
     // страховка: якщо модель переписала все (довжина попливла) - лишаємо попередню версію
     if (fixed.length < text.length * 0.5 || fixed.length > text.length * 1.6) break;
@@ -1639,7 +1646,7 @@ export async function suggestHooks(workspaceId: string, text: string): Promise<H
     "\n4) remove: хук-артефакти, ЗНАЙДЕНІ в поточному тексті, які треба видалити («СТОП, не гортай», «99% не знають», «алгоритм ховає», «додивись до кінця», накручена інтрига) - точними цитатами; якщо чисто, порожній масив." +
     (s.tone_of_voice ? `\nГолос бренду: ${s.tone_of_voice.slice(0, 600)}` : "") + voicePassport(s) +
     HOOK_RULE + NO_DASH_RULE +
-    `\n\nПоверни ЛИШЕ валідний JSON: {"culmination":"…","hooks":["…","…","…"],"soft":"…","remove":["точна цитата",…]}. Мова: ${lang}.`;
+    `\n\nПоверни ЛИШЕ валідний JSON: {"culmination":"…","hooks":["…","…","…"],"soft":"…","remove":["точна цитата",…]}. ${keepLang(lang)}`;
   const raw = await chat("openai/gpt-4o", system, `Пост:\n---\n${(text || "").slice(0, 4000)}`, { workspaceId, step: "hooks" });
   try {
     const o = extractJsonObject<any>(raw);
@@ -1657,7 +1664,7 @@ export async function suggestHeadline(workspaceId: string, text: string): Promis
   const s = await loadSettings(workspaceId);
   const lang = (s.output_language || "Українська").trim();
   const system = "Запропонуй короткий заголовок на зображення поста: 2-5 слів, ВЕЛИКИЙ сенс маленькими словами. ПРАВИЛО НЕПЕРЕСІЧЕННЯ: заголовок НЕ повторює перший рядок і жодну фразу поста - він додає другий кут (емоцію, наслідок, питання), щоб картинка і текст працювали в парі, а не дублювались. Без крапки в кінці, без лапок." +
-    `\n\nПоверни ЛИШЕ сам заголовок одним рядком. Мова: ${lang}.`;
+    `\n\nПоверни ЛИШЕ сам заголовок одним рядком. ${keepLang(lang)}`;
   const raw = await chat(env.cheapModel, system, `Пост:\n---\n${(text || "").slice(0, 2500)}`, { workspaceId, step: "headline" });
   return raw.replace(/^["«»']+|["«»'.]+$/g, "").trim().slice(0, 60);
 }
@@ -1700,7 +1707,7 @@ export async function reelCaption(workspaceId: string, script: string): Promise<
   const lang = (s.output_language || "Українська").trim();
   const system = "Із сценарію короткого відео зроби ПІДПИС до опублікованого рілса: 1-2 чіпкі речення (інтрига чи головна користь, БЕЗ переказу всього ролика) + 3-5 релевантних хештегів останнім рядком." +
     voicePassport(s) + HOOK_RULE + ANTI_AI_RULE + NO_DASH_RULE +
-    `\n\nПоверни лише підпис. Мова: ${lang}.`;
+    `\n\nПоверни лише підпис. ${keepLang(lang)}`;
   const raw = await chat(env.cheapModel, system, (script || "").slice(0, 3000), { workspaceId, step: "reel_caption" });
   return raw.trim().slice(0, 1800);
 }
