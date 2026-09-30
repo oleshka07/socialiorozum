@@ -563,6 +563,7 @@ async function registerMenu(token: string): Promise<void> {
     { command: "idea", description: "Банк ідей" },
     { command: "diary", description: "Записати в щоденник" },
     { command: "digest", description: "Зведення дня" },
+    { command: "drafts", description: "Чернетки: відкрити, дописати, перенести в інший бренд" },
     { command: "brand", description: "Обрати бренд (якщо їх кілька)" },
   ]);
   await tg.setChatMenuButton(token, MINIAPP_URL, "Кабінет");
@@ -607,6 +608,24 @@ async function switchBrand(fromId: number, chatId: string, token: string, short:
   await tg.sendWithKeyboard(token, chatId, `✅ Тепер працюю з брендом «${target.title}».\nНові пости, монтаж, ідеї, щоденник і зведення - тут. Повернутись: /brand чи кнопка «🏢» унизу.${note}`, mainKeyboard(target.title));
   await logEvent("info", "tgbot", `бот перемкнуто на інший бренд (${mt === "moved" ? "з сесією монтажу" : "без сесії монтажу"})`, { ws: target.id });
   return "";
+}
+
+// 📝 Чернетки бренду, що ще нікуди не вийшли. Картка поста в чаті живе одним повідомленням і замінюється
+// наступною - тож до чернетки, створеної годину тому (скажімо, рілса з монтажу), з бота було не дістатись:
+// ні дописати, ні перенести в інший бренд.
+async function sendDrafts(ws: string, chatId: string): Promise<void> {
+  const rows = await q<{ id: string; content: string; format: string | null }>(
+    `select p.id, p.content, p.format from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+      where s.workspace_id=$1 and p.stage='final' and coalesce(p.review,'') <> 'archived'
+        and not exists (select 1 from telegram_publish x where x.post_id=p.id and x.status='sent')
+        and not exists (select 1 from threads_publish x where x.post_id=p.id and x.status='sent')
+        and not exists (select 1 from meta_publish x where x.post_id=p.id and x.status='sent')
+        and not exists (select 1 from linkedin_publish x where x.post_id=p.id and x.status='sent')
+      order by p.created_at desc limit 8`, [ws]);
+  const brand = await brandLabel(ws, chatId).catch(() => "");
+  if (!rows.length) { await liveSend(ws, chatId, "drafts", `📝 Чернеток нема${brand ? ` у бренді «${brand}»` : ""}. /post - написати новий.`); return; }
+  await liveSend(ws, chatId, "drafts", `📝 **Чернетки**${brand ? ` · 🏢 ${brand}` : ""} - що ще нікуди не вийшло. Тапни, щоб відкрити картку:`,
+    rows.map((r) => [{ text: `${r.format === "reel" ? "🎬" : r.format === "story" ? "⚡" : "✍"} ${(r.content.split("\n").find((x) => x.trim()) || "(без тексту)").trim().slice(0, 44)}`, data: `cc:${r.id}` }]));
 }
 
 // 📅 Що заплановано. Запланувати з бота було можна ще раніше, а ПОБАЧИТИ чергу - ніде: людина
@@ -777,6 +796,14 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
       const ws = await ownerWorkspace(fromId, token);
       if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos (кнопка «Підключити наш бот»)."); return; }
       await sendIdeaList(ws, chatId);
+      return;
+    }
+
+    // /drafts — чернетки бренду: відкрити картку (дописати, опублікувати, перенести в інший бренд)
+    if (text.toLowerCase().startsWith("/drafts")) {
+      const ws = await ownerWorkspace(fromId, token);
+      if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos."); return; }
+      await sendDrafts(ws, chatId);
       return;
     }
 
