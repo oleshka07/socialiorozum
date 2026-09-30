@@ -11,6 +11,9 @@ name: beta-check
 # 30.09: під сповіщення про збої - які warn/error реально бувають за 30 днів (прод і бета), чи є куди слати
 # (ADMIN_EMAILS, Resend, Telegram адміна), баланси провайдерів (OpenRouter, ElevenLabs, Deepgram - лише цифри),
 # бекапи, диск і фільтри ffmpeg для переходів і музики. Нічого не пише.
+# Далі - після деплою f475477: сповіщення (таблиці, рядки, налаштування), запасний маршрут (чи є ключ OpenAI -
+# лише так/ні), привʼязка Telegram до акаунта (tg_owner.user_id - під вибір бренду в боті), пости з бота за 2 дні,
+# монтажі й чи має ключ ElevenLabs право Music (навмисно кривий запит - нічого не генерує).
 
 on:
   push:
@@ -27,7 +30,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Errors/warns 30 days, alert channels, provider balances, backups, disk, ffmpeg filters (read-only)
+      - name: After f475477 - alerts, failover, bot brand binding, montage jobs (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -36,50 +39,63 @@ jobs:
           command_timeout: 8m
           script: |
             echo "зараз $(date -u +%d.%m\ %H:%M) UTC"
-            df -h / | tail -1
-            ls -la --time-style=+%d.%m_%H:%M /opt/socialio-backups 2>/dev/null | tail -8 || echo "бекапів нема"
-            tail -5 /opt/socialio-backup.log 2>/dev/null || true
             JS=$(cat <<'EOF'
             const { q } = await import('/app/dist/db.js');
             const w8 = (x) => String(x || '').slice(0, 8);
-            const mask = (s) => String(s || '').replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '***@***').replace(/\d{6,}:[A-Za-z0-9_-]{20,}/g, '<token>').replace(/[a-f0-9]{32,}/gi, '<hex>').replace(/sk-[A-Za-z0-9_-]{10,}/g, '<key>');
-            const lv = await q("select level, scope, count(*)::int n from app_log where created_at > now() - interval '30 days' and level in ('error','warn') group by level, scope order by n desc");
-            console.log('warn/error за 30 днів по scope:', lv.map((r) => r.level[0] + ':' + r.scope + '=' + r.n).join(' · ') || 'порожньо');
-            const bad = await q("select level, scope, left(regexp_replace(message, '[0-9]+', '#', 'g'), 150) m, count(*)::int n, to_char(max(created_at) at time zone 'UTC','DD.MM HH24:MI') b from app_log where created_at > now() - interval '30 days' and level in ('error','warn') group by 1,2,3 order by n desc limit 70");
-            for (const r of bad) console.log('  ' + r.level[0] + ' ' + r.scope + ' ×' + r.n + ' [' + r.b + '] ' + mask(r.m));
-            const admins = String(process.env.ADMIN_EMAILS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
-            console.log('ADMIN_EMAILS: ' + admins.length + ' адрес(и); o.stepeniev@ серед них: ' + admins.some((x) => x.startsWith('o.stepeniev@')) + ' · RESEND_API_KEY: ' + !!process.env.RESEND_API_KEY + ' · APP_BASE_URL host: ' + (() => { try { return new URL(process.env.APP_BASE_URL).host; } catch { return '?'; } })());
-            const own = await q("select count(distinct o.tg_user_id)::int n from tg_owner o join workspace_member m on m.workspace_id=o.workspace_id join app_user u on u.id=m.user_id where lower(u.email) = any($1)", [admins]).catch((e) => [{ n: 'err ' + e.message }]);
-            console.log('Telegram адміна (tg_owner у його кабінетах): ' + own[0].n);
-            const sec = async (k) => ((await q("select value from app_secret where name=$1", [k]))[0]?.value) || process.env[k] || '';
-            const orKey = await sec('OPENROUTER_API_KEY');
-            if (orKey) {
-              for (const path of ['/api/v1/credits', '/api/v1/key']) {
-                try { const r = await fetch('https://openrouter.ai' + path, { headers: { Authorization: 'Bearer ' + orKey } }); const j = await r.json().catch(() => ({})); const d = j.data || j; console.log('OpenRouter ' + path + ' → ' + r.status + ' ' + JSON.stringify({ total_credits: d.total_credits, total_usage: d.total_usage, limit: d.limit, usage: d.usage, limit_remaining: d.limit_remaining, is_free_tier: d.is_free_tier, err: j.error?.message?.slice(0, 80) })); } catch (e) { console.log('OpenRouter ' + path + ' збій ' + e.message); }
-              }
-            } else console.log('OpenRouter: ключа нема');
-            const el = await sec('ELEVENLABS_API_KEY');
-            if (el) { try { const r = await fetch('https://api.elevenlabs.io/v1/user/subscription', { headers: { 'xi-api-key': el } }); const j = await r.json().catch(() => ({})); console.log('ElevenLabs → ' + r.status + ' ' + JSON.stringify({ tier: j.tier, used: j.character_count, limit: j.character_limit, reset: j.next_character_count_reset_unix, status: j.status, err: j.detail?.message || j.detail?.status })); } catch (e) { console.log('ElevenLabs збій ' + e.message); } } else console.log('ElevenLabs: ключа нема');
-            const dg = await sec('DEEPGRAM_API_KEY');
-            if (dg) { try { const r = await fetch('https://api.deepgram.com/v1/projects', { headers: { Authorization: 'Token ' + dg } }); const j = await r.json().catch(() => ({})); console.log('Deepgram /projects → ' + r.status + ' ' + (j.projects ? j.projects.length + ' проєкт(и)' : JSON.stringify(j).slice(0, 120))); if (j.projects?.[0]) { const b = await fetch('https://api.deepgram.com/v1/projects/' + j.projects[0].project_id + '/balances', { headers: { Authorization: 'Token ' + dg } }); const bj = await b.json().catch(() => ({})); console.log('Deepgram balances → ' + b.status + ' ' + JSON.stringify((bj.balances || []).map((x) => ({ amount: x.amount, units: x.units }))) + (bj.err_msg ? ' ' + bj.err_msg : '')); } } catch (e) { console.log('Deepgram збій ' + e.message); } } else console.log('Deepgram: ключа нема');
-            const mm = await q("select workspace_id, content from settings_block where key='main_model'");
-            console.log('головні моделі кабінетів: ' + (mm.map((r) => w8(r.workspace_id) + '=' + String(r.content).slice(0, 40)).join(' · ') || 'усі типові'));
-            const ts = await q("select count(*)::int n from settings_block where key='threads_strategy' and content like '%takes%'").catch(() => [{ n: '?' }]);
-            console.log('кабінетів зі стратегією Threads: ' + ts[0].n);
+            const mask = (s) => String(s || '').replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, (m) => m.slice(0, 3) + '***').replace(/\d{6,}:[A-Za-z0-9_-]{20,}/g, '<token>').replace(/[a-f0-9]{32,}/gi, '<hex>').replace(/sk-[A-Za-z0-9_-]{10,}/g, '<key>');
+            const tail3 = (x) => '…' + String(x || '').slice(-3);
+            const t = await q("select to_regclass('ops_alert') a, to_regclass('app_setting') b");
+            console.log('таблиці: ops_alert ' + !!t[0].a + ', app_setting ' + !!t[0].b);
+            if (t[0].a) {
+              const al = await q("select id, kind, severity, left(title, 90) title, count, to_char(first_at at time zone 'UTC','DD.MM HH24:MI') f, to_char(last_at at time zone 'UTC','DD.MM HH24:MI') l, notified_at is not null sent, resolved_at is not null res from ops_alert order by last_at desc limit 12");
+              for (const r of al) console.log('  alert #' + r.id + ' ' + r.severity + ' ' + r.kind + ' ×' + r.count + ' [' + r.f + '→' + r.l + '] sent=' + r.sent + ' res=' + r.res + ' ' + mask(r.title));
+              if (!al.length) console.log('  ops_alert порожня');
+              const st = await q("select value from app_setting where name='ops_alerts'");
+              console.log('  налаштування сповіщень: ' + (st[0] ? JSON.stringify({ ...st[0].value, emails: (st[0].value.emails || []).length }) : 'типові'));
+            }
+            console.log('OPENAI_API_KEY у .env: ' + !!process.env.OPENAI_API_KEY + ' · в адмінці: ' + !!(await q("select 1 from app_secret where name='OPENAI_API_KEY'"))[0] + ' · LLM_FAILOVER: ' + (process.env.LLM_FAILOVER ?? '(типово так)') + ' · GEMINI: ' + !!process.env.GEMINI_API_KEY);
+            const ow = await q(`select o.tg_user_id, o.workspace_id, o.user_id, o.chat_id is not null chat, to_char(o.created_at at time zone 'UTC','DD.MM.YY') c, u.email,
+                                  w.title, (select count(*)::int from workspace_member m where m.user_id=o.user_id) mem,
+                                  (select string_agg(left(w2.id::text,8) || '=' || coalesce(w2.title, w2.name) || '(' || m2.role || ')', ' | ') from workspace_member m2 join workspace w2 on w2.id=m2.workspace_id where m2.user_id=o.user_id) brands,
+                                  (select count(*)::int from tg_connect c2 where c2.tg_user_id=o.tg_user_id) codes,
+                                  (select count(*)::int from tg_connect c3 where c3.tg_user_id=o.tg_user_id and c3.created_by is not null) codes_by
+                                 from tg_owner o left join app_user u on u.id=o.user_id left join workspace w on w.id=o.workspace_id order by o.created_at`);
+            console.log('tg_owner: ' + ow.length + ' рядків; без user_id: ' + ow.filter((r) => !r.user_id).length);
+            for (const r of ow) console.log('  tg ' + tail3(r.tg_user_id) + ' → ws ' + w8(r.workspace_id) + ' «' + mask(r.title) + '» user=' + (r.user_id ? mask(r.email) : 'NULL') + ' брендів=' + r.mem + ' chat=' + r.chat + ' з ' + r.c + ' кодів=' + r.codes + '/' + r.codes_by + (r.brands ? ' · ' + mask(r.brands) : ''));
+            const own2 = await q(`select o.tg_user_id, m.workspace_id, m.role, w.title from tg_owner o join workspace_member m on m.workspace_id=o.workspace_id and m.role='owner' join workspace w on w.id=o.workspace_id where o.user_id is null`);
+            for (const r of own2) console.log('  (без user_id) tg ' + tail3(r.tg_user_id) + ': власник кабінету ' + w8(r.workspace_id));
+            const jobs = await q("select id, status, left(coalesce(error,''),160) err, to_char(created_at at time zone 'UTC','DD.MM HH24:MI') c, to_char(updated_at at time zone 'UTC','HH24:MI') u, left(result::text, 260) res from job where kind='montage' and created_at > now() - interval '2 days' order by created_at desc limit 8").catch((e) => [{ err: e.message }]);
+            for (const j of jobs) console.log('  монтаж ' + (j.c || '') + '→' + (j.u || '') + ' ' + (j.status || '') + ' ' + mask(j.err) + ' ' + mask(j.res));
+            const bot = await q(`select p.id, s.origin, s.workspace_id, p.format, to_char(p.created_at at time zone 'UTC','DD.MM HH24:MI') c, p.review,
+                                   (select string_agg(tp.status || ':' || coalesce(tp.account_name,''), ',') from threads_publish tp where tp.post_id=p.id) th,
+                                   (select string_agg(mp.channel || ':' || mp.status || ':' || coalesce(mp.account_name,''), ',') from meta_publish mp where mp.post_id=p.id) me,
+                                   (select string_agg(tp.status || ':' || coalesce(tp.target,''), ',') from telegram_publish tp where tp.post_id=p.id) tgp
+                                  from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+                                 where p.created_at > now() - interval '2 days' and s.origin in ('bot','montage','idea','diary') order by p.created_at desc limit 12`).catch((e) => [{ c: 'err ' + e.message }]);
+            for (const b of bot) console.log('  пост ' + w8(b.id) + ' ws ' + w8(b.workspace_id) + ' ' + b.origin + ' ' + (b.format || '') + ' ' + b.c + ' ' + (b.review || '') + ' th=' + (b.th || '-') + ' meta=' + mask(b.me || '-') + ' tg=' + (b.tgp || '-'));
+            const lg = await q("select level, scope, left(message, 200) m, to_char(created_at at time zone 'UTC','DD.MM HH24:MI') c from app_log where created_at > now() - interval '5 hours' and (scope in ('montage','alerts','llm') or message ilike '%запасн%' or message ilike '%кошти%' or level='error') order by created_at desc limit 25");
+            for (const r of lg) console.log('  ' + r.c + ' ' + r.level[0] + ' ' + r.scope + ': ' + mask(r.m));
             process.exit(0);
             EOF
             )
-            for S in "" "-beta"; do
+            for S in "-beta" ""; do
               D="${{ secrets.APP_DIR }}$S"
               echo "===== ${S:-прод} · HEAD $(git -C "$D" rev-parse --short HEAD) ====="
               cd "$D/server"
               docker compose ps app --format '{{.Name}} {{.Status}}'
-              docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -95
-              docker compose exec -T app sh -c 'ls -la /backups 2>/dev/null | tail -4; df -h /app/media 2>/dev/null | tail -1' || true
+              curl -s -o /dev/null -w "health %{http_code}\n" "http://127.0.0.1:$(grep -E '^APP_PORT=' .env | cut -d= -f2 | grep . || echo 8080)/health"
+              docker compose logs --since 40m app 2>&1 | grep -aE "\[alerts\]|запасн|ProviderDown" | tail -6
+              docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -80
             done
             cd "${{ secrets.APP_DIR }}-beta/server"
-            echo "--- ffmpeg фільтри для переходів, музики, аналізу кадрів ---"
-            docker compose exec -T app sh -c 'ffmpeg -hide_banner -version | head -1; ffmpeg -hide_banner -filters 2>/dev/null | grep -E " (xfade|acrossfade|sidechaincompress|blurdetect|signalstats|silencedetect|loudnorm|afade|aloop|vidstabdetect|deshake|scdet|freezedetect|ebur128|astats|afftdn|arnndn|dynaudnorm|thumbnail|entropy) " | cut -c1-40'
+            echo "--- ElevenLabs Music: право ключа (навмисно кривий запит: 422 = право є, 401 = нема; нічого не генерує) ---"
+            docker compose exec -T app node --input-type=module -e "
+              const { q } = await import('/app/dist/db.js');
+              const k = ((await q(\"select value from app_secret where name='ELEVENLABS_API_KEY'\"))[0]?.value) || process.env.ELEVENLABS_API_KEY || '';
+              if (!k) { console.log('ключа нема'); process.exit(0); }
+              const r = await fetch('https://api.elevenlabs.io/v1/music?output_format=mp3_44100_128', { method: 'POST', headers: { 'xi-api-key': k, 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: '', music_length_ms: 1 }) });
+              const j = await r.text(); console.log('POST /v1/music (порожній промт, 1 мс) → ' + r.status + ' ' + j.replace(/[a-f0-9]{32,}/gi, '<hex>').slice(0, 300));
+              process.exit(0);" 2>&1 | tail -3
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
