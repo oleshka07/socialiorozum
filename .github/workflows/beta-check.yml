@@ -8,6 +8,9 @@ name: beta-check
 # причина - не ffmpeg 8, а stdin: скрипт іде в sh через stdin, і ffmpeg без -nostdin з'їдав його байти.
 # Далі: стан Telegram-бота беті до і після деплою 60ae725 (бета бере свого спільного бота) - лише читання:
 # id ботів (без токенів), куди веде вебхук (хост і вид шляху), рядки кабінетів, журнал tgbot.
+# 30.09: під сповіщення про збої - які warn/error реально бувають за 30 днів (прод і бета), чи є куди слати
+# (ADMIN_EMAILS, Resend, Telegram адміна), баланси провайдерів (OpenRouter, ElevenLabs, Deepgram - лише цифри),
+# бекапи, диск і фільтри ffmpeg для переходів і музики. Нічого не пише.
 
 on:
   push:
@@ -24,48 +27,59 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Beta bot log since 29.09 15:38 UTC + montage jobs after a2cf2bd (read-only)
+      - name: Errors/warns 30 days, alert channels, provider balances, backups, disk, ffmpeg filters (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 5m
+          command_timeout: 8m
           script: |
-            B="${{ secrets.APP_DIR }}-beta"
-            echo "зараз $(date -u +%d.%m\ %H:%M) UTC · beta HEAD $(git -C "$B" rev-parse --short HEAD)"
-            cd "$B/server"
-            docker compose ps app --format '{{.Name}} {{.Status}}'
-            curl -fsS -o /dev/null -w "health %{http_code}\n" http://127.0.0.1:8081/health || echo "health недоступний"
+            echo "зараз $(date -u +%d.%m\ %H:%M) UTC"
+            df -h / | tail -1
+            ls -la --time-style=+%d.%m_%H:%M /opt/socialio-backups 2>/dev/null | tail -8 || echo "бекапів нема"
+            tail -5 /opt/socialio-backup.log 2>/dev/null || true
             JS=$(cat <<'EOF'
             const { q } = await import('/app/dist/db.js');
-            const tg = await import('/app/dist/telegram.js');
             const w8 = (x) => String(x || '').slice(0, 8);
-            const mask = (s) => String(s || '').replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '***@***').replace(/\d{6,}:[A-Za-z0-9_-]{20,}/g, '<token>');
-            const since = '2026-09-29 15:38:00+00';
-            const lv = await q("select level, scope, count(*)::int n from app_log where created_at > $1 group by level, scope order by level, n desc", [since]);
-            console.log('журнал з 29.09 15:38 UTC:', lv.map((r) => r.level + '/' + r.scope + '=' + r.n).join(' · ') || 'порожньо');
-            const bad = await q("select level, scope, left(message, 200) m, count(*)::int n, to_char(min(created_at) at time zone 'UTC','DD.MM HH24:MI') a, to_char(max(created_at) at time zone 'UTC','DD.MM HH24:MI') b from app_log where created_at > $1 and level in ('error','warn') group by level, scope, left(message, 200) order by max(created_at) desc limit 25", [since]);
-            for (const r of bad) console.log('  ' + r.level + ' ' + r.scope + ' ×' + r.n + ' [' + r.a + (r.a !== r.b ? '..' + r.b : '') + '] ' + mask(r.m));
-            if (!bad.length) console.log('  warn/error: нема');
-            const a = (await q("select value from app_secret where name='TELEGRAM_BOT_TOKEN'"))[0];
-            if (a?.value) {
-              try { const wi = await tg.getWebhookInfo(a.value); const u = String(wi.url || ''); console.log('спільний бот: вебхук → ' + (u ? new URL(u).host : '—') + ' · у черзі ' + (wi.pending_update_count ?? 0) + (wi.last_error_date ? ' · остання помилка ' + new Date(wi.last_error_date * 1000).toISOString().slice(5, 16) + ' ' + String(wi.last_error_message || '').slice(0, 120) : ' · помилок доставки нема')); }
-              catch (e) { console.log('спільний бот: Telegram не відповів (' + String(e.message).slice(0, 100) + ')'); }
-            }
-            const upd = await q("select count(*)::int n, to_char(max(updated_at) at time zone 'UTC','DD.MM HH24:MI') t from tg_message where updated_at > $1", [since]).catch(() => [{ n: '?', t: '?' }]);
-            console.log('повідомлень бота (tg_message) з 15:38:', upd[0]?.n, 'останнє', upd[0]?.t || '-');
-            const jobs = await q("select id, workspace_id, status, error, result, to_char(created_at at time zone 'UTC','DD.MM HH24:MI') c from job where kind='montage' and created_at > '2026-09-29 16:30:00+00' order by created_at");
-            for (const j of jobs) { const r = j.result || {}; console.log('монтаж ' + j.c + ' ws ' + w8(j.workspace_id) + ' ' + j.status + (j.error ? ' ' + mask(String(j.error).slice(0, 150)) : '') + ' | voice ' + r.voice + ' кліпів ' + r.clips + ' ' + r.duration + ' с ' + JSON.stringify(r.warnings || [])); }
-            if (!jobs.length) console.log('монтажів після деплою a2cf2bd: нема');
-            const st = await q("select workspace_id, content from settings_block where key='montage_state'");
-            for (const s of st) { try { const m = JSON.parse(s.content); console.log('відкрита сесія монтажу ws ' + w8(s.workspace_id) + ': кліпів ' + (m.clips || []).length + (m.voice ? ', голос ' + m.voice.dur + ' с' : '') + ', востаннє ' + new Date(m.at).toISOString().slice(5, 16)); } catch { /* */ } }
+            const mask = (s) => String(s || '').replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '***@***').replace(/\d{6,}:[A-Za-z0-9_-]{20,}/g, '<token>').replace(/[a-f0-9]{32,}/gi, '<hex>').replace(/sk-[A-Za-z0-9_-]{10,}/g, '<key>');
+            const lv = await q("select level, scope, count(*)::int n from app_log where created_at > now() - interval '30 days' and level in ('error','warn') group by level, scope order by n desc");
+            console.log('warn/error за 30 днів по scope:', lv.map((r) => r.level[0] + ':' + r.scope + '=' + r.n).join(' · ') || 'порожньо');
+            const bad = await q("select level, scope, left(regexp_replace(message, '[0-9]+', '#', 'g'), 150) m, count(*)::int n, to_char(max(created_at) at time zone 'UTC','DD.MM HH24:MI') b from app_log where created_at > now() - interval '30 days' and level in ('error','warn') group by 1,2,3 order by n desc limit 70");
+            for (const r of bad) console.log('  ' + r.level[0] + ' ' + r.scope + ' ×' + r.n + ' [' + r.b + '] ' + mask(r.m));
+            const admins = String(process.env.ADMIN_EMAILS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+            console.log('ADMIN_EMAILS: ' + admins.length + ' адрес(и); o.stepeniev@ серед них: ' + admins.some((x) => x.startsWith('o.stepeniev@')) + ' · RESEND_API_KEY: ' + !!process.env.RESEND_API_KEY + ' · APP_BASE_URL host: ' + (() => { try { return new URL(process.env.APP_BASE_URL).host; } catch { return '?'; } })());
+            const own = await q("select count(distinct o.tg_user_id)::int n from tg_owner o join workspace_member m on m.workspace_id=o.workspace_id join app_user u on u.id=m.user_id where lower(u.email) = any($1)", [admins]).catch((e) => [{ n: 'err ' + e.message }]);
+            console.log('Telegram адміна (tg_owner у його кабінетах): ' + own[0].n);
+            const sec = async (k) => ((await q("select value from app_secret where name=$1", [k]))[0]?.value) || process.env[k] || '';
+            const orKey = await sec('OPENROUTER_API_KEY');
+            if (orKey) {
+              for (const path of ['/api/v1/credits', '/api/v1/key']) {
+                try { const r = await fetch('https://openrouter.ai' + path, { headers: { Authorization: 'Bearer ' + orKey } }); const j = await r.json().catch(() => ({})); const d = j.data || j; console.log('OpenRouter ' + path + ' → ' + r.status + ' ' + JSON.stringify({ total_credits: d.total_credits, total_usage: d.total_usage, limit: d.limit, usage: d.usage, limit_remaining: d.limit_remaining, is_free_tier: d.is_free_tier, err: j.error?.message?.slice(0, 80) })); } catch (e) { console.log('OpenRouter ' + path + ' збій ' + e.message); }
+              }
+            } else console.log('OpenRouter: ключа нема');
+            const el = await sec('ELEVENLABS_API_KEY');
+            if (el) { try { const r = await fetch('https://api.elevenlabs.io/v1/user/subscription', { headers: { 'xi-api-key': el } }); const j = await r.json().catch(() => ({})); console.log('ElevenLabs → ' + r.status + ' ' + JSON.stringify({ tier: j.tier, used: j.character_count, limit: j.character_limit, reset: j.next_character_count_reset_unix, status: j.status, err: j.detail?.message || j.detail?.status })); } catch (e) { console.log('ElevenLabs збій ' + e.message); } } else console.log('ElevenLabs: ключа нема');
+            const dg = await sec('DEEPGRAM_API_KEY');
+            if (dg) { try { const r = await fetch('https://api.deepgram.com/v1/projects', { headers: { Authorization: 'Token ' + dg } }); const j = await r.json().catch(() => ({})); console.log('Deepgram /projects → ' + r.status + ' ' + (j.projects ? j.projects.length + ' проєкт(и)' : JSON.stringify(j).slice(0, 120))); if (j.projects?.[0]) { const b = await fetch('https://api.deepgram.com/v1/projects/' + j.projects[0].project_id + '/balances', { headers: { Authorization: 'Token ' + dg } }); const bj = await b.json().catch(() => ({})); console.log('Deepgram balances → ' + b.status + ' ' + JSON.stringify((bj.balances || []).map((x) => ({ amount: x.amount, units: x.units }))) + (bj.err_msg ? ' ' + bj.err_msg : '')); } } catch (e) { console.log('Deepgram збій ' + e.message); } } else console.log('Deepgram: ключа нема');
+            const mm = await q("select workspace_id, content from settings_block where key='main_model'");
+            console.log('головні моделі кабінетів: ' + (mm.map((r) => w8(r.workspace_id) + '=' + String(r.content).slice(0, 40)).join(' · ') || 'усі типові'));
+            const ts = await q("select count(*)::int n from settings_block where key='threads_strategy' and content like '%takes%'").catch(() => [{ n: '?' }]);
+            console.log('кабінетів зі стратегією Threads: ' + ts[0].n);
             process.exit(0);
             EOF
             )
-            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -45
-            echo "--- консоль беті (tgbot/telegram), останні 12 год ---"
-            docker compose logs --since 12h app 2>&1 | grep -iE "\[(warn|error)\] (tgbot|telegram)" | tail -12 || true
+            for S in "" "-beta"; do
+              D="${{ secrets.APP_DIR }}$S"
+              echo "===== ${S:-прод} · HEAD $(git -C "$D" rev-parse --short HEAD) ====="
+              cd "$D/server"
+              docker compose ps app --format '{{.Name}} {{.Status}}'
+              docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -95
+              docker compose exec -T app sh -c 'ls -la /backups 2>/dev/null | tail -4; df -h /app/media 2>/dev/null | tail -1' || true
+            done
+            cd "${{ secrets.APP_DIR }}-beta/server"
+            echo "--- ffmpeg фільтри для переходів, музики, аналізу кадрів ---"
+            docker compose exec -T app sh -c 'ffmpeg -hide_banner -version | head -1; ffmpeg -hide_banner -filters 2>/dev/null | grep -E " (xfade|acrossfade|sidechaincompress|blurdetect|signalstats|silencedetect|loudnorm|afade|aloop|vidstabdetect|deshake|scdet|freezedetect|ebur128|astats|afftdn|arnndn|dynaudnorm|thumbnail|entropy) " | cut -c1-40'
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
