@@ -14,6 +14,8 @@ name: beta-check
 # Далі - після деплою f475477: сповіщення (таблиці, рядки, налаштування), запасний маршрут (чи є ключ OpenAI -
 # лише так/ні), привʼязка Telegram до акаунта (tg_owner.user_id - під вибір бренду в боті), пости з бота за 2 дні,
 # монтажі й чи має ключ ElevenLabs право Music (навмисно кривий запит - нічого не генерує).
+# Далі - після 9bee32a (бренд у боті): версія, здоров'я, код у контейнері, команди бота (getMyCommands), привʼязки,
+# сповіщення й warn/error журналу за 20 хв.
 
 on:
   push:
@@ -30,72 +32,40 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: After f475477 - alerts, failover, bot brand binding, montage jobs (read-only)
+      - name: After 9bee32a - brand in bot, commands, logs (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 8m
+          command_timeout: 6m
           script: |
             echo "зараз $(date -u +%d.%m\ %H:%M) UTC"
+            cd "${{ secrets.APP_DIR }}-beta/server"
+            echo "HEAD $(git -C .. rev-parse --short HEAD)"
+            docker compose ps app --format '{{.Name}} {{.Status}}'
+            curl -s -o /dev/null -w "health %{http_code}\n" "http://127.0.0.1:$(grep -E '^APP_PORT=' .env | cut -d= -f2 | grep . || echo 8081)/health"
+            docker compose exec -T app sh -c 'ls -la /app/dist/tgbrand.js | cut -c1-80; grep -c "sendBrandPicker\|sendDrafts" /app/dist/tgbot.js'
+            docker compose logs --since 15m app 2>&1 | grep -aiE "error|warn|alerts|tgbot" | grep -avE "DeprecationWarning" | tail -12
             JS=$(cat <<'EOF'
             const { q } = await import('/app/dist/db.js');
-            const w8 = (x) => String(x || '').slice(0, 8);
-            const mask = (s) => String(s || '').replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, (m) => m.slice(0, 3) + '***').replace(/\d{6,}:[A-Za-z0-9_-]{20,}/g, '<token>').replace(/[a-f0-9]{32,}/gi, '<hex>').replace(/sk-[A-Za-z0-9_-]{10,}/g, '<key>');
-            const tail3 = (x) => '…' + String(x || '').slice(-3);
-            const t = await q("select to_regclass('ops_alert') a, to_regclass('app_setting') b");
-            console.log('таблиці: ops_alert ' + !!t[0].a + ', app_setting ' + !!t[0].b);
-            if (t[0].a) {
-              const al = await q("select id, kind, severity, left(title, 90) title, count, to_char(first_at at time zone 'UTC','DD.MM HH24:MI') f, to_char(last_at at time zone 'UTC','DD.MM HH24:MI') l, notified_at is not null sent, resolved_at is not null res from ops_alert order by last_at desc limit 12");
-              for (const r of al) console.log('  alert #' + r.id + ' ' + r.severity + ' ' + r.kind + ' ×' + r.count + ' [' + r.f + '→' + r.l + '] sent=' + r.sent + ' res=' + r.res + ' ' + mask(r.title));
-              if (!al.length) console.log('  ops_alert порожня');
-              const st = await q("select value from app_setting where name='ops_alerts'");
-              console.log('  налаштування сповіщень: ' + (st[0] ? JSON.stringify({ ...st[0].value, emails: (st[0].value.emails || []).length }) : 'типові'));
-            }
-            console.log('OPENAI_API_KEY у .env: ' + !!process.env.OPENAI_API_KEY + ' · в адмінці: ' + !!(await q("select 1 from app_secret where name='OPENAI_API_KEY'"))[0] + ' · LLM_FAILOVER: ' + (process.env.LLM_FAILOVER ?? '(типово так)') + ' · GEMINI: ' + !!process.env.GEMINI_API_KEY);
-            const ow = await q(`select o.tg_user_id, o.workspace_id, o.user_id, o.chat_id is not null chat, to_char(o.created_at at time zone 'UTC','DD.MM.YY') c, u.email,
-                                  w.title, (select count(*)::int from workspace_member m where m.user_id=o.user_id) mem,
-                                  (select string_agg(left(w2.id::text,8) || '=' || coalesce(w2.title, w2.name) || '(' || m2.role || ')', ' | ') from workspace_member m2 join workspace w2 on w2.id=m2.workspace_id where m2.user_id=o.user_id) brands,
-                                  (select count(*)::int from tg_connect c2 where c2.tg_user_id=o.tg_user_id) codes,
-                                  (select count(*)::int from tg_connect c3 where c3.tg_user_id=o.tg_user_id and c3.created_by is not null) codes_by
-                                 from tg_owner o left join app_user u on u.id=o.user_id left join workspace w on w.id=o.workspace_id order by o.created_at`);
-            console.log('tg_owner: ' + ow.length + ' рядків; без user_id: ' + ow.filter((r) => !r.user_id).length);
-            for (const r of ow) console.log('  tg ' + tail3(r.tg_user_id) + ' → ws ' + w8(r.workspace_id) + ' «' + mask(r.title) + '» user=' + (r.user_id ? mask(r.email) : 'NULL') + ' брендів=' + r.mem + ' chat=' + r.chat + ' з ' + r.c + ' кодів=' + r.codes + '/' + r.codes_by + (r.brands ? ' · ' + mask(r.brands) : ''));
-            const own2 = await q(`select o.tg_user_id, m.workspace_id, m.role, w.title from tg_owner o join workspace_member m on m.workspace_id=o.workspace_id and m.role='owner' join workspace w on w.id=o.workspace_id where o.user_id is null`);
-            for (const r of own2) console.log('  (без user_id) tg ' + tail3(r.tg_user_id) + ': власник кабінету ' + w8(r.workspace_id));
-            const jobs = await q("select id, status, left(coalesce(error,''),160) err, to_char(created_at at time zone 'UTC','DD.MM HH24:MI') c, to_char(updated_at at time zone 'UTC','HH24:MI') u, left(result::text, 260) res from job where kind='montage' and created_at > now() - interval '2 days' order by created_at desc limit 8").catch((e) => [{ err: e.message }]);
-            for (const j of jobs) console.log('  монтаж ' + (j.c || '') + '→' + (j.u || '') + ' ' + (j.status || '') + ' ' + mask(j.err) + ' ' + mask(j.res));
-            const bot = await q(`select p.id, s.origin, s.workspace_id, p.format, to_char(p.created_at at time zone 'UTC','DD.MM HH24:MI') c, p.review,
-                                   (select string_agg(tp.status || ':' || coalesce(tp.account_name,''), ',') from threads_publish tp where tp.post_id=p.id) th,
-                                   (select string_agg(mp.channel || ':' || mp.status || ':' || coalesce(mp.account_name,''), ',') from meta_publish mp where mp.post_id=p.id) me,
-                                   (select string_agg(tp.status || ':' || coalesce(tp.target,''), ',') from telegram_publish tp where tp.post_id=p.id) tgp
-                                  from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
-                                 where p.created_at > now() - interval '2 days' and s.origin in ('bot','montage','idea','diary') order by p.created_at desc limit 12`).catch((e) => [{ c: 'err ' + e.message }]);
-            for (const b of bot) console.log('  пост ' + w8(b.id) + ' ws ' + w8(b.workspace_id) + ' ' + b.origin + ' ' + (b.format || '') + ' ' + b.c + ' ' + (b.review || '') + ' th=' + (b.th || '-') + ' meta=' + mask(b.me || '-') + ' tg=' + (b.tgp || '-'));
-            const lg = await q("select level, scope, left(message, 200) m, to_char(created_at at time zone 'UTC','DD.MM HH24:MI') c from app_log where created_at > now() - interval '5 hours' and (scope in ('montage','alerts','llm') or message ilike '%запасн%' or message ilike '%кошти%' or level='error') order by created_at desc limit 25");
-            for (const r of lg) console.log('  ' + r.c + ' ' + r.level[0] + ' ' + r.scope + ': ' + mask(r.m));
+            const { env } = await import('/app/dist/env.js');
+            const sec = (await q("select value from app_secret where name='TELEGRAM_BOT_TOKEN'"))[0]?.value || process.env.TELEGRAM_BOT_TOKEN || '';
+            const tok = sec;
+            const r = await fetch('https://api.telegram.org/bot' + tok + '/getMyCommands').then((x) => x.json()).catch((e) => ({ err: e.message }));
+            console.log('команди бота: ' + (r.result || []).map((c) => '/' + c.command).join(' ') + (r.ok ? '' : ' ' + JSON.stringify(r).slice(0, 120)));
+            const me = await fetch('https://api.telegram.org/bot' + tok + '/getMe').then((x) => x.json()).catch(() => ({}));
+            console.log('бот: @' + (me.result?.username || '?'));
+            const o = await q("select o.workspace_id, o.user_id is not null linked, (select count(*)::int from workspace_member m where m.user_id=o.user_id) brands from tg_owner o order by o.created_at");
+            console.log('tg_owner: ' + o.map((x) => String(x.workspace_id).slice(0, 8) + (x.linked ? ' (акаунт відомий, брендів ' + x.brands + ')' : ' (без акаунта)')).join(' · '));
+            const al = await q("select id, severity, kind, left(title,80) t, count, notified_at is not null sent, resolved_at is not null res from ops_alert order by last_at desc limit 5");
+            for (const a of al) console.log('  alert #' + a.id + ' ' + a.severity + ' ' + a.kind + ' ×' + a.count + ' sent=' + a.sent + ' res=' + a.res + ' ' + a.t);
+            const lg = await q("select level, scope, left(message,160) m, to_char(created_at at time zone 'UTC','HH24:MI') c from app_log where created_at > now() - interval '20 minutes' and level in ('warn','error') order by created_at desc limit 10");
+            for (const l of lg) console.log('  ' + l.c + ' ' + l.level[0] + ' ' + l.scope + ': ' + l.m.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g, '***'));
             process.exit(0);
             EOF
             )
-            for S in "-beta" ""; do
-              D="${{ secrets.APP_DIR }}$S"
-              echo "===== ${S:-прод} · HEAD $(git -C "$D" rev-parse --short HEAD) ====="
-              cd "$D/server"
-              docker compose ps app --format '{{.Name}} {{.Status}}'
-              curl -s -o /dev/null -w "health %{http_code}\n" "http://127.0.0.1:$(grep -E '^APP_PORT=' .env | cut -d= -f2 | grep . || echo 8080)/health"
-              docker compose logs --since 40m app 2>&1 | grep -aE "\[alerts\]|запасн|ProviderDown" | tail -6
-              docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -80
-            done
-            cd "${{ secrets.APP_DIR }}-beta/server"
-            echo "--- ElevenLabs Music: право ключа (навмисно кривий запит: 422 = право є, 401 = нема; нічого не генерує) ---"
-            docker compose exec -T app node --input-type=module -e "
-              const { q } = await import('/app/dist/db.js');
-              const k = ((await q(\"select value from app_secret where name='ELEVENLABS_API_KEY'\"))[0]?.value) || process.env.ELEVENLABS_API_KEY || '';
-              if (!k) { console.log('ключа нема'); process.exit(0); }
-              const r = await fetch('https://api.elevenlabs.io/v1/music?output_format=mp3_44100_128', { method: 'POST', headers: { 'xi-api-key': k, 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: '', music_length_ms: 1 }) });
-              const j = await r.text(); console.log('POST /v1/music (порожній промт, 1 мс) → ' + r.status + ' ' + j.replace(/[a-f0-9]{32,}/gi, '<hex>').slice(0, 300));
-              process.exit(0);" 2>&1 | tail -3
+            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -25
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
