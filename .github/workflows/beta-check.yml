@@ -76,7 +76,7 @@ jobs:
             const sec = (await q("select value from app_secret where name='TELEGRAM_BOT_TOKEN'"))[0]?.value || process.env.TELEGRAM_BOT_TOKEN || '';
             const r = await fetch('https://api.telegram.org/bot' + sec + '/getMyCommands').then((x) => x.json()).catch((e) => ({ err: e.message }));
             console.log('команди бота: ' + (r.result || []).map((c) => '/' + c.command).join(' ') + (r.ok ? '' : ' (не прочиталось)'));
-            const lm = await q("select count(*)::int n, max(created_at) at from tg_message where category='comments'");
+            const lm = await q("select count(*)::int n, max(updated_at) at from tg_message where category like 'comments%'");
             console.log('живих повідомлень «comments»: ' + lm[0].n + (lm[0].at ? ', останнє ' + new Date(lm[0].at).toISOString().slice(11, 19) + ' UTC' : ''));
             const w = await q("select created_at, level, scope, left(message, 170) as m from app_log where created_at > now() - interval '20 minutes' and level in ('warn','error') order by created_at desc limit 10");
             for (const x of w) console.log(new Date(x.created_at).toISOString().slice(11, 19) + ' ' + x.level + ' ' + (x.scope || '-') + ': ' + mask(x.m));
@@ -84,7 +84,7 @@ jobs:
             process.exit(0);
             EOF
             )
-            docker compose exec -T app node --input-type=module -e "$JS2" 2>&1 | tail -25
+            docker compose exec -T app node --input-type=module -e "$JS2" 2>&1 | head -40
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
