@@ -24,75 +24,48 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Montage after fix a2cf2bd - Oleg's real clips through planShots (read-only, temp dir)
+      - name: Beta bot log since 29.09 15:38 UTC + montage jobs after a2cf2bd (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 15m
+          command_timeout: 5m
           script: |
             B="${{ secrets.APP_DIR }}-beta"
             echo "зараз $(date -u +%d.%m\ %H:%M) UTC · beta HEAD $(git -C "$B" rev-parse --short HEAD)"
             cd "$B/server"
             docker compose ps app --format '{{.Name}} {{.Status}}'
             curl -fsS -o /dev/null -w "health %{http_code}\n" http://127.0.0.1:8081/health || echo "health недоступний"
-            docker compose exec -T app sh -c 'grep -c "planShots" /app/dist/montage.js; grep -c "mtLocked" /app/dist/tgmontage.js'
             JS=$(cat <<'EOF'
             const { q } = await import('/app/dist/db.js');
-            const { MEDIA_DIR, probeVideo, probeAudio } = await import('/app/dist/media.js');
-            const P = await import('/app/dist/montage-plan.js');
-            const cp = await import('node:child_process');
-            const fs = await import('node:fs');
-            const path = await import('node:path');
-            const sh = (cmd, args, t = 300000, cwd) => { try { return cp.execFileSync(cmd, args, { timeout: t, cwd, stdio: ['ignore', 'pipe', 'pipe'] }).toString(); } catch (e) { return 'ERR ' + String(e.stderr || e.message).slice(-600); } };
+            const tg = await import('/app/dist/telegram.js');
             const w8 = (x) => String(x || '').slice(0, 8);
-            const J = (await q("select workspace_id, created_at from job where kind='montage' and status='done' order by created_at desc limit 1"))[0];
-            if (!J) { console.log('монтажів нема'); process.exit(0); }
-            const media = await q("select id, kind, filename, original_name, duration from media_asset where workspace_id=$1 and source='bot' and created_at > $2::timestamptz - interval '10 minutes' and created_at < $2::timestamptz order by original_name desc", [J.workspace_id, J.created_at]);
-            const clips = media.filter((m) => m.kind === 'video'), voice = media.find((m) => m.kind === 'audio');
-            console.log('кліпи', clips.map((m) => w8(m.id) + ' ' + m.original_name + ' ' + m.duration + 's').join(' | '), '· голос', voice ? voice.duration + 's' : 'нема');
-            if (clips.length < 2 || !voice) process.exit(0);
-            const srcs = [];
-            for (const m of clips) { const v = await probeVideo(path.join(MEDIA_DIR, m.filename)); srcs.push({ m, v }); }
-            const vdur = (await probeAudio(path.join(MEDIA_DIR, voice.filename)))?.duration || Number(voice.duration);
-            const slots = srcs.map((s) => ({ avail: Math.max(0.3, s.v.duration), want: null, still: false }));
-            const durs = P.allocate(slots, vdur + 0.15 + 0.5);
-            const plan = P.planShots(srcs.map((s) => ({ avail: Math.max(0.3, s.v.duration), still: false, fromGiven: false })), durs, true);
-            console.log('план: проходів', plan.passes, '· кадри', plan.shots.map((x) => 'кліп' + (x.clip + 1) + ' ' + x.dur.toFixed(2) + 's з ' + x.offset + ' ×' + x.speed + (x.freeze ? ' стоп ' + x.freeze : '')).join(' | '));
-            const dir = '/tmp/mprobe2-' + Date.now();
-            fs.mkdirSync(dir);
-            const W = 1080, H = 1920, FPS = 30;
-            const coverChain = 'scale=' + W + ':' + H + ':force_original_aspect_ratio=increase,crop=' + W + ':' + H;
-            const segs = [], rendered = new Map();
-            for (const x of plan.shots) {
-              const s = srcs[x.clip]; const d = x.dur.toFixed(3);
-              const key = [x.clip, x.offset, x.take, x.speed, d].join(':');
-              let out = rendered.get(key);
-              if (!out) {
-                out = 'seg' + rendered.size + '.mp4';
-                const pre = x.speed !== 1 ? 'setpts=' + x.speed + '*PTS,' : '';
-                const vg = '[0:v]' + pre + coverChain + ',fps=' + FPS + ',format=yuv420p,setsar=1,tpad=stop_mode=clone:stop_duration=' + (x.freeze + 0.5).toFixed(3) + '[v]';
-                const r = sh('nice', ['-n', '10', 'ffmpeg', '-hide_banner', '-nostdin', '-loglevel', 'error', '-y', '-ss', String(x.offset), '-t', String(x.take), '-i', path.join(MEDIA_DIR, s.m.filename), '-f', 'lavfi', '-t', d, '-i', 'anullsrc=r=48000:cl=stereo', '-filter_complex', vg, '-map', '[v]', '-map', '1:a', '-t', d, '-r', String(FPS), '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18', '-pix_fmt', 'yuv420p', '-g', String(FPS), '-c:a', 'aac', '-ar', '48000', '-ac', '2', '-threads', '2', out], 300000, dir);
-                if (r.startsWith('ERR')) console.log(out, r);
-                rendered.set(key, out);
-              }
-              segs.push(out);
+            const mask = (s) => String(s || '').replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '***@***').replace(/\d{6,}:[A-Za-z0-9_-]{20,}/g, '<token>');
+            const since = '2026-09-29 15:38:00+00';
+            const lv = await q("select level, scope, count(*)::int n from app_log where created_at > $1 group by level, scope order by level, n desc", [since]);
+            console.log('журнал з 29.09 15:38 UTC:', lv.map((r) => r.level + '/' + r.scope + '=' + r.n).join(' · ') || 'порожньо');
+            const bad = await q("select level, scope, left(message, 200) m, count(*)::int n, to_char(min(created_at) at time zone 'UTC','DD.MM HH24:MI') a, to_char(max(created_at) at time zone 'UTC','DD.MM HH24:MI') b from app_log where created_at > $1 and level in ('error','warn') group by level, scope, left(message, 200) order by max(created_at) desc limit 25", [since]);
+            for (const r of bad) console.log('  ' + r.level + ' ' + r.scope + ' ×' + r.n + ' [' + r.a + (r.a !== r.b ? '..' + r.b : '') + '] ' + mask(r.m));
+            if (!bad.length) console.log('  warn/error: нема');
+            const a = (await q("select value from app_secret where name='TELEGRAM_BOT_TOKEN'"))[0];
+            if (a?.value) {
+              try { const wi = await tg.getWebhookInfo(a.value); const u = String(wi.url || ''); console.log('спільний бот: вебхук → ' + (u ? new URL(u).host : '—') + ' · у черзі ' + (wi.pending_update_count ?? 0) + (wi.last_error_date ? ' · остання помилка ' + new Date(wi.last_error_date * 1000).toISOString().slice(5, 16) + ' ' + String(wi.last_error_message || '').slice(0, 120) : ' · помилок доставки нема')); }
+              catch (e) { console.log('спільний бот: Telegram не відповів (' + String(e.message).slice(0, 100) + ')'); }
             }
-            fs.writeFileSync(path.join(dir, 'list.txt'), segs.map((x) => "file '" + x + "'").join('\n') + '\n');
-            const tot = durs.reduce((a, b) => a + b, 0).toFixed(3);
-            const fin = sh('nice', ['-n', '10', 'ffmpeg', '-hide_banner', '-nostdin', '-loglevel', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', 'list.txt', '-map', '0:v', '-t', tot, '-r', '30', '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '2', 'fin.mp4'], 300000, dir);
-            console.log('склейка', fin.startsWith('ERR') ? fin : 'ok', '· рендерів', rendered.size, 'на', segs.length, 'кадрів · тривалість', sh('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', 'fin.mp4'], 30000, dir).trim());
-            const fz = sh('sh', ['-c', 'ffmpeg -hide_banner -nostdin -i fin.mp4 -vf freezedetect=n=0.003:d=0.6 -an -f null - 2>&1 || true'], 300000, dir);
-            const fr = (fz.match(/freeze_(start|duration): [0-9.]+/g) || []);
-            console.log('стоп-кадри ≥0,6 с:', fr.length ? fr.join(' ') : 'нема');
-            const sc = sh('sh', ['-c', "ffmpeg -hide_banner -nostdin -i fin.mp4 -vf \"select='gt(scene,0.25)',showinfo\" -an -f null - 2>&1 | grep -o 'pts_time:[0-9.]*' || true"], 300000, dir).trim().split('\n').filter(Boolean);
-            console.log('склейки кліпів (зміна сцени):', sc.join(' ') || 'не знайдено');
-            fs.rmSync(dir, { recursive: true, force: true });
+            const upd = await q("select count(*)::int n, to_char(max(updated_at) at time zone 'UTC','DD.MM HH24:MI') t from tg_message where updated_at > $1", [since]).catch(() => [{ n: '?', t: '?' }]);
+            console.log('повідомлень бота (tg_message) з 15:38:', upd[0]?.n, 'останнє', upd[0]?.t || '-');
+            const jobs = await q("select id, workspace_id, status, error, result, to_char(created_at at time zone 'UTC','DD.MM HH24:MI') c from job where kind='montage' and created_at > '2026-09-29 16:30:00+00' order by created_at");
+            for (const j of jobs) { const r = j.result || {}; console.log('монтаж ' + j.c + ' ws ' + w8(j.workspace_id) + ' ' + j.status + (j.error ? ' ' + mask(String(j.error).slice(0, 150)) : '') + ' | voice ' + r.voice + ' кліпів ' + r.clips + ' ' + r.duration + ' с ' + JSON.stringify(r.warnings || [])); }
+            if (!jobs.length) console.log('монтажів після деплою a2cf2bd: нема');
+            const st = await q("select workspace_id, content from settings_block where key='montage_state'");
+            for (const s of st) { try { const m = JSON.parse(s.content); console.log('відкрита сесія монтажу ws ' + w8(s.workspace_id) + ': кліпів ' + (m.clips || []).length + (m.voice ? ', голос ' + m.voice.dur + ' с' : '') + ', востаннє ' + new Date(m.at).toISOString().slice(5, 16)); } catch { /* */ } }
             process.exit(0);
             EOF
             )
-            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -30
+            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -45
+            echo "--- консоль беті (tgbot/telegram), останні 12 год ---"
+            docker compose logs --since 12h app 2>&1 | grep -iE "\[(warn|error)\] (tgbot|telegram)" | tail -12 || true
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
