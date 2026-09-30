@@ -22,6 +22,9 @@ name: beta-check
 # його у Vary Servis через upload_media конектора (рішення Олега в картці holos-bot-brand).
 # Далі - бета після монтажу v3: версія, здоров'я, код у контейнері, колонка обкладинки, фільтри ffmpeg і проба
 # libass у тимчасовій теці контейнера (гачок-плашка, субтитри на плашці, шторка) - у базу й медіатеку не пише.
+# Далі - під примітки Олега в чек-листі 30.09: чи падає читання коментарів Threads (журнал), яка головна модель у
+# кабінетах (OpenRouter чи OpenAI), Vary Servis (пояс, бриф, канали Telegram), нові акаунти для рецензента Meta,
+# канали Telegram у брендах, чи є підключення YouTube/TikTok і чи задані їхні ключі (лише так/ні), тест сповіщень.
 
 on:
   push:
@@ -34,11 +37,11 @@ on:
         default: ""
 
 jobs:
-  check:
+  beta:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Beta after montage v3 - journal since deploy (read-only)
+      - name: beta - read-only facts for Oleg's checklist notes
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -50,19 +53,69 @@ jobs:
             cd "${{ secrets.APP_DIR }}-beta/server"
             echo "HEAD $(git -C .. rev-parse --short HEAD)"
             curl -s -o /dev/null -w "health %{http_code}\n" http://127.0.0.1:8081/health
+            docker compose exec -T app sh -c 'for v in TIKTOK_CLIENT_KEY TIKTOK_CLIENT_SECRET GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET THREADS_APP_ID; do eval "x=\${$v}"; if [ -n "$x" ]; then echo "$v: задано"; else echo "$v: нема"; fi; done'
             JS2=$(cat <<'EOF'
             const { q } = await import('/app/dist/db.js');
-            const r = await q("select created_at, level, scope, left(message, 170) as m from app_log where created_at > now() - interval '40 minutes' and level in ('warn','error') order by created_at desc limit 15");
-            for (const x of r) console.log(new Date(x.created_at).toISOString().slice(11, 19) + ' ' + x.level + ' ' + (x.scope || '-') + ': ' + x.m);
-            if (!r.length) console.log('warn/error: нічого');
-            const s = await q("select created_at, left(message, 170) as m from app_log where created_at > now() - interval '40 minutes' and level='info' and (message ilike '%сповіщення%' or message ilike '%бот%' or scope in ('boot','telegram','montage')) order by created_at desc limit 8");
-            for (const x of s) console.log('info ' + new Date(x.created_at).toISOString().slice(11, 19) + ' ' + x.m);
-            const oa = await q("select count(*)::int as n from ops_alert where resolved_at is null");
-            console.log('відкритих сповіщень: ' + oa[0].n);
+            const mask = (s) => String(s || '').replace(/([^@\s]{2})[^@\s]*@/g, '$1***@');
+            const t = (d) => d ? new Date(d).toISOString().slice(0, 16).replace('T', ' ') : '-';
+            const rows = async (title, sql) => { try { const r = await q(sql); console.log('--- ' + title + ' (' + r.length + ')'); for (const x of r) console.log('  ' + Object.entries(x).map(([k, v]) => k + '=' + (v instanceof Date ? t(v) : mask(typeof v === 'object' && v ? JSON.stringify(v) : v))).join(' | ')); } catch (e) { console.log('--- ' + title + ': ПОМИЛКА ' + e.message); } };
+            await rows('журнал: Threads/коментарі за 3 доби', "select created_at, level, scope, left(message, 200) as m from app_log where created_at > now() - interval '3 days' and (message ilike '%replies%' or message ilike '%threads_read%' or scope in ('inbox','comments') or message ilike '%коментар%') order by created_at desc limit 14");
+            await rows('головна модель кабінетів', "select coalesce(w.title, w.name) as brand, s.content as model, s.updated_at from settings_block s join workspace w on w.id = s.workspace_id where s.key = 'main_model' order by s.updated_at desc nulls last");
+            await rows('виклики AI за добу за моделлю', "select left(model, 48) as model, count(*)::int as n, round(sum(cost)::numeric, 4) as usd, max(created_at) as last from llm_usage where created_at > now() - interval '24 hours' group by 1 order by n desc limit 12");
+            await rows('запасний маршрут за добу (журнал)', "select created_at, left(message, 160) as m from app_log where created_at > now() - interval '24 hours' and (message ilike '%запасн%' or message ilike '%openrouter%') order by created_at desc limit 6");
+            await rows('нові акаунти за 3 доби', "select u.created_at, u.email, u.email_verified as verified, (select count(*)::int from workspace_member m where m.user_id = u.id) as brands, (select count(*)::int from meta_config mc where mc.workspace_id = u.workspace_id) as meta, (select mc.granted from meta_config mc where mc.workspace_id = u.workspace_id limit 1) as granted from app_user u where u.created_at > now() - interval '3 days' order by u.created_at desc limit 8");
+            await rows('Telegram у брендах: основні', "select coalesce(w.title, w.name) as brand, (tc.channel_chat_id is not null) as channel, tc.channel_username as chan, left(coalesce(tc.channel_title, ''), 40) as ch_title, (tc.group_chat_id is not null) as grp, (select count(*)::int from telegram_chat c where c.workspace_id = w.id) as extra from telegram_config tc join workspace w on w.id = tc.workspace_id order by tc.updated_at desc nulls last limit 10");
+            await rows('Telegram: додаткові канали', "select coalesce(w.title, w.name) as brand, left(coalesce(c.title, c.username, ''), 40) as title, c.username, c.added_at from telegram_chat c join workspace w on w.id = c.workspace_id order by c.added_at desc limit 10");
+            await rows('YouTube/TikTok підключення', "select 'youtube' as net, count(*)::int as n, max(created_at) as last from youtube_config union all select 'tiktok', count(*)::int, max(created_at) from tiktok_config union all select 'yt_pub', count(*)::int, max(created_at) from youtube_publish union all select 'tt_pub', count(*)::int, max(created_at) from tiktok_publish");
+            await rows('ключі з адмінки (лише назви)', "select name, updated_at from app_secret order by name");
+            await rows('сповіщення: тест і останні', "select first_at, last_at, kind, severity, left(title, 70) as title, notified_at, resolved_at from ops_alert order by last_at desc limit 6");
+            await rows('відповіді з вікна коментарів за 2 доби', "select network, action, count(*)::int as n, max(created_at) as last from comment_reply where created_at > now() - interval '2 days' group by 1, 2 order by 1, 2");
+
+            await rows('Vary Servis: пояс, бриф, канали', "select coalesce(w.title, w.name) as brand, (select content from settings_block s where s.workspace_id = w.id and s.key = 'timezone') as tz, (select length(content) from settings_block s where s.workspace_id = w.id and s.key = 'strategy_brief') as brief_len, (select left(content, 90) from settings_block s where s.workspace_id = w.id and s.key = 'strategy_brief') as brief_start, (select updated_at from settings_block s where s.workspace_id = w.id and s.key = 'strategy_brief') as brief_at, (select tc.channel_chat_id is not null from telegram_config tc where tc.workspace_id = w.id) as tg_channel, (select tc.group_chat_id is not null from telegram_config tc where tc.workspace_id = w.id) as tg_group, (select count(*)::int from telegram_chat c where c.workspace_id = w.id) as tg_extra from workspace w where coalesce(w.title, w.name) ilike '%vary%'");
+
             process.exit(0);
             EOF
             )
-            docker compose exec -T app node --input-type=module -e "$JS2" 2>&1 | tail -26
+            docker compose exec -T app node --input-type=module -e "$JS2" 2>&1 | tail -90
+
+  prod:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: prod - read-only facts for Oleg's checklist notes
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          command_timeout: 3m
+          script: |
+            echo "зараз $(date -u +%d.%m\ %H:%M) UTC"
+            cd "${{ secrets.APP_DIR }}/server"
+            echo "HEAD $(git -C .. rev-parse --short HEAD)"
+            curl -s -o /dev/null -w "health %{http_code}\n" http://127.0.0.1:8080/health
+            docker compose exec -T app sh -c 'for v in TIKTOK_CLIENT_KEY TIKTOK_CLIENT_SECRET GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET THREADS_APP_ID; do eval "x=\${$v}"; if [ -n "$x" ]; then echo "$v: задано"; else echo "$v: нема"; fi; done'
+            JS2=$(cat <<'EOF'
+            const { q } = await import('/app/dist/db.js');
+            const mask = (s) => String(s || '').replace(/([^@\s]{2})[^@\s]*@/g, '$1***@');
+            const t = (d) => d ? new Date(d).toISOString().slice(0, 16).replace('T', ' ') : '-';
+            const rows = async (title, sql) => { try { const r = await q(sql); console.log('--- ' + title + ' (' + r.length + ')'); for (const x of r) console.log('  ' + Object.entries(x).map(([k, v]) => k + '=' + (v instanceof Date ? t(v) : mask(typeof v === 'object' && v ? JSON.stringify(v) : v))).join(' | ')); } catch (e) { console.log('--- ' + title + ': ПОМИЛКА ' + e.message); } };
+            await rows('журнал: Threads/коментарі за 3 доби', "select created_at, level, scope, left(message, 200) as m from app_log where created_at > now() - interval '3 days' and (message ilike '%replies%' or message ilike '%threads_read%' or scope in ('inbox','comments') or message ilike '%коментар%') order by created_at desc limit 14");
+            await rows('головна модель кабінетів', "select coalesce(w.title, w.name) as brand, s.content as model, s.updated_at from settings_block s join workspace w on w.id = s.workspace_id where s.key = 'main_model' order by s.updated_at desc nulls last");
+            await rows('виклики AI за добу за моделлю', "select left(model, 48) as model, count(*)::int as n, round(sum(cost)::numeric, 4) as usd, max(created_at) as last from llm_usage where created_at > now() - interval '24 hours' group by 1 order by n desc limit 12");
+            await rows('запасний маршрут за добу (журнал)', "select created_at, left(message, 160) as m from app_log where created_at > now() - interval '24 hours' and (message ilike '%запасн%' or message ilike '%openrouter%') order by created_at desc limit 6");
+            await rows('нові акаунти за 3 доби', "select u.created_at, u.email, u.email_verified as verified, (select count(*)::int from workspace_member m where m.user_id = u.id) as brands, (select count(*)::int from meta_config mc where mc.workspace_id = u.workspace_id) as meta, (select mc.granted from meta_config mc where mc.workspace_id = u.workspace_id limit 1) as granted from app_user u where u.created_at > now() - interval '3 days' order by u.created_at desc limit 8");
+            await rows('Telegram у брендах: основні', "select coalesce(w.title, w.name) as brand, (tc.channel_chat_id is not null) as channel, tc.channel_username as chan, left(coalesce(tc.channel_title, ''), 40) as ch_title, (tc.group_chat_id is not null) as grp, (select count(*)::int from telegram_chat c where c.workspace_id = w.id) as extra from telegram_config tc join workspace w on w.id = tc.workspace_id order by tc.updated_at desc nulls last limit 10");
+            await rows('Telegram: додаткові канали', "select coalesce(w.title, w.name) as brand, left(coalesce(c.title, c.username, ''), 40) as title, c.username, c.added_at from telegram_chat c join workspace w on w.id = c.workspace_id order by c.added_at desc limit 10");
+            await rows('YouTube/TikTok підключення', "select 'youtube' as net, count(*)::int as n, max(created_at) as last from youtube_config union all select 'tiktok', count(*)::int, max(created_at) from tiktok_config union all select 'yt_pub', count(*)::int, max(created_at) from youtube_publish union all select 'tt_pub', count(*)::int, max(created_at) from tiktok_publish");
+            await rows('ключі з адмінки (лише назви)', "select name, updated_at from app_secret order by name");
+            await rows('сповіщення: тест і останні', "select first_at, last_at, kind, severity, left(title, 70) as title, notified_at, resolved_at from ops_alert order by last_at desc limit 6");
+            await rows('відповіді з вікна коментарів за 2 доби', "select network, action, count(*)::int as n, max(created_at) as last from comment_reply where created_at > now() - interval '2 days' group by 1, 2 order by 1, 2");
+
+            process.exit(0);
+            EOF
+            )
+            docker compose exec -T app node --input-type=module -e "$JS2" 2>&1 | tail -90
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
