@@ -26,6 +26,8 @@ name: beta-check
 # кабінетах (OpenRouter чи OpenAI), Vary Servis (пояс, бриф, канали Telegram), нові акаунти для рецензента Meta,
 # канали Telegram у брендах, чи є підключення YouTube/TikTok і чи задані їхні ключі (лише так/ні), тест сповіщень.
 # Далі - після хотфіксу 761d958 (прод: політика й умови) і 3150429 (бета): сторінки, код у контейнері, тривоги й журнал.
+# Далі - бета після коментарів у боті: версія, здоров'я, код у контейнері, таблиця comment_notice (скільки рядків за
+# станом - чи пройшов перший прохід воркера), команди бота (getMyCommands), warn/error журналу. Нічого не пише.
 
 on:
   push:
@@ -38,59 +40,51 @@ on:
         default: ""
 
 jobs:
-  prod:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - name: prod after legal hotfix 761d958 (read-only)
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.HETZNER_HOST }}
-          username: ${{ secrets.HETZNER_USER }}
-          key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 3m
-          script: |
-            echo "зараз $(date -u +%d.%m\ %H:%M) UTC"
-            cd "${{ secrets.APP_DIR }}/server"
-            echo "HEAD $(git -C .. rev-parse --short HEAD)"
-            curl -s -o /dev/null -w "health %{http_code}\n" http://127.0.0.1:8080/health
-            for pth in privacy terms data-deletion; do
-              b=$(curl -s -H "Host: holos.rozum.one" -H "X-Forwarded-Proto: https" http://127.0.0.1:8080/$pth)
-              echo "/$pth: $(printf %s "$b" | wc -c) байт · Swipe Scape: $(printf %s "$b" | grep -c 'Swipe Scape s.r.o.') · IČO: $(printf %s "$b" | grep -c '22269134') · YouTube API Services: $(printf %s "$b" | grep -c 'YouTube API Services') · youtube.com/t/terms: $(printf %s "$b" | grep -c 'youtube.com/t/terms') · security.google.com: $(printf %s "$b" | grep -c 'security.google.com/settings/security/permissions') · TikTok: $(printf %s "$b" | grep -c 'TikTok') · privacy@: $(printf %s "$b" | grep -c 'privacy@swipescape.eu') · стара пошта: $(printf %s "$b" | grep -c 'o.stepeniev@')"
-            done
-            curl -s -o /dev/null -w "стара адреса /privacy → %{http_code} %{redirect_url}\n" -H "Host: socialio.rozum.one" -H "X-Forwarded-Proto: https" http://127.0.0.1:8080/privacy
-
   beta:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: beta after 3150429 (read-only)
+      - name: beta after comments-in-bot (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 3m
+          command_timeout: 6m
           script: |
-            echo "зараз $(date -u +%d.%m\ %H:%M) UTC"
             cd "${{ secrets.APP_DIR }}-beta/server"
+            # перший прохід воркера - за 90 с після старту: чекаємо, поки контейнер проживе 150 с (до 4 хв)
+            for i in $(seq 1 48); do
+              up=$(( $(date +%s) - $(date -d "$(docker inspect -f '{{.State.StartedAt}}' $(docker compose ps -q app))" +%s) ))
+              [ "$up" -ge 150 ] && break; sleep 5
+            done
+            echo "зараз $(date -u +%d.%m\ %H:%M) UTC · контейнер живе ${up} с"
             echo "HEAD $(git -C .. rev-parse --short HEAD)"
             curl -s -o /dev/null -w "health %{http_code}\n" http://127.0.0.1:8081/health
-            docker compose exec -T app sh -c 'echo "threads_read_replies у вході: $(grep -c threads_read_replies dist/server.js)"; echo "«＋ Додати канал чи групу» у боті: $(grep -c "Додати канал чи групу" dist/tgcompose.js)"; echo "нові кабінети - посилання: $(grep -c NEW_WORKSPACE_SETTINGS dist/auth.js)"; echo "проба OpenRouter лише для користувачів: $(grep -c "баланс не стежимо" dist/alerts.js)"'
+            docker compose exec -T app sh -c 'echo "воркер коментарів: $(grep -c startCommentNotify dist/server.js) · картка: $(grep -c "cm:r:" dist/tgcomments.js) · кнопка меню: $(grep -c "💬 Коменти" dist/tgbot.js) · у зведенні: $(grep -c pendingCount dist/digest.js) · ключі TikTok/LinkedIn з адмінки: $(grep -c TIKTOK_CLIENT_KEY dist/secrets.js)/$(grep -c LINKEDIN_CLIENT_ID dist/secrets.js)"; echo "кабінет: 💬 угорі $(grep -c topComments public/app.html) · галочка $(grep -c cmBotOn public/app.js)"'
             JS2=$(cat <<'EOF'
             const { q } = await import('/app/dist/db.js');
             const mask = (s) => String(s ?? '').replace(/([^@\s]{2})[^@\s]*@/g, '$1***@');
-            const mm = await q("select distinct content from settings_block where key='main_model'");
-            console.log('головні моделі на беті: ' + (mm.map((x) => x.content).join(', ') || '-'));
-            const al = await q("select fp, severity, count, last_at, resolved_at from ops_alert where fp like '%OpenRouter%' order by last_at desc limit 3");
-            for (const a of al) console.log('тривога ' + a.fp + ' · ' + a.severity + ' ×' + a.count + ' · востаннє ' + new Date(a.last_at).toISOString().slice(0, 16) + ' · ' + (a.resolved_at ? 'закрита ' + new Date(a.resolved_at).toISOString().slice(0, 16) : 'відкрита'));
-            const w = await q("select created_at, level, scope, left(message, 170) as m from app_log where created_at > now() - interval '15 minutes' and level in ('warn','error') order by created_at desc limit 8");
+            const t = await q("select to_regclass('comment_notice') is not null ok");
+            console.log('таблиця comment_notice: ' + t[0].ok);
+            const st = await q("select status, count(*)::int n, count(distinct workspace_id)::int ws, count(distinct tg_user_id)::int ppl from comment_notice group by 1 order by 1");
+            console.log('сповіщення: ' + (st.map((x) => x.status + ' ' + x.n + ' (брендів ' + x.ws + ', людей ' + x.ppl + ')').join(' · ') || 'нема рядків'));
+            const seen = await q("select count(*)::int n from settings_block where key like 'comment_seen:%'");
+            console.log('перше знайомство пройдено: ' + seen[0].n + ' раз (людина × бренд)');
+            const off = await q("select count(*)::int n from settings_block where key='comment_notify' and content='off'");
+            console.log('бренди з вимкненими сповіщеннями: ' + off[0].n);
+            const sec = (await q("select value from app_secret where name='TELEGRAM_BOT_TOKEN'"))[0]?.value || process.env.TELEGRAM_BOT_TOKEN || '';
+            const r = await fetch('https://api.telegram.org/bot' + sec + '/getMyCommands').then((x) => x.json()).catch((e) => ({ err: e.message }));
+            console.log('команди бота: ' + (r.result || []).map((c) => '/' + c.command).join(' ') + (r.ok ? '' : ' (не прочиталось)'));
+            const lm = await q("select count(*)::int n, max(created_at) at from tg_message where category='comments'");
+            console.log('живих повідомлень «comments»: ' + lm[0].n + (lm[0].at ? ', останнє ' + new Date(lm[0].at).toISOString().slice(11, 19) + ' UTC' : ''));
+            const w = await q("select created_at, level, scope, left(message, 170) as m from app_log where created_at > now() - interval '20 minutes' and level in ('warn','error') order by created_at desc limit 10");
             for (const x of w) console.log(new Date(x.created_at).toISOString().slice(11, 19) + ' ' + x.level + ' ' + (x.scope || '-') + ': ' + mask(x.m));
-            if (!w.length) console.log('warn/error за 15 хв: нічого');
+            if (!w.length) console.log('warn/error за 20 хв: нічого');
             process.exit(0);
             EOF
             )
-            docker compose exec -T app node --input-type=module -e "$JS2" 2>&1 | tail -20
+            docker compose exec -T app node --input-type=module -e "$JS2" 2>&1 | tail -25
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
