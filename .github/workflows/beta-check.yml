@@ -31,6 +31,9 @@ name: beta-check
 # Далі - бета після YouTube і TikTok як мереж: версія, здоров'я, код у контейнері, представлення post_published і
 # унікальні індекси «раз на пост», нові колонки, чи задано ключі Google/TikTok (лише так/ні), підключення й
 # публікації YouTube/TikTok (лише кількості), warn/error журналу. Нічого не пише.
+# Далі - бета після TikTok-перевірки (англійський режим ?review=tiktok, блок TikTok словами TikTok, «Новий пост»):
+# версія, здоров'я, код у контейнері, колонка аватара, чи задано ключі TikTok і чи це sandbox (лише так/ні),
+# підключення TikTok (кількість), warn/error журналу. Нічого не пише.
 
 on:
   push:
@@ -47,7 +50,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: beta after youtube+tiktok networks (read-only)
+      - name: beta after tiktok review path (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -63,22 +66,22 @@ jobs:
             echo "зараз $(date -u +%d.%m\ %H:%M) UTC · контейнер живе ${up} с"
             echo "HEAD $(git -C .. rev-parse --short HEAD)"
             curl -s -o /dev/null -w "health %{http_code}\n" http://127.0.0.1:8081/health
-            docker compose exec -T app sh -c 'echo "код: сторож TikTok $(grep -c tiktokWatchTick dist/vidpub.js) · публікатор $(grep -c sendTikTok dist/publisher.js)/$(grep -c sendYouTube dist/publisher.js) · post_published у server $(grep -c post_published dist/server.js) · бот ctt/cyt/cal $(grep -c "ctt:" dist/tgcompose.js)/$(grep -c "cyt:" dist/tgcompose.js)/$(grep -c "cal:" dist/tgcompose.js) · конектор all_networks $(grep -c all_networks dist/mcp.js)"; echo "кабінет: блоки $(grep -c cmpYtBox public/app.js)/$(grep -c cmpTtBox public/app.js) · «в усі мережі» $(grep -c "В усі мережі" public/app.js) · Mini App vnets $(grep -c VNETS public/tgapp.html)"'
+            curl -s -o /dev/null -w "сторінка входу %{http_code}\n" http://127.0.0.1:8081/login
+            docker compose exec -T app sh -c 'echo "кабінет: словник EN $(grep -c "const I18N_EN" public/app.js) · «Posting to TikTok as» $(grep -c "Posting to TikTok as" public/app.js) · смуга TikTok $(grep -c REVIEW_TXT_TT public/app.js) · «Новий пост» $(grep -c "id=\"newPost\"" public/app.html) · перечитування обробки $(grep -c watchProcessing public/app.js)"; echo "сервер: /posts/blank $(grep -c "/api/posts/blank" dist/server.js) · аватар $(grep -c avatar_url dist/server.js) · sandbox $(grep -c "sandbox:" dist/server.js) · підпис TikTok без моделі $(grep -c "k !== \"tiktok\"" dist/publisher.js) · бот 🚫 співпраця $(grep -c "Брендований контент не може" dist/tgcompose.js)"'
+            echo "у репозиторії на сервері: $(ls ../tiktok-review 2>/dev/null | tr '\n' ' ')"
             JS2=$(cat <<'EOF'
             const { q } = await import('/app/dist/db.js');
             const mask = (s) => String(s ?? '').replace(/([^@\s]{2})[^@\s]*@/g, '$1***@');
-            const v = await q("select to_regclass('post_published') is not null ok");
-            console.log('представлення post_published: ' + v[0].ok);
-            const pp = await q("select net, count(*)::int n from post_published group by 1 order by 1");
-            console.log('публікацій за мережами: ' + pp.map((x) => x.net + ' ' + x.n).join(' · '));
-            const ix = await q("select indexname from pg_indexes where indexname in ('uq_ytpub_post','uq_ttpub_post','idx_ttpub_watch') order by 1");
-            console.log('індекси: ' + ix.map((x) => x.indexname).join(', '));
-            const cols = await q("select table_name||'.'||column_name c from information_schema.columns where (table_name='tiktok_publish' and column_name in ('mode','tt_status','video_id','check_at','checks','permalink')) or (table_name='tiktok_config' and column_name in ('username','scopes')) or (table_name='youtube_publish' and column_name in ('permalink','privacy')) or (table_name='youtube_config' and column_name='channel_id') order by 1");
-            console.log('нові колонки: ' + cols.length + ' з 11');
-            const has = async (k) => !!(process.env[k] || (await q("select 1 from app_secret where name=$1", [k])).length);
-            console.log('ключі (так/ні): Google ' + (await has('GOOGLE_CLIENT_ID')) + ' · TikTok ' + (await has('TIKTOK_CLIENT_KEY')) + ' · TIKTOK_SCOPES задано ' + (await has('TIKTOK_SCOPES')));
-            const c = await q("select (select count(*)::int from youtube_config) yt, (select count(*)::int from tiktok_config) tt, (select count(*)::int from youtube_publish) ytp, (select count(*)::int from tiktok_publish) ttp, (select count(*)::int from tiktok_publish where status='processing') proc");
-            console.log('YouTube підключено: ' + c[0].yt + ' · TikTok: ' + c[0].tt + ' · публікацій YouTube ' + c[0].ytp + ' · TikTok ' + c[0].ttp + ' (обробляються ' + c[0].proc + ')');
+            const col = await q("select count(*)::int n from information_schema.columns where table_name='tiktok_config' and column_name='avatar_url'");
+            console.log('tiktok_config.avatar_url: ' + (col[0].n === 1));
+            // лише так/ні: значення ключів не виходять із бази (префікс sandbox перевіряє сам Postgres)
+            const sec = async (k) => { const r = (await q("select true as set, value ~* '^sb' as sb from app_secret where name=$1", [k]))[0]; return r ? r : { set: !!process.env[k], sb: /^sb/i.test(process.env[k] || '') }; };
+            const key = await sec('TIKTOK_CLIENT_KEY'), secret = await sec('TIKTOK_CLIENT_SECRET');
+            console.log('ключі TikTok (так/ні): key ' + key.set + ' · secret ' + secret.set + ' · sandbox ' + key.sb);
+            const c = await q("select (select count(*)::int from tiktok_config) tt, (select count(*)::int from tiktok_config where avatar_url is not null) av, (select count(*)::int from tiktok_publish) ttp");
+            console.log('TikTok підключено: ' + c[0].tt + ' (з аватаром ' + c[0].av + ') · публікацій TikTok ' + c[0].ttp);
+            const bl = await q("select count(*)::int n from source where origin='manual' and archived and transcript='' and title like '%Новий пост%'");
+            console.log('службових джерел «Новий пост»: ' + bl[0].n);
             const w = await q("select created_at, level, scope, left(message, 170) as m from app_log where created_at > now() - interval '20 minutes' and level in ('warn','error') order by created_at desc limit 10");
             for (const x of w) console.log(new Date(x.created_at).toISOString().slice(11, 19) + ' ' + x.level + ' ' + (x.scope || '-') + ': ' + mask(x.m));
             if (!w.length) console.log('warn/error за 20 хв: нічого');
