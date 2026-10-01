@@ -28,6 +28,9 @@ name: beta-check
 # Далі - після хотфіксу 761d958 (прод: політика й умови) і 3150429 (бета): сторінки, код у контейнері, тривоги й журнал.
 # Далі - бета після коментарів у боті: версія, здоров'я, код у контейнері, таблиця comment_notice (скільки рядків за
 # станом - чи пройшов перший прохід воркера), команди бота (getMyCommands), warn/error журналу. Нічого не пише.
+# Далі - бета після YouTube і TikTok як мереж: версія, здоров'я, код у контейнері, представлення post_published і
+# унікальні індекси «раз на пост», нові колонки, чи задано ключі Google/TikTok (лише так/ні), підключення й
+# публікації YouTube/TikTok (лише кількості), warn/error журналу. Нічого не пише.
 
 on:
   push:
@@ -44,7 +47,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: beta after comments-in-bot (read-only)
+      - name: beta after youtube+tiktok networks (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -53,31 +56,29 @@ jobs:
           command_timeout: 6m
           script: |
             cd "${{ secrets.APP_DIR }}-beta/server"
-            # перший прохід воркера - за 90 с після старту: чекаємо, поки контейнер проживе 150 с (до 4 хв)
-            for i in $(seq 1 48); do
+            for i in $(seq 1 24); do
               up=$(( $(date +%s) - $(date -d "$(docker inspect -f '{{.State.StartedAt}}' $(docker compose ps -q app))" +%s) ))
-              [ "$up" -ge 150 ] && break; sleep 5
+              [ "$up" -ge 90 ] && break; sleep 5
             done
             echo "зараз $(date -u +%d.%m\ %H:%M) UTC · контейнер живе ${up} с"
             echo "HEAD $(git -C .. rev-parse --short HEAD)"
             curl -s -o /dev/null -w "health %{http_code}\n" http://127.0.0.1:8081/health
-            docker compose exec -T app sh -c 'echo "воркер коментарів: $(grep -c startCommentNotify dist/server.js) · картка: $(grep -c "cm:r:" dist/tgcomments.js) · кнопка меню: $(grep -c "💬 Коменти" dist/tgbot.js) · у зведенні: $(grep -c pendingCount dist/digest.js) · ключі TikTok/LinkedIn з адмінки: $(grep -c TIKTOK_CLIENT_KEY dist/secrets.js)/$(grep -c LINKEDIN_CLIENT_ID dist/secrets.js)"; echo "кабінет: 💬 угорі $(grep -c topComments public/app.html) · галочка $(grep -c cmBotOn public/app.js)"'
+            docker compose exec -T app sh -c 'echo "код: сторож TikTok $(grep -c tiktokWatchTick dist/vidpub.js) · публікатор $(grep -c sendTikTok dist/publisher.js)/$(grep -c sendYouTube dist/publisher.js) · post_published у server $(grep -c post_published dist/server.js) · бот ctt/cyt/cal $(grep -c "ctt:" dist/tgcompose.js)/$(grep -c "cyt:" dist/tgcompose.js)/$(grep -c "cal:" dist/tgcompose.js) · конектор all_networks $(grep -c all_networks dist/mcp.js)"; echo "кабінет: блоки $(grep -c cmpYtBox public/app.js)/$(grep -c cmpTtBox public/app.js) · «в усі мережі» $(grep -c "В усі мережі" public/app.js) · Mini App vnets $(grep -c VNETS public/tgapp.html)"'
             JS2=$(cat <<'EOF'
             const { q } = await import('/app/dist/db.js');
             const mask = (s) => String(s ?? '').replace(/([^@\s]{2})[^@\s]*@/g, '$1***@');
-            const t = await q("select to_regclass('comment_notice') is not null ok");
-            console.log('таблиця comment_notice: ' + t[0].ok);
-            const st = await q("select status, count(*)::int n, count(distinct workspace_id)::int ws, count(distinct tg_user_id)::int ppl from comment_notice group by 1 order by 1");
-            console.log('сповіщення: ' + (st.map((x) => x.status + ' ' + x.n + ' (брендів ' + x.ws + ', людей ' + x.ppl + ')').join(' · ') || 'нема рядків'));
-            const seen = await q("select count(*)::int n from settings_block where key like 'comment_seen:%'");
-            console.log('перше знайомство пройдено: ' + seen[0].n + ' раз (людина × бренд)');
-            const off = await q("select count(*)::int n from settings_block where key='comment_notify' and content='off'");
-            console.log('бренди з вимкненими сповіщеннями: ' + off[0].n);
-            const sec = (await q("select value from app_secret where name='TELEGRAM_BOT_TOKEN'"))[0]?.value || process.env.TELEGRAM_BOT_TOKEN || '';
-            const r = await fetch('https://api.telegram.org/bot' + sec + '/getMyCommands').then((x) => x.json()).catch((e) => ({ err: e.message }));
-            console.log('команди бота: ' + (r.result || []).map((c) => '/' + c.command).join(' ') + (r.ok ? '' : ' (не прочиталось)'));
-            const lm = await q("select count(*)::int n, max(updated_at) at from tg_message where category like 'comments%'");
-            console.log('живих повідомлень «comments»: ' + lm[0].n + (lm[0].at ? ', останнє ' + new Date(lm[0].at).toISOString().slice(11, 19) + ' UTC' : ''));
+            const v = await q("select to_regclass('post_published') is not null ok");
+            console.log('представлення post_published: ' + v[0].ok);
+            const pp = await q("select net, count(*)::int n from post_published group by 1 order by 1");
+            console.log('публікацій за мережами: ' + pp.map((x) => x.net + ' ' + x.n).join(' · '));
+            const ix = await q("select indexname from pg_indexes where indexname in ('uq_ytpub_post','uq_ttpub_post','idx_ttpub_watch') order by 1");
+            console.log('індекси: ' + ix.map((x) => x.indexname).join(', '));
+            const cols = await q("select table_name||'.'||column_name c from information_schema.columns where (table_name='tiktok_publish' and column_name in ('mode','tt_status','video_id','check_at','checks','permalink')) or (table_name='tiktok_config' and column_name in ('username','scopes')) or (table_name='youtube_publish' and column_name in ('permalink','privacy')) or (table_name='youtube_config' and column_name='channel_id') order by 1");
+            console.log('нові колонки: ' + cols.length + ' з 11');
+            const has = async (k) => !!(process.env[k] || (await q("select 1 from app_secret where name=$1", [k])).length);
+            console.log('ключі (так/ні): Google ' + (await has('GOOGLE_CLIENT_ID')) + ' · TikTok ' + (await has('TIKTOK_CLIENT_KEY')) + ' · TIKTOK_SCOPES задано ' + (await has('TIKTOK_SCOPES')));
+            const c = await q("select (select count(*)::int from youtube_config) yt, (select count(*)::int from tiktok_config) tt, (select count(*)::int from youtube_publish) ytp, (select count(*)::int from tiktok_publish) ttp, (select count(*)::int from tiktok_publish where status='processing') proc");
+            console.log('YouTube підключено: ' + c[0].yt + ' · TikTok: ' + c[0].tt + ' · публікацій YouTube ' + c[0].ytp + ' · TikTok ' + c[0].ttp + ' (обробляються ' + c[0].proc + ')');
             const w = await q("select created_at, level, scope, left(message, 170) as m from app_log where created_at > now() - interval '20 minutes' and level in ('warn','error') order by created_at desc limit 10");
             for (const x of w) console.log(new Date(x.created_at).toISOString().slice(11, 19) + ' ' + x.level + ' ' + (x.scope || '-') + ': ' + mask(x.m));
             if (!w.length) console.log('warn/error за 20 хв: нічого');
@@ -85,6 +86,7 @@ jobs:
             EOF
             )
             docker compose exec -T app node --input-type=module -e "$JS2" 2>&1 | head -40
+            docker compose logs --since 15m app 2>&1 | grep -E "TypeError|ReferenceError|Unhandled|migrate|міграц" | head -10 || true
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
