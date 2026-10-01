@@ -8,6 +8,8 @@ import { logEvent } from "./log.js";
 import * as threads from "./threads.js";
 import * as meta from "./meta.js";
 import * as tg from "./telegram.js";
+import * as youtube from "./youtube.js";
+import { ytToken } from "./vidpub.js";
 import { threadsAccounts, threadsToken, metaPages, threadsAccountForRow, metaAccountForRow, accountChoices, mainAccountIds, telegramTargets, MULTI_NETS, isMultiNet, type Picked, type MetaPage, type ThreadsLogin } from "./accounts.js";
 import { buildAnalytics, MATURE_H, type PubRow, type FollowerRow } from "./analytics.js";
 import { bestTimes, BT_DAYS, type BestTime } from "./besttime.js";
@@ -121,11 +123,12 @@ async function saveFailure(postId: string, network: string, account: string, err
 // висів би добу як «0 переглядів». 5 год, а не 6 - запас, щоб прохід не пропускав пост через секунди.
 const YOUNG_EVERY_H = 5;
 type StaleRow = { post_id: string; ext: string; account_id: string | null; account_name: string | null };
-async function staleRows(ws: string, network: "threads" | "instagram" | "facebook", minAgeH = 24): Promise<StaleRow[]> {
+async function staleRows(ws: string, network: "threads" | "instagram" | "facebook" | "youtube", minAgeH = 24): Promise<StaleRow[]> {
   return q<StaleRow>(
     `select x.post_id, x.ext, x.account_id, x.account_name from (
          select post_id, media_id as ext, created_at, account_id, account_name from threads_publish where status='sent' and $2='threads'
          union all select post_id, external_id, created_at, account_id, account_name from meta_publish where status='sent' and channel=$2
+         union all select post_id, external_id, created_at, null, null from youtube_publish where status='sent' and $2='youtube'
        ) x
        join post p on p.id=x.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
        left join post_metric pm on pm.post_id=x.post_id and pm.network=$2 and pm.account=coalesce(x.account_id,'')
@@ -246,6 +249,25 @@ async function collectFacebook(ws: string, minAgeH: number): Promise<number> {
   return n;
 }
 
+// 🎬 YouTube: перегляди, лайки, коментарі - до 50 відео одним запитом (1 одиниця квоти YouTube на 50 відео)
+async function collectYouTube(ws: string, minAgeH: number): Promise<number> {
+  const rows = await staleRows(ws, "youtube", minAgeH);
+  if (!rows.length) return 0;
+  let token: string;
+  try { token = await ytToken(ws); } catch { return 0; } // YouTube відключили - нема кого питати
+  let stats: Awaited<ReturnType<typeof youtube.videoStats>>;
+  try { stats = await youtube.videoStats(token, rows.map((r) => r.ext)); }
+  catch (e: any) { for (const r of rows) await saveFailure(r.post_id, "youtube", "", e?.message); return 0; }
+  let n = 0;
+  for (const r of rows) {
+    const v = stats[r.ext];
+    if (!v) { await saveFailure(r.post_id, "youtube", "", "YouTube не знаходить відео (видалене чи приватне)"); continue; }
+    await saveMetric(r.post_id, "youtube", "", { views: v.views, likes: v.likes, replies: v.comments });
+    n++;
+  }
+  return n;
+}
+
 async function wsTimezone(ws: string): Promise<string> {
   const r = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='timezone'`, [ws]);
   const tz = (r?.content || "").trim() || "Europe/Kyiv";
@@ -273,6 +295,10 @@ export async function snapshotFollowers(ws: string): Promise<number> {
     if (p.igUserId) { try { await put("instagram", p.igUserId, (await meta.igStats(p.igUserId, p.pageToken)).followers_count); } catch { /* ignore */ } }
     try { const s = await meta.pageStats(p.pageId, p.pageToken); await put("facebook", p.pageId, s.followers_count ?? s.fan_count); } catch { /* ignore */ }
   }
+  // YouTube - підписники каналу (якщо автор їх не приховав)
+  if (await one(`select 1 from youtube_config where workspace_id=$1`, [ws])) {
+    try { await put("youtube", "", (await youtube.myChannel(await ytToken(ws))).subscribers); } catch { /* токен відкликали */ }
+  }
   // Telegram - кожен канал і група бренду окремо (їх може бути кілька)
   const tgt = await telegramTargets(ws);
   if (tgt.token) for (const t of tgt.targets) {
@@ -288,6 +314,7 @@ export async function collectWorkspace(ws: string, minAgeH = 24): Promise<{ post
   n += await collectThreads(ws, minAgeH);
   n += await collectInstagram(ws, minAgeH);
   n += await collectFacebook(ws, minAgeH);
+  n += await collectYouTube(ws, minAgeH);
   const followers = await snapshotFollowers(ws);
   return { posts: n, followers };
 }
@@ -296,6 +323,7 @@ async function tick(): Promise<void> {
   const wss = await q<{ workspace_id: string }>(
     `select workspace_id from threads_config where access_token is not null
      union select workspace_id from meta_config where page_token is not null
+     union select workspace_id from youtube_config where access_token is not null
      union select workspace_id from telegram_config where bot_token is not null and coalesce(channel_chat_id, group_chat_id) is not null`);
   for (const w of wss) {
     try { await collectWorkspace(w.workspace_id); }
@@ -379,6 +407,8 @@ export async function analyticsFor(ws: string, days: number, net = "all") {
          union all select post_id, 'threads', created_at, permalink, account_id, account_name from threads_publish where status='sent'
          union all select post_id, channel, created_at, permalink, account_id, account_name from meta_publish where status='sent'
          union all select post_id, 'linkedin', created_at, permalink, null, null from linkedin_publish where status='sent'
+         union all select post_id, 'youtube', created_at, permalink, null, null from youtube_publish where status='sent'
+         union all select post_id, 'tiktok', created_at, permalink, null, null from tiktok_publish where status in ('sent','processing')
        ) x
        join post p on p.id=x.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
        left join media_asset ma on ma.id=p.media_id
@@ -408,11 +438,13 @@ export async function analyticsFor(ws: string, days: number, net = "all") {
   }
   for (const f of followers)
     f.label = nameOf.get(`${f.network}:${f.account || ""}`) || (f.account && isMultiNet(f.network) ? unknownName(f.network, f.account) : undefined);
-  const connected = await one<{ threads: boolean; meta: boolean; telegram: boolean; linkedin: boolean }>(
+  const connected = await one<{ threads: boolean; meta: boolean; telegram: boolean; linkedin: boolean; youtube: boolean; tiktok: boolean }>(
     `select exists(select 1 from threads_config where workspace_id=$1 and access_token is not null) as threads,
             exists(select 1 from meta_config where workspace_id=$1 and page_token is not null) as meta,
             exists(select 1 from telegram_config where workspace_id=$1 and bot_token is not null and coalesce(channel_chat_id, group_chat_id) is not null) as telegram,
-            exists(select 1 from linkedin_config where workspace_id=$1 and access_token is not null) as linkedin`, [ws]);
+            exists(select 1 from linkedin_config where workspace_id=$1 and access_token is not null) as linkedin,
+            exists(select 1 from youtube_config where workspace_id=$1) as youtube,
+            exists(select 1 from tiktok_config where workspace_id=$1) as tiktok`, [ws]);
   // акаунти для фільтра - лише мережі, де їх у бренді кілька (з одним фільтр «мережа» і так точний)
   const accounts: { key: string; net: string; name: string }[] = [];
   for (const net of MULTI_NETS) {

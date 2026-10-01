@@ -14,15 +14,17 @@ let ChanStatus={};             // підключені мережі {net:true}
 let ThStrat={};                // threads_strategy JSON {thread,cta_min,takes}
 let Pub={ bank: [], slots: [] };   // банк затверджених + слоти календаря
 let obVoiceImported=false;     // онбординг: чи вже тягнули голос з IG
-const NETS=[['telegram','Telegram'],['instagram','Instagram'],['facebook','Facebook'],['threads','Threads'],['linkedin','LinkedIn']];
+const NETS=[['telegram','Telegram'],['instagram','Instagram'],['facebook','Facebook'],['threads','Threads'],['linkedin','LinkedIn'],['youtube','YouTube'],['tiktok','TikTok']];
+// 🎬 мережі лише для відео: текстовому чи фото-посту їх не пропонуємо (публікація все одно відмовила б)
+const VIDEO_NETS=['youtube','tiktok'];
 // 🎨 формат контент-одиниці: третій вимір поруч із рубрикою (про що) і каналом (куди)
 const FMT_META={post:['📝','Пост','звичайний текстовий пост'],carousel:['🖼','Карусель','кілька слайдів, які читач перегортає - найкраще збирає збереження'],reel:['🎬','Рілс','короткий вертикальний відео-сценарій - найкраще охоплення'],story:['⚡','Сторіс','ефемерний кадр на 24 години']};
 const FMT_KEYS=['post','carousel','reel','story'];
-const NETVAR={telegram:'--tg',instagram:'--ig',facebook:'--fb',threads:'--th',linkedin:'--li'};
+const NETVAR={telegram:'--tg',instagram:'--ig',facebook:'--fb',threads:'--th',linkedin:'--li',youtube:'--yt',tiktok:'--tt'};
 // 💬 перший коментар: куди він іде і межа довжини в мережі (відповідь у Threads - такий самий пост на 500)
 const FC_NETS=['instagram','facebook','linkedin','threads'];
 const FC_MAX={instagram:2200,facebook:8000,linkedin:1250,threads:500};
-const NETICON={telegram:'M22 4L2 11l6 2 2 6 3-4 5 4 4-15z',instagram:'M7 3h10a4 4 0 014 4v10a4 4 0 01-4 4H7a4 4 0 01-4-4V7a4 4 0 014-4zm5 5a4 4 0 100 8 4 4 0 000-8z',facebook:'M14 9V7c0-1 .5-1.5 1.5-1.5H17V2h-3c-2.5 0-4 1.5-4 4v3H7v3h3v9h4v-9h3l.5-3H14z',threads:'M12 3c5 0 8 3 8 9s-3 9-8 9-8-3-8-9c0-2 .5-3.5 1.5-4.5',linkedin:'M4 4h4v16H4V4zm2-1a2 2 0 110-4 2 2 0 010 4zm5 5h4v2c.8-1.3 2.2-2.3 4-2.3 3 0 5 2 5 5.3V20h-4v-8c0-1.5-.8-2.5-2-2.5s-2 1-2 2.5v8h-5V8z'};
+const NETICON={telegram:'M22 4L2 11l6 2 2 6 3-4 5 4 4-15z',instagram:'M7 3h10a4 4 0 014 4v10a4 4 0 01-4 4H7a4 4 0 01-4-4V7a4 4 0 014-4zm5 5a4 4 0 100 8 4 4 0 000-8z',facebook:'M14 9V7c0-1 .5-1.5 1.5-1.5H17V2h-3c-2.5 0-4 1.5-4 4v3H7v3h3v9h4v-9h3l.5-3H14z',threads:'M12 3c5 0 8 3 8 9s-3 9-8 9-8-3-8-9c0-2 .5-3.5 1.5-4.5',linkedin:'M4 4h4v16H4V4zm2-1a2 2 0 110-4 2 2 0 010 4zm5 5h4v2c.8-1.3 2.2-2.3 4-2.3 3 0 5 2 5 5.3V20h-4v-8c0-1.5-.8-2.5-2-2.5s-2 1-2 2.5v8h-5V8z',youtube:'M12 4c7 0 9 1 9 8s-2 8-9 8-9-1-9-8 2-8 9-8zm-2 4.5v7l6-3.5-6-3.5z',tiktok:'M16 3c.4 2.6 2 4.2 4.6 4.5v3c-1.8 0-3.4-.6-4.6-1.5v6.8c0 3.9-2.8 6.2-6.1 6.2A5.9 5.9 0 013 16.2c0-3.5 2.7-6 6.4-5.8v3.1c-1.8-.3-3.3.8-3.3 2.6 0 1.7 1.3 2.9 2.9 2.9 1.8 0 3-1.3 3-3.3V3h4z'};
 const CP_LABEL={telegram:'Telegram',instagram:'Instagram',threads:'Threads',facebook:'Facebook'};
 const STEP  = {1:'extract_ideas',3:'drafts',4:'tone',5:'format',6:'deai',7:'strategy'};
 const ORDER = [1,3,4,5,6,7];
@@ -620,8 +622,9 @@ function applyPlanFilter(){
 async function renderPlanNets(){
   const box=$('planNets'); if(!box) return;
   if(!Object.keys(ChanStatus||{}).length){ try{ await loadChanStatus(); }catch(e){} }
-  const conn=NETS.filter(n=>ChanStatus[n[0]]);
-  const list=conn.length?conn:NETS; // якщо нічого не підключено - показуємо всі (план можна будувати наперед)
+  // YouTube і TikTok - лише відео: текстового плану під них не будуємо
+  const conn=NETS.filter(n=>ChanStatus[n[0]]&&!VIDEO_NETS.includes(n[0]));
+  const list=conn.length?conn:NETS.filter(n=>!VIDEO_NETS.includes(n[0])); // якщо нічого не підключено - показуємо всі (план можна будувати наперед)
   box.innerHTML=list.map(n=>'<label class="rchip'+(ChanStatus[n[0]]?' on':'')+'" style="font-size:12.5px"><input type="checkbox" class="planNet" value="'+n[0]+'"'+(ChanStatus[n[0]]?' checked':'')+'> '+(CP_ICON[n[0]]||'')+' '+esc(n[1])+'</label>').join('')
     +(conn.length?'':'<div style="font-size:11.5px;color:var(--faint);width:100%;margin-top:4px">Підключи мережі в Налаштування → Канали, щоб націлити план точніше.</div>');
   box.querySelectorAll('.planNet').forEach(cb=>cb.addEventListener('change',()=>{ cb.closest('.rchip').classList.toggle('on',cb.checked); updPlanEst(); }));
@@ -984,9 +987,9 @@ async function loadToday(){
 // бібліотек: кольори мереж з валідованої палітри (.viz у app.html), колір іде за мережею, а не за
 // порядком (фільтр не перефарбовує ті, що лишились). Кожен графік має таблицю-двійника, а підказка
 // при наведенні лише доповнює: жодне число не сховане тільки в ній.
-const AN_NETS=['threads','instagram','facebook','telegram'];
-const AN_LABEL={threads:'Threads',instagram:'Instagram',facebook:'Facebook',telegram:'Telegram',linkedin:'LinkedIn'};
-const AN_ICON={threads:'🧵',instagram:'📸',facebook:'📘',telegram:'✈️',linkedin:'💼'};
+const AN_NETS=['threads','instagram','facebook','telegram','youtube'];
+const AN_LABEL={threads:'Threads',instagram:'Instagram',facebook:'Facebook',telegram:'Telegram',linkedin:'LinkedIn',youtube:'YouTube',tiktok:'TikTok'};
+const AN_ICON={threads:'🧵',instagram:'📸',facebook:'📘',telegram:'✈️',linkedin:'💼',youtube:'▶️',tiktok:'🎵'};
 const AN_MEDIA={text:'Текст',photo:'Фото',carousel:'Карусель',video:'Відео',story:'Сторіс'};
 const AN_PERIODS=[[30,'30 днів'],[90,'90 днів'],[365,'Рік']];
 const SVGNS='http://www.w3.org/2000/svg';
@@ -1221,9 +1224,9 @@ function anCsv(){
 
 function anCoverage(a){
   const parts=[], cov=a.coverage||{}, con=a.connected||{};
-  const anyMeasured=con.threads||con.meta;
-  if(!anyMeasured) parts.push('Перегляди, лайки й коментарі окремих постів віддають <b>Threads, Instagram і Facebook</b> - підключи їх у Налаштування → Канали, і статистика почне збиратись сама.');
-  ['threads','instagram','facebook'].forEach(n=>{ const c=cov[n]; if(!c||!c.published) return;
+  const anyMeasured=con.threads||con.meta||con.youtube;
+  if(!anyMeasured) parts.push('Перегляди, лайки й коментарі окремих постів віддають <b>Threads, Instagram, Facebook і YouTube</b> - підключи їх у Налаштування → Канали, і статистика почне збиратись сама.');
+  ['threads','instagram','facebook','youtube'].forEach(n=>{ const c=cov[n]; if(!c||!c.published) return;
     if(!c.measured&&c.error){ const perm=/дозвол|permission/i.test(c.error);
       parts.push('<span class="warn">'+AN_LABEL[n]+': перегляди недоступні</span> - '+(perm?(n==='facebook'
         ?'Meta не дала дозволу на статистику дописів. <a href="#" onclick="return connectPopup(\'/api/integrations/meta/connect?add=insights\')" style="color:var(--brand)">📈 Дозволити статистику Facebook</a> (вікно Meta; залиш галочки увімкненими) - реакції й коментарі збираються й без цього.'
@@ -1231,6 +1234,7 @@ function anCoverage(a){
     else if(c.measured<c.published) parts.push(AN_LABEL[n]+': статистика є для '+c.measured+' з '+c.published+' публікацій (нові пости отримують цифри з найближчим збором).'); });
   const fresh=(a.posts||[]).filter(p=>p.young).length;
   if(fresh) parts.push('🕐 '+fresh+' '+anPlural(fresh,'свіжий пост ще набирає','свіжі пости ще набирають','свіжих постів ще набирають')+' перегляди: з нормою і у висновках вони зʼявляться, коли мине 2 доби після публікації, а цифри оновлюються кожні 6 годин.');
+  if(cov.tiktok&&cov.tiktok.published) parts.push('TikTok: статистику постів поки не збираємо (для неї TikTok вимагає окремий дозвіл) - тут лише публікації.');
   const noPer=['telegram','linkedin'].filter(n=>cov[n]&&cov[n].published);
   if(noPer.length) parts.push(noPer.map(n=>AN_LABEL[n]).join(' і ')+' не '+(noPer.length>1?'віддають':'віддає')+' через API переглядів окремих постів - тут рахуємо '+(noPer.includes('telegram')?'публікації і підписників каналу.':'лише публікації.'));
   const last=Object.values(cov).map(c=>c.lastFetch).filter(Boolean).sort().pop();
@@ -1353,7 +1357,7 @@ async function loadAnalytics(){
   // вигляд, а не порожнє місце, що стрибає під курсором
   const prevTh=$('thAnPanel'), prevThHtml=prevTh&&prevTh.style.display!=='none'?prevTh.innerHTML:'', prevSpend=($('anSpend')||{}).innerHTML||'';
   // 👥 кілька акаунтів однієї мережі - під мережею ще й кожен акаунт окремо
-  const netOpts=[['all','Усі мережі']].concat(...['threads','instagram','facebook','telegram','linkedin'].map(n=>[[n,(AN_ICON[n]||'')+' '+AN_LABEL[n]+((a.accounts||[]).some(x=>x.net===n)?' (усі акаунти)':'')]]
+  const netOpts=[['all','Усі мережі']].concat(...['threads','instagram','facebook','telegram','linkedin','youtube','tiktok'].map(n=>[[n,(AN_ICON[n]||'')+' '+AN_LABEL[n]+((a.accounts||[]).some(x=>x.net===n)?' (усі акаунти)':'')]]
     .concat((a.accounts||[]).filter(x=>x.net===n).map(x=>[x.key,'\u00a0\u00a0\u00a0· '+x.name]))));
   const ins=(a.insights||[]);
   box.innerHTML='<div class="viz">'
@@ -1914,7 +1918,7 @@ function askReelLen(title){ return new Promise(res=>{
   ov.querySelectorAll('.rlOpt').forEach(b=>b.onclick=()=>done(+b.dataset.s));
 }); }
 // 📤 публікація готового рілса: IG Reels / FB відео / YouTube Shorts / TikTok (чернетка)
-const REELNETS=[['instagram','Instagram Reels'],['facebook','Facebook'],['youtube','YouTube Shorts'],['tiktok','TikTok (чернетка в застосунку)']];
+const REELNETS=[['instagram','Instagram Reels'],['facebook','Facebook'],['youtube','YouTube Shorts'],['tiktok','TikTok (без «Хто бачить» у пості - чернеткою)']];
 async function openReelPublish(postId){
   let st={},pub={sent:[]}; try{ st=await api('/channels/status'); }catch(e){} try{ pub=await api('/posts/'+postId+'/reel-publish'); }catch(e){}
   const sent=new Set(pub.sent||[]);
@@ -2455,12 +2459,17 @@ function pickVideo(){ return new Promise(async resolve=>{
 }); }
 // ---------- композер: опублікувати / запланувати ----------
 // ---------- КОМПОЗЕР: повноекранна панель (ліворуч редактор, праворуч мобільне прев'ю) ----------
-const NETLIM={telegram:1024,threads:500,instagram:2200,facebook:2000,linkedin:3000};
+const NETLIM={telegram:1024,threads:500,instagram:2200,facebook:2000,linkedin:3000,youtube:5000,tiktok:2200};
+// 🎬 TikTok і YouTube: як назвати варіанти «Хто бачить» людині
+const TT_PRIV={PUBLIC_TO_EVERYONE:'Усі',MUTUAL_FOLLOW_FRIENDS:'Друзі (взаємні підписки)',FOLLOWER_OF_CREATOR:'Підписники',SELF_ONLY:'Лише я'};
+const YT_PRIV={public:'Усі',unlisted:'За посиланням',private:'Лише я'};
+// назва відео YouTube з тексту: перший змістовний рядок без хештегів і посилань (як робить сервер)
+function ytTitleFrom(t){ for(const line of String(t||'').split('\n')){ const x=line.replace(/https?:\/\/\S+/g,'').replace(/(^|\s)#[^\s#]+/g,' ').replace(/[<>]/g,'').replace(/\s+/g,' ').trim(); if(x.replace(/[^\p{L}\p{N}]/gu,'').length>=2) return x.length>100?x.slice(0,99).replace(/\s+\S*$/,'')+'…':x; } return ''; }
 // ⚡ мережі, що приймають сторіс через API (решта для формату «Сторіс» вимикаються)
 const STORY_NETS=['instagram','facebook'];
 // скільки символів мережа показує ДО «… ще»/«показати повністю» (візуальний згин, як у застосунках); telegram - без згину
-const NETFOLD={instagram:125,facebook:280,threads:320,linkedin:210};
-const NETMORE={instagram:'… ще',facebook:'… ще',threads:'Показати повністю',linkedin:'…more'};
+const NETFOLD={instagram:125,facebook:280,threads:320,linkedin:210,tiktok:90,youtube:100};
+const NETMORE={instagram:'… ще',facebook:'… ще',threads:'Показати повністю',linkedin:'…more',tiktok:'більше',youtube:'…більше'};
 // 📣 Публікація тепер ФОНОВА: сервер одразу вертає «почав», а ми полимо статус.
 // Раніше запит висів на весь час відправки (Instagram і Threads обробляють медіа асинхронно, до 40с
 // кожен, плюс ретраї й паузи між частинами гілки) - nginx рвав зʼєднання на 60с і людина бачила
@@ -2525,8 +2534,9 @@ async function openComposer(postId, opts){
   let sentTo=ps.sentTo||[];      // 👥 куди саме вийшов, акаунт за акаунтом: [{net, account, name, link, comment}]
   const sentSet=new Set(ps.sent||[]); // мережі, куди пост уже вийшов хоч одним акаунтом
   const C=JSON.parse(JSON.stringify(full.channels||{}));
-  // якщо жодна мережа не обрана - вмикаємо всі підключені й ще не надіслані
-  if(!Object.keys(C).some(k=>C[k]&&C[k].on)) NETS.forEach(n=>{ if(ChanStatus[n[0]]&&!sentSet.has(n[0])){ C[n[0]]=C[n[0]]||{text:''}; C[n[0]].on=true; } });
+  // якщо жодна мережа не обрана - вмикаємо всі підключені й ще не надіслані (YouTube і TikTok - лише для відео)
+  const vid0=(full.media||[]).length===1&&full.media[0]&&full.media[0].kind==='video'&&full.format!=='story';
+  if(!Object.keys(C).some(k=>C[k]&&C[k].on)) NETS.forEach(n=>{ if(ChanStatus[n[0]]&&!sentSet.has(n[0])&&(vid0||!VIDEO_NETS.includes(n[0]))){ C[n[0]]=C[n[0]]||{text:''}; C[n[0]].on=true; } });
   // надіслані мережі завжди позначені як обрані (щоб було видно в прев'ю)
   sentSet.forEach(k=>{ C[k]=C[k]||{text:''}; C[k].on=true; });
   let master=full.content||''; let mediaFilename=full.media_filename||null; let rubric=full.rubric||'';
@@ -2568,6 +2578,8 @@ async function openComposer(postId, opts){
         +'<div id="cmpIgBox" style="display:none"><div style="font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint);margin-top:14px">📸 INSTAGRAM <span class="qh" title="Співавтори (collab): кожен отримає запрошення в Instagram, і після згоди пост зʼявиться і в його профілі, і в стрічці його підписників. До 3 акаунтів. Опис фото для незрячих (alt-текст) - кнопка ALT на кожному фото нижче.">?</span></div>'
           +'<input id="cmpCollab" class="txt" style="margin-top:6px;font-size:13px" placeholder="👥 Співавтори: @партнер, @друг (до 3, необовʼязково)">'
           +'<div id="cmpCollabHint" style="font-size:11.5px;color:var(--muted);margin-top:4px"></div></div>'
+        +'<div id="cmpYtBox" class="vnbox" style="display:none"></div>'
+        +'<div id="cmpTtBox" class="vnbox" style="display:none"></div>'
         +'<div style="font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint);margin-top:14px">🖼 МЕДІА</div>'
         +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="dashbtn" id="cmpPhoto" title="Обкладинка: з галереї, з компʼютера, зі стоку чи AI-генерація, текст на фото">🎨 Обкладинка</button><button class="dashbtn" id="cmpAddSlides" title="Кілька фото в одному пості: Instagram і Threads - карусель, Facebook - галерея, Telegram - альбом">＋ Кадри каруселі</button><button class="dashbtn" id="cmpVideo" title="Власне відео: Instagram - Reels, Facebook - відео Сторінки, Threads, Telegram, LinkedIn">🎬 Відео</button></div>'
         +'<div id="cmpMediaWrap" style="margin-top:10px"></div>'
@@ -2687,7 +2699,9 @@ async function openComposer(postId, opts){
       // sent - пост уже вийшов у мережу хоч одним акаунтом (мережу вже не зняти); done - усіма обраними
       const sent=sentSet.has(k), done=netDone(k);
       const storyOff=isStory()&&!STORY_NETS.includes(k); // сторіс - лише Instagram і Facebook
-      const dimmed=(thOn&&k!=='threads')||storyOff; // режим гілки: серія їде ЛИШЕ в Threads, решта мереж затінені
+      // 🎬 YouTube і TikTok - лише відео: без відео в пості мережу не обрати (а обрану - можна зняти)
+      const vidOff=VIDEO_NETS.includes(k)&&!isVideo()&&!sent;
+      const dimmed=(thOn&&k!=='threads')||storyOff||(vidOff&&!on); // режим гілки: серія їде ЛИШЕ в Threads, решта мереж затінені
       const own=hasOwn(k);             // у мережі вже є СВОЯ версія тексту
       const segOff=!conn||done||dimmed||!on;
       // ✨ = підлаштувати САМЕ цю мережу; ↺ (лише коли є своя версія) = вернути мій текст.
@@ -2699,7 +2713,8 @@ async function openComposer(postId, opts){
       // Мережа УВІМКНЕНА, але не підключена (пост із бота/плану чи канал відключили): чіп мусить лишатись
       // клікабельним, щоб її можна було ЗНЯТИ - інакше «не можу зняти Telegram» (фідбек тестера).
       const lockOff=sent||dimmed||(!conn&&!on);
-      const chip='<button class="netchip'+(on&&!dimmed?' on':'')+(on&&!conn?' warn':'')+'" data-net="'+k+'"'+(lockOff?' disabled':'')+' style="'+(dimmed?'opacity:.35':'')+'" title="'+(sent?(done?'вже опубліковано':'опубліковано не в усі обрані акаунти - решту можна опублікувати'):(storyOff?'сторіс через API приймають лише Instagram і Facebook':(dimmed?'у режимі гілки пост їде лише в Threads (вимкни 🧵, щоб обрати інші мережі)':(conn?'':(on?'мережа не підключена - клік, щоб зняти її з поста':'не підключено')))))+'">'+(sent?(done?'✓ ':'◐ '):'')+(on&&!conn?'⚠ ':'')+n[1]+'</button>';
+      const warn=on&&(!conn||vidOff);
+      const chip='<button class="netchip'+(on&&!dimmed?' on':'')+(warn?' warn':'')+'" data-net="'+k+'"'+(lockOff?' disabled':'')+' style="'+(dimmed?'opacity:.35':'')+'" title="'+(sent?(done?'вже опубліковано':'опубліковано не в усі обрані акаунти - решту можна опублікувати'):(storyOff?'сторіс через API приймають лише Instagram і Facebook':(vidOff?(on?n[1]+' приймає лише відео - прикріпи відео («🎬 Відео») або клікни, щоб зняти':'лише для відео-поста: прикріпи відео («🎬 Відео»)'):(dimmed?'у режимі гілки пост їде лише в Threads (вимкни 🧵, щоб обрати інші мережі)':(conn?'':(on?'мережа не підключена - клік, щоб зняти її з поста':'не підключено'))))))+'">'+(sent?(done?'✓ ':'◐ '):'')+(warn?'⚠ ':'')+n[1]+'</button>';
       return '<span class="netgrp">'+chip+seg+rev+'</span>'; }).join('');
     box.querySelectorAll('.netchip').forEach(b=>{ if(b.disabled) return; b.onclick=()=>{ const k=b.dataset.net; C[k]=C[k]||{text:''}; C[k].on=!C[k].on; renderChips(); renderPrev(); if(isVideo()) renderMedia(); }; });
     box.querySelectorAll('[data-adapt]').forEach(b=>{ if(b.disabled) return; b.onclick=()=>adaptOne(b.dataset.adapt,b); });
@@ -2716,7 +2731,7 @@ async function openComposer(postId, opts){
         else if(thSnap){ thSnap.forEach(k=>{ if(C[k]&&!sentSet.has(k)) C[k].on=true; }); thSnap=null; }
         renderChips(); renderPrev(); };
       nb.onclick=()=>{ C.threads.number=C.threads.number===false?true:false; renderChips(); renderPrev(); }; }
-    renderAccs(); }
+    renderAccs(); renderVid(); }
   // ----- медіа (ліва панель) -----
   // 🖼 смужка кадрів: обкладинка першою, ✕ прибрати, ‹ › переставити, «＋» додати ще
   function setMedia(list){ media=(list||[]).filter(m=>m&&m.filename); mediaFilename=media.length?media[0].filename:null; }
@@ -2735,10 +2750,11 @@ async function openComposer(postId, opts){
     if(on('instagram')&&v.width&&v.height&&v.width>v.height) w.push('горизонтальне відео в Reels покажеться з полями - найкраще 9:16');
     return w.join(' · '); }
   function renderMedia(){ const box=ov.querySelector('#cmpMediaWrap'); const n=media.length;
-    if(!n){ box.innerHTML='<div style="font-size:12px;color:var(--muted)">Медіа ще нема - «🎨 Обкладинка», «＋ Кадри каруселі» або «🎬 Відео».</div>'; renderCarBlock(); return; }
+    if(!n){ box.innerHTML='<div style="font-size:12px;color:var(--muted)">Медіа ще нема - «🎨 Обкладинка», «＋ Кадри каруселі» або «🎬 Відео».</div>'; renderCarBlock(); renderVid(); return; }
     if(isVideo()){ const v=media[0], warn=videoWarn(v);
       box.innerHTML='<div class="slides-strip"><div class="slide-th"><img src="/thumb/'+esc(v.filename)+'" onerror="this.style.opacity=.25"><span class="sn">▶ '+(fmtDur(v.duration)||'відео')+'</span><button class="sx" id="cmpVidRm" title="Прибрати відео">✕</button></div></div>'
-        +'<div style="font-size:11.5px;color:var(--muted);margin-top:6px">🎬 Відео'+(v.size?' · '+Math.round(v.size/1048576)+' МБ':'')+(v.width&&v.height?' · '+v.width+'×'+v.height:'')+'. Instagram - Reels, Facebook - відео Сторінки, Threads, Telegram, LinkedIn; текст поста - підпис.</div>'
+        +'<div style="font-size:11.5px;color:var(--muted);margin-top:6px">🎬 Відео'+(v.size?' · '+Math.round(v.size/1048576)+' МБ':'')+(v.width&&v.height?' · '+v.width+'×'+v.height:'')+'. Instagram - Reels, Facebook - відео Сторінки, Threads, Telegram, LinkedIn, YouTube (вертикальне до 3 хв - Shorts), TikTok; текст поста - підпис.</div>'
+        +(()=>{ const off=NETS.map(n=>n[0]).filter(k=>ChanStatus[k]&&!(C[k]&&C[k].on)&&!sentSet.has(k)); return off.length?'<div style="font-size:11.5px;margin-top:4px">Це відео приймають і '+off.map(netName).join(', ')+': <button class="dashbtn" id="cmpVidNets">🌐 В усі мережі</button></div>':''; })()
         +(warn?'<div id="cmpVidWarn" style="font-size:11.5px;color:var(--danger);margin-top:4px">⚠ '+esc(warn)+'</div>':'')
         +'<div class="cmpCover" id="cmpCover"><div class="cmpCoverTh">'+(coverFile?'<img src="/thumb/'+esc(coverFile)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(coverFile)+'\'">':'<span>кадр<br>вибере<br>Instagram</span>')+'</div>'
         +'<div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600">🖼 Обкладинка Reels</div><div style="font-size:11.5px;color:var(--muted);margin:2px 0 6px">Її видно в сітці профілю Instagram (там кадр 3:4 - головне тримай посередині).</div>'
@@ -2752,8 +2768,9 @@ async function openComposer(postId, opts){
         rg.oninput=seek; vid.onloadedmetadata=seek; box.querySelector('#cmpCovOk').onclick=(e)=>covSet({at:Number(rg.value)},e.target); };
       box.querySelector('#cmpCovPhoto').onclick=async()=>{ const pick=await chooseMedia(); if(pick&&pick.id) covSet({media:pick.id}); };
       const cc=box.querySelector('#cmpCovClear'); if(cc) cc.onclick=(e)=>covSet({clear:true},e.target);
-      box.querySelector('#cmpVidRm').onclick=async(e)=>{ e.target.disabled=true; try{ const r=await api('/posts/'+postId+'/video',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:null})}); setMedia(r.media); renderMedia(); renderPrev(); setMsg('відео прибрано'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); e.target.disabled=false; } };
-      renderCarBlock(); return; }
+      const vn=box.querySelector('#cmpVidNets'); if(vn) vn.onclick=()=>{ NETS.map(n=>n[0]).forEach(k=>{ if(ChanStatus[k]&&!sentSet.has(k)){ C[k]=C[k]||{text:''}; C[k].on=true; } }); renderChips(); renderMedia(); renderPrev(); setMsg('🌐 увімкнено всі підключені мережі - збережи чи запланувай'); };
+      box.querySelector('#cmpVidRm').onclick=async(e)=>{ e.target.disabled=true; try{ const r=await api('/posts/'+postId+'/video',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:null})}); setMedia(r.media); renderChips(); renderMedia(); renderPrev(); setMsg('відео прибрано'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); e.target.disabled=false; } };
+      renderCarBlock(); renderVid(); return; }
     const st=isStory();
     box.innerHTML='<div class="slides-strip">'+media.map((m,i)=>'<div class="slide-th'+(st?' story':'')+'"><img src="/thumb/'+esc(m.filename)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(m.filename)+'\'"><span class="sn">'+(m.kind==='video'?'▶ '+(fmtDur(m.duration)||''):(st?(i+1):(i===0?'обкл.':(i+1))))+'</span><button class="sx" data-rm="'+m.id+'" title="Прибрати кадр">✕</button>'
         +((m.kind!=='video'&&!st)?'<button class="sa'+(m.alt_text?' on':'')+'" data-alt="'+m.id+'" title="'+(m.alt_text?'Опис фото: '+esc(m.alt_text):'Додати опис фото (alt-текст) для незрячих і пошуку - іде в Instagram і LinkedIn')+'">ALT'+(m.alt_text?' ✓':'')+'</button>':'')
@@ -2769,7 +2786,7 @@ async function openComposer(postId, opts){
       const v=prompt('Опис фото (alt-текст): що на ньому, 1-2 речення. Його читають екранні читалки незрячих людей і пошук Instagram. Іде в Instagram і LinkedIn. Порожньо - прибрати.', m.alt_text||''); if(v===null) return;
       try{ const r=await api('/media/'+m.id+'/alt',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({alt_text:v})}); m.alt_text=r.alt_text; renderMedia(); renderIg(); setMsg(r.alt_text?'опис фото збережено ✓':'опис фото прибрано','var(--brand)'); }
       catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); } });
-    renderCarBlock(); renderIg(); }
+    renderCarBlock(); renderIg(); renderVid(); }
   // ＋ кадри: з медіатеки (кілька, у порядку кліків) або одразу з компʼютера пачкою
   async function addSlides(){ if(isVideo()){ setMsg('⚠ Відео публікується окремим постом. Щоб зробити карусель, спершу прибери відео (✕).','var(--danger)'); return; }
     const room=10-media.length; if(room<=0){ setMsg('у каруселі вже 10 кадрів - більше Instagram і Telegram не приймають','var(--danger)'); return; }
@@ -2796,7 +2813,10 @@ async function openComposer(postId, opts){
   function pvMedia(k){ const files=media.map(m=>m.filename); const n=files.length;
     if(!n) return '';
     // 🎬 відео так, як його покаже мережа: Instagram - вертикальний Reels, решта - плеєр у стрічці
-    if(isVideo()) return '<div class="pv-video'+(k==='instagram'?' reel':'')+'"><video src="/media/'+esc(files[0])+'" poster="/thumb/'+esc(files[0])+'" controls muted playsinline preload="none"></video>'+(k==='instagram'?'<span class="pv-cnt">Reels</span>':'')+'</div>'; if(n===1) return '<img src="/media/'+esc(files[0])+'" style="width:100%;display:block">';
+    if(isVideo()){ const v=media[0]||{}, vert=!(v.width&&v.height)||v.height>=v.width, sh=vert&&Number(v.duration)>0&&Number(v.duration)<=180;
+      const reel=k==='instagram'||k==='tiktok'||(k==='youtube'&&vert);
+      const tag=k==='instagram'?'Reels':k==='youtube'?(sh?'Shorts':'YouTube'):k==='tiktok'?'TikTok':'';
+      return '<div class="pv-video'+(reel?' reel':'')+'"><video src="/media/'+esc(files[0])+'" poster="/thumb/'+esc(files[0])+'" controls muted playsinline preload="none"></video>'+(tag?'<span class="pv-cnt">'+tag+'</span>':'')+'</div>'; } if(n===1) return '<img src="/media/'+esc(files[0])+'" style="width:100%;display:block">';
     if(k==='instagram'){ const i=Math.min(pvIdx.instagram||0,n-1);
       return '<div class="pv-car"><img src="/media/'+esc(files[i])+'"><span class="pv-cnt">'+(i+1)+'/'+n+'</span>'+(i>0?'<button class="pv-nav pv-prev" data-nav="-1">‹</button>':'')+(i<n-1?'<button class="pv-nav pv-next" data-nav="1">›</button>':'')+'</div>'
         +'<div class="pv-dots">'+files.map((_,j)=>'<i'+(j===i?' class="on"':'')+'></i>').join('')+'</div>'; }
@@ -2810,6 +2830,15 @@ async function openComposer(postId, opts){
     const bars='<div class="pv-bars">'+media.map((_,j)=>'<i'+(j<=i?' class="on"':'')+'></i>').join('')+'</div>';
     const body=m.kind==='video'?'<video src="/media/'+esc(m.filename)+'" poster="/thumb/'+esc(m.filename)+'" controls muted playsinline preload="none"></video>':'<img src="/media/'+esc(m.filename)+'">';
     return '<div class="pv-story">'+bars+body+(i>0?'<button class="pv-nav pv-prev" data-snav="'+k+'" data-d="-1">‹</button>':'')+(i<n-1?'<button class="pv-nav pv-next" data-snav="'+k+'" data-d="1">›</button>':'')+'<span class="pv-cnt">'+(i+1)+'/'+n+'</span></div>'; }
+  // стан TikTok-блоку оголошено ДО прев'ю: renderPrev читає нік автора (ttUser) і режим (ttMode)
+  let ttInfo=null, ttInfoErr='', ttLoading=false, ttDisclose=!!(C.tiktok&&(C.tiktok.your_brand||C.tiktok.branded));
+  async function loadTtInfo(fresh){ if(ttLoading) return; ttLoading=true;
+    try{ const r=await api('/integrations/tiktok/creator'+(fresh?'?fresh=1':'')); ttInfo=r||{}; ttInfoErr=(r&&r.ok===false)?(r.error||'TikTok не відповів'):''; }
+    catch(e){ ttInfo={}; ttInfoErr=e.message; } finally{ ttLoading=false; renderVid(); renderPrev(); } }
+  const vOn=(k)=>!!(C[k]&&C[k].on)&&!isStory()&&isVideo()&&!netDone(k);
+  const ttCanDirect=()=>!!(ttInfo&&ttInfo.direct)&&!ttInfoErr;
+  function ttMode(){ const t=C.tiktok||{}; if(!ttCanDirect()||t.mode==='draft') return 'draft'; return (t.mode==='direct'||t.privacy)?'direct':'draft'; }
+  const ttUser=()=>(ttInfo&&(ttInfo.username||ttInfo.nickname))||(ChanStatus.video&&ChanStatus.video.tiktok&&(ChanStatus.video.tiktok.username||ChanStatus.video.tiktok.name))||'ваш_профіль';
   function renderPrev(){ const box=ov.querySelector('#cmpPrev'); const sel=NETS.filter(n=>C[n[0]]&&C[n[0]].on);
     if(isStory()){
       const ss=sel.filter(n=>STORY_NETS.includes(n[0]));
@@ -2840,6 +2869,15 @@ async function openComposer(postId, opts){
           +'</div>').join('')+'</div>'
           +'<div class="pv-note">🧵 гілка: '+parts.length+' частин(и)'+(num?' з нумерацією 2/ 3/…':' без нумерації')+' - root-гачок + відповіді</div>';
       }
+      else if(k==='youtube'||k==='tiktok'){
+        // 🎬 лише відео: без відео в пості - чесно, що не вийде
+        if(!isVideo()) body=head+'<div class="phone-b"><div class="pv-note" style="color:var(--danger)">⚠ '+n[1]+' приймає лише відео - прикріпи відео («🎬 Відео») або зніми '+n[1]+'</div></div>';
+        else if(k==='youtube'){ const y=C.youtube||{}; const tl=y.title||ytTitleFrom(t)||'Назва відео';
+          body=head+img+'<div class="phone-b"><div style="font-weight:700;font-size:13px;line-height:1.35">'+esc(tl)+'</div><div class="phone-txt" style="font-size:12px;color:var(--muted);margin-top:3px">'+(t?pvCap(k,t):empty)+'</div><div style="font-size:11px;color:var(--faint);margin-top:4px">'+esc(YT_PRIV[y.privacy||'public'])+(y.kids?' · для дітей':'')+(y.ai?' · змінений/синтетичний вміст':'')+'</div></div>'; }
+        else { const draft=ttMode()==='draft', tc=C.tiktok||{};
+          body=head+img+'<div class="phone-b"><span class="phone-user">@'+esc(String(ttUser()).replace(/^@/,''))+'</span> <span class="phone-txt" style="display:inline">'+(t?pvCap(k,t):empty)+'</span>'
+            +'<div style="font-size:11px;color:var(--faint);margin-top:4px">'+(draft?'📥 чернетка в TikTok':('бачать: '+(tc.privacy?esc(TT_PRIV[tc.privacy]||tc.privacy):'<span style="color:var(--danger)">не обрано</span>')+(tc.branded?' · Paid partnership':tc.your_brand?' · Promotional content':'')))+'</div></div>'
+            +(draft?'<div class="pv-note">📥 відео піде чернеткою в TikTok - підпис вставиш там сам (кнопка ⧉ ліворуч)</div>':''); } }
       else body=head+'<div class="phone-b"><div class="phone-txt">'+(t?pvCap(k,t):empty)+'</div></div>'+img;
       // Честь прев'ю: поки адаптацією не керує людина, мережа без своєї версії буде спакована
       // сервером ПРИ публікації - тобто вийде НЕ те, що показано тут. Кажемо це прямо.
@@ -2850,9 +2888,12 @@ async function openComposer(postId, opts){
       const ids=ACC_NETS.includes(k)?[...new Set([...tgtIds(k),...sentTo.filter(x=>x.net===k&&x.account).map(x=>x.account)])]:[];
       const accLine=ids.length>1?'<div class="pv-accs">'+(k==='telegram'?'✈️ у канали: ':'👥 піде від: ')+ids.map(id=>{ const sn=sentAcc(k,id);
         return sn?(sn.link?'<a href="'+esc(sn.link)+'" target="_blank" rel="noopener" title="Відкрити пост">✓ '+esc(accName(k,id))+' ↗</a>':'<b>✓ '+esc(accName(k,id))+'</b>'):'<span>'+esc(accName(k,id))+'</span>'; }).join(' · ')+'</div>':'';
+      // 🎬 TikTok ще обробляє / відео в чернетках TikTok / YouTube залив приватним
+      const vst=sentTo.find(x=>x.net===k&&(x.state||x.note));
+      const vNote=vst?'<div class="pv-note" style="color:'+(vst.note?'var(--amber)':'var(--muted)')+'">'+(vst.state==='processing'?'⏳ TikTok ще обробляє відео - посилання зʼявиться, щойно він закінчить':vst.state==='draft'?'📥 відео в чернетках TikTok - відкрий TikTok і опублікуй':'')+(vst.note?(vst.state?' · ':'')+'⚠ '+esc(vst.note):'')+'</div>':'';
       // 🔗 щойно мережа опублікована - поруч із її плашкою зʼявляється лінк на живий пост
       const open=(!accLine&&sentLinks[k])?'<a href="'+esc(sentLinks[k])+'" target="_blank" rel="noopener" class="pv-open" title="Відкрити пост у '+esc(n[1])+'">↗ Відкрити пост</a>':'';
-      return '<div class="pv-label" style="background:var('+NETVAR[k]+')">'+n[1]+'</div>'+open+accLine+'<div class="phone">'+body+pvFc(k,av)+'</div>'+auto+ownMark; }).join('');
+      return '<div class="pv-label" style="background:var('+NETVAR[k]+')">'+n[1]+'</div>'+open+accLine+vNote+'<div class="phone">'+body+pvFc(k,av)+'</div>'+auto+ownMark; }).join('');
     box.querySelectorAll('[data-more]').forEach(el=>el.onclick=()=>{ _pvExp.add(el.dataset.more); renderPrev(); });
     // 💬 свій текст коментаря / без коментаря в цій мережі / назад до спільного
     box.querySelectorAll('[data-fcedit]').forEach(a=>a.onclick=()=>{ const k=a.dataset.fcedit; const v=prompt('Перший коментар для '+netName(k)+' (порожньо = без коментаря в цій мережі):', fcOf(k)||fcMaster.trim()); if(v===null) return; C[k]=C[k]||{text:''}; C[k].first_comment=v.trim(); renderPrev(); });
@@ -2873,6 +2914,70 @@ async function openComposer(postId, opts){
       +(r.bad.length?' <span style="color:var(--danger)">⚠ не схоже на нік: '+esc(r.bad.join(', '))+'</span>':'')
       +(r.extra.length?' <span style="color:var(--danger)">⚠ Instagram приймає до 3 - зайві: @'+esc(r.extra.join(', @'))+'</span>':'')
       +(noAlt&&!isVideo()?' · Опис фото для незрячих - кнопка ALT на фото в «Медіа».':''); }
+  // ----- 🎬 YouTube і TikTok: як вийде відео -----
+  // TikTok перед прямою публікацією вимагає: показати, хто публікує (нік), «Хто бачить» без типового
+  // значення, коментарі/Duet/Stitch вимкнені, поки їх не ввімкнуть (а вимкнене автором у TikTok - сіре),
+  // позначку реклами і згоду з Music Usage Confirmation. Без обраного «Хто бачить» відео йде в чернетки
+  // TikTok - туди його можна надіслати завжди, решту людина обере в застосунку.
+  // що заважає опублікувати в TikTok/YouTube саме так (текст для людини) - перевіряємо ДО публікації й планування
+  function vidBlock(){
+    if(vOn('tiktok')&&ttMode()==='direct'){ const t=C.tiktok||{};
+      if(!t.privacy) return 'TikTok: обери «Хто бачить» (або «У чернетки TikTok») - TikTok не дозволяє обирати це за людину';
+      if(ttDisclose&&!t.your_brand&&!t.branded) return 'TikTok: обери, яка це реклама (мій бренд чи брендований контент), або зніми «Розкрити комерційний вміст»';
+      if(t.branded&&t.privacy==='SELF_ONLY') return 'TikTok: брендований контент не може бути видно «Лише мені» - обери інше «Хто бачить»';
+      const mx=ttInfo&&ttInfo.maxDurationSec, d=Number((media[0]||{}).duration)||0;
+      if(mx&&d>mx+0.5) return 'TikTok цього акаунта приймає відео до '+fmtDur(mx)+', а тут '+fmtDur(d)+' - вріж відео або зніми TikTok'; }
+    return ''; }
+  function renderYt(){ const box=ov.querySelector('#cmpYtBox'); if(!box) return; const show=vOn('youtube'); box.style.display=show?'':'none'; if(!show) return;
+    const y=C.youtube=C.youtube||{on:true}; const v=media[0]||{}, d=Number(v.duration)||0;
+    const shorts=v.width&&v.height&&v.height>=v.width&&d>0&&d<=180;
+    const chName=ChanStatus.video&&ChanStatus.video.youtube?ChanStatus.video.youtube.name:'';
+    box.innerHTML='<div class="vnh">▶️ YOUTUBE'+(chName?' · <span>'+esc(chName)+'</span>':'')+' <span class="qh" title="Відео піде на канал YouTube: вертикальне до 3 хв YouTube сам показує як Shorts. Опис - текст поста для YouTube.">?</span></div>'
+      +'<input id="ytTitle" class="txt" maxlength="100" style="margin-top:6px;font-size:13px">'
+      +'<div class="vnrow"><label>Хто бачить <select id="ytPriv" class="txt">'+Object.keys(YT_PRIV).map(k=>'<option value="'+k+'"'+((y.privacy||'public')===k?' selected':'')+'>'+YT_PRIV[k]+'</option>').join('')+'</select></label></div>'
+      +'<div class="vnrow">Відео для дітей? <label><input type="radio" name="ytKids" value="0"'+(y.kids?'':' checked')+'> Ні</label><label><input type="radio" name="ytKids" value="1"'+(y.kids?' checked':'')+'> Так, для дітей</label> <span class="qh" title="Вимога YouTube (закон COPPA): «для дітей» вимикає коментарі й персоналізовану рекламу під відео. Обирай «Так», лише якщо відео справді зроблене для дітей.">?</span></div>'
+      +'<label class="vnrow"><input type="checkbox" id="ytAi"'+(y.ai?' checked':'')+'> 🤖 Позначка «змінений чи синтетичний вміст» <span class="qh" title="YouTube просить позначати реалістичний вміст, створений чи змінений AI: синтетичний голос, згенеровані обличчя чи сцени, що виглядають справжніми. Монтаж з AI-голосом ставить її сам.">?</span></label>'
+      +'<div class="vnmuted">'+(shorts?'▶️ Буде Shorts (вертикальне, до 3 хв).':'▶️ Буде звичайним відео: Shorts - лише вертикальне до 3 хв.')+' Якщо Holos ще не пройшов аудит YouTube, YouTube зробить відео приватним - про це скаже результат публікації.</div>';
+    const ti=box.querySelector('#ytTitle'); ti.value=y.title||''; ti.placeholder='Назва відео (порожньо - «'+(ytTitleFrom(textOf('youtube'))||'перший рядок тексту')+'»)';
+    ti.addEventListener('input',()=>{ const x=ti.value.replace(/[<>]/g,''); if(x.trim()) y.title=x; else delete y.title; renderPrev(); });
+    box.querySelector('#ytPriv').onchange=(e)=>{ y.privacy=e.target.value; renderPrev(); };
+    box.querySelectorAll('[name=ytKids]').forEach(r=>r.onchange=()=>{ y.kids=r.value==='1'; });
+    box.querySelector('#ytAi').onchange=(e)=>{ y.ai=e.target.checked; }; }
+  function renderTt(){ const box=ov.querySelector('#cmpTtBox'); if(!box) return; const show=vOn('tiktok'); box.style.display=show?'':'none'; if(!show) return;
+    const t=C.tiktok=C.tiktok||{on:true};
+    const head='<div class="vnh">🎵 TIKTOK <span class="qh" title="Одразу - пост виходить сам із цими налаштуваннями. Чернетка - відео чекатиме в застосунку TikTok, і ти опублікуєш його сам.">?</span></div>';
+    if(!ttInfo){ box.innerHTML=head+'<div class="vnmuted">питаю TikTok, хто публікує…</div>'; loadTtInfo(false); return; }
+    const info=ttInfo, can=ttCanDirect(), mode=ttMode(), d=Number((media[0]||{}).duration)||0;
+    const opts=(info.privacyOptions&&info.privacyOptions.length)?info.privacyOptions:Object.keys(TT_PRIV);
+    const nick=info.nickname||(ChanStatus.video&&ChanStatus.video.tiktok&&ChanStatus.video.tiktok.name)||'', un=info.username||(ChanStatus.video&&ChanStatus.video.tiktok&&ChanStatus.video.tiktok.username)||'';
+    let h=head+'<div class="vnwho">'+(info.avatarUrl?'<img src="'+esc(info.avatarUrl)+'" alt="">':'')+'Публікує: <b>'+esc(nick||'TikTok')+'</b>'+(un?' <span>@'+esc(un)+'</span>':'')+'</div>';
+    if(ttInfoErr) h+='<div class="vnerr">⚠ '+esc(ttInfoErr)+' <a href="#" id="ttRetry">↻ ще раз</a></div>';
+    h+='<div class="vnrow"><label'+(can?'':' class="off" title="Пряма публікація для Holos ще не ввімкнена"')+'><input type="radio" name="ttMode" value="direct"'+(mode==='direct'?' checked':'')+(can?'':' disabled')+'> Опублікувати одразу</label><label><input type="radio" name="ttMode" value="draft"'+(mode==='draft'?' checked':'')+'> У чернетки TikTok</label></div>';
+    if(!can&&!ttInfoErr) h+='<div class="vnmuted">Пряма публікація для Holos у TikTok ще не ввімкнена - поки відео йде в чернетки TikTok.</div>';
+    if(mode==='direct'){
+      h+='<div class="vnrow"><label>Хто бачить <select id="ttPriv" class="txt"><option value="">- обери -</option>'+opts.map(o=>'<option value="'+esc(o)+'"'+(t.privacy===o?' selected':'')+(t.branded&&o==='SELF_ONLY'?' disabled':'')+'>'+esc(TT_PRIV[o]||o)+(t.branded&&o==='SELF_ONLY'?' (не для брендованого)':'')+'</option>').join('')+'</select></label></div>';
+      const tog=(id,key,label,dis)=>'<label'+(dis?' class="off" title="Вимкнено в налаштуваннях твого TikTok"':'')+'><input type="checkbox" id="'+id+'"'+(t[key]&&!dis?' checked':'')+(dis?' disabled':'')+'> '+label+'</label>';
+      h+='<div class="vnrow">Дозволити: '+tog('ttCm','comment','коментарі',info.commentDisabled)+tog('ttDu','duet','Duet',info.duetDisabled)+tog('ttSt','stitch','Stitch',info.stitchDisabled)+'</div>';
+      if(info.commentDisabled||info.duetDisabled||info.stitchDisabled) h+='<div class="vnmuted">Сіре вимкнено в налаштуваннях твого TikTok - увімкнути можна лише там.</div>';
+      h+='<label class="vnrow"><input type="checkbox" id="ttDisc"'+(ttDisclose?' checked':'')+'> Розкрити комерційний вміст (реклама)</label>';
+      if(ttDisclose) h+='<div class="vnsub"><label><input type="checkbox" id="ttOwn"'+(t.your_brand?' checked':'')+'> Мій бренд - TikTok позначить «Promotional content»</label><label><input type="checkbox" id="ttBr"'+(t.branded?' checked':'')+'> Брендований контент (співпраця з іншим брендом) - позначка «Paid partnership»</label>'
+        +((!t.your_brand&&!t.branded)?'<div class="vnerr">обери хоча б одне - або зніми «Розкрити»</div>':'')+'</div>';
+      h+='<label class="vnrow"><input type="checkbox" id="ttAi"'+(t.ai?' checked':'')+'> 🤖 Створено з AI (AI-голос, згенеровані кадри)</label>';
+      if(info.maxDurationSec&&d>info.maxDurationSec+0.5) h+='<div class="vnerr">⚠ цей акаунт TikTok приймає відео до '+fmtDur(info.maxDurationSec)+', а тут '+fmtDur(d)+'</div>';
+      h+='<div class="vnlegal">Публікуючи, ти погоджуєшся з <a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noopener">Music Usage Confirmation</a>'+(t.branded?' і <a href="https://www.tiktok.com/legal/page/global/bc-policy/en" target="_blank" rel="noopener">Branded Content Policy</a>':'')+' TikTok. Після публікації TikTok обробляє відео кілька хвилин - посилання зʼявиться, щойно він закінчить.</div>';
+    } else h+='<div class="vnmuted">Відео прийде в TikTok чернеткою (сповіщення в застосунку чи Профіль → Чернетки): там обереш, хто бачить, і натиснеш «Опублікувати». Підпис TikTok у чернетку не переносить - <button class="dashbtn" id="ttCopy">⧉ Копіювати підпис</button></div>';
+    box.innerHTML=h;
+    const on=(id,fn)=>{ const el=box.querySelector(id); if(el) el.onchange=fn; };
+    box.querySelectorAll('[name=ttMode]').forEach(r=>r.onchange=()=>{ t.mode=r.value; renderTt(); renderPrev(); });
+    on('#ttPriv',(e)=>{ if(e.target.value) t.privacy=e.target.value; else delete t.privacy; renderPrev(); });
+    on('#ttCm',(e)=>{ t.comment=e.target.checked; }); on('#ttDu',(e)=>{ t.duet=e.target.checked; }); on('#ttSt',(e)=>{ t.stitch=e.target.checked; });
+    on('#ttDisc',(e)=>{ ttDisclose=e.target.checked; if(!ttDisclose){ delete t.your_brand; delete t.branded; } renderTt(); });
+    on('#ttOwn',(e)=>{ t.your_brand=e.target.checked; renderTt(); });
+    on('#ttBr',(e)=>{ t.branded=e.target.checked; if(t.branded&&t.privacy==='SELF_ONLY') delete t.privacy; renderTt(); });
+    on('#ttAi',(e)=>{ t.ai=e.target.checked; });
+    const rt=box.querySelector('#ttRetry'); if(rt) rt.onclick=(e)=>{ e.preventDefault(); ttInfo=null; ttInfoErr=''; loadTtInfo(true); renderTt(); };
+    const cp=box.querySelector('#ttCopy'); if(cp) cp.onclick=()=>{ try{ navigator.clipboard.writeText(textOf('tiktok')); setMsg('підпис для TikTok скопійовано ✓','var(--brand)'); }catch(e){ setMsg('не вдалося скопіювати - виділи текст вручну','var(--danger)'); } }; }
+  function renderVid(){ renderYt(); renderTt(); }
   // ----- 💬 перший коментар -----
   // свій текст мережі (рядок, порожній = без коментаря тут) або спільний; у сторіс і Telegram - нема
   function fcOwn(k){ return !!(C[k]&&typeof C[k].first_comment==='string'); }
@@ -2891,7 +2996,9 @@ async function openComposer(postId, opts){
   // коментар у прев'ю мережі - так, як його побачать під постом
   function pvFc(k,av){
     if(isStory()) return '';
-    if(!FC_NETS.includes(k)) return (k==='telegram'&&fcMaster.trim())?'<div class="pv-fc-off">💬 у Telegram коментар не піде: коментарі каналу живуть в окремій групі обговорення, бот туди не пише</div>':'';
+    if(!FC_NETS.includes(k)) return !fcMaster.trim()?'':k==='telegram'?'<div class="pv-fc-off">💬 у Telegram коментар не піде: коментарі каналу живуть в окремій групі обговорення, бот туди не пише</div>'
+      :k==='tiktok'?'<div class="pv-fc-off">💬 у TikTok коментар не піде: TikTok коментарів через API не приймає</div>'
+      :k==='youtube'?'<div class="pv-fc-off">💬 у YouTube коментар не піде: для цього YouTube вимагає ще один дозвіл</div>':'';
     const own=fcOwn(k), t=fcOf(k), cs=fcAgg(k), per=fcList(k);
     if(!t&&!own&&!cs) return '';
     // кілька акаунтів: стан коментаря під кожним постом окремо
@@ -2914,7 +3021,7 @@ async function openComposer(postId, opts){
     const cnt=ov.querySelector('#cmpFcCnt'), m=fcMaster.trim();
     if(cnt){ if(m&&withMaster.length){ const k=withMaster.reduce((a,b)=>FC_MAX[a]<=FC_MAX[b]?a:b); cnt.textContent=m.length+'/'+FC_MAX[k]+' ('+netName(k)+')'; cnt.style.color=m.length>FC_MAX[k]?'var(--danger)':'var(--faint)'; } else cnt.textContent=''; }
     ov.querySelector('#cmpFcNets').innerHTML=sel.map(k=>{
-      if(!FC_NETS.includes(k)) return m?'<span class="fcchip off" title="Коментарі каналу Telegram живуть в окремій групі обговорення - бот туди не пише">'+netName(k)+'</span>':'';
+      if(!FC_NETS.includes(k)) return m?'<span class="fcchip off" title="'+(k==='tiktok'?'TikTok коментарів через API не приймає':k==='youtube'?'Коментар у YouTube потребує окремого дозволу - поки без нього':'Коментарі каналу Telegram живуть в окремій групі обговорення - бот туди не пише')+'">'+netName(k)+'</span>':'';
       const cs=fcAgg(k), t=fcOf(k), own=fcOwn(k);
       if(cs&&cs.status==='sent') return '<span class="fcchip ok" title="Коментар уже під постом">💬✓ '+netName(k)+'</span>';
       if(cs&&cs.status==='failed') return '<span class="fcchip bad" title="'+esc(cs.error||'')+'">⚠ '+netName(k)+'</span>';
@@ -3036,7 +3143,7 @@ async function openComposer(postId, opts){
   // «Facebook (Rozum.one)» - коли в публікації кілька акаунтів мережі, результат називає кожен
   const resLbl=(x)=>x.channel+(x.accountName?' ('+x.accountName+')':'');
   const onSent=(l,st)=>{ sentLinks=l; if(st&&st.comments) cmStates=st.comments; if(st&&st.sentTo) sentTo=st.sentTo; if(st&&st.accounts) sentAccs=st.accounts; renderChips(); renderPrev(); };
-  ov.querySelector('#cmpNow').onclick=async(e)=>{ const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!netDone(k)); if(!todo.length){ setMsg('усі обрані канали вже опубліковано','var(--danger)'); return; } if(!carGuard()) return; const b=e.target; b.disabled=true;
+  ov.querySelector('#cmpNow').onclick=async(e)=>{ const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!netDone(k)); if(!todo.length){ setMsg('усі обрані канали вже опубліковано','var(--danger)'); return; } if(!carGuard()) return; const vb=vidBlock(); if(vb){ setMsg('⚠ '+vb,'var(--danger)'); return; } const b=e.target; b.disabled=true;
     try{
       // Авто-перепаковка мереж без власної версії - АЛЕ лише поки адаптацією не почала керувати
       // людина. Щойно юзер підлаштував (чи вернув ↺) хоч одну мережу вручну, прев'ю = істина:
@@ -3061,7 +3168,7 @@ async function openComposer(postId, opts){
       const cm=res.filter(x=>x.comment); const cmBad=cm.filter(x=>x.comment.status!=='sent');
       const cmTxt=cm.length?(' · 💬 '+cm.map(x=>resLbl(x)+(x.comment.status==='sent'?' ✓':x.comment.status==='pending'?' ⏳':' ⚠')).join(', ')):'';
       const notes=res.filter(x=>x.status==='sent'&&x.note).map(x=>resLbl(x)+': '+x.note);
-      setMsg((ok.length?'✓ '+ok.join(', '):'')+cmTxt+(err.length?' ⚠ '+err.map(x=>resLbl(x)+': '+x.error).join('; '):'')+(cmBad.length?' · коментар: '+cmBad.map(x=>resLbl(x)+': '+(x.comment.error||'надсилається')).join('; '):'')+(notes.length?' · ⚠ '+notes.join('; '):''), (err.length||notes.length||cmBad.some(x=>x.comment.status==='failed'))?'var(--danger)':'var(--brand)');
+      setMsg((ok.length?'✓ '+ok.join(', '):'')+cmTxt+(err.length?' ⚠ '+err.map(x=>resLbl(x)+': '+x.error).join('; '):'')+(cmBad.length?' · коментар: '+cmBad.map(x=>resLbl(x)+': '+(x.comment.error||'надсилається')).join('; '):'')+(notes.length?' · ⚠ '+notes.join('; '):''), (err.length||cmBad.some(x=>x.comment.status==='failed'))?'var(--danger)':notes.length?'var(--amber)':'var(--brand)');
       if(cmStates.some(x=>x.status==='sending'||(x.status==='pending'&&!x.error))) pollComments(); if(ok.length&&!err.length) flash('Опубліковано ✓ Якщо пост залетить - 🔥 на картці дасть 5 кутів продовження'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)');
       // навіть при збої частина мереж могла пройти - перечитуємо ФАКТИЧНИЙ стан, щоб інтерфейс
       // не показував «не опубліковано» на пості, який уже вийшов
@@ -3075,7 +3182,7 @@ async function openComposer(postId, opts){
       ov.querySelector('#cmpDate').value=nb.date; ov.querySelector('#cmpTime').value=nb.time;
       setMsg('⏰ '+(AN_LABEL[k]||k)+': найкращий час з твоєї статистики - '+ts.join(', '),'var(--brand)'); return; }
     setMsg('для обраних мереж ще нема статистики, щоб радити час (треба 10+ постів, старших за 2 доби)','var(--muted)'); };
-  ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ setMsg('вкажи дату й час','var(--danger)'); return; } const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!netDone(k)); if(!todo.length){ setMsg('немає каналів для планування (усі вже опубліковано)','var(--danger)'); return; } if(!carGuard()) return; const b=e.target; b.disabled=true; setMsg('🗓 зберігаю…'); const at=zonedToUTCISO(d,t); try{ await saveDraft(); if(opts.slotId){ await scheduleApi('/schedule/'+opts.slotId,'PUT',{scheduledAt:at}); } else { await scheduleApi('/schedule','POST',{postId,scheduledAt:at}); } setMsg('заплановано ✓ ('+todo.join(', ')+')','var(--brand)'); try{await loadPublish();}catch(_){} try{await loadStudioPosts();}catch(_){} setTimeout(close,1000); }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); b.disabled=false; } };
+  ov.querySelector('#cmpSched').onclick=async(e)=>{ const d=ov.querySelector('#cmpDate').value, t=ov.querySelector('#cmpTime').value; if(!d||!t){ setMsg('вкажи дату й час','var(--danger)'); return; } const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!netDone(k)); if(!todo.length){ setMsg('немає каналів для планування (усі вже опубліковано)','var(--danger)'); return; } if(!carGuard()) return; const vb=vidBlock(); if(vb){ setMsg('⚠ '+vb,'var(--danger)'); return; } const b=e.target; b.disabled=true; setMsg('🗓 зберігаю…'); const at=zonedToUTCISO(d,t); try{ await saveDraft(); if(opts.slotId){ await scheduleApi('/schedule/'+opts.slotId,'PUT',{scheduledAt:at}); } else { await scheduleApi('/schedule','POST',{postId,scheduledAt:at}); } setMsg('заплановано ✓ ('+todo.join(', ')+')','var(--brand)'); try{await loadPublish();}catch(_){} try{await loadStudioPosts();}catch(_){} setTimeout(close,1000); }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)'); b.disabled=false; } };
 }
 // двокроковий редактор фото поста: крок 1 - джерело (галерея/завантаження/генерація) + формат (кроп),
 // крок 2 - текст на фото (шрифт/місце/фон, безкоштовне перенакладання) + перегенерація з коментарем
@@ -3690,7 +3797,7 @@ if($('liDisconnect')) $('liDisconnect').onclick=async()=>{ if(!confirm('Відк
 async function loadYoutube(){
   try{ const c=await api('/integrations/youtube'); const st=$('ytStatus'), conn=$('ytConnect'), dis=$('ytDisconnect'); if(!st) return;
     if(!c.configured){ st.textContent='🕓 Підключення YouTube тимчасово недоступне.'; if(conn)conn.style.display='none'; if(dis)dis.style.display='none'; return; }
-    if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.name?(' канал <b>'+esc(c.name)+'</b>'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-flex'; }
+    if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.name?(' канал <b>'+esc(c.name)+'</b>'):'')+' · відео-пости йдуть туди з композера, бота й Claude'; if(conn){ conn.style.display='inline-flex'; conn.textContent='🔄 Інший канал'; } if(dis)dis.style.display='inline-flex'; }
     else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-flex'; if(dis)dis.style.display='none'; }
   }catch(e){}
 }
@@ -3698,7 +3805,9 @@ if($('ytDisconnect')) $('ytDisconnect').onclick=async()=>{ if(!confirm('Відк
 async function loadTiktok(){
   try{ const c=await api('/integrations/tiktok'); const st=$('ttStatus'), conn=$('ttConnect'), dis=$('ttDisconnect'); if(!st) return;
     if(!c.configured){ st.textContent='🕓 Скоро: чекаємо схвалення застосунку від TikTok.'; if(conn)conn.style.display='none'; if(dis)dis.style.display='none'; return; }
-    if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.name?(' як <b>'+esc(c.name)+'</b>'):''); if(conn)conn.style.display='none'; if(dis)dis.style.display='inline-flex'; }
+    if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.name?(' як <b>'+esc(c.name)+'</b>'):'')+(c.username?' <span style="color:var(--muted)">@'+esc(c.username)+'</span>':'')
+      +(c.direct?' · пряма публікація і чернетки':' · поки лише чернетки в TikTok (пряма публікація для Holos ще не ввімкнена)');
+      if(conn){ conn.style.display='inline-flex'; conn.textContent='🔄 Підключити заново'; } if(dis)dis.style.display='inline-flex'; }
     else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-flex'; if(dis)dis.style.display='none'; }
   }catch(e){}
 }
@@ -4835,7 +4944,8 @@ window.addEventListener('message',(ev)=>{ if(ev.origin!==location.origin) return
     if($('onboarding')&&$('onboarding').style.display!=='none'&&cs&&cs.type==='connect'){ obVoiceImported=false; renderOb(); } else if(d.meta!=='error') flash(d.meta==='ok'?'Instagram/Facebook підключено ✓':'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).'); }
   if(d.threads!=null){ try{loadThreads();}catch(e){} try{loadChanStatus();}catch(e){} if(d.threads==='ok') flash(threadsOkText(d.acc,d.how)); else alert(oauthFailText('threads',d.why)); }
   if(d.linkedin!=null){ try{loadLinkedin();}catch(e){} try{loadChanStatus();}catch(e){} flash(d.linkedin==='ok'?'LinkedIn підключено ✓':'Не вдалося підключити LinkedIn.'); }
-  if(d.youtube!=null){ try{loadYoutube();}catch(e){} try{loadChanStatus();}catch(e){} flash(d.youtube==='ok'?'YouTube підключено ✓':'Не вдалося підключити YouTube.'); }
+  if(d.youtube!=null){ try{loadYoutube();}catch(e){} try{loadChanStatus();}catch(e){}
+    if(d.youtube==='ok') flash('YouTube підключено ✓'); else if(d.why==='nochannel') alert('У цього акаунта Google ще нема каналу YouTube.\n\nСтвори канал на youtube.com (аватар → «Створити канал») і натисни «Підключити YouTube» ще раз - або обери в Google інший акаунт, де канал уже є.'); else flash('Не вдалося підключити YouTube.'); }
   if(d.tiktok!=null){ try{loadTiktok();}catch(e){} try{loadChanStatus();}catch(e){} flash(d.tiktok==='ok'?'TikTok підключено ✓':'Не вдалося підключити TikTok.'); }
   if(d.gdrive!=null){ try{loadGdrive();}catch(e){} flash(d.gdrive==='ok'?'Google Drive підключено ✓':'Не вдалося підключити Google Drive.'); }
 });

@@ -44,7 +44,8 @@ import { readdir, stat } from "node:fs/promises";
 import { startMeetingPull, testPull, pullOnce } from "./meetings-pull.js";
 import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
 import * as gdrive from "./gdrive.js";
-import { publishPostToChannels, alreadySentNetworks, startReelPublishJob, reelSentNetworks, closeSlotsIfDone, enabledNets, beginShutdown, publishesInFlight, unschedulePost, isPublishingNow } from "./publisher.js";
+import { publishPostToChannels, alreadySentNetworks, startReelPublishJob, reelSentNetworks, closeSlotsIfDone, enabledNets, beginShutdown, publishesInFlight, unschedulePost, isPublishingNow, PUB_NETS } from "./publisher.js";
+import { ttCreator, canDirect, startTikTokWatch } from "./vidpub.js";
 import { startLifecycleWorker } from "./lifecycle.js";
 import { startDigest } from "./digest.js";
 import { startCommentNotify, notifyOn, setNotify } from "./tgcomments.js";
@@ -786,7 +787,7 @@ app.post("/api/montage", async (req: any, reply) => {
     else { voice = "none"; spreadText(own, clips.length).forEach((t, i) => { clips[i].text = t || null; }); }
   }
   if ((voice === "tts" || ai?.mode === "voiceover") && !ttsReady()) return reply.code(400).send({ error: "AI-голос не підключено: адмін додає ключ ElevenLabs у Налаштування → Профіль → Ключі провайдерів" });
-  const nets = Array.isArray(b.nets) ? b.nets.map(String).filter((n: string) => ["instagram", "facebook", "threads", "telegram", "linkedin"].includes(n)) : [];
+  const nets = Array.isArray(b.nets) ? b.nets.map(String).filter((n: string) => PUB_NETS.includes(n)) : [];
   // 🎬 v3: шаблон, гачок (true - AI, false - без, рядок - свій), фінальна картка, паузи, стиль субтитрів.
   // Не задане - з шаблону і стилю відео бренду (Бренд → Візуал → «🎬 Стиль відео»)
   const tri = (x: unknown, max: number) => (x === true || x === false ? x : typeof x === "string" && x.trim() ? x.trim().slice(0, max) : null);
@@ -1096,8 +1097,8 @@ app.get("/api/channels/status", async (req: any) => {
     one<{ access_token: string | null }>(`select access_token from threads_config where workspace_id=$1`, [ws]),
     one<{ page_token: string | null; ig_user_id: string | null }>(`select page_token, ig_user_id from meta_config where workspace_id=$1`, [ws]),
     one<{ access_token: string | null }>(`select access_token from linkedin_config where workspace_id=$1`, [ws]),
-    one<{ access_token: string | null }>(`select access_token from youtube_config where workspace_id=$1`, [ws]),
-    one<{ access_token: string | null }>(`select access_token from tiktok_config where workspace_id=$1`, [ws]),
+    one<{ access_token: string | null; channel_title: string | null }>(`select access_token, channel_title from youtube_config where workspace_id=$1`, [ws]),
+    one<{ access_token: string | null; display_name: string | null; username: string | null; scopes: string | null }>(`select access_token, display_name, username, scopes from tiktok_config where workspace_id=$1`, [ws]),
   ]);
   // 👥 акаунти для вибору в композері (імена без токенів); Instagram є, якщо він є хоч в одної Сторінки
   const accounts = await accountChoices(ws);
@@ -1113,6 +1114,11 @@ app.get("/api/channels/status", async (req: any) => {
     linkedin: !!(li && li.access_token),
     youtube: !!(yt && yt.access_token),
     tiktok: !!(tt && tt.access_token),
+    // 🎬 хто публікує в YouTube і TikTok (по одному акаунту на бренд) - для прев'ю й блоків у композері
+    video: {
+      youtube: yt ? { name: yt.channel_title || "YouTube" } : null,
+      tiktok: tt ? { name: tt.display_name || "TikTok", username: tt.username || "", direct: canDirect(tt.scopes) } : null,
+    },
     accounts,
   };
 });
@@ -1321,6 +1327,11 @@ async function postPermalinks(ws: string, postId: string): Promise<Record<string
     }
     if (url && !out.threads) out.threads = url;
   }
+  // YouTube і TikTok: посилання пишеться при публікації (TikTok - коли закінчить обробку)
+  const vids = await q<{ net: string; permalink: string }>(
+    `select 'youtube'::text as net, permalink from youtube_publish where post_id=$1 and status='sent' and permalink is not null
+     union all select 'tiktok', permalink from tiktok_publish where post_id=$1 and status='sent' and permalink is not null`, [postId]);
+  for (const r of vids) if (!out[r.net]) out[r.net] = r.permalink;
   // Instagram зі старих рядків: permalink теж лише запитом
   for (const r of mt) {
     if (r.channel !== "instagram" || r.permalink || !r.external_id) continue;
@@ -1335,13 +1346,21 @@ async function postPermalinks(ws: string, postId: string): Promise<Record<string
 // 👥 Куди саме пост уже вийшов: мережа + акаунт (id і назва) + посилання на цю публікацію. Композер
 // ставить ✓ на галочку саме цього акаунта, а решту обраних ще можна опублікувати. Рядки до галочок без
 // акаунта - акаунт за замовчуванням (у Threads - за ніком із посилання).
-type SentTo = { net: string; account: string; name: string | null; link: string | null; comment: { status: string; error: string | null; due_at: string | null } | null };
+// state: TikTok ще обробляє відео ('processing') чи відео лежить у чернетках TikTok ('draft');
+// note: що людині варто знати про цю публікацію (YouTube залив приватним, TikTok не підтвердив)
+type SentTo = { net: string; account: string; name: string | null; link: string | null; state?: string; note?: string; comment: { status: string; error: string | null; due_at: string | null } | null };
 async function sentTo(ws: string, postId: string): Promise<SentTo[]> {
-  const rows = await q<{ net: string; acc: string | null; name: string | null; link: string | null }>(
-    `select 'telegram'::text as net, chat_id as acc, null::text as name, permalink as link, created_at from telegram_publish where post_id=$1 and status='sent'
-     union all select 'threads', account_id, account_name, permalink, created_at from threads_publish where post_id=$1 and status='sent'
-     union all select channel, account_id, account_name, permalink, created_at from meta_publish where post_id=$1 and status='sent'
-     union all select 'linkedin', null, null, permalink, created_at from linkedin_publish where post_id=$1 and status='sent'
+  const rows = await q<{ net: string; acc: string | null; name: string | null; link: string | null; state: string | null; note: string | null }>(
+    `select 'telegram'::text as net, chat_id as acc, null::text as name, permalink as link, created_at, null::text as state, null::text as note from telegram_publish where post_id=$1 and status='sent'
+     union all select 'threads', account_id, account_name, permalink, created_at, null, null from threads_publish where post_id=$1 and status='sent'
+     union all select channel, account_id, account_name, permalink, created_at, null, null from meta_publish where post_id=$1 and status='sent'
+     union all select 'linkedin', null, null, permalink, created_at, null, null from linkedin_publish where post_id=$1 and status='sent'
+     union all select 'youtube', null, null, permalink, created_at, null,
+            case when privacy='private' then 'YouTube залив відео приватним (до аудиту Holos у YouTube так з усіма відео через API)' end
+       from youtube_publish where post_id=$1 and status='sent'
+     union all select 'tiktok', null, null, permalink, created_at,
+            case when status='processing' then 'processing' when mode='inbox' and permalink is null then 'draft' end, error
+       from tiktok_publish where post_id=$1 and status in ('sent','processing')
      order by 5`, [postId]);
   const legacy = rows.some((r) => isAccNet(r.net) && !r.acc);
   const [mains, th, tgt, cms] = await Promise.all([legacy ? mainAccountIds(ws) : null, legacy ? threadsAccounts(ws) : [], telegramTargets(ws), commentStates(postId)]);
@@ -1352,7 +1371,8 @@ async function sentTo(ws: string, postId: string): Promise<SentTo[]> {
     const name = r.name || (r.net === "telegram" ? tgt.targets.find((t) => t.id === r.acc)?.name || null : null);
     // 💬 перший коментар саме під ЦІЄЮ публікацією (коментар живе за тим, як акаунт записано в рядку)
     const cs = cms.find((c) => c.network === r.net && c.account === (r.acc || ""));
-    return { net: r.net, account: acc || "", name, link: r.link, comment: cs ? { status: cs.status, error: cs.error ?? null, due_at: cs.due_at ?? null } : null };
+    return { net: r.net, account: acc || "", name, link: r.link, ...(r.state ? { state: r.state } : {}), ...(r.note ? { note: r.note } : {}),
+      comment: cs ? { status: cs.status, error: cs.error ?? null, due_at: cs.due_at ?? null } : null };
   });
 }
 
@@ -1721,21 +1741,12 @@ app.get("/api/today", async (req: any) => {
         where workspace_id=$1 and archived=false and origin='rss' and created_at > now() - interval '24 hours'`, [ws]),
     // ✈️ скільки публікацій реально вийшло вчора (за таймзоною) - замикання циклу «зробив → вийшло»
     one<{ n: number }>(
-      `select count(*)::int n from (
-         select tp.created_at from telegram_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.status='sent'
-         union all select tp.created_at from threads_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.status='sent'
-         union all select tp.created_at from meta_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.status='sent'
-         union all select tp.created_at from linkedin_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.status='sent'
-       ) u where to_char(u.created_at at time zone $2,'YYYY-MM-DD')=$3`, [ws, tz, dayStr(1)]),
+      `select count(*)::int n from post_published u join post p on p.id=u.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+        where s.workspace_id=$1 and to_char(u.created_at at time zone $2,'YYYY-MM-DD')=$3`, [ws, tz, dayStr(1)]),
     // 📡 funnel/канали-віджет «Сьогодні»: скільки пішло СЬОГОДНІ по кожній мережі окремо
     q<{ net: string; n: number }>(
-      `select net, count(*)::int n from (
-         select 'telegram' as net, tp.created_at from telegram_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.status='sent'
-         union all select 'threads', tp.created_at from threads_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.status='sent'
-         union all select 'instagram', tp.created_at from meta_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.channel='instagram' and tp.status='sent'
-         union all select 'facebook', tp.created_at from meta_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.channel='facebook' and tp.status='sent'
-         union all select 'linkedin', tp.created_at from linkedin_publish tp join post p on p.id=tp.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where s.workspace_id=$1 and tp.status='sent'
-       ) u where to_char(u.created_at at time zone $2,'YYYY-MM-DD')=$3 group by net`, [ws, tz, today]),
+      `select u.net, count(*)::int n from post_published u join post p on p.id=u.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+        where s.workspace_id=$1 and to_char(u.created_at at time zone $2,'YYYY-MM-DD')=$3 group by u.net`, [ws, tz, today]),
   ]);
   // стрік Threads: поспіль днів із публікацією (сьогодні ще без поста - стрік живий від учора)
   const set = new Set(thDays.map((x) => x.d));
@@ -1838,7 +1849,7 @@ app.get("/api/analytics/posts", async (req: any) => {
   const days = [7, 30, 90, 180, 365].includes(Number(req.query?.days)) ? Number(req.query.days) : 90;
   // мережа або один акаунт мережі («threads:<id акаунта>», кілька акаунтів однієї мережі в бренді)
   const raw = String(req.query?.net ?? "");
-  const net = ["all", "threads", "instagram", "facebook", "telegram", "linkedin"].includes(raw)
+  const net = ["all", "threads", "instagram", "facebook", "telegram", "linkedin", "youtube", "tiktok"].includes(raw)
     || /^(threads|instagram|facebook):[A-Za-z0-9_.:@-]{1,80}$/.test(raw) ? raw : "all";
   const ws = req.user.workspace_id;
   const [a, bt, auto] = await Promise.all([analyticsFor(ws, days, net), bestTimesFor(ws), bestTimeAuto(ws)]);
@@ -2705,7 +2716,7 @@ app.post("/api/integrations/linkedin/disconnect", async (req: any) => {
   return { ok: true };
 });
 
-// ===================== YOUTUBE SHORTS (рілси; той самий Google-застосунок, що й логін/Drive) =====================
+// ===================== YOUTUBE (відео й Shorts; той самий Google-застосунок, що й логін/Drive) =====================
 const YOUTUBE_REDIRECT = `${env.appBaseUrl}/api/integrations/youtube/callback`;
 
 app.get("/api/integrations/youtube", async (req: any) => {
@@ -2727,13 +2738,23 @@ app.get("/api/integrations/youtube/callback", async (req: any, reply) => {
   reply.clearCookie("youtube_state", { path: "/" });
   try {
     const tok = await youtube.exchangeCode(env.google.clientId, env.google.clientSecret, YOUTUBE_REDIRECT, code);
-    const title = await youtube.myChannelTitle(tok.access_token).catch(() => "YouTube");
+    // канал за токеном (Google сам дав обрати канал, якщо їх кілька); каналу нема - кажемо одразу, а не при першому відео
+    let ch: { id: string; title: string };
+    try { ch = await youtube.myChannel(tok.access_token); }
+    catch (e: any) {
+      if (e instanceof youtube.YouTubeError && e.reason === "youtubeSignupRequired") {
+        await logEvent("warn", "youtube", "у акаунта Google нема каналу YouTube", null, req.user.id);
+        return reply.redirect("/app?youtube=error&why=nochannel");
+      }
+      ch = { id: "", title: "YouTube" };
+    }
     const exp = new Date(Date.now() + (tok.expires_in || 3600) * 1000).toISOString();
-    await q(`insert into youtube_config(workspace_id, channel_title, access_token, refresh_token, token_expires_at, updated_at)
-             values($1,$2,$3,$4,$5,now())
-             on conflict (workspace_id) do update set channel_title=excluded.channel_title, access_token=excluded.access_token,
+    await q(`insert into youtube_config(workspace_id, channel_title, channel_id, access_token, refresh_token, token_expires_at, updated_at)
+             values($1,$2,nullif($3,''),$4,$5,$6,now())
+             on conflict (workspace_id) do update set channel_title=excluded.channel_title, channel_id=excluded.channel_id, access_token=excluded.access_token,
                refresh_token=coalesce(excluded.refresh_token, youtube_config.refresh_token), token_expires_at=excluded.token_expires_at, updated_at=now()`,
-      [req.user.workspace_id, title, tok.access_token, tok.refresh_token ?? null, exp]);
+      [req.user.workspace_id, ch.title, ch.id, tok.access_token, tok.refresh_token ?? null, exp]);
+    const title = ch.title;
     await logEvent("info", "youtube", `підключено канал ${title}`, null, req.user.id);
     return reply.redirect("/app?youtube=ok");
   } catch (e: any) {
@@ -2747,19 +2768,31 @@ app.post("/api/integrations/youtube/disconnect", async (req: any) => {
   return { ok: true };
 });
 
-// ===================== TIKTOK (рілси; до аудиту застосунку - відео їде юзеру в чернетки) =====================
+// ===================== TIKTOK (пряма публікація; до аудиту застосунку - чернетки в TikTok) =====================
 const TIKTOK_REDIRECT = `${env.appBaseUrl}/api/integrations/tiktok/callback`;
 
 app.get("/api/integrations/tiktok", async (req: any) => {
-  const c = await one<{ display_name: string | null }>(`select display_name from tiktok_config where workspace_id=$1`, [req.user.workspace_id]);
-  return { configured: !!env.tiktok.clientKey, hasToken: !!c, name: c?.display_name ?? "" };
+  const c = await one<{ display_name: string | null; username: string | null; scopes: string | null }>(
+    `select display_name, username, scopes from tiktok_config where workspace_id=$1`, [req.user.workspace_id]);
+  return { configured: !!env.tiktok.clientKey, hasToken: !!c, name: c?.display_name ?? "", username: c?.username ?? "", direct: !!c && canDirect(c.scopes) };
+});
+
+// «Хто публікує» для блоку TikTok у композері: нік, варіанти «Хто бачить», що вимкнув автор, найдовше відео.
+// TikTok вимагає показати це перед публікацією; помилку (ліміт постів, доступ відкликано) - людською мовою.
+app.get("/api/integrations/tiktok/creator", async (req: any) => {
+  const ws = req.user.workspace_id;
+  const c = await one<{ scopes: string | null }>(`select scopes from tiktok_config where workspace_id=$1`, [ws]);
+  if (!c) return { ok: false, error: "TikTok не підключено" };
+  if (!canDirect(c.scopes)) return { ok: true, direct: false };
+  try { return { ok: true, direct: true, ...(await ttCreator(ws, req.query?.fresh === "1")) }; }
+  catch (e: any) { return { ok: false, direct: true, error: e.message, code: e?.code || "" }; }
 });
 
 app.get("/api/integrations/tiktok/connect", async (req: any, reply) => {
   if (!env.tiktok.clientKey) return reply.code(400).send({ error: "Підключення TikTok тимчасово недоступне" });
   const state = auth.newToken();
   reply.setCookie("tiktok_state", state, stateCookie);
-  return reply.redirect(tiktok.authUrl(env.tiktok.clientKey, TIKTOK_REDIRECT, state));
+  return reply.redirect(tiktok.authUrl(env.tiktok.clientKey, TIKTOK_REDIRECT, state, env.tiktok.scopes || tiktok.TT_SCOPES));
 });
 
 app.get("/api/integrations/tiktok/callback", async (req: any, reply) => {
@@ -2770,12 +2803,16 @@ app.get("/api/integrations/tiktok/callback", async (req: any, reply) => {
   try {
     const tok = await tiktok.exchangeCode(env.tiktok.clientKey, env.tiktok.clientSecret, TIKTOK_REDIRECT, code);
     const info = await tiktok.userInfo(tok.access_token).catch(() => ({ displayName: "TikTok" }));
+    // нік (для посилання на пост) віддає лише creator_info - є, коли TikTok дав дозвіл на пряму публікацію
+    const scopes = String(tok.scope || "").trim() || null;
+    const username = canDirect(scopes) ? await tiktok.creatorInfo(tok.access_token).then((c) => c.username, () => "") : "";
     const exp = new Date(Date.now() + (tok.expires_in || 86400) * 1000).toISOString();
-    await q(`insert into tiktok_config(workspace_id, open_id, display_name, access_token, refresh_token, token_expires_at, updated_at)
-             values($1,$2,$3,$4,$5,$6,now())
+    await q(`insert into tiktok_config(workspace_id, open_id, display_name, access_token, refresh_token, token_expires_at, scopes, username, updated_at)
+             values($1,$2,$3,$4,$5,$6,$7,nullif($8,''),now())
              on conflict (workspace_id) do update set open_id=excluded.open_id, display_name=excluded.display_name,
-               access_token=excluded.access_token, refresh_token=excluded.refresh_token, token_expires_at=excluded.token_expires_at, updated_at=now()`,
-      [req.user.workspace_id, tok.open_id, info.displayName, tok.access_token, tok.refresh_token ?? null, exp]);
+               access_token=excluded.access_token, refresh_token=excluded.refresh_token, token_expires_at=excluded.token_expires_at,
+               scopes=excluded.scopes, username=coalesce(excluded.username, tiktok_config.username), updated_at=now()`,
+      [req.user.workspace_id, tok.open_id, info.displayName, tok.access_token, tok.refresh_token ?? null, exp, scopes, username]);
     await logEvent("info", "tiktok", `підключено ${info.displayName}`, null, req.user.id);
     return reply.redirect("/app?tiktok=ok");
   } catch (e: any) {
@@ -3498,12 +3535,7 @@ app.get("/api/bank", async (req: any) => {
   // sent: пост УЖЕ поїхав хоч в одну мережу - потрібно для перемикача «Опубліковані» в банку
   // (раніше опубліковані просто тьмяніли разом із тими, що вже в календарі, і їх не було як розділити)
   return q(`select p.id, p.content, p.review, p.created_at, src.title as source_title,
-                   exists(
-                     select 1 from telegram_publish t where t.post_id=p.id and t.status='sent'
-                     union all select 1 from threads_publish t where t.post_id=p.id and t.status='sent'
-                     union all select 1 from meta_publish t where t.post_id=p.id and t.status='sent'
-                     union all select 1 from linkedin_publish t where t.post_id=p.id and t.status='sent'
-                   ) as sent
+                   exists(select 1 from post_published t where t.post_id=p.id) as sent
             from post p join pipeline_run r on r.id=p.run_id join source src on src.id=r.source_id
             where src.workspace_id=$1 and p.stage='final' and p.review='approved'
             order by p.created_at desc`, [req.user.workspace_id]);
@@ -3528,17 +3560,8 @@ app.get("/api/posts/studio", async (req: any) => {
     if (link) { const l = linkMap.get(pid) || {}; if (!l[net]) l[net] = link; linkMap.set(pid, l); }
   };
   if (ids.length) {
-    const [tg, th, mt, li, yt, tt] = await Promise.all([
-      q<{ post_id: string; permalink: string | null }>(`select distinct post_id, permalink from telegram_publish where status='sent' and post_id=any($1)`, [ids]),
-      q<{ post_id: string; permalink: string | null }>(`select distinct post_id, permalink from threads_publish where status='sent' and post_id=any($1)`, [ids]),
-      q<{ post_id: string; channel: string; permalink: string | null }>(`select distinct post_id, channel, permalink from meta_publish where status='sent' and post_id=any($1)`, [ids]),
-      q<{ post_id: string; permalink: string | null }>(`select distinct post_id, permalink from linkedin_publish where status='sent' and post_id=any($1)`, [ids]),
-      q<{ post_id: string }>(`select distinct post_id from youtube_publish where status='sent' and post_id=any($1)`, [ids]),
-      q<{ post_id: string }>(`select distinct post_id from tiktok_publish where status='sent' and post_id=any($1)`, [ids]),
-    ]);
-    tg.forEach((r) => add(r.post_id, "telegram", r.permalink)); th.forEach((r) => add(r.post_id, "threads", r.permalink));
-    mt.forEach((r) => r.channel && add(r.post_id, r.channel, r.permalink)); li.forEach((r) => add(r.post_id, "linkedin", r.permalink));
-    yt.forEach((r) => add(r.post_id, "youtube")); tt.forEach((r) => add(r.post_id, "tiktok"));
+    for (const r of await q<{ post_id: string; net: string; permalink: string | null }>(
+      `select post_id, net, permalink from post_published where post_id=any($1) order by created_at`, [ids])) add(r.post_id, r.net, r.permalink);
   }
   const counts = await mediaCounts(ids);
   // 💬 стан перших коментарів: чи десь не вийшов (значок на картці веде в пост)
@@ -3580,12 +3603,7 @@ app.get("/api/published", async (req: any) => {
   const ws = req.user.workspace_id;
   // permalink їде в тому ж union - «Останні публікації» стають клікабельними без окремого запиту
   const recent = await q<{ post_id: string; net: string; created_at: string; content: string; permalink: string | null }>(
-    `select x.post_id, x.net, x.created_at, x.permalink, p.content from (
-        select post_id, 'telegram'::text as net, created_at, permalink from telegram_publish where status='sent'
-        union all select post_id, 'threads', created_at, permalink from threads_publish where status='sent'
-        union all select post_id, channel, created_at, permalink from meta_publish where status='sent'
-        union all select post_id, 'linkedin', created_at, permalink from linkedin_publish where status='sent'
-     ) x
+    `select x.post_id, x.net, x.created_at, x.permalink, p.content from post_published x
      join post p on p.id=x.post_id
      join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where s.workspace_id=$1
@@ -3593,12 +3611,7 @@ app.get("/api/published", async (req: any) => {
   // лічильники - окремим запитом по ВСІХ публікаціях: раніше їх рахували з цих 100 останніх рядків,
   // тож після сотої відправки «Опубліковано» застигало й брехало
   const tot = await one<{ posts: number; sends: number }>(
-    `select count(distinct x.post_id)::int as posts, count(*)::int as sends from (
-        select post_id from telegram_publish where status='sent'
-        union all select post_id from threads_publish where status='sent'
-        union all select post_id from meta_publish where status='sent'
-        union all select post_id from linkedin_publish where status='sent'
-     ) x join post p on p.id=x.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
+    `select count(distinct x.post_id)::int as posts, count(*)::int as sends from post_published x join post p on p.id=x.post_id join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where s.workspace_id=$1`, [ws]);
   return { posts: tot?.posts ?? 0, sends: tot?.sends ?? 0, recent };
 });
@@ -3707,10 +3720,7 @@ app.post("/api/schedule/auto", async (req: any) => {
   // слота не має, тож фільтр лише за слотами пропускав такі пости: вони займали перші дні розкладу,
   // а свіжі затверджені їхали в кінець. Частково опублікований пост лишається - автопостер добʼє решту.
   const sentRows = approved.length ? await q<{ post_id: string; net: string }>(
-    `select post_id, 'telegram' as net from telegram_publish where status='sent' and post_id = any($1)
-     union select post_id, 'threads' from threads_publish where status='sent' and post_id = any($1)
-     union select post_id, channel from meta_publish where status='sent' and post_id = any($1)
-     union select post_id, 'linkedin' from linkedin_publish where status='sent' and post_id = any($1)`, [approved.map((u) => u.id)]) : [];
+    `select distinct post_id, net from post_published where post_id = any($1)`, [approved.map((u) => u.id)]) : [];
   const sentBy = new Map<string, Set<string>>();
   for (const r of sentRows) { if (!sentBy.has(r.post_id)) sentBy.set(r.post_id, new Set()); sentBy.get(r.post_id)!.add(r.net); }
   const units = approved.filter((u) => {
@@ -4449,12 +4459,14 @@ app.get("/api/tg/me", async (req: any, reply) => {
     one<{ c: string }>(`select count(*)::text c from source where workspace_id=$1 and archived=false`, [u.ws]),
     connectedNets(u.ws),
   ]);
+  // ▶️🎵 YouTube і TikTok - лише для відео-поста, тож окремим списком
+  const vnets = (await connectedNets(u.ws, { video: true })).filter((n) => !nets.includes(n));
   const tz = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='timezone'`, [u.ws]);
   // таймзона потрібна клієнту, щоб «завтра о 9:00» означало 9:00 у ПОЯСІ ВОРКСПЕЙСУ, а не в
   // тому, який стоїть на телефоні (людина в подорожі планувала б пости не туди)
   // 🏢 кілька брендів - перемикач угорі (той самий вибір, що /brand у боті)
   const b = await botBrands(u.tgId, u.own, u.token).catch(() => null);
-  return { ok: true, drafts: +(drafts?.c || 0), materials: +(mats?.c || 0), nets, tz: tz?.content || "Europe/Kyiv",
+  return { ok: true, drafts: +(drafts?.c || 0), materials: +(mats?.c || 0), nets, vnets, tz: tz?.content || "Europe/Kyiv",
     brand: u.ws, brands: b && b.linked && b.list.length > 1 ? b.list : [] };
 });
 
@@ -4501,10 +4513,7 @@ async function sentMap(ids: string[]): Promise<Map<string, string[]>> {
   const out = new Map<string, string[]>();
   if (!ids.length) return out;
   const rs = await q<{ post_id: string; net: string }>(
-    `select post_id, 'telegram' as net from telegram_publish where status='sent' and post_id=any($1)
-     union all select post_id, 'threads' from threads_publish where status='sent' and post_id=any($1)
-     union all select post_id, channel from meta_publish where status='sent' and post_id=any($1)
-     union all select post_id, 'linkedin' from linkedin_publish where status='sent' and post_id=any($1)`, [ids]);
+    `select post_id, net from post_published where post_id=any($1)`, [ids]);
   for (const r of rs) out.set(r.post_id, [...new Set([...(out.get(r.post_id) || []), r.net])]);
   return out;
 }
@@ -4843,6 +4852,7 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then(async (addr) => {
   startThreadsAuto();
   startComments();
   startCommentNotify(); // 💬 нові коментарі людей - у бот (раз на 20 хв, без нічних сповіщень)
+  startTikTokWatch(); // 🎬 TikTok обробляє відео асинхронно: посилання на пост або причина відмови
   startEvergreen();     // ♻️ вічнозелена черга (працює лише в кабінетах, де її увімкнули)
   startMeetingPull();   // погодинна звірка з хмарою власного транскрибатора
   startAlerts().catch((e: any) => app.log.error("startAlerts: " + e.message));   // 🔔 сповіщення адміну про збої

@@ -39,11 +39,7 @@ export async function scheduleConflicts(ws: string, postId: string, at: Date | n
     `with me as (select lower(regexp_replace(btrim(content), '\\s+', ' ', 'g')) as t from post where id=$2)
      select p2.id,
             (select min(ss.scheduled_at) from schedule_slot ss where ss.post_id=p2.id and ss.status='planned') as slot_at,
-            (select array_agg(distinct x.net || '|' || coalesce(x.acc, '')) from (
-               select 'telegram' as net, chat_id as acc from telegram_publish where post_id=p2.id and status='sent'
-               union all select 'threads', account_id from threads_publish where post_id=p2.id and status='sent'
-               union all select channel, account_id from meta_publish where post_id=p2.id and status='sent'
-               union all select 'linkedin', null from linkedin_publish where post_id=p2.id and status='sent') x) as sent_nets
+            (select array_agg(distinct x.net || '|' || x.account) from post_published x where x.post_id=p2.id) as sent_nets
        from post p2 join pipeline_run r on r.id=p2.run_id join source s on s.id=r.source_id, me
       where s.workspace_id=$1 and p2.id<>$2 and p2.stage='final' and length(me.t) >= 20
         and lower(regexp_replace(btrim(p2.content), '\\s+', ' ', 'g')) = me.t

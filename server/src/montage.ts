@@ -782,7 +782,7 @@ export async function attachMontage(ws: string, postId: string, format: MontageF
 }
 
 /** Новий пост під змонтоване відео (затверджений - лишається обрати час). */
-export async function montagePost(ws: string, format: MontageFormat, nets: string[], text: string, videoIds: string[], coverId?: string | null): Promise<string> {
+export async function montagePost(ws: string, format: MontageFormat, nets: string[], text: string, videoIds: string[], coverId?: string | null, aiVoice = false): Promise<string> {
   const body = text.trim() || (format === "story" ? "🎬 Змонтована сторіс" : "🎬 Змонтований рілс");
   const src = await one<{ id: string }>(`insert into source(workspace_id, origin, title, transcript) values($1,'montage',$2,$3) returning id`, [ws, body.slice(0, 90), body]);
   const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
@@ -790,6 +790,9 @@ export async function montagePost(ws: string, format: MontageFormat, nets: strin
   for (const n of nets) ch[n] = { on: true };
   // одна мережа - текст іде дослівно (як і в create_draft конектора)
   if (nets.length === 1) Object.assign(ch, { manual_adapt: true, native: nets[0] });
+  // 🗣 AI-голос - позначка «створено з AI» для YouTube і TikTok одразу (людина може зняти). Ставимо й
+  // тоді, коли мережу ще не ввімкнено: «🌐 В усі мережі» потім лише вмикає її, позначка лишається.
+  if (format === "reel" && aiVoice) for (const n of ["youtube", "tiktok"]) ch[n] = { ...(ch[n] || { on: false }), ai: true };
   const post = await one<{ id: string }>(
     `insert into post(run_id, stage, content, channels, format, review) values($1,'final',$2,$3,$4,'approved') returning id`,
     [run!.id, body, JSON.stringify(ch), format]);
@@ -824,7 +827,7 @@ export function startMontage(ws: string, o: MontageOpts, target: MontageTarget =
       if (postId) await attachMontage(ws, postId, o.format, ids, r.cover?.id);
       // текст нового поста - свій, інакше те, що звучить чи написано на відео (у сторіс його не видно,
       // але в кабінеті й Студії він каже, що це за ролик; для рілса - готовий підпис)
-      else if (target.create) postId = await montagePost(ws, o.format, target.create.nets, target.create.text || r.transcript || "", ids, r.cover?.id);
+      else if (target.create) postId = await montagePost(ws, o.format, target.create.nets, target.create.text || r.transcript || "", ids, r.cover?.id, o.voice === "tts");
       // обкладинка потрібна лише посту: монтаж «лише в медіатеку» сироти не лишає (свою поставить update_post)
       if (!postId && r.cover) { await dropUnusedDerived(ws, [{ id: r.cover.id }]).catch(() => {}); r.cover = null; }
       const out = { ...r, postId };

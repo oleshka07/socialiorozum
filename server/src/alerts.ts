@@ -473,10 +473,7 @@ export async function buildDigest(): Promise<string | null> {
   const open = (await q<AlertRow>(`select * from ops_alert where resolved_at is null order by (severity='critical') desc, last_at desc limit 10`))
     .map((a) => ({ title: a.title, severity: a.severity, count: a.count, since: fmtTime(a.first_at) }));
   const st = await one<{ published: number; failed: number; users: number; spend: number }>(`select
-      (select count(*) from telegram_publish where status='sent' and created_at > now() - interval '24 hours')::int
-      + (select count(*) from threads_publish where status='sent' and created_at > now() - interval '24 hours')::int
-      + (select count(*) from meta_publish where status='sent' and created_at > now() - interval '24 hours')::int
-      + (select count(*) from linkedin_publish where status='sent' and created_at > now() - interval '24 hours')::int as published,
+      (select count(*) from post_published where created_at > now() - interval '24 hours')::int as published,
       (select count(*) from schedule_slot where status='failed' and updated_at > now() - interval '24 hours')::int as failed,
       (select count(*) from app_user where created_at > now() - interval '24 hours')::int as users,
       coalesce((select sum(cost) from llm_usage where created_at > now() - interval '24 hours'), 0)::float as spend`).catch(() => null);
@@ -518,13 +515,13 @@ async function maybeDigest(): Promise<void> {
 // ---------------- людині: її запланований пост не вийшов ----------------
 /** Автопостер: пост не вийшов (не тимчасовий збій) - пишемо власнику кабінету в Telegram, з причиною
  *  і кнопкою на пост. Раніше це видно було лише в «Сьогодні», тобто людина дізнавалась, коли зайде. */
-export async function notifyPublishFailed(ws: string, postId: string, errors: Array<{ net: string; error: string }>): Promise<void> {
+export async function notifyPublishFailed(ws: string, postId: string, errors: Array<{ net: string; error: string }>, title = "⚠️ Запланований пост не вийшов"): Promise<void> {
   try {
     const owners = await q<{ chat_id: string }>(`select chat_id from tg_owner where workspace_id=$1 and chat_id is not null`, [ws]);
     if (!owners.length || !errors.length) return;
     const p = await one<{ content: string }>(`select content from post where id=$1`, [postId]);
     const first = String(p?.content || "").replace(/\s+/g, " ").trim();
-    const text = [`⚠️ Запланований пост не вийшов`, first ? `«${first.length > 90 ? first.slice(0, 89) + "…" : first}»` : "",
+    const text = [title, first ? `«${first.length > 90 ? first.slice(0, 89) + "…" : first}»` : "",
       "", ...errors.slice(0, 5).map((e) => `• ${e.net}: ${String(e.error).slice(0, 220)}`),
       "", "Відкрий пост, виправ причину й опублікуй ще раз - решта мереж, куди вже вийшло, не задублюється."].filter((x, i, a) => x || a[i - 1]).join("\n");
     const { liveSend } = await import("./tgbot.js");

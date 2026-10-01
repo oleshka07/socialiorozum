@@ -127,9 +127,10 @@ async function runJob(path, body, onTick) {
   }
 }
 
-let NETS = [], TZ = 'Europe/Kyiv', tab = 'new', draftFilter = 'active';
+let NETS = [], VNETS = [], TZ = 'Europe/Kyiv', tab = 'new', draftFilter = 'active';
 let draft = { text: '', nets: [] };          // «Новий»: чернетка, якої ще нема в базі
-const NETNAME = { telegram:'✈️ Telegram', instagram:'📸 Instagram', facebook:'📘 Facebook', threads:'🧵 Threads', linkedin:'💼 LinkedIn' };
+const NETNAME = { telegram:'✈️ Telegram', instagram:'📸 Instagram', facebook:'📘 Facebook', threads:'🧵 Threads', linkedin:'💼 LinkedIn', youtube:'▶️ YouTube', tiktok:'🎵 TikTok' };
+const TT_PRIV = { PUBLIC_TO_EVERYONE:'усі', MUTUAL_FOLLOW_FRIENDS:'друзі', FOLLOWER_OF_CREATOR:'підписники', SELF_ONLY:'лише я' };
 const ORIGIN = { diary:'📔 щоденник', rss:'📡 RSS', bot:'🤖 з бота', manual:'✍️ нотатка', idea:'💡 ідея', plan:'📅 план',
                  instagram:'📸 Instagram', fireflies:'🎙 транскрипт', gdrive:'📁 Drive', brand:'✨ бренд', takes:'🧵 тейк', topic:'🎯 тема', meeting:'🎤 зустріч' };
 
@@ -308,7 +309,15 @@ function closeEditor(reload) {
 function drawEditor() {
   const p = cur, ch = p.channels || {};
   const done = (p.sent || []).length > 0;
-  const netBtns = NETS.length ? NETS.map((k) => {
+  // відео-пост (не сторіс) - ще YouTube і TikTok; вже обрані показуємо завжди, щоб їх можна було зняти
+  const vidPost = isVid(p) && p.format !== 'story';
+  const allNets = NETS.concat(VNETS.filter((k) => vidPost || (ch[k] && ch[k].on)));
+  const tt = ch.tiktok && ch.tiktok.on ? ch.tiktok : null;
+  const ttNote = tt ? '<div class="meta" style="font-size:12px">🎵 TikTok: ' + (tt.mode === 'direct' && tt.privacy ? 'одразу · бачать: ' + (TT_PRIV[tt.privacy] || tt.privacy)
+      : tt.mode === 'direct' ? '⚠️ не обрано, хто бачить - обери в боті (картка поста → 🎵 TikTok) чи в кабінеті'
+      : 'у чернетки TikTok - там обереш, хто бачить, і опублікуєш (налаштувати - у боті чи кабінеті)') + '</div>' : '';
+  const offAll = allNets.filter((k) => !(ch[k] && ch[k].on) && !(p.sent || []).includes(k));
+  const netBtns = allNets.length ? allNets.map((k) => {
     const isSent = (p.sent || []).includes(k);
     return '<button class="net' + (ch[k] && ch[k].on ? ' on' : '') + '" data-n="' + k + '"' + (isSent ? ' disabled' : '') + '>'
       + (isSent ? '✓ ' : '') + (NETNAME[k] || k) + '</button>';
@@ -330,6 +339,8 @@ function drawEditor() {
     + '</div>'
     + (p.filename ? '<button class="go ghost" id="aDelPic">🗑 ' + (isVid(p) ? 'Прибрати відео' : (p.media || []).length > 1 ? 'Прибрати всі фото' : 'Прибрати фото') + '</button>' : '')
     + '<div class="nets" id="enets">' + netBtns + '</div>'
+    + (vidPost && offAll.length >= 2 && !done ? '<button class="go ghost" id="aAll">🌐 В усі мережі</button>' : '')
+    + ttNote
     + fcBlock(p)
     + (p.scheduled_at ? '<div class="meta"><span class="pill warn">🗓 ' + fmtWhen(p.scheduled_at) + '</span>'
         + '<button class="back" id="aUnsched">скасувати</button></div>' : '')
@@ -353,6 +364,12 @@ function drawEditor() {
     await api('/post/' + cur.id, { method: 'PUT', body: JSON.stringify({ channels: cur.channels }) });
     b.classList.toggle('on', cur.channels[k].on);
   });
+  if ($('aAll')) $('aAll').onclick = async () => {
+    cur.channels = cur.channels || {};
+    offAll.forEach((k) => { cur.channels[k] = { ...(cur.channels[k] || {}), on: true }; });
+    try { await api('/post/' + cur.id, { method: 'PUT', body: JSON.stringify({ channels: cur.channels }) }); haptic('success'); drawEditor(); }
+    catch (e) { $('em').textContent = '⚠️ ' + e.message; }
+  };
   $('aPhoto').onclick = () => $('ef').click();
   $('ef').onchange = uploadPhoto;
   if ($('aMore')) $('aMore').onclick = () => $('efm').click();
@@ -624,6 +641,7 @@ async function doPublish() {
       };
     }
     NETS = me.nets || [];
+    VNETS = me.vnets || [];
     TZ = me.tz || TZ;
     draft.nets = NETS.includes('telegram') ? ['telegram'] : [];
     render();

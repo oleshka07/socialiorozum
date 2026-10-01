@@ -619,10 +619,7 @@ async function sendDrafts(ws: string, chatId: string): Promise<void> {
   const rows = await q<{ id: string; content: string; format: string | null }>(
     `select p.id, p.content, p.format from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
       where s.workspace_id=$1 and p.stage='final' and coalesce(p.review,'') <> 'archived'
-        and not exists (select 1 from telegram_publish x where x.post_id=p.id and x.status='sent')
-        and not exists (select 1 from threads_publish x where x.post_id=p.id and x.status='sent')
-        and not exists (select 1 from meta_publish x where x.post_id=p.id and x.status='sent')
-        and not exists (select 1 from linkedin_publish x where x.post_id=p.id and x.status='sent')
+        and not exists (select 1 from post_published x where x.post_id=p.id)
       order by p.created_at desc limit 8`, [ws]);
   const brand = await brandLabel(ws, chatId).catch(() => "");
   if (!rows.length) { await liveSend(ws, chatId, "drafts", `📝 Чернеток нема${brand ? ` у бренді «${brand}»` : ""}. /post - написати новий.`); return; }
@@ -1075,6 +1072,28 @@ async function composeCallback(ws: string, chatId: string, data: string, cbq: an
 2. Перешли сюди будь-який пост із цього каналу. Або надішли його @назву, якщо канал публічний.
 
 Основний канал лишається, новий стане ще одним - і в картці поста зʼявиться галочка для нього.`, [[{ text: "‹ Назад до поста", data: `cc:${postId}` }]]);
+      return true;
+    }
+    case "cal": {
+      const add = await cmp.allNetsOn(ws, postId);
+      await tg.answerCallbackQuery(token, cbq.id, add.length ? `Додано: ${add.length}` : "Уже в усіх підключених мережах");
+      await openCompose(ws, chatId, postId, token); return true;
+    }
+    case "ctt": {
+      // 🎵 TikTok: режим, «хто бачить», дозволи, реклама, AI (ctt:<пост> - картка, ctt:<пост>:<дія> - дія)
+      const action = data.split(":").slice(2).join(":");
+      const why = action ? await cmp.tiktokAction(ws, postId, action) : "";
+      await tg.answerCallbackQuery(token, cbq.id, why || undefined);
+      const c = await cmp.tiktokCard(ws, postId);
+      if (c) await liveSend(ws, chatId, "compose", c.text, c.buttons); else await openCompose(ws, chatId, postId, token);
+      return true;
+    }
+    case "cyt": {
+      const action = data.split(":").slice(2).join(":");
+      if (action) await cmp.youtubeAction(ws, postId, action);
+      await tg.answerCallbackQuery(token, cbq.id);
+      const c = await cmp.youtubeCard(ws, postId);
+      if (c) await liveSend(ws, chatId, "compose", c.text, c.buttons); else await openCompose(ws, chatId, postId, token);
       return true;
     }
     case "cat": {

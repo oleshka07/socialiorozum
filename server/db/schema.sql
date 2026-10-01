@@ -1,5 +1,7 @@
 -- KontentGrov — схема БД (v1 + v2, готова до v3)
 create extension if not exists "pgcrypto";
+-- представлення перестворюється наприкінці файлу: прибираємо його ДО змін таблиць, на які воно спирається
+drop view if exists post_published;
 
 create table if not exists workspace (
   id          uuid primary key default gen_random_uuid(),
@@ -1135,3 +1137,43 @@ create table if not exists comment_notice (
   unique (workspace_id, tg_user_id, network, comment_id)
 );
 create index if not exists idx_comment_notice_user on comment_notice(tg_user_id);
+
+-- 🎬 YouTube і TikTok - звичайні мережі для відео-постів (композер, розклад, бот, конектор), а не лише
+-- кнопка 📤 для PRO-рілсів. Публікація «раз на пост», як у LinkedIn: резервація рядка ПЕРЕД заливкою.
+delete from youtube_publish where id in (
+  select id from (select id, row_number() over (partition by post_id order by created_at, id) rn from youtube_publish) t where rn > 1
+);
+create unique index if not exists uq_ytpub_post on youtube_publish(post_id);
+delete from tiktok_publish where id in (
+  select id from (select id, row_number() over (partition by post_id order by created_at, id) rn from tiktok_publish) t where rn > 1
+);
+create unique index if not exists uq_ttpub_post on tiktok_publish(post_id);
+alter table youtube_publish add column if not exists permalink text;
+alter table youtube_publish add column if not exists privacy text;            -- як YouTube прийняв: public|unlisted|private (до аудиту - private)
+-- давні завантаження кнопкою 📤 - вертикальні рілси до хвилини, тобто Shorts
+update youtube_publish set permalink = 'https://www.youtube.com/shorts/' || external_id
+ where permalink is null and status='sent' and created_at < '2026-10-02' and external_id ~ '^[A-Za-z0-9_-]{6,20}$';
+alter table youtube_config add column if not exists channel_id text;
+-- TikTok: пряма публікація (direct) чи чернетка в застосунку (inbox); TikTok обробляє відео асинхронно -
+-- status 'processing', поки сторож (vidpub.ts) не почує PUBLISH_COMPLETE чи FAILED.
+alter table tiktok_publish add column if not exists permalink text;
+alter table tiktok_publish add column if not exists mode text;                 -- direct | inbox
+alter table tiktok_publish add column if not exists tt_status text;            -- останній стан у TikTok
+alter table tiktok_publish add column if not exists video_id text;             -- id поста в TikTok (рядком: 19 цифр не влазять у число JS)
+alter table tiktok_publish add column if not exists check_at timestamptz;      -- коли сторожу питати TikTok знову
+alter table tiktok_publish add column if not exists checks int not null default 0;
+create index if not exists idx_ttpub_watch on tiktok_publish(check_at) where status='processing' or mode='inbox';
+alter table tiktok_config add column if not exists username text;              -- @нік (для посилання на пост)
+alter table tiktok_config add column if not exists scopes text;                -- які дозволи TikTok дала людина
+
+-- 📤 Усі публікації поста одним списком: мережа, акаунт (id; '' - мережа з одним акаунтом), посилання, коли.
+-- Нова мережа додається сюди, а не в пʼятнадцять union по коду (так YouTube і TikTok уже були пропущені
+-- в «Сьогодні», банку, аналітиці й розкладі). TikTok, що ще обробляє відео, - теж «уже там»: повтор
+-- задублював би пост.
+create view post_published as
+  select post_id, 'telegram'::text as net, coalesce(chat_id, '')::text as account, permalink, created_at from telegram_publish where status='sent'
+  union all select post_id, 'threads', coalesce(account_id, ''), permalink, created_at from threads_publish where status='sent'
+  union all select post_id, channel, coalesce(account_id, ''), permalink, created_at from meta_publish where status='sent'
+  union all select post_id, 'linkedin', '', permalink, created_at from linkedin_publish where status='sent'
+  union all select post_id, 'youtube', '', permalink, created_at from youtube_publish where status='sent'
+  union all select post_id, 'tiktok', '', permalink, created_at from tiktok_publish where status in ('sent', 'processing');

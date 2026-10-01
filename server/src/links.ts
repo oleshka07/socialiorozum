@@ -57,17 +57,17 @@ export async function shortFor(ws: string, source: string, o: { postId?: string 
 
 // Жорсткі межі поста, за якими мережа відбиває публікацію (Telegram довгий підпис шле окремим
 // повідомленням, Facebook приймає десятки тисяч знаків - там межі нема)
-export const LINK_HARD_MAX: Record<string, number> = { threads: 500, linkedin: 3000 };
+export const LINK_HARD_MAX: Record<string, number> = { threads: 500, linkedin: 3000, youtube: 5000 };
 
 /**
- * Посилання в тексті поста для мережі → короткі з UTM (коли людина це ввімкнула). Instagram - ні: там
- * посилання в підписі й коментарях не клікаються. Власні адреси Holos не чіпаємо.
+ * Посилання в тексті поста для мережі → короткі з UTM (коли людина це ввімкнула). Instagram і TikTok - ні:
+ * там посилання в підписі й коментарях не клікаються. Власні адреси Holos не чіпаємо.
  * max - межа мережі: коротке посилання (~33 знаки) довше за коротку адресу (t.me/x), і текст на межі
  * перевалив би її. Тоді скорочуються лише адреси, що від заміни коротшають, а не влазить і так - текст
  * як був: пост, що не вийшов, гірший за пост без лічильника.
  */
 export async function linkify(ws: string, postId: string, net: string, text: string, max: number | undefined = LINK_HARD_MAX[net]): Promise<string> {
-  if (!text || net === "instagram") return text;
+  if (!text || net === "instagram" || net === "tiktok") return text;
   const s = await linkSettings(ws);
   if (!s.auto) return text;
   const host = ourHost();

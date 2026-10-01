@@ -39,7 +39,8 @@ export function networkStates(e: LandingEnv): Record<Network, NetState> {
     facebook: meta,
     threads: !e.threadsAppId ? "soon" : e.threadsPublic ? "live" : "invite",
     linkedin: e.linkedinClientId ? "live" : "soon",
-    // рілси в YouTube і TikTok - PRO-трек зі збіркою відео; чесно «бета», навіть коли ключі є
+    // відео в YouTube і TikTok: публікуються, але до перевірок платформ YouTube показує їх лише автору,
+    // а TikTok кладе в чернетки - тож чесно «бета», навіть коли ключі є
     youtube: e.googleClientId ? "beta" : "soon",
     tiktok: e.tiktokKey ? "beta" : "soon",
   };
@@ -67,7 +68,7 @@ export function networksFaq(st: Record<Network, NetState>): string {
   const parts: string[] = [];
   if (by("live").length) parts.push(`<b>Працює зараз:</b> ${list(by("live"))}.`);
   if (by("invite").length) parts.push(`<b>За запрошенням:</b> ${list(by("invite"))} - поки платформа перевіряє застосунок, підключитись можуть учасники ранньої бети.`);
-  if (by("beta").length) parts.push(`<b>Бета:</b> ${list(by("beta"))} - для рілсів у PRO.`);
+  if (by("beta").length) parts.push(`<b>Бета:</b> ${list(by("beta"))} - відео виходять туди з того самого поста, але поки платформи перевіряють застосунок, YouTube показує їх лише тобі, а TikTok кладе в чернетки, які ти публікуєш у застосунку TikTok.`);
   if (by("soon").length) parts.push(`<b>Скоро:</b> ${list(by("soon"))}.`);
   parts.push("Особисті профілі й групи Facebook Meta через API не відкриває нікому, тож їх не буде ні в нас, ні в інших сервісів.");
   return parts.join(" ");

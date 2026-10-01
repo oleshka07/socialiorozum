@@ -127,10 +127,7 @@ export async function backfillDigests(limit = 40): Promise<number> {
     const rows = await q<{ post_id: string; workspace_id: string }>(
       `select post_id, workspace_id from (
          select distinct on (u.pid) u.pid as post_id, s.workspace_id, u.at from (
-            select tp.post_id as pid, tp.created_at as at from telegram_publish tp where tp.status='sent'
-            union all select tp.post_id, tp.created_at from threads_publish tp where tp.status='sent'
-            union all select tp.post_id, tp.created_at from meta_publish tp where tp.status='sent'
-            union all select tp.post_id, tp.created_at from linkedin_publish tp where tp.status='sent'
+            select tp.post_id as pid, tp.created_at as at from post_published tp
           ) u
           join post p on p.id=u.pid join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
           left join post_digest d on d.post_id=u.pid
@@ -153,10 +150,7 @@ export async function backfillDigests(limit = 40): Promise<number> {
 async function legacyRecentDigest(workspaceId: string): Promise<string> {
   const rows = await q<{ pid: string; content: string }>(
     `select p.id as pid, p.content from (
-       select tp.post_id as pid, tp.created_at as at from telegram_publish tp where tp.status='sent'
-       union all select tp.post_id, tp.created_at from threads_publish tp where tp.status='sent'
-       union all select tp.post_id, tp.created_at from meta_publish tp where tp.status='sent'
-       union all select tp.post_id, tp.created_at from linkedin_publish tp where tp.status='sent'
+       select tp.post_id as pid, tp.created_at as at from post_published tp
      ) u join post p on p.id=u.pid join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where s.workspace_id=$1 order by u.at desc limit 60`, [workspaceId]);
   const seen = new Set<string>(); const posts: string[] = [];

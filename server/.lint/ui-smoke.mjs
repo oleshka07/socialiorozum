@@ -57,6 +57,11 @@ CAR.set(P8, [{ id: "c8", filename: "p8.jpg", kind: "image" }]);
 const P9 = "99999999-9999-9999-9999-999999999999";
 const P9POST = { id: P9, content: "Осінь у горах", review: "approved", channels: { instagram: { on: true }, linkedin: { on: true } }, format: "post", rubric: "", intent: "", first_comment: "Маршрут: https://rozum.one/trail", sent: ["instagram", "linkedin"], links: {} };
 CAR.set(P9, [{ id: "c9", filename: "p9.jpg", kind: "image" }]);
+// 🎬 YouTube і TikTok: вертикальне відео 45 с, обрано лише Instagram (YouTube і TikTok вмикає кнопка «＋ Увімкнути»)
+const P10 = "10101010-1010-1010-1010-101010101010";
+const P10POST = { id: P10, content: "Як ми зекономили 3 години на тиждень\nДеталі в описі #holos", review: "review", channels: { instagram: { on: true } }, format: "post", rubric: "", intent: "", sent: [], links: {} };
+CAR.set(P10, [{ id: "v10", filename: "v10.mp4", kind: "video", duration: 45, width: 1080, height: 1920, size: 30 * 1048576 }]);
+const TT_CREATOR = { ok: true, direct: true, nickname: "Holos", username: "holos_rozum", avatarUrl: "", privacyOptions: ["PUBLIC_TO_EVERYONE", "FOLLOWER_OF_CREATOR", "SELF_ONLY"], commentDisabled: false, duetDisabled: true, stitchDisabled: false, maxDurationSec: 60 };
 const FC9 = { comments: [{ network: "instagram", status: "sent" }, { network: "linkedin", status: "failed", error: "LinkedIn не дав застосунку дозволу коментувати від імені профілю." }] };
 const fcSends = [];   // POST /posts/:id/first-comment/send
 const altPuts = [];   // PUT /media/:id/alt - опис фото
@@ -214,6 +219,7 @@ const API = {
   "GET /integrations/linkedin": { connected: false, available: false },
   "GET /integrations/youtube": { connected: false, available: false },
   "GET /integrations/tiktok": { connected: false, available: false },
+  "GET /integrations/tiktok/creator": TT_CREATOR,
   "GET /integrations/gdrive": { connected: false, available: false },
   "GET /integrations/transcription": { hasKey: false, webhookUrl: "", hasSecret: false, autoRun: false },
   "GET /workspaces": { items: [{ id: "11111111-1111-1111-1111-111111111111", title: "Бренд А", role: "owner" },
@@ -621,13 +627,13 @@ function handleApi(method, path, body) {
   }
   let m = /^\/posts\/([0-9a-f-]+)\/full$/.exec(path);
   if (m) {
-    const p = m[1] === P4 ? P4POST : m[1] === P5 ? P5POST : m[1] === P7 ? P7POST : m[1] === P8 ? P8POST : m[1] === P9 ? P9POST : (POSTS.find((x) => x.id === m[1]) || POSTS[0]);
+    const p = m[1] === P4 ? P4POST : m[1] === P5 ? P5POST : m[1] === P7 ? P7POST : m[1] === P8 ? P8POST : m[1] === P9 ? P9POST : m[1] === P10 ? P10POST : (POSTS.find((x) => x.id === m[1]) || POSTS[0]);
     return { ...p, image_prompt: "", headline: "", has_base: false, slides_text: "", cover_filename: p.id === P5 ? "cov0.jpg" : null, media: CAR.get(p.id) || (p.media_filename ? [{ id: "c0", filename: p.media_filename }] : []) };
   }
   m = /^\/posts\/([0-9a-f-]+)\/publish-state$/.exec(path);
   if (m) {
     if (m[1] === P8 && P8STATE) return P8STATE;
-    if (m[1] === P4 || m[1] === P5 || m[1] === P7 || m[1] === P8) return { sent: [], links: {}, comments: [] };
+    if (m[1] === P4 || m[1] === P5 || m[1] === P7 || m[1] === P8 || m[1] === P10) return { sent: [], links: {}, comments: [] };
     if (m[1] === P9) {
       // як справжній сервер: кожна публікація окремо (sentTo) зі станом свого коментаря
       const cs = (n) => { const c = FC9.comments.find((x) => x.network === n); return c ? { status: c.status, error: c.error || null, due_at: null } : null; };
@@ -972,7 +978,7 @@ const run = async () => {
     const fns = await page.$$eval(".tdFn", (a) => a.map((x) => x.textContent));
     const chans = await page.$$eval(".tdChan", (a) => a.map((x) => x.textContent));
     return fns.length === 3 && fns[0].includes("Новини") && fns[1].includes("Чернетки") && fns[2].includes("Опубліковано") &&
-      chans.length === 5 && chans.some((c) => c.includes("✓ підключено")) && (await count(".tdChanGo")) > 0;
+      chans.length === 7 && chans.some((c) => c.includes("✓ підключено")) && (await count(".tdChanGo")) > 0;
   });
 
   await check("quickstart", async () => {
@@ -1130,7 +1136,7 @@ const run = async () => {
     });
     // прев'ю мусить ЧЕСНО казати, що мережу без своєї версії сервер спакує сам
     const note = await $t("#cmpPrev");
-    return st.grps === 5 && st.tgDisabled && st.thEnabled && st.revert === 0 && note.includes("спакується під цю мережу автоматично");
+    return st.grps === 7 && st.tgDisabled && st.thEnabled && st.revert === 0 && note.includes("спакується під цю мережу автоматично");
   });
 
   // 🖼 карусель у композері: смужка кадрів, переставляння, прибирання, додавання з медіатеки
@@ -1236,6 +1242,135 @@ const run = async () => {
     const txt = await $t('.pcard[data-post="11111111-1111-1111-1111-111111111111"] .pcard-cnt');
     await page.evaluate(() => { StudioFilter = "all"; renderStudio(); });
     return txt === "🖼 3";
+  });
+
+  // 🎬 YouTube і TikTok: лише для відео; блок TikTok - як вимагає TikTok перед прямою публікацією
+  // (нік автора, «Хто бачить» без типового значення, вимкнене автором - сіре, реклама, згода з музикою)
+  await check("vidNets", async () => {
+    await closeComposers();
+    await page.waitForTimeout(150);
+    const orig = API["GET /channels/status"];
+    API["GET /channels/status"] = { ...orig, youtube: true, tiktok: true, video: { youtube: { name: "Holos Channel" }, tiktok: { name: "Holos", username: "holos_rozum", direct: true } } };
+    await page.evaluate(() => loadChanStatus());
+    try {
+      // фото-пост: YouTube і TikTok сірі, з поясненням
+      await page.evaluate((id) => openComposer(id), P8);
+      await page.waitForSelector('.cmp-ov #cmpChips .netchip[data-net="tiktok"]', { timeout: 6000 });
+      const photo = await page.evaluate(() => { const c = (k) => document.querySelector('#cmpChips .netchip[data-net="' + k + '"]');
+        return { yt: c("youtube").disabled, tt: c("tiktok").disabled, title: c("tiktok").title, box: getComputedStyle(document.querySelector("#cmpTtBox")).display }; });
+      await closeComposers();
+      await page.waitForTimeout(150);
+      // відео-пост: кнопка вмикає обидві мережі
+      await page.evaluate((id) => openComposer(id), P10);
+      await page.waitForSelector(".cmp-ov #cmpVidNets", { timeout: 6000 });
+      const allBtn = await $t("#cmpVidNets");
+      await page.evaluate(() => document.querySelector("#cmpVidNets").click());
+      // без обраного «Хто бачить» TikTok-блок стоїть на «У чернетки» (так само поводиться й сервер)
+      await page.waitForSelector('.cmp-ov #cmpTtBox [name=ttMode][value=draft]:checked', { timeout: 6000 });
+      await page.evaluate(() => { const r = document.querySelector('#cmpTtBox [name=ttMode][value=direct]'); r.checked = true; r.dispatchEvent(new Event("change")); });
+      await page.waitForSelector(".cmp-ov #cmpTtBox #ttPriv", { timeout: 6000 });
+      const st = await page.evaluate(() => ({
+        yt: getComputedStyle(document.querySelector("#cmpYtBox")).display !== "none",
+        ytPh: document.querySelector("#ytTitle").placeholder,
+        who: document.querySelector("#cmpTtBox .vnwho").textContent,
+        priv: document.querySelector("#ttPriv").value,
+        opts: [...document.querySelectorAll("#ttPriv option")].map((o) => o.textContent),
+        duetDis: document.querySelector("#ttDu").disabled, cm: document.querySelector("#ttCm").checked,
+        legal: document.querySelector("#cmpTtBox .vnlegal").textContent,
+        shorts: /Shorts/.test(document.querySelector("#cmpPrev").textContent), user: document.querySelector("#cmpPrev").textContent.includes("@holos_rozum"),
+      }));
+      if (process.env.SMOKE_SHOTS) {
+        await page.evaluate(() => { const b = document.querySelector("#cmpTtBox"); if (b) b.scrollIntoView({ block: "center" }); });
+        await page.screenshot({ path: join(HERE, "vidnets-light.png") });
+        await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark")); await page.waitForTimeout(200);
+        await page.screenshot({ path: join(HERE, "vidnets-dark.png") });
+        await page.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
+      }
+      // без «Хто бачить» публікація не стартує, а пояснює
+      const before = carCalls.filter((c) => c.kind === "publish").length;
+      await page.evaluate(() => document.querySelector("#cmpNow").click());
+      await page.waitForTimeout(250);
+      const blocked = await $t("#cmpMsg");
+      const started = carCalls.filter((c) => c.kind === "publish").length - before;
+      // обрали «Підписники», ввімкнули коментарі, розкрили рекламу → без вибору типу - помилка, «брендований» - «Лише я» вимкнено
+      await page.evaluate(() => { const s = document.querySelector("#ttPriv"); s.value = "SELF_ONLY"; s.dispatchEvent(new Event("change")); const c = document.querySelector("#ttCm"); c.checked = true; c.dispatchEvent(new Event("change")); const d = document.querySelector("#ttDisc"); d.checked = true; d.dispatchEvent(new Event("change")); });
+      await page.waitForTimeout(100);
+      const disc = await $t("#cmpTtBox");
+      await page.evaluate(() => { const b = document.querySelector("#ttBr"); b.checked = true; b.dispatchEvent(new Event("change")); });
+      await page.waitForTimeout(100);
+      const br = await page.evaluate(() => ({ selfOff: document.querySelector('#ttPriv option[value="SELF_ONLY"]').disabled, priv: document.querySelector("#ttPriv").value, legal: document.querySelector("#cmpTtBox .vnlegal").textContent }));
+      await page.evaluate(() => { const s = document.querySelector("#ttPriv"); s.value = "FOLLOWER_OF_CREATOR"; s.dispatchEvent(new Event("change")); });
+      // YouTube: своя назва і «за посиланням»
+      await page.evaluate(() => { const t = document.querySelector("#ytTitle"); t.value = "Моя <назва>"; t.dispatchEvent(new Event("input")); const p = document.querySelector("#ytPriv"); p.value = "unlisted"; p.dispatchEvent(new Event("change")); });
+      chanSaves.length = 0;
+      await page.evaluate(() => document.querySelector("#cmpSave").click());
+      await page.waitForTimeout(300);
+      const saved = (chanSaves.find((x) => x.id === P10) || {}).channels || {};
+      // режим «чернетка»: «Хто бачить» зникає, є кнопка скопіювати підпис
+      await page.evaluate(() => { const r = document.querySelector('#cmpTtBox [name=ttMode][value=draft]'); r.checked = true; r.dispatchEvent(new Event("change")); });
+      await page.waitForTimeout(100);
+      const draft = await page.evaluate(() => ({ priv: !!document.querySelector("#ttPriv"), copy: !!document.querySelector("#ttCopy"), pv: document.querySelector("#cmpPrev").textContent.includes("чернетк") }));
+      const good = photo.yt && photo.tt && /лише для відео/.test(photo.title) && photo.box === "none"
+        && st.yt && st.ytPh.includes("Як ми зекономили 3 години на тиждень") && st.who.includes("Holos") && st.who.includes("@holos_rozum")
+        && st.priv === "" && st.opts[0].includes("обери") && st.opts.length === 4 && st.duetDis && !st.cm && /Music Usage Confirmation/.test(st.legal) && st.shorts && st.user
+        && /обери «Хто бачить»/.test(blocked) && started === 0
+        && /обери хоча б одне/.test(disc) && br.selfOff && br.priv === "" && /Branded Content Policy/.test(br.legal)
+        && saved.tiktok && saved.tiktok.privacy === "FOLLOWER_OF_CREATOR" && saved.tiktok.comment === true && saved.tiktok.branded === true && !saved.tiktok.duet
+        && saved.youtube && saved.youtube.title === "Моя назва" && saved.youtube.privacy === "unlisted" && saved.youtube.on === true
+        // «🌐 В усі мережі» вмикає всі підключені, а не лише YouTube і TikTok
+        && /В усі мережі/.test(allBtn) && saved.telegram && saved.telegram.on === true && saved.threads && saved.threads.on === true
+        && !draft.priv && draft.copy && draft.pv;
+      if (!good) console.log("   ↳ vidNets:", JSON.stringify({ allBtn, photo, st, blocked, started, disc: disc.slice(0, 200), br, saved: { tiktok: saved.tiktok, youtube: saved.youtube, telegram: saved.telegram, threads: saved.threads }, draft }));
+      if (process.env.SMOKE_SHOTS) {
+        // телефон: композер відкривається вже на вузькому екрані (як у людини), а не стискається відкритим
+        await closeComposers(); await page.waitForTimeout(200);
+        await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(300);
+        await page.evaluate((id) => openComposer(id), P10);
+        await page.waitForSelector(".cmp-ov #cmpVidNets", { timeout: 6000 });
+        await page.evaluate(() => document.querySelector("#cmpVidNets").click());
+        await page.waitForSelector('.cmp-ov #cmpTtBox [name=ttMode][value=direct]', { timeout: 6000 });
+        await page.evaluate(() => { const r = document.querySelector('#cmpTtBox [name=ttMode][value=direct]'); r.checked = true; r.dispatchEvent(new Event("change")); });
+        await page.waitForSelector(".cmp-ov #cmpTtBox #ttPriv", { timeout: 6000 });
+        await page.waitForTimeout(400);
+        await page.evaluate(() => { const b = document.querySelector("#cmpTtBox"); if (b) b.scrollIntoView({ block: "start" }); });
+        await page.waitForTimeout(200);
+        await page.screenshot({ path: join(HERE, "vidnets-mobile.png") });
+        const ov = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+        const geo = await page.evaluate(() => { const r = (sel) => { const e = document.querySelector(sel); if (!e) return null; const b = e.getBoundingClientRect(); return [Math.round(b.top), Math.round(b.bottom)]; };
+          return { tt: r("#cmpTtBox"), prev: r("#cmpPrev"), foot: r(".cmp-foot") }; });
+        console.log("   ↳ vidNets телефон: горизонтальний скрол " + ov + " px · " + JSON.stringify(geo));
+        await page.setViewportSize({ width: 1400, height: 950 }); await page.waitForTimeout(200);
+      }
+      return good;
+    } finally {
+      API["GET /channels/status"] = orig;
+      await page.evaluate(() => loadChanStatus());
+      await closeComposers();
+    }
+  });
+
+  // 📱 композер на телефоні: редактор і прев'ю - один стовпчик, що гортається цілком. Раніше висока стрічка
+  // прев'ю (відео 9:16 у кожній мережі) стискала редактор до кількох пікселів, а кнопки малювались посеред прев'ю.
+  await check("cmpPhone", async () => {
+    await closeComposers();
+    await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(300);
+    try {
+      await page.evaluate((id) => openComposer(id), P10);
+      await page.waitForSelector(".cmp-ov #cmpPrev .phone", { timeout: 6000 });
+      await page.waitForTimeout(300);
+      const g = await page.evaluate(() => {
+        const b = (sel) => document.querySelector(sel).getBoundingClientRect();
+        const body = document.querySelector(".cmp-ov .cmp-body"), left = b(".cmp-ov .cmp-left"), right = b(".cmp-ov .cmp-right"), foot = b(".cmp-ov .cmp-foot"), bb = body.getBoundingClientRect();
+        return { left: Math.round(left.height), leftScroll: document.querySelector(".cmp-ov .cmp-left").scrollHeight, rightTop: Math.round(right.top), leftBottom: Math.round(left.bottom),
+          bodyBottom: Math.round(bb.bottom), footTop: Math.round(foot.top), scrolls: body.scrollHeight > body.clientHeight + 50, hscroll: document.documentElement.scrollWidth - window.innerWidth };
+      });
+      const good = g.left >= g.leftScroll - 2 && g.rightTop >= g.leftBottom - 1 && g.footTop >= g.bodyBottom - 1 && g.scrolls && g.hscroll <= 0;
+      if (!good) console.log("   ↳ cmpPhone:", JSON.stringify(g));
+      return good;
+    } finally {
+      await closeComposers();
+      await page.setViewportSize({ width: 1400, height: 950 }); await page.waitForTimeout(200);
+    }
   });
 
   await check("videoComposer", async () => {
@@ -2964,7 +3099,10 @@ const run = async () => {
     await page.click("#mntGo");
     await page.waitForFunction(() => !document.querySelector("#mntSrc"), undefined, { timeout: 10000 });
     const sent = mtCalls[mtCalls.length - 1] || {};
-    await page.evaluate(() => { document.querySelector(".cmp-ov")?.remove(); MediaSel = null; });
+    // після монтажу композер відкривається асинхронно (пост ще вантажиться) - дочекатись і лише тоді прибрати,
+    // інакше він зʼявлявся вже після прибирання й перекривав наступні перевірки
+    await page.waitForSelector(".cmp-ov", { timeout: 6000 }).catch(() => {});
+    await page.evaluate(() => { document.querySelectorAll(".cmp-ov").forEach((o) => o.remove()); MediaSel = null; });
     const good = tpls.join(",") === "standard*,before_after,talking,process" && /Vary Servis & Úklid · Karlovy Vary · @servisvary/.test(endLbl)
       && ba.shown && ba.hint === "ДО: 1 · ПІСЛЯ: 2" && hookShown && /свій гачок/.test(needHook) && cutShown && talkSrc === "auto"
       && sent.template === "before_after" && sent.beforeCount === 1 && sent.hook === "Ріжемо бетон за день" && sent.endCard === false

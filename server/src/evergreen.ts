@@ -39,7 +39,8 @@ async function wsTz(ws: string): Promise<string> {
 }
 
 type Sent = { nets: string[]; accs: Record<string, (string | null)[]>; first: number; last: number };
-/** Куди й коли пости вийшли: мережі (по порядку першої публікації), акаунти рядків, перша й остання публікація. */
+/** Куди й коли пости вийшли: мережі (по порядку першої публікації), акаунти рядків, перша й остання публікація.
+ *  YouTube і TikTok сюди свідомо не входять: повтор того самого відео там - дубль (TikTok за таке ріже охоплення). */
 async function sentInfo(ids: string[]): Promise<Map<string, Sent>> {
   const out = new Map<string, Sent>();
   if (!ids.length) return out;

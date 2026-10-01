@@ -18,7 +18,7 @@
     --line:#E8E3DA; --line2:#DCD6CB;
     --brand:#15795A; --brand2:#1C9170; --brand-ink:#FFFFFF; --brand-soft:#E4F0EA; --brand-soft2:#D2E7DD;
     --amber:#B9762A; --amber-soft:#F6EAD7; --danger:#BC4530; --danger-soft:#F7E4DF;
-    --tg:#2AABEE; --ig:#E1306C; --fb:#1877F2; --th:#101010; --li:#0A66C2;
+    --tg:#2AABEE; --ig:#E1306C; --fb:#1877F2; --th:#101010; --li:#0A66C2; --yt:#FF0000; --tt:#FE2C55;
     --shadow:0 1px 2px rgba(28,40,33,.04), 0 4px 14px rgba(28,40,33,.06);
     --shadow-lg:0 8px 40px rgba(28,40,33,.14); --r:14px;
   }
@@ -28,7 +28,7 @@
     --line:#28302C; --line2:#323B36;
     --brand:#37B488; --brand2:#42C496; --brand-ink:#06120D; --brand-soft:#13251D; --brand-soft2:#173026;
     --amber:#D99B4E; --amber-soft:#241B0F; --danger:#E0654A; --danger-soft:#2A140E;
-    --tg:#2AABEE; --ig:#F25C9A; --fb:#4D90F5; --th:#E8EDE9; --li:#3B82C4;
+    --tg:#2AABEE; --ig:#F25C9A; --fb:#4D90F5; --th:#E8EDE9; --li:#3B82C4; --yt:#FF4E45; --tt:#FE2C55;
     --shadow:0 1px 2px rgba(0,0,0,.3), 0 6px 22px rgba(0,0,0,.4); --shadow-lg:0 12px 48px rgba(0,0,0,.55);
   }
   *{box-sizing:border-box}
@@ -366,9 +366,9 @@
      людини з дальтонізмом злилися б в один. Палітру перевірено scripts/validate_palette.js (усі пари,
      світла й темна тема): Threads зелений, Instagram маджента, Facebook синій, Telegram жовтий.
      Шкала «×норми» - розбіжна: синій = краще за норму, червоний = гірше, сірий посередині = як завжди. */
-  .viz{--viz-threads:#008300;--viz-instagram:#e87ba4;--viz-facebook:#2a78d6;--viz-telegram:#eda100;
+  .viz{--viz-threads:#008300;--viz-instagram:#e87ba4;--viz-facebook:#2a78d6;--viz-telegram:#eda100;--viz-youtube:#8437b2;
        --viz-up:#2a78d6;--viz-up2:#9ec5f4;--viz-mid:#f0efec;--viz-down2:#f4b6b6;--viz-down:#e34948;--viz-thin:#c3c2b7;--viz-good:#006300}
-  [data-theme="dark"] .viz{--viz-instagram:#d55181;--viz-facebook:#3987e5;--viz-telegram:#c98500;
+  [data-theme="dark"] .viz{--viz-instagram:#d55181;--viz-facebook:#3987e5;--viz-telegram:#c98500;--viz-youtube:#9347c2;
        --viz-up:#3987e5;--viz-up2:#184f95;--viz-mid:#383835;--viz-down2:#743e3c;--viz-down:#e66767;--viz-thin:#4a4a46;--viz-good:#0ca30c}
   .anbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
   .anbar select{width:auto;max-width:100%;padding:7px 10px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;font-size:13px}
@@ -565,6 +565,22 @@
   .fcchip{font-size:11.5px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--ink2);background:var(--surface)}
   .fcchip.off{color:var(--faint);text-decoration:line-through}
   .fcchip.ok{color:var(--brand);border-color:var(--brand)}
+  /* 🎬 YouTube і TikTok у композері */
+  .vnbox{margin-top:14px;padding:10px 12px;border:1px dashed var(--line);border-radius:10px}
+  .vnbox .vnh{font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint)}
+  .vnbox .vnh span{letter-spacing:0;font-weight:700;color:var(--ink2)}
+  .vnbox .vnrow{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:12.5px;color:var(--ink2);margin-top:8px}
+  .vnbox .vnrow label{display:inline-flex;gap:5px;align-items:center;cursor:pointer}
+  .vnbox .vnrow select{width:auto;padding:5px 8px;display:inline-block;margin-left:4px}
+  .vnbox label.off{opacity:.45;cursor:not-allowed}
+  .vnbox .vnwho{display:flex;gap:6px;align-items:center;font-size:12.5px;margin-top:6px;color:var(--ink2)}
+  .vnbox .vnwho img{width:22px;height:22px;border-radius:50%;object-fit:cover}
+  .vnbox .vnwho span{color:var(--muted)}
+  .vnbox .vnsub{display:flex;flex-direction:column;gap:6px;margin:6px 0 0 22px;font-size:12px;color:var(--ink2)}
+  .vnbox .vnsub label{display:inline-flex;gap:5px;align-items:flex-start;cursor:pointer}
+  .vnbox .vnmuted{font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.45}
+  .vnbox .vnerr{font-size:11.5px;color:var(--danger);margin-top:6px}
+  .vnbox .vnlegal{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.45}
   .fcchip.bad{color:var(--danger);border-color:var(--danger)}
   /* 🖼 карусель: смужка кадрів у композері */
   .slides-strip{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start}
@@ -605,7 +621,10 @@
   /* 🔗 лінк на живий пост під плашкою мережі (зʼявляється після публікації) */
   .pv-open{display:block;width:fit-content;margin:-4px auto 8px;font-size:11.5px;font-weight:700;color:var(--brand);text-decoration:none;border-bottom:1px dashed var(--brand)}
   .pv-open:hover{opacity:.75}
-  @media(max-width:820px){ .cmp-body{flex-direction:column} .cmp-right{width:auto;border-left:none;border-top:1px solid var(--line)} }
+  /* вузький екран: редактор і прев'ю - один стовпчик, що гортається цілком (раніше кожна панель гортала себе
+     сама, і висока стрічка прев'ю - відео 9:16 у кожній мережі - стискала редактор до кількох пікселів, а
+     кнопки внизу малювались посеред прев'ю) */
+  @media(max-width:820px){ .cmp-body{flex-direction:column;overflow:auto;-webkit-overflow-scrolling:touch} .cmp-left{flex:none;overflow:visible} .cmp-right{width:auto;flex:none;overflow:visible;border-left:none;border-top:1px solid var(--line)} }
   /* 🦉 сова-провідник Розум */
   :root{ --owl-bd:#f2a007; --owl-bl:#ffd98a; --owl-dk:#1a1a1a; --owl-r:#1a1a1a }
   :root[data-theme="dark"]{ --owl-bd:#f2a007; --owl-bl:#ffe0a0; --owl-dk:#0d0d0d; --owl-r:#f2a007 }
@@ -1284,15 +1303,15 @@ html.review-on #owl{display:none!important}
             <div class="btnrow"><span id="liStatus" style="font-size:13px;color:var(--muted)">…</span></div>
             <div class="btnrow"><a id="liConnect" class="btn primary" href="/api/integrations/linkedin/connect" onclick="return connectPopup('/api/integrations/linkedin/connect')" style="display:none">🔗 Підключити LinkedIn</a><button class="ghost" id="liDisconnect" style="display:none">Відключити</button></div>
           </div>
-          <div class="panel proonly" style="margin:0;display:none">
-            <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:#FF0000"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M12 4c7 0 9 1 9 8s-2 8-9 8-9-1-9-8 2-8 9-8zm-2 4.5v7l6-3.5-6-3.5z"></path></svg></span>YouTube Shorts</div>
-            <div class="hint">Готові відео-рілси автоматично залітають на твій YouTube-канал як Shorts.</div>
+          <div class="panel" style="margin:0">
+            <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--yt)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M12 4c7 0 9 1 9 8s-2 8-9 8-9-1-9-8 2-8 9-8zm-2 4.5v7l6-3.5-6-3.5z"></path></svg></span>YouTube</div>
+            <div class="hint">Відео-пости йдуть на твій канал: вертикальне до 3 хв YouTube сам робить Shorts. Назва, «хто бачить», «для дітей» і позначка AI - у композері.</div>
             <div class="btnrow"><span id="ytStatus" style="font-size:13px;color:var(--muted)">…</span></div>
             <div class="btnrow"><a id="ytConnect" class="btn primary" href="/api/integrations/youtube/connect" onclick="return connectPopup('/api/integrations/youtube/connect')" style="display:none">🔗 Підключити YouTube</a><button class="ghost" id="ytDisconnect" style="display:none">Відключити</button></div>
           </div>
-          <div class="panel proonly" style="margin:0;display:none">
-            <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:#010101"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M16 3c.4 2.6 2 4.2 4.6 4.5v3c-1.8 0-3.4-.6-4.6-1.5v6.8c0 3.9-2.8 6.2-6.1 6.2A5.9 5.9 0 013 16.2c0-3.5 2.7-6 6.4-5.8v3.1c-1.8-.3-3.3.8-3.3 2.6 0 1.7 1.3 2.9 2.9 2.9 1.8 0 3-1.3 3-3.3V3h4z"></path></svg></span>TikTok</div>
-            <div class="hint">Рілс приїжджає тобі в TikTok як готова чернетка - лишається натиснути «Опублікувати» в застосунку TikTok.</div>
+          <div class="panel" style="margin:0">
+            <div class="ph"><span class="cdot" style="width:30px;height:30px;border-radius:9px;background:var(--tt)"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M16 3c.4 2.6 2 4.2 4.6 4.5v3c-1.8 0-3.4-.6-4.6-1.5v6.8c0 3.9-2.8 6.2-6.1 6.2A5.9 5.9 0 013 16.2c0-3.5 2.7-6 6.4-5.8v3.1c-1.8-.3-3.3.8-3.3 2.6 0 1.7 1.3 2.9 2.9 2.9 1.8 0 3-1.3 3-3.3V3h4z"></path></svg></span>TikTok</div>
+            <div class="hint">Відео-пости йдуть у TikTok одразу (обираєш у композері, хто бачить, коментарі, Duet, Stitch) або чернеткою: тоді відео чекає в застосунку TikTok, і ти публікуєш його сам.</div>
             <div class="btnrow"><span id="ttStatus" style="font-size:13px;color:var(--muted)">…</span></div>
             <div class="btnrow"><a id="ttConnect" class="btn primary" href="/api/integrations/tiktok/connect" onclick="return connectPopup('/api/integrations/tiktok/connect')" style="display:none">🔗 Підключити TikTok</a><button class="ghost" id="ttDisconnect" style="display:none">Відключити</button></div>
           </div>

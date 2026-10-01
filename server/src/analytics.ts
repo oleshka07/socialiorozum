@@ -35,8 +35,8 @@ export type PubRow = {
 export type FollowerRow = { network: string; day: string; followers: number; account?: string; label?: string };
 export type AnalyticsOpts = { days: number; net: string; tz: string; now?: number };
 
-export const MEASURED_NETS = ["threads", "instagram", "facebook"];   // мережі, що віддають статистику постів
-export const NET_LABEL: Record<string, string> = { threads: "Threads", instagram: "Instagram", facebook: "Facebook", telegram: "Telegram", linkedin: "LinkedIn" };
+export const MEASURED_NETS = ["threads", "instagram", "facebook", "youtube"];   // мережі, що віддають статистику постів
+export const NET_LABEL: Record<string, string> = { threads: "Threads", instagram: "Instagram", facebook: "Facebook", telegram: "Telegram", linkedin: "LinkedIn", youtube: "YouTube", tiktok: "TikTok" };
 const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"];
 const DAYPARTS = [
   { key: "morning", label: "Ранок 6-11", from: 6, to: 11 },

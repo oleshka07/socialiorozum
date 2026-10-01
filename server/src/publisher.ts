@@ -7,9 +7,9 @@ import * as tg from "./telegram.js";
 import * as threads from "./threads.js";
 import * as meta from "./meta.js";
 import * as linkedin from "./linkedin.js";
-import * as youtube from "./youtube.js";
-import * as tiktok from "./tiktok.js";
-import { MEDIA_DIR } from "./media.js";
+import * as vp from "./vidpub.js";
+import { ytOpts, ttOpts, VIDEO_NETS } from "./vidnets.js";
+import { MEDIA_DIR, probeVideo } from "./media.js";
 import { ensureIgSafeImage } from "./images.js";
 import { adaptForChannels, reelCaption, threadsSplit } from "./pipeline.js";
 import { getSetting } from "./settings.js";
@@ -41,7 +41,7 @@ export const pubLabel = (r: Pick<PubResult, "channel" | "accountName">, names: R
 // Мережі, у які сервіс реально публікує. У `post.channels` бувають службові ключі (manual_adapt,
 // reel_caption) і сміття на кшталт «all» із майстер-плану: без цього фільтра такий ключ пролітав
 // повз усі гілки й звітував «опубліковано», хоча не пішло нікуди.
-export const PUB_NETS = ["telegram", "threads", "facebook", "instagram", "linkedin"];
+export const PUB_NETS = ["telegram", "threads", "facebook", "instagram", "linkedin", "youtube", "tiktok"];
 export const enabledNets = (ch: any): string[] => PUB_NETS.filter((k) => ch && ch[k] && ch[k].on === true);
 
 // Резервація «раз на мережу» ПЕРЕД викликом мережі. Повертає рядок, "sent" (уже надіслано) або "busy"
@@ -49,7 +49,7 @@ export const enabledNets = (ch: any): string[] => PUB_NETS.filter((k) => ch && c
 // перезапуск сервера (деплой, OOM): жоден живий процес її вже не веде, тож його переймаємо. Раніше він
 // блокував мережу для поста назавжди, а автопостер ще й звітував «↩ вже», хоча пост міг не вийти.
 const STALE_SENDING = "20 minutes";
-type PubTable = "telegram_publish" | "threads_publish" | "meta_publish" | "linkedin_publish";
+type PubTable = "telegram_publish" | "threads_publish" | "meta_publish" | "linkedin_publish" | "youtube_publish" | "tiktok_publish";
 async function reservePub(table: PubTable, key: Record<string, string>, extra: Record<string, string | null> = {}): Promise<{ id: string } | "sent" | "busy"> {
   const kc = Object.keys(key), kv = Object.values(key);
   const cond = kc.map((c, i) => `${c}=$${i + 1}`).join(" and ");
@@ -163,15 +163,17 @@ export async function targetKeys(ws: string, ch: any, nets: string[]): Promise<s
 /** Куди пост уже вийшов: ключі «мережа|акаунт». Рядки до галочок без акаунта - акаунт за замовчуванням
  *  (у Threads - за ніком із посилання, якщо такий акаунт є в бренді). */
 export async function sentAccountKeys(ws: string, postId: string): Promise<Set<string>> {
-  const [tgRows, thRows, mtRows, li] = await Promise.all([
+  const [tgRows, thRows, mtRows, li, vid] = await Promise.all([
     q<{ chat_id: string | null }>(`select chat_id from telegram_publish where post_id=$1 and status='sent'`, [postId]),
     q<{ account_id: string | null; account_name: string | null }>(`select account_id, account_name from threads_publish where post_id=$1 and status='sent'`, [postId]),
     q<{ channel: string; account_id: string | null }>(`select channel, account_id from meta_publish where post_id=$1 and status='sent'`, [postId]),
     one<{ n: number }>(`select count(*)::int n from linkedin_publish where post_id=$1 and status='sent'`, [postId]),
+    videoSentNets(postId),
   ]);
   const out = new Set<string>();
   for (const r of tgRows) out.add(`telegram|${r.chat_id || ""}`);
   if ((li?.n || 0) > 0) out.add("linkedin|");
+  for (const n of vid) out.add(`${n}|`);
   const legacy = thRows.some((r) => !r.account_id) || mtRows.some((r) => !r.account_id);
   const [mains, th] = legacy ? await Promise.all([mainAccountIds(ws), threadsAccounts(ws)]) : [null, []];
   for (const r of thRows) {
@@ -186,18 +188,28 @@ export async function sentAccountKeys(ws: string, postId: string): Promise<Set<s
 // Мережі, куди пост УЖЕ відправлено (status='sent') хоч одним акаунтом — для позначок «опубліковано»
 // (картка, бот, Mini App). Що саме з обраних акаунтів ще не отримало пост - sentAccountKeys/targetKeys.
 export async function alreadySentNetworks(postId: string): Promise<string[]> {
-  const [tgSent, thSent, metaSent, liSent] = await Promise.all([
+  const [tgSent, thSent, metaSent, liSent, vid] = await Promise.all([
     one<{ n: number }>(`select count(*)::int as n from telegram_publish where post_id=$1 and status='sent'`, [postId]),
     one<{ n: number }>(`select count(*)::int as n from threads_publish where post_id=$1 and status='sent'`, [postId]),
     q<{ channel: string }>(`select distinct channel from meta_publish where post_id=$1 and status='sent'`, [postId]),
     one<{ n: number }>(`select count(*)::int as n from linkedin_publish where post_id=$1 and status='sent'`, [postId]),
+    videoSentNets(postId),
   ]);
   const sent: string[] = [];
   if ((tgSent?.n || 0) > 0) sent.push("telegram");
   if ((thSent?.n || 0) > 0) sent.push("threads");
   for (const r of metaSent) if (r.channel) sent.push(r.channel); // facebook / instagram
   if ((liSent?.n || 0) > 0) sent.push("linkedin");
+  sent.push(...vid);
   return sent;
+}
+// YouTube і TikTok: відео вже там. TikTok, що ще обробляє відео ('processing'), - теж «уже»: повтор
+// задублював би пост; не вийде - сторож звільнить рядок і скаже людині.
+async function videoSentNets(postId: string): Promise<string[]> {
+  const r = await one<{ yt: number; tt: number }>(
+    `select (select count(*)::int from youtube_publish where post_id=$1 and status='sent') as yt,
+            (select count(*)::int from tiktok_publish where post_id=$1 and status in ('sent','processing')) as tt`, [postId]);
+  return [...((r?.yt || 0) > 0 ? ["youtube"] : []), ...((r?.tt || 0) > 0 ? ["tiktok"] : [])];
 }
 
 // Публікує пост у кожну ввімкнену в post.channels мережу (своїм текстом + медіа).
@@ -231,7 +243,9 @@ export async function publishingNow(postId: string): Promise<{ net: string; sinc
     `select 'telegram'::text as net, min(created_at) as since from telegram_publish where post_id=$1 and status='sending' having count(*) > 0
      union all select 'threads', created_at from threads_publish where post_id=$1 and status='sending'
      union all select channel, created_at from meta_publish where post_id=$1 and status='sending'
-     union all select 'linkedin', created_at from linkedin_publish where post_id=$1 and status='sending'`, [postId]);
+     union all select 'linkedin', created_at from linkedin_publish where post_id=$1 and status='sending'
+     union all select 'youtube', created_at from youtube_publish where post_id=$1 and status='sending'
+     union all select 'tiktok', created_at from tiktok_publish where post_id=$1 and status in ('sending','processing')`, [postId]);
 }
 
 /**
@@ -244,6 +258,51 @@ export async function unschedulePost(postId: string): Promise<number> {
   await q(`update plan_slot ps set status = case when p.review='approved' then 'approved' else 'drafted' end
              from post p where p.id=ps.post_id and ps.post_id=$1 and ps.status='scheduled'`, [postId]);
   return gone.length;
+}
+
+// 🎬 YouTube і TikTok - спільне для поста й кнопки 📤 рілса: резервація «раз на пост» ПЕРЕД заливкою,
+// рядок публікації, посилання. skipped - пост уже там (інший процес устиг першим).
+async function sendYouTube(ws: string, postId: string, vf: vp.VidFile, text: string, ch: any): Promise<{ skipped?: true; note: string }> {
+  const rv = await reservePub("youtube_publish", { post_id: postId });
+  if (rv === "sent") return { skipped: true, note: "" };
+  if (rv === "busy") throw new Error(BUSY);
+  try {
+    const r = await vp.youtubeUpload(ws, vf, text, ytOpts(ch.youtube));
+    await q(`update youtube_publish set external_id=$2, status='sent', permalink=nullif($3,''), privacy=nullif($4,'') where id=$1`, [rv.id, r.videoId, r.permalink, r.privacy]);
+    return { note: r.note };
+  } catch (e: any) { await q(`delete from youtube_publish where id=$1`, [rv.id]); throw e; }
+}
+// TikTok обробляє відео асинхронно: чекаємо до ~1 хв; довше - рядок «обробляється», далі сторож
+// (vidpub.ts) допише посилання або, якщо TikTok відмовить, звільнить рядок і напише власнику в бот.
+async function sendTikTok(ws: string, postId: string, vf: vp.VidFile, text: string, ch: any): Promise<{ skipped?: true; note: string }> {
+  const rv = await reservePub("tiktok_publish", { post_id: postId });
+  if (rv === "sent") return { skipped: true, note: "" };
+  if (rv === "busy") throw new Error(BUSY);
+  let uploaded = false;
+  try {
+    const st = await vp.tiktokStart(ws, vf, text, ttOpts(ch.tiktok), async (publishId, mode) => {
+      // файл уже в TikTok: з цього моменту рядок не звільняємо - повтор задублював би пост
+      uploaded = true;
+      await q(`update tiktok_publish set external_id=$2, mode=$3, status='processing', check_at=now() + interval '3 minutes' where id=$1`, [rv.id, publishId, mode]);
+    });
+    const out = await vp.tiktokWait(ws, st.publishId, st.mode, st.username);
+    if (out.state === "failed") {
+      await q(`delete from tiktok_publish where id=$1`, [rv.id]);
+      throw new Error(out.error);
+    }
+    if (out.state === "sent")
+      await q(`update tiktok_publish set status='sent', tt_status=$2, video_id=nullif($3,''), permalink=nullif($4,''),
+                 check_at=case when $5 then now() + interval '2 hours' else null end where id=$1`,
+        [rv.id, out.ttStatus, out.videoId, out.permalink, st.mode === "inbox" && !out.permalink]);
+    else await q(`update tiktok_publish set tt_status=nullif($2,'') where id=$1`, [rv.id, out.ttStatus]);
+    const notes = [...st.notes];
+    if (out.state === "processing") notes.push("TikTok ще обробляє відео - посилання зʼявиться, щойно він закінчить (зазвичай кілька хвилин)");
+    if (st.mode === "inbox") notes.push(vp.ttDraftNote);
+    return { note: notes.join("; ") };
+  } catch (e: any) {
+    if (!uploaded) await q(`delete from tiktok_publish where id=$1`, [rv.id]);
+    throw e;
+  }
 }
 
 export function publishPostToChannels(ws: string, postId: string, onlyNets?: string[]): Promise<PubResult[]> {
@@ -307,7 +366,7 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
   // а мені подобався мій перший текст»).
   const manual = ch.manual_adapt === true;
   const pendingNets = [...new Set(units.filter((u) => !isSent(u)).map((u) => u.k))];
-  const missing = manual ? [] : pendingNets.filter((k) => !(ch[k] && String(ch[k].text || "").trim()));
+  const missing = manual ? [] : pendingNets.filter((k) => !(ch[k] && String(ch[k].text || "").trim()) && (video || !VIDEO_NETS.includes(k)));
   if (missing.length) {
     try {
       const variants = await adaptForChannels(ws, post.content, missing, (post as any).intent || undefined);
@@ -557,6 +616,15 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
             [reserved.id, r.postId || null, liLink(r.postId || null)]);
           target = r.postId || "";
         } catch (e: any) { await q(`delete from linkedin_publish where id=$1`, [reserved.id]); throw e; }
+      } else if (k === "youtube" || k === "tiktok") {
+        // 🎬 лише відео: YouTube (вертикальне до 3 хв - Shorts) і TikTok. Першого коментаря тут нема:
+        // YouTube вимагав би ще один дозвіл, у TikTok коментарів через API нема взагалі.
+        if (!video) throw new Error(`${NET_UA[k]} приймає лише відео - прикріпи відео або зніми ${NET_UA[k]} із цього поста`);
+        if (!videoSize) throw new Error("файл відео не знайдено на сервері - прикріпи відео заново");
+        const vf: vp.VidFile = { path: videoPath, filename: video.filename, size: videoSize, width: Number(video.width) || 0, height: Number(video.height) || 0, duration: vDur };
+        const r = k === "youtube" ? await sendYouTube(ws, postId, vf, textOf(k), ch) : await sendTikTok(ws, postId, vf, textOf(k), ch);
+        if (r.skipped) { results.push({ channel: k, ...who, status: "skipped" }); continue; }
+        note = r.note;
       }
       // 💬 перший коментар: пост уже в мережі, тож збій коментаря НЕ робить публікацію помилковою -
       // він окремим станом поруч (повтор - воркер або кнопка «Надіслати коментар»). Під кожною
@@ -589,7 +657,7 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
 // Telegram, Threads і LinkedIn сторіс через API не приймають - для них чесна відмова, а не тихий
 // звичайний пост замість сторіс.
 export const STORY_NETS = ["instagram", "facebook"];
-const NET_UA: Record<string, string> = { telegram: "Telegram", threads: "Threads", linkedin: "LinkedIn", instagram: "Instagram", facebook: "Facebook" };
+const NET_UA: Record<string, string> = { telegram: "Telegram", threads: "Threads", linkedin: "LinkedIn", instagram: "Instagram", facebook: "Facebook", youtube: "YouTube", tiktok: "TikTok" };
 async function publishStoryToChannels(ws: string, postId: string, ch: any, onlyNets?: string[]): Promise<PubResult[]> {
   const enabled = enabledNets(ch).filter((k) => !onlyNets || onlyNets.includes(k));
   const frames = await postMediaList(postId);
@@ -656,30 +724,11 @@ async function publishStoryToChannels(ws: string, postId: string, ch: any, onlyN
 
 // мережі, куди рілс УЖЕ поїхав (щоб не публікувати вдруге)
 export async function reelSentNetworks(postId: string): Promise<string[]> {
-  const [metaSent, ytSent, ttSent] = await Promise.all([
+  const [metaSent, vid] = await Promise.all([
     q<{ channel: string }>(`select distinct channel from meta_publish where post_id=$1 and status='sent'`, [postId]),
-    one<{ n: number }>(`select count(*)::int as n from youtube_publish where post_id=$1 and status='sent'`, [postId]),
-    one<{ n: number }>(`select count(*)::int as n from tiktok_publish where post_id=$1 and status='sent'`, [postId]),
+    videoSentNets(postId),
   ]);
-  const sent: string[] = metaSent.map((r) => r.channel).filter(Boolean);
-  if ((ytSent?.n || 0) > 0) sent.push("youtube");
-  if ((ttSent?.n || 0) > 0) sent.push("tiktok");
-  return sent;
-}
-
-// Спільний патерн «освіжи OAuth-токен, якщо скоро протухне» (YouTube/TikTok мають однакову механіку
-// refresh_token → новий access_token; раніше два дослівно схожі блоки жили в publishReelToChannels)
-async function freshToken(
-  cfg: { access_token: string; refresh_token: string | null; token_expires_at: string | null },
-  refresh: (rt: string) => Promise<{ access_token: string; refresh_token?: string; expires_in: number }>,
-  persist: (token: string, refreshToken: string | null, expiresAt: string) => Promise<void>
-): Promise<string> {
-  const exp = cfg.token_expires_at ? new Date(cfg.token_expires_at).getTime() : 0;
-  if (!cfg.refresh_token || (exp && exp - Date.now() > 5 * 60e3)) return cfg.access_token;
-  const r = await refresh(cfg.refresh_token);
-  const newExp = new Date(Date.now() + r.expires_in * 1000).toISOString();
-  await persist(r.access_token, r.refresh_token || cfg.refresh_token, newExp);
-  return r.access_token;
+  return [...metaSent.map((r) => r.channel).filter(Boolean), ...vid];
 }
 
 export function publishReelToChannels(ws: string, postId: string, nets: string[]): Promise<PubResult[]> {
@@ -710,8 +759,14 @@ async function publishReelToChannelsNow(ws: string, postId: string, nets: string
   const videoUrl = `${env.appBaseUrl}/media/${post.reel_video}`;
   const sentSet = new Set(await reelSentNetworks(postId));
   const results: PubResult[] = [];
-  let videoBuf: Buffer | null = null; // читаємо з диска один раз (YouTube/TikTok вантажать файлом)
-  const getBuf = async () => (videoBuf ??= await readFile(join(MEDIA_DIR, post.reel_video!)));
+  // YouTube і TikTok вантажать файл частинами з диска; розмір і кадр міряємо один раз
+  let vf: vp.VidFile | null = null;
+  const reelFile = async (): Promise<vp.VidFile> => {
+    if (vf) return vf;
+    const path = join(MEDIA_DIR, post.reel_video!);
+    const [st, info] = await Promise.all([stat(path), probeVideo(path)]);
+    return (vf = { path, filename: post.reel_video!, size: st.size, width: info?.width || 0, height: info?.height || 0, duration: info?.duration || 0 });
+  };
   for (const k of nets) {
     if (sentSet.has(k)) { results.push({ channel: k, status: "skipped" }); continue; }
     try {
@@ -736,25 +791,13 @@ async function publishReelToChannelsNow(ws: string, postId: string, nets: string
           const r = await meta.publishVideoToPage(acc.acc.pageId, acc.acc.pageToken, caption, videoUrl);
           await q(`update meta_publish set external_id=$2, status='sent', permalink=nullif($3,'') where id=$1`, [rv.id, r.id, fbVideoLink(r.id)]);
         } catch (e: any) { await q(`delete from meta_publish where id=$1`, [rv.id]); throw e; }
-      } else if (k === "youtube") {
-        const yc = await one<{ access_token: string; refresh_token: string | null; token_expires_at: string | null }>(
-          `select access_token, refresh_token, token_expires_at from youtube_config where workspace_id=$1`, [ws]);
-        if (!yc) throw new Error("YouTube не підключено");
-        const token = await freshToken(yc,
-          (rt) => youtube.refreshAccessToken(env.google.clientId, env.google.clientSecret, rt),
-          async (t, _rt, expAt) => { await q(`update youtube_config set access_token=$2, token_expires_at=$3, updated_at=now() where workspace_id=$1`, [ws, t, expAt]); });
-        const title = caption.split("\n")[0].replace(/#[^\s#]+/g, "").trim() || "Reels";
-        const r = await youtube.uploadVideo(token, await getBuf(), title, caption);
-        await q(`insert into youtube_publish(post_id,external_id,status) values($1,$2,'sent')`, [postId, r.videoId]);
-      } else if (k === "tiktok") {
-        const tc = await one<{ access_token: string; refresh_token: string | null; token_expires_at: string | null }>(
-          `select access_token, refresh_token, token_expires_at from tiktok_config where workspace_id=$1`, [ws]);
-        if (!tc) throw new Error("TikTok не підключено");
-        const token = await freshToken(tc,
-          (rt) => tiktok.refreshToken(env.tiktok.clientKey, env.tiktok.clientSecret, rt),
-          async (t, rt, expAt) => { await q(`update tiktok_config set access_token=$2, refresh_token=$3, token_expires_at=$4, updated_at=now() where workspace_id=$1`, [ws, t, rt, expAt]); });
-        const r = await tiktok.uploadToInbox(token, await getBuf());
-        await q(`insert into tiktok_publish(post_id,external_id,status) values($1,$2,'sent')`, [postId, r.publishId]);
+      } else if (k === "youtube" || k === "tiktok") {
+        // ті самі YouTube і TikTok, що в публікації поста: «раз на пост», налаштування з channels.youtube /
+        // channels.tiktok (не обрано «Хто бачить» - відео йде в чернетки TikTok)
+        const r = k === "youtube" ? await sendYouTube(ws, postId, await reelFile(), caption, ch) : await sendTikTok(ws, postId, await reelFile(), caption, ch);
+        if (r.skipped) { results.push({ channel: k, status: "skipped" }); continue; }
+        results.push({ channel: k, status: "sent", ...(r.note ? { note: r.note } : {}) });
+        continue;
       } else { throw new Error("невідома мережа для рілсів"); }
       results.push({ channel: k, status: "sent" });
     } catch (e: any) { results.push({ channel: k, status: "error", error: e.message }); }

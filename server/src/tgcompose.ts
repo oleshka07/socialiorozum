@@ -16,6 +16,10 @@ import { appendCroppedSlide } from "./images.js";
 import { publishPostToChannels, enabledNets, closeSlotsIfDone, alreadySentNetworks, sentAccountKeys, PUB_NETS, unschedulePost, type PubResult } from "./publisher.js";
 import { accountChoices, postAccounts, isAccNet, type AccNet, type AccountChoice } from "./accounts.js";
 import { rewritePost } from "./pipeline.js";
+import { ttOpts, ytOpts, ttLine, ytLine, VIDEO_NETS } from "./vidnets.js";
+import { PRIVACY_UA } from "./tiktok.js";
+import { YT_PRIVACY_UA, titleFrom } from "./youtube.js";
+import { ttCreator, canDirect } from "./vidpub.js";
 import { logEvent } from "./log.js";
 
 const KEY = "tg_compose";
@@ -38,14 +42,17 @@ export const clearCompose = (ws: string) => setSetting(ws, KEY, EMPTY);
 // публікація не виконає
 const NETS: Array<[string, string]> = [
   ["telegram", "✈️ Telegram"], ["instagram", "📸 Instagram"], ["facebook", "📘 Facebook"],
-  ["threads", "🧵 Threads"], ["linkedin", "💼 LinkedIn"],
+  ["threads", "🧵 Threads"], ["linkedin", "💼 LinkedIn"], ["youtube", "▶️ YouTube"], ["tiktok", "🎵 TikTok"],
 ];
-export async function connectedNets(ws: string): Promise<string[]> {
-  const [t, th, m, li] = await Promise.all([
+// opts.video - пост із відео: тоді й YouTube та TikTok (вони приймають лише відео, тож текстовому
+// посту кнопки цих мереж були б обіцянкою, яку публікація не виконає)
+export async function connectedNets(ws: string, opts: { video?: boolean } = {}): Promise<string[]> {
+  const [t, th, m, li, v] = await Promise.all([
     one<{ n: number }>(`select count(*)::int n from telegram_config where workspace_id=$1 and bot_token is not null and (channel_chat_id is not null or group_chat_id is not null)`, [ws]),
     one<{ n: number }>(`select count(*)::int n from threads_config where workspace_id=$1 and access_token is not null`, [ws]),
     one<{ page_id: string | null; ig_user_id: string | null }>(`select page_id, ig_user_id from meta_config where workspace_id=$1`, [ws]),
     one<{ n: number }>(`select count(*)::int n from linkedin_config where workspace_id=$1 and access_token is not null`, [ws]),
+    opts.video ? one<{ yt: boolean; tt: boolean }>(`select exists(select 1 from youtube_config where workspace_id=$1) as yt, exists(select 1 from tiktok_config where workspace_id=$1) as tt`, [ws]) : null,
   ]);
   const out: string[] = [];
   if ((t?.n || 0) > 0) out.push("telegram");
@@ -53,6 +60,8 @@ export async function connectedNets(ws: string): Promise<string[]> {
   if (m?.page_id) out.push("facebook");
   if ((th?.n || 0) > 0) out.push("threads");
   if ((li?.n || 0) > 0) out.push("linkedin");
+  if (v?.yt) out.push("youtube");
+  if (v?.tt) out.push("tiktok");
   return out;
 }
 
@@ -106,10 +115,10 @@ export async function createBotDraft(ws: string, text: string): Promise<string> 
   return p!.id;
 }
 
-type PostRow = { id: string; content: string; channels: any; filename: string | null; review: string | null };
+type PostRow = { id: string; content: string; channels: any; filename: string | null; review: string | null; format: string | null };
 export async function loadPost(ws: string, postId: string): Promise<PostRow | null> {
   return one<PostRow>(
-    `select p.id, p.content, p.channels, p.review, ma.filename from post p
+    `select p.id, p.content, p.channels, p.review, p.format, ma.filename from post p
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
        left join media_asset ma on ma.id=p.media_id
      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
@@ -120,7 +129,11 @@ export async function composeCard(ws: string, postId: string, brand = ""): Promi
   const p = await loadPost(ws, postId);
   if (!p) return null;
   const ch = p.channels || {};
-  const nets = await connectedNets(ws);
+  const list = await postMediaList(postId);
+  const frames = list.length, isVideo = list[0]?.kind === "video";
+  // YouTube і TikTok - лише для відео-поста (не сторіс); уже обрані показуємо, щоб їх можна було зняти
+  const vidPost = isVideo && frames === 1 && p.format !== "story";
+  const nets = await connectedNets(ws, { video: vidPost || VIDEO_NETS.some((k) => ch[k]?.on) });
   const chosen = nets.filter((k) => ch[k] && ch[k].on);
   const slot = await one<{ scheduled_at: string }>(
     `select scheduled_at from schedule_slot where post_id=$1 and status='planned' order by scheduled_at limit 1`, [postId]);
@@ -128,8 +141,6 @@ export async function composeCard(ws: string, postId: string, brand = ""): Promi
   const when = slot ? new Intl.DateTimeFormat("uk-UA", { timeZone: tz, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(slot.scheduled_at)) : "";
 
   const body = p.content.length > 600 ? p.content.slice(0, 600) + "…" : p.content;
-  const list = await postMediaList(postId);
-  const frames = list.length, isVideo = list[0]?.kind === "video";
   // розмітка **…** (sendMessage сам перекладає її в HTML і екранує текст): власні <b> і &amp; тут
   // екранувались удруге, і людина бачила буквальні «<b>Чернетка</b>» та «R&amp;D»
   const choices = await accountChoices(ws);
@@ -137,6 +148,8 @@ export async function composeCard(ws: string, postId: string, brand = ""): Promi
     + (isVideo ? `🎬 Відео${list[0].duration ? ` ${Math.floor(Number(list[0].duration) / 60)}:${String(Math.round(Number(list[0].duration)) % 60).padStart(2, "0")}` : ""}\n`
       : `🖼 Фото: ${frames > 1 ? `карусель, ${frames} кадрів` : p.filename ? "є" : "нема"}\n`)
     + `📢 Куди: ${chosen.length ? chosen.map((k) => niceNet(k) + accountsLabel(k, ch, choices)).join(" · ") : "не обрано"}`
+    + (chosen.includes("youtube") ? `\n▶️ YouTube: ${vidPost ? ytLine(ytOpts(ch.youtube), titleFrom(ch.youtube?.text || p.content)) : "⚠️ лише відео - додай відео або зніми YouTube"}` : "")
+    + (chosen.includes("tiktok") ? `\n🎵 TikTok: ${vidPost ? ttLine(ttOpts(ch.tiktok)) : "⚠️ лише відео - додай відео або зніми TikTok"}` : "")
     + (when ? `\n🗓 Заплановано: ${when}` : "");
 
   // ряд каналів: тумблери ✅/⬜ по 2 в рядок, щоб кнопки лишались читабельними на телефоні
@@ -151,6 +164,15 @@ export async function composeCard(ws: string, postId: string, brand = ""): Promi
   const multi = chosen.filter((k) => isAccNet(k) && (choices[k].length > 1 || (k === "telegram" && choices[k].length > 0)));
   for (let i = 0; i < multi.length; i += 2)
     rows.push(multi.slice(i, i + 2).map((k) => ({ text: `👥 ${niceNet(k).split(" ")[1]}: ${shortPick(k, ch, choices)} ▸`, data: `cac:${postId}:${k}` })));
+  // 🌐 один пост - одразу в усі підключені мережі, що приймають такий формат (відео - і YouTube з TikTok)
+  const allOff = (await allNetsFor(ws, postId)).filter((k) => !(ch[k] && ch[k].on));
+  if (allOff.length >= 2) rows.push([{ text: `🌐 В усі мережі (ще ${allOff.length})`, data: `cal:${postId}` }]);
+  // 🎬 як вийде відео в YouTube і TikTok (TikTok вимагає, щоб «хто бачить» обирала людина)
+  const vr: tg.TgButton[] = [];
+  const sentV = new Set((await alreadySentNetworks(postId)).filter((k) => VIDEO_NETS.includes(k)));
+  if (vidPost && chosen.includes("youtube") && !sentV.has("youtube")) vr.push({ text: `▶️ YouTube: ${YT_PRIVACY_UA[ytOpts(ch.youtube).privacy]} ▸`, data: `cyt:${postId}` });
+  if (vidPost && chosen.includes("tiktok") && !sentV.has("tiktok")) { const t = ttOpts(ch.tiktok); vr.push({ text: `🎵 TikTok: ${t.mode === "draft" ? "чернетка" : t.privacy ? PRIVACY_UA[t.privacy] : "хто бачить?"} ▸`, data: `ctt:${postId}` }); }
+  if (vr.length) rows.push(vr);
   if (brand) rows.push([{ text: `🏢 Бренд: ${brand.slice(0, 28)} ▸`, data: `cb:${postId}` }]);
   // альбом, надісланий у відповідь на «Додати фото», стає каруселлю (перше фото - обкладинка)
   rows.push([{ text: isVideo ? "🎬 Змінити відео" : p.filename ? "🖼 Змінити фото" : "🖼 Фото, альбом чи відео", data: `cp:${postId}` },
@@ -236,6 +258,97 @@ export async function toggleAccount(ws: string, postId: string, net: string, suf
   return "";
 }
 
+// ---- 🎵 TikTok у боті: так само, як у композері, - «хто бачить» без типового значення, коментарі/Duet/
+// Stitch вимкнені, поки людина їх не ввімкне (вимкнене в самому TikTok - не ввімкнути), реклама, згода ----
+const on = (v: boolean) => (v ? "✅" : "⬜");
+export async function tiktokCard(ws: string, postId: string): Promise<{ text: string; buttons: tg.TgButton[][] } | null> {
+  const p = await loadPost(ws, postId);
+  if (!p) return null;
+  const ch = p.channels || {};
+  const t = ttOpts(ch.tiktok);
+  let info: Awaited<ReturnType<typeof ttCreator>> | null = null, err = "";
+  try { info = await ttCreator(ws); } catch (e: any) { err = String(e?.message || e).slice(0, 200); }
+  const tc = await one<{ scopes: string | null }>(`select scopes from tiktok_config where workspace_id=$1`, [ws]);
+  const direct = !!tc && canDirect(tc.scopes) && !err;
+  const rows: tg.TgButton[][] = [];
+  rows.push([{ text: `${t.mode === "draft" || !direct ? "🔘" : "⚪"} У чернетки TikTok`, data: `ctt:${postId}:m:draft` },
+             ...(direct ? [{ text: `${t.mode === "direct" ? "🔘" : "⚪"} Одразу`, data: `ctt:${postId}:m:direct` }] : [])]);
+  if (direct && t.mode === "direct") {
+    const opts = info?.privacyOptions.length ? info.privacyOptions : Object.keys(PRIVACY_UA);
+    for (let i = 0; i < opts.length; i += 2)
+      rows.push(opts.slice(i, i + 2).map((o) => ({ text: `${t.privacy === o ? "🔘" : "⚪"} ${PRIVACY_UA[o] || o}${t.branded && o === "SELF_ONLY" ? " 🚫" : ""}`, data: `ctt:${postId}:p:${o}` })));
+    rows.push([
+      { text: `${info?.commentDisabled ? "🚫" : on(t.comment)} Коментарі`, data: `ctt:${postId}:t:comment` },
+      { text: `${info?.duetDisabled ? "🚫" : on(t.duet)} Duet`, data: `ctt:${postId}:t:duet` },
+      { text: `${info?.stitchDisabled ? "🚫" : on(t.stitch)} Stitch`, data: `ctt:${postId}:t:stitch` },
+    ]);
+    rows.push([{ text: `${on(t.yourBrand)} Реклама мого бренду`, data: `ctt:${postId}:t:your_brand` }, { text: `${on(t.branded)} Співпраця з брендом`, data: `ctt:${postId}:t:branded` }]);
+    rows.push([{ text: `${on(t.ai)} Створено з AI`, data: `ctt:${postId}:t:ai` }]);
+  }
+  rows.push([{ text: "‹ Назад", data: `cc:${postId}` }]);
+  const who = info ? `${info.nickname || "TikTok"}${info.username ? ` (@${info.username})` : ""}` : "";
+  const text = [
+    `🎵 **TikTok**${who ? ` · публікує ${who}` : ""}`,
+    err ? `⚠️ ${err}` : "",
+    !direct && !err ? "Пряма публікація для Holos у TikTok ще не ввімкнена - відео піде в чернетки TikTok, і ти опублікуєш його в застосунку." : "",
+    t.mode === "draft" || !direct
+      ? "📥 Відео прийде в TikTok чернеткою: там обереш, хто бачить, і натиснеш «Опублікувати». Підпис TikTok у чернетку не переносить - після публікації я надішлю його тобі окремим повідомленням, щоб скопіювати."
+      : [`Хто бачить: ${t.privacy ? PRIVACY_UA[t.privacy] : "не обрано - обери (TikTok не дозволяє обирати це за тебе)"}`,
+         "🚫 - вимкнено в налаштуваннях твого TikTok.",
+         (info?.maxDurationSec ? `Найдовше відео для цього акаунта - ${Math.round(info.maxDurationSec / 60) || 1} хв.` : ""),
+         `Публікуючи, ти погоджуєшся з Music Usage Confirmation TikTok${t.branded ? " і Branded Content Policy" : ""}. Після публікації TikTok обробляє відео кілька хвилин.`].filter(Boolean).join("\n"),
+  ].filter(Boolean).join("\n\n");
+  return { text, buttons: rows };
+}
+/** Дія з картки TikTok. Вертає пояснення, якщо так не можна. */
+export async function tiktokAction(ws: string, postId: string, action: string): Promise<string> {
+  const p = await loadPost(ws, postId); if (!p) return "Пост не знайдено";
+  const ch = p.channels || {};
+  const t: any = { ...(ch.tiktok && typeof ch.tiktok === "object" ? ch.tiktok : { on: true }) };
+  const [kind, val] = [action.slice(0, 1), action.slice(2)];
+  let info: Awaited<ReturnType<typeof ttCreator>> | null = null;
+  try { info = await ttCreator(ws); } catch { info = null; }
+  if (kind === "m") t.mode = val === "direct" ? "direct" : "draft";
+  else if (kind === "p") {
+    if (!(PRIVACY_UA as Record<string, string>)[val]) return "Невідомий варіант";
+    if (info?.privacyOptions.length && !info.privacyOptions.includes(val)) return "Для цього акаунта TikTok такий варіант недоступний";
+    if (t.branded && val === "SELF_ONLY") return "Співпраця з брендом не може бути видно «Лише мені»";
+    t.privacy = val; t.mode = "direct";
+  } else if (kind === "t") {
+    const key = ({ comment: "comment", duet: "duet", stitch: "stitch", your_brand: "your_brand", branded: "branded", ai: "ai" } as Record<string, string>)[val];
+    if (!key) return "Невідома дія";
+    if ((key === "comment" && info?.commentDisabled) || (key === "duet" && info?.duetDisabled) || (key === "stitch" && info?.stitchDisabled))
+      return "Це вимкнено в налаштуваннях твого TikTok - увімкнути можна лише там";
+    t[key] = !(t[key] === true);
+    if (key === "branded" && t.branded && t.privacy === "SELF_ONLY") { delete t.privacy; ch.tiktok = t; await q(`update post set channels=$2 where id=$1`, [postId, JSON.stringify({ ...ch, tiktok: t })]); return "Співпраця не може бути «Лише я» - обери інше «Хто бачить»"; }
+  } else return "Невідома дія";
+  await q(`update post set channels=$2 where id=$1`, [postId, JSON.stringify({ ...ch, tiktok: t })]);
+  return "";
+}
+// ---- ▶️ YouTube у боті: хто бачить, «для дітей», позначка AI ----
+export async function youtubeCard(ws: string, postId: string): Promise<{ text: string; buttons: tg.TgButton[][] } | null> {
+  const p = await loadPost(ws, postId); if (!p) return null;
+  const y = ytOpts((p.channels || {}).youtube);
+  const rows: tg.TgButton[][] = [
+    (["public", "unlisted", "private"] as const).map((v) => ({ text: `${y.privacy === v ? "🔘" : "⚪"} ${YT_PRIVACY_UA[v]}`, data: `cyt:${postId}:p:${v}` })),
+    [{ text: `Для дітей: ${y.kids ? "так" : "ні"} ↺`, data: `cyt:${postId}:t:kids` }, { text: `${on(y.ai)} Позначка AI`, data: `cyt:${postId}:t:ai` }],
+    [{ text: "‹ Назад", data: `cc:${postId}` }],
+  ];
+  const title = y.title || titleFrom(p.channels?.youtube?.text || p.content) || "перший рядок тексту";
+  return { text: `▶️ **YouTube**\n\nНазва: «${title}» (змінити назву - у кабінеті)\nХто бачить: ${YT_PRIVACY_UA[y.privacy]}\nДля дітей: ${y.kids ? "так" : "ні"} (вимога YouTube: «так» вимикає коментарі й персональну рекламу)\nПозначка «змінений чи синтетичний вміст» (AI-голос, згенеровані обличчя): ${y.ai ? "так" : "ні"}\n\nВертикальне відео до 3 хв YouTube сам покаже як Shorts.`, buttons: rows };
+}
+export async function youtubeAction(ws: string, postId: string, action: string): Promise<void> {
+  const p = await loadPost(ws, postId); if (!p) return;
+  const ch = p.channels || {};
+  const y: any = { ...(ch.youtube && typeof ch.youtube === "object" ? ch.youtube : { on: true }) };
+  const [kind, val] = [action.slice(0, 1), action.slice(2)];
+  if (kind === "p" && ["public", "unlisted", "private"].includes(val)) y.privacy = val;
+  else if (kind === "t" && val === "kids") y.kids = !(y.kids === true);
+  else if (kind === "t" && val === "ai") y.ai = !(y.ai === true);
+  else return;
+  await q(`update post set channels=$2 where id=$1`, [postId, JSON.stringify({ ...ch, youtube: y })]);
+}
+
 // «затверджено» - той самий прапорець `review`, що в Студії й Mini App: пост, схвалений з телефона,
 // має рахуватись схваленим і в кабінеті, інакше це два різні поняття з однією назвою
 export async function toggleApprove(ws: string, postId: string): Promise<string> {
@@ -250,6 +363,25 @@ export async function toggleApprove(ws: string, postId: string): Promise<string>
 const niceNet = (k: string) => (NETS.find((n) => n[0] === k) || [k, k])[1];
 
 // ---- дії ----
+/** Мережі, куди цей пост може піти з того, що підключено: сторіс - Instagram і Facebook, відео - усі (з
+ * YouTube і TikTok), фото й текст - усі, крім YouTube і TikTok. Уже надіслані не пропонуємо. */
+export async function allNetsFor(ws: string, postId: string): Promise<string[]> {
+  const p = await loadPost(ws, postId); if (!p) return [];
+  const list = await postMediaList(postId);
+  const video = list.length === 1 && list[0].kind === "video";
+  const conn = await connectedNets(ws, { video });
+  const sent = new Set(await alreadySentNetworks(postId));
+  return conn.filter((k) => !sent.has(k) && (p.format !== "story" || k === "instagram" || k === "facebook"));
+}
+export async function allNetsOn(ws: string, postId: string): Promise<string[]> {
+  const p = await loadPost(ws, postId); if (!p) return [];
+  const ch = p.channels || {};
+  const add = (await allNetsFor(ws, postId)).filter((k) => !(ch[k] && ch[k].on));
+  for (const k of add) ch[k] = { ...(ch[k] && typeof ch[k] === "object" ? ch[k] : {}), on: true };
+  if (add.length) await q(`update post set channels=$2 where id=$1`, [postId, JSON.stringify(ch)]);
+  return add;
+}
+
 export async function toggleNet(ws: string, postId: string, net: string): Promise<void> {
   const p = await loadPost(ws, postId); if (!p) return;
   const ch = p.channels || {};
@@ -338,6 +470,9 @@ export async function publishNow(ws: string, postId: string): Promise<string> {
   if (skip.length) out += `${out ? "\n" : ""}↩️ Пропущено (вже публікувалось): ${skip.join(", ")}`;
   if (err.length) out += `${out ? "\n" : ""}⚠️ Не вийшло: ${err.map((e) => `${lbl(e)} - ${e.error}`).join("; ")}`;
   if (notes.length) out += `${out ? "\n" : ""}ℹ️ ${notes.join("; ")}`;
+  // 🎵 чернетка TikTok: підпис туди не переноситься - даємо його окремим блоком, щоб скопіювати
+  const ttDraft = res.some((r) => r.channel === "tiktok" && r.status === "sent" && /чернетк/.test(r.note || ""));
+  if (ttDraft) out += `\n\n📋 Підпис для TikTok (скопіюй і встав у чернетку):\n${String((p.channels?.tiktok?.text) || p.content).trim().slice(0, 2200)}`;
   return out || "Нічого не відправлено.";
 }
 
