@@ -282,7 +282,8 @@ export async function tiktokCard(ws: string, postId: string): Promise<{ text: st
       { text: `${info?.duetDisabled ? "🚫" : on(t.duet)} Duet`, data: `ctt:${postId}:t:duet` },
       { text: `${info?.stitchDisabled ? "🚫" : on(t.stitch)} Stitch`, data: `ctt:${postId}:t:stitch` },
     ]);
-    rows.push([{ text: `${on(t.yourBrand)} Реклама мого бренду`, data: `ctt:${postId}:t:your_brand` }, { text: `${on(t.branded)} Співпраця з брендом`, data: `ctt:${postId}:t:branded` }]);
+    // брендований контент не буває «Лише я»: при «Лише я» кнопка сіра (🚫), як вимагає TikTok
+    rows.push([{ text: `${on(t.yourBrand)} Реклама мого бренду`, data: `ctt:${postId}:t:your_brand` }, { text: `${t.privacy === "SELF_ONLY" ? "🚫" : on(t.branded)} Співпраця з брендом`, data: `ctt:${postId}:t:branded` }]);
     rows.push([{ text: `${on(t.ai)} Створено з AI`, data: `ctt:${postId}:t:ai` }]);
   }
   rows.push([{ text: "‹ Назад", data: `cc:${postId}` }]);
@@ -294,7 +295,8 @@ export async function tiktokCard(ws: string, postId: string): Promise<{ text: st
     t.mode === "draft" || !direct
       ? "📥 Відео прийде в TikTok чернеткою: там обереш, хто бачить, і натиснеш «Опублікувати». Підпис TikTok у чернетку не переносить - після публікації я надішлю його тобі окремим повідомленням, щоб скопіювати."
       : [`Хто бачить: ${t.privacy ? PRIVACY_UA[t.privacy] : "не обрано - обери (TikTok не дозволяє обирати це за тебе)"}`,
-         "🚫 - вимкнено в налаштуваннях твого TikTok.",
+         "🚫 - вимкнено в налаштуваннях твого TikTok (а співпраця з брендом - коли обрано «Лише я»: так TikTok не дозволяє).",
+         t.branded ? "TikTok позначить відео як «Paid partnership»." : t.yourBrand ? "TikTok позначить відео як «Promotional content»." : "",
          (info?.maxDurationSec ? `Найдовше відео для цього акаунта - ${Math.round(info.maxDurationSec / 60) || 1} хв.` : ""),
          `Публікуючи, ти погоджуєшся з Music Usage Confirmation TikTok${t.branded ? " і Branded Content Policy" : ""}. Після публікації TikTok обробляє відео кілька хвилин.`].filter(Boolean).join("\n"),
   ].filter(Boolean).join("\n\n");
@@ -319,8 +321,8 @@ export async function tiktokAction(ws: string, postId: string, action: string): 
     if (!key) return "Невідома дія";
     if ((key === "comment" && info?.commentDisabled) || (key === "duet" && info?.duetDisabled) || (key === "stitch" && info?.stitchDisabled))
       return "Це вимкнено в налаштуваннях твого TikTok - увімкнути можна лише там";
+    if (key === "branded" && t.branded !== true && t.privacy === "SELF_ONLY") return "Брендований контент не може бути видно «Лише мені» - спершу обери інше «Хто бачить»";
     t[key] = !(t[key] === true);
-    if (key === "branded" && t.branded && t.privacy === "SELF_ONLY") { delete t.privacy; ch.tiktok = t; await q(`update post set channels=$2 where id=$1`, [postId, JSON.stringify({ ...ch, tiktok: t })]); return "Співпраця не може бути «Лише я» - обери інше «Хто бачить»"; }
   } else return "Невідома дія";
   await q(`update post set channels=$2 where id=$1`, [postId, JSON.stringify({ ...ch, tiktok: t })]);
   return "";

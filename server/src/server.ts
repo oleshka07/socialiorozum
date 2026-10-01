@@ -2772,9 +2772,16 @@ app.post("/api/integrations/youtube/disconnect", async (req: any) => {
 const TIKTOK_REDIRECT = `${env.appBaseUrl}/api/integrations/tiktok/callback`;
 
 app.get("/api/integrations/tiktok", async (req: any) => {
-  const c = await one<{ display_name: string | null; username: string | null; scopes: string | null }>(
-    `select display_name, username, scopes from tiktok_config where workspace_id=$1`, [req.user.workspace_id]);
-  return { configured: !!env.tiktok.clientKey, hasToken: !!c, name: c?.display_name ?? "", username: c?.username ?? "", direct: !!c && canDirect(c.scopes) };
+  const c = await one<{ display_name: string | null; username: string | null; scopes: string | null; avatar_url: string | null }>(
+    `select display_name, username, scopes, avatar_url from tiktok_config where workspace_id=$1`, [req.user.workspace_id]);
+  return {
+    configured: !!(env.tiktok.clientKey && env.tiktok.clientSecret), hasToken: !!c, name: c?.display_name ?? "", username: c?.username ?? "",
+    avatar: c?.avatar_url ?? "", direct: !!c && canDirect(c.scopes),
+    // ключі sandbox TikTok починаються з «sb»: тоді підключитись можуть лише Target users застосунку,
+    // а до перевірки TikTok відео виходять лише «Лише я» в приватний акаунт - кажемо це в картці
+    sandbox: /^sb/i.test(env.tiktok.clientKey || ""),
+    admin: env.adminEmails.includes(String(req.user.email || "").toLowerCase()),
+  };
 });
 
 // «Хто публікує» для блоку TikTok у композері: нік, варіанти «Хто бачить», що вимкнув автор, найдовше відео.
@@ -2789,7 +2796,7 @@ app.get("/api/integrations/tiktok/creator", async (req: any) => {
 });
 
 app.get("/api/integrations/tiktok/connect", async (req: any, reply) => {
-  if (!env.tiktok.clientKey) return reply.code(400).send({ error: "Підключення TikTok тимчасово недоступне" });
+  if (!env.tiktok.clientKey || !env.tiktok.clientSecret) return reply.code(400).send({ error: "Підключення TikTok тимчасово недоступне: адміністратор ще не вставив ключі застосунку TikTok" });
   const state = auth.newToken();
   reply.setCookie("tiktok_state", state, stateCookie);
   return reply.redirect(tiktok.authUrl(env.tiktok.clientKey, TIKTOK_REDIRECT, state, env.tiktok.scopes || tiktok.TT_SCOPES));
@@ -2802,17 +2809,17 @@ app.get("/api/integrations/tiktok/callback", async (req: any, reply) => {
   reply.clearCookie("tiktok_state", { path: "/" });
   try {
     const tok = await tiktok.exchangeCode(env.tiktok.clientKey, env.tiktok.clientSecret, TIKTOK_REDIRECT, code);
-    const info = await tiktok.userInfo(tok.access_token).catch(() => ({ displayName: "TikTok" }));
+    const info = await tiktok.userInfo(tok.access_token).catch(() => ({ displayName: "TikTok", avatarUrl: "" }));
     // нік (для посилання на пост) віддає лише creator_info - є, коли TikTok дав дозвіл на пряму публікацію
     const scopes = String(tok.scope || "").trim() || null;
     const username = canDirect(scopes) ? await tiktok.creatorInfo(tok.access_token).then((c) => c.username, () => "") : "";
     const exp = new Date(Date.now() + (tok.expires_in || 86400) * 1000).toISOString();
-    await q(`insert into tiktok_config(workspace_id, open_id, display_name, access_token, refresh_token, token_expires_at, scopes, username, updated_at)
-             values($1,$2,$3,$4,$5,$6,$7,nullif($8,''),now())
+    await q(`insert into tiktok_config(workspace_id, open_id, display_name, access_token, refresh_token, token_expires_at, scopes, username, avatar_url, updated_at)
+             values($1,$2,$3,$4,$5,$6,$7,nullif($8,''),nullif($9,''),now())
              on conflict (workspace_id) do update set open_id=excluded.open_id, display_name=excluded.display_name,
                access_token=excluded.access_token, refresh_token=excluded.refresh_token, token_expires_at=excluded.token_expires_at,
-               scopes=excluded.scopes, username=coalesce(excluded.username, tiktok_config.username), updated_at=now()`,
-      [req.user.workspace_id, tok.open_id, info.displayName, tok.access_token, tok.refresh_token ?? null, exp, scopes, username]);
+               scopes=excluded.scopes, username=coalesce(excluded.username, tiktok_config.username), avatar_url=excluded.avatar_url, updated_at=now()`,
+      [req.user.workspace_id, tok.open_id, info.displayName, tok.access_token, tok.refresh_token ?? null, exp, scopes, username, info.avatarUrl || ""]);
     await logEvent("info", "tiktok", `підключено ${info.displayName}`, null, req.user.id);
     return reply.redirect("/app?tiktok=ok");
   } catch (e: any) {
@@ -3541,6 +3548,17 @@ app.get("/api/bank", async (req: any) => {
             order by p.created_at desc`, [req.user.workspace_id]);
 });
 
+// ✍️ «Новий пост» у кабінеті: порожня чернетка - текст людина пише сама, фото чи відео додає в композері.
+// Джерело службове (archived): порожній «матеріал» у стрічці Матеріалів нікому не потрібен. Порожній пост,
+// у якому нічого не зʼявилось, композер прибирає сам при закритті.
+app.post("/api/posts/blank", async (req: any) => {
+  const ws = req.user.workspace_id;
+  const src = await one<{ id: string }>(`insert into source(workspace_id, origin, title, transcript, archived) values($1,'manual',$2,'',true) returning id`, [ws, "✍️ Новий пост"]);
+  const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
+  const p = await one<{ id: string }>(`insert into post(run_id, stage, content, channels) values($1,'final','','{}'::jsonb) returning id`, [run!.id]);
+  return { id: p!.id };
+});
+
 // усі фінальні пости воркспейсу (Студія/Інбокс - глобальний список, НЕ привʼязаний до активного джерела)
 // + sent: у які мережі пост УЖЕ опубліковано (іконки на картці + фільтр «Опубліковані»)
 app.get("/api/posts/studio", async (req: any) => {
@@ -3585,7 +3603,11 @@ app.delete("/api/posts/:postId", async (req: any, reply) => {
   if (isPublishingNow(req.params.postId)) return reply.code(409).send({ error: "Пост саме зараз публікується - дочекайся результату." });
   await q(`update plan_slot set status = case when match_source_id is null then 'empty' else 'matched' end, post_id=null
            where post_id=$1 and status in ('drafted','approved','scheduled')`, [req.params.postId]);
+  const src = await one<{ id: string }>(`select r.source_id as id from post p join pipeline_run r on r.id=p.run_id where p.id=$1`, [req.params.postId]);
   await q(`delete from post where id=$1`, [req.params.postId]);
+  // службове джерело «✍️ Новий пост» без жодного поста - теж геть (у стрічці Матеріалів його й так не видно)
+  if (src) await q(`delete from source s where s.id=$1 and s.archived and s.origin='manual' and s.transcript=''
+                      and not exists (select 1 from pipeline_run r join post p on p.run_id=r.id where r.source_id=s.id)`, [src.id]);
   return { ok: true };
 });
 

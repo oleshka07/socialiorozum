@@ -366,7 +366,10 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
   // а мені подобався мій перший текст»).
   const manual = ch.manual_adapt === true;
   const pendingNets = [...new Set(units.filter((u) => !isSent(u)).map((u) => u.k))];
-  const missing = manual ? [] : pendingNets.filter((k) => !(ch[k] && String(ch[k].text || "").trim()) && (video || !VIDEO_NETS.includes(k)));
+  // 🎵 TikTok - виняток: підпис іде рівно той, що людина бачила й затвердила в композері (TikTok вимагає,
+  // щоб людина бачила й могла поправити підпис до публікації; переписаний моделлю в мить публікації -
+  // уже не той). Свою версію під TikTok людина робить кнопкою ✨ і бачить її в прев'ю.
+  const missing = manual ? [] : pendingNets.filter((k) => k !== "tiktok" && !(ch[k] && String(ch[k].text || "").trim()) && (video || !VIDEO_NETS.includes(k)));
   if (missing.length) {
     try {
       const variants = await adaptForChannels(ws, post.content, missing, (post as any).intent || undefined);

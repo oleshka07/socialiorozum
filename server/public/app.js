@@ -14,6 +14,13 @@ let ChanStatus={};             // підключені мережі {net:true}
 let ThStrat={};                // threads_strategy JSON {thread,cta_min,takes}
 let Pub={ bank: [], slots: [] };   // банк затверджених + слоти календаря
 let obVoiceImported=false;     // онбординг: чи вже тягнули голос з IG
+// 🌐 мова інтерфейсу: 'en' - англійська для запису відео перевірок мереж (/app?review=tiktok або
+// /app?lang=en; вимкнути - ?review=off чи ?lang=uk), типово українська. Сталі фрази перекладає
+// словник I18N_EN (унизу файлу), тексти зі змінними - L(ua,en) прямо в коді.
+let UI_LANG=(()=>{ const q=new URLSearchParams(location.search), r=q.get('review'), l=q.get('lang');
+  try{ if(r==='tiktok'||l==='en') localStorage.setItem('kg_lang','en'); if(r==='off'||l==='uk') localStorage.removeItem('kg_lang'); return localStorage.getItem('kg_lang')==='en'?'en':'uk'; }
+  catch(e){ return (r==='tiktok'||l==='en')?'en':'uk'; } })();
+function L(ua,en){ return UI_LANG==='en'?en:ua; }
 const NETS=[['telegram','Telegram'],['instagram','Instagram'],['facebook','Facebook'],['threads','Threads'],['linkedin','LinkedIn'],['youtube','YouTube'],['tiktok','TikTok']];
 // 🎬 мережі лише для відео: текстовому чи фото-посту їх не пропонуємо (публікація все одно відмовила б)
 const VIDEO_NETS=['youtube','tiktok'];
@@ -2441,9 +2448,9 @@ function pickSlides(room){ return new Promise(async resolve=>{
 function pickVideo(){ return new Promise(async resolve=>{
   let lib=[]; try{ lib=(await api('/media')).filter(m=>m.kind==='video'); }catch(e){ flash('Не вдалося завантажити медіатеку'); resolve(null); return; }
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='96';
-  ov.innerHTML='<div class="modal-card" style="max-width:660px;padding:20px"><b>🎬 Відео для поста</b> <span style="font-size:12px;color:var(--muted)">Instagram - Reels, Facebook - відео, Threads, Telegram (до 50 МБ), LinkedIn</span>'
+  ov.innerHTML='<div class="modal-card" style="max-width:660px;padding:20px"><b>'+L('🎬 Відео для поста','🎬 Video for the post')+'</b> <span style="font-size:12px;color:var(--muted)">'+L('Instagram - Reels, Facebook - відео, Threads, Telegram (до 50 МБ), LinkedIn, YouTube, TikTok','Instagram - Reels, Facebook - video, Threads, Telegram (up to 50 MB), LinkedIn, YouTube, TikTok')+'</span>'
     +'<div style="margin:10px 0"><label class="dashbtn" style="cursor:pointer">⬆ Завантажити з компʼютера<input type="file" id="pvFile" accept="video/*" style="display:none"></label> <span id="pvMsg" style="font-size:12px;color:var(--muted)"></span></div>'
-    +'<div id="pvGrid" style="display:flex;flex-wrap:wrap;gap:8px;max-height:52vh;overflow:auto">'+(lib.length?lib.map(m=>'<div class="slide-pick" data-id="'+m.id+'"><img loading="lazy" src="/thumb/'+esc(m.filename)+'" onerror="this.style.opacity=.3"><span class="vbadge">▶ '+(fmtDur(m.duration)||'відео')+'</span></div>').join(''):'<div class="empty">Відео в медіатеці ще нема - завантаж кнопкою вище.</div>')+'</div>'
+    +'<div id="pvGrid" style="display:flex;flex-wrap:wrap;gap:8px;max-height:52vh;overflow:auto">'+(lib.length?lib.map(m=>'<div class="slide-pick" data-id="'+m.id+'"><img loading="lazy" src="/thumb/'+esc(m.filename)+'" onerror="this.style.opacity=.3"><span class="vbadge">▶ '+(fmtDur(m.duration)||L('відео','video'))+'</span></div>').join(''):'<div class="empty">Відео в медіатеці ще нема - завантаж кнопкою вище.</div>')+'</div>'
     +'<div class="btnrow"><button class="ghost" id="pvClose">Скасувати</button></div></div>';
   document.body.appendChild(ov);
   const done=(v)=>{ ov.remove(); resolve(v); };
@@ -2462,7 +2469,18 @@ function pickVideo(){ return new Promise(async resolve=>{
 const NETLIM={telegram:1024,threads:500,instagram:2200,facebook:2000,linkedin:3000,youtube:5000,tiktok:2200};
 // 🎬 TikTok і YouTube: як назвати варіанти «Хто бачить» людині
 const TT_PRIV={PUBLIC_TO_EVERYONE:'Усі',MUTUAL_FOLLOW_FRIENDS:'Друзі (взаємні підписки)',FOLLOWER_OF_CREATOR:'Підписники',SELF_ONLY:'Лише я'};
+const TT_PRIV_EN={PUBLIC_TO_EVERYONE:'Everyone',MUTUAL_FOLLOW_FRIENDS:'Friends',FOLLOWER_OF_CREATOR:'Followers',SELF_ONLY:'Only me'};
+function ttPrivName(o){ return L(TT_PRIV[o]||o, TT_PRIV_EN[o]||o); }
+// creator_info каже «цей акаунт зараз публікувати не може» - TikTok вимагає зупинити публікацію й
+// попросити спробувати пізніше (а не тихо слати чернеткою)
+const TT_CANT_POST=['spam_risk_too_many_posts','spam_risk_user_banned_from_posting','reached_active_user_cap'];
+const TT_ERR_EN={spam_risk_too_many_posts:'This TikTok account has reached its daily limit of posts from third-party apps. Please try again later.',
+  spam_risk_user_banned_from_posting:'TikTok does not allow this account to post right now.',
+  reached_active_user_cap:'Too many people are posting through Holos today (TikTok limit for apps in review). Please try again tomorrow.',
+  access_token_invalid:'Access to TikTok has expired - connect TikTok again (Settings → Channels).'};
 const YT_PRIV={public:'Усі',unlisted:'За посиланням',private:'Лише я'};
+const YT_PRIV_EN={public:'Public',unlisted:'Unlisted',private:'Private'};
+function ytPrivName(k){ return L(YT_PRIV[k]||k, YT_PRIV_EN[k]||k); }
 // назва відео YouTube з тексту: перший змістовний рядок без хештегів і посилань (як робить сервер)
 function ytTitleFrom(t){ for(const line of String(t||'').split('\n')){ const x=line.replace(/https?:\/\/\S+/g,'').replace(/(^|\s)#[^\s#]+/g,' ').replace(/[<>]/g,'').replace(/\s+/g,' ').trim(); if(x.replace(/[^\p{L}\p{N}]/gu,'').length>=2) return x.length>100?x.slice(0,99).replace(/\s+\S*$/,'')+'…':x; } return ''; }
 // ⚡ мережі, що приймають сторіс через API (решта для формату «Сторіс» вимикаються)
@@ -2536,7 +2554,7 @@ async function openComposer(postId, opts){
   const C=JSON.parse(JSON.stringify(full.channels||{}));
   // якщо жодна мережа не обрана - вмикаємо всі підключені й ще не надіслані (YouTube і TikTok - лише для відео)
   const vid0=(full.media||[]).length===1&&full.media[0]&&full.media[0].kind==='video'&&full.format!=='story';
-  if(!Object.keys(C).some(k=>C[k]&&C[k].on)) NETS.forEach(n=>{ if(ChanStatus[n[0]]&&!sentSet.has(n[0])&&(vid0||!VIDEO_NETS.includes(n[0]))){ C[n[0]]=C[n[0]]||{text:''}; C[n[0]].on=true; } });
+  if(!opts.blank&&!Object.keys(C).some(k=>C[k]&&C[k].on)) NETS.forEach(n=>{ if(ChanStatus[n[0]]&&!sentSet.has(n[0])&&(vid0||!VIDEO_NETS.includes(n[0]))){ C[n[0]]=C[n[0]]||{text:''}; C[n[0]].on=true; } });
   // надіслані мережі завжди позначені як обрані (щоб було видно в прев'ю)
   sentSet.forEach(k=>{ C[k]=C[k]||{text:''}; C[k].on=true; });
   let master=full.content||''; let mediaFilename=full.media_filename||null; let rubric=full.rubric||'';
@@ -2581,7 +2599,7 @@ async function openComposer(postId, opts){
         +'<div id="cmpYtBox" class="vnbox" style="display:none"></div>'
         +'<div id="cmpTtBox" class="vnbox" style="display:none"></div>'
         +'<div style="font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint);margin-top:14px">🖼 МЕДІА</div>'
-        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="dashbtn" id="cmpPhoto" title="Обкладинка: з галереї, з компʼютера, зі стоку чи AI-генерація, текст на фото">🎨 Обкладинка</button><button class="dashbtn" id="cmpAddSlides" title="Кілька фото в одному пості: Instagram і Threads - карусель, Facebook - галерея, Telegram - альбом">＋ Кадри каруселі</button><button class="dashbtn" id="cmpVideo" title="Власне відео: Instagram - Reels, Facebook - відео Сторінки, Threads, Telegram, LinkedIn">🎬 Відео</button></div>'
+        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="dashbtn" id="cmpPhoto" title="Обкладинка: з галереї, з компʼютера, зі стоку чи AI-генерація, текст на фото">🎨 Обкладинка</button><button class="dashbtn" id="cmpAddSlides" title="Кілька фото в одному пості: Instagram і Threads - карусель, Facebook - галерея, Telegram - альбом">＋ Кадри каруселі</button><button class="dashbtn" id="cmpVideo" title="Власне відео: Instagram - Reels, Facebook - відео Сторінки, Threads, Telegram, LinkedIn, YouTube, TikTok">🎬 Відео</button></div>'
         +'<div id="cmpMediaWrap" style="margin-top:10px"></div>'
         +'<div id="cmpCarWrap" style="display:none;margin-top:12px;padding:10px 12px;border:1px dashed var(--line);border-radius:10px">'
           +'<div id="cmpCarTitle" style="font-size:12px;font-weight:700;margin-bottom:4px">🎠 Сценарій слайдів</div>'
@@ -2612,6 +2630,9 @@ async function openComposer(postId, opts){
     if(layers[layers.length-1]!==ov) return;
     if(leaveOk()) close(); };
   function close(){ ov.remove(); document.removeEventListener('keydown',escH); if(onMeta) document.removeEventListener('kg-meta',onMeta); _cmpOpenId=null;
+    // ✍️ «Новий пост», у якому так нічого й не зʼявилось (ні тексту, ні фото чи відео, ні публікації) - прибираємо,
+    // щоб у Чорновиках не лишалось порожніх карток від кожного відкриття
+    if(opts.blank&&!master.trim()&&!fcMaster.trim()&&!media.length&&!sentSet.size) api('/posts/'+postId,{method:'DELETE'}).then(()=>loadStudioPosts()).catch(()=>{});
     if(/^#\/post\//.test(location.hash)) location.hash=_routeBack; } // function-декларація: хойститься, безпечна для колбеків вище
   document.addEventListener('keydown',escH);
   const msg=ov.querySelector('#cmpMsg'); const txt=ov.querySelector('#cmpText'); txt.value=master;
@@ -2753,10 +2774,10 @@ async function openComposer(postId, opts){
     if(!n){ box.innerHTML='<div style="font-size:12px;color:var(--muted)">Медіа ще нема - «🎨 Обкладинка», «＋ Кадри каруселі» або «🎬 Відео».</div>'; renderCarBlock(); renderVid(); return; }
     if(isVideo()){ const v=media[0], warn=videoWarn(v);
       box.innerHTML='<div class="slides-strip"><div class="slide-th"><img src="/thumb/'+esc(v.filename)+'" onerror="this.style.opacity=.25"><span class="sn">▶ '+(fmtDur(v.duration)||'відео')+'</span><button class="sx" id="cmpVidRm" title="Прибрати відео">✕</button></div></div>'
-        +'<div style="font-size:11.5px;color:var(--muted);margin-top:6px">🎬 Відео'+(v.size?' · '+Math.round(v.size/1048576)+' МБ':'')+(v.width&&v.height?' · '+v.width+'×'+v.height:'')+'. Instagram - Reels, Facebook - відео Сторінки, Threads, Telegram, LinkedIn, YouTube (вертикальне до 3 хв - Shorts), TikTok; текст поста - підпис.</div>'
-        +(()=>{ const off=NETS.map(n=>n[0]).filter(k=>ChanStatus[k]&&!(C[k]&&C[k].on)&&!sentSet.has(k)); return off.length?'<div style="font-size:11.5px;margin-top:4px">Це відео приймають і '+off.map(netName).join(', ')+': <button class="dashbtn" id="cmpVidNets">🌐 В усі мережі</button></div>':''; })()
+        +'<div style="font-size:11.5px;color:var(--muted);margin-top:6px">'+L('🎬 Відео','🎬 Video')+(v.size?' · '+Math.round(v.size/1048576)+L(' МБ',' MB'):'')+(v.width&&v.height?' · '+v.width+'×'+v.height:'')+L('. Instagram - Reels, Facebook - відео Сторінки, Threads, Telegram, LinkedIn, YouTube (вертикальне до 3 хв - Shorts), TikTok; текст поста - підпис.','. Instagram - Reels, Facebook - Page video, Threads, Telegram, LinkedIn, YouTube (vertical up to 3 min - Shorts), TikTok; the post text is the caption.')+'</div>'
+        +(()=>{ const off=NETS.map(n=>n[0]).filter(k=>ChanStatus[k]&&!(C[k]&&C[k].on)&&!sentSet.has(k)); return off.length?'<div style="font-size:11.5px;margin-top:4px">'+L('Це відео приймають і ','This video can also go to ')+off.map(netName).join(', ')+': <button class="dashbtn" id="cmpVidNets">'+L('🌐 В усі мережі','🌐 To all networks')+'</button></div>':''; })()
         +(warn?'<div id="cmpVidWarn" style="font-size:11.5px;color:var(--danger);margin-top:4px">⚠ '+esc(warn)+'</div>':'')
-        +'<div class="cmpCover" id="cmpCover"><div class="cmpCoverTh">'+(coverFile?'<img src="/thumb/'+esc(coverFile)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(coverFile)+'\'">':'<span>кадр<br>вибере<br>Instagram</span>')+'</div>'
+        +'<div class="cmpCover" id="cmpCover"><div class="cmpCoverTh">'+(coverFile?'<img src="/thumb/'+esc(coverFile)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(coverFile)+'\'">':L('<span>кадр<br>вибере<br>Instagram</span>','<span>Instagram<br>picks<br>a frame</span>'))+'</div>'
         +'<div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600">🖼 Обкладинка Reels</div><div style="font-size:11.5px;color:var(--muted);margin:2px 0 6px">Її видно в сітці профілю Instagram (там кадр 3:4 - головне тримай посередині).</div>'
         +'<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="dashbtn" id="cmpCovFrame">🎞 Кадр із відео</button><button class="dashbtn" id="cmpCovPhoto">🖼 Фото з медіатеки</button>'+(coverFile?'<button class="dashbtn" id="cmpCovClear" title="Instagram візьме кадр сам">✕</button>':'')+'</div>'
         +'<div id="cmpCovPick" style="display:none;margin-top:8px"><video id="cmpCovVid" src="/media/'+esc(v.filename)+'" muted playsinline preload="metadata" style="width:120px;border-radius:8px;background:#000;display:block"></video>'
@@ -2831,10 +2852,11 @@ async function openComposer(postId, opts){
     const body=m.kind==='video'?'<video src="/media/'+esc(m.filename)+'" poster="/thumb/'+esc(m.filename)+'" controls muted playsinline preload="none"></video>':'<img src="/media/'+esc(m.filename)+'">';
     return '<div class="pv-story">'+bars+body+(i>0?'<button class="pv-nav pv-prev" data-snav="'+k+'" data-d="-1">‹</button>':'')+(i<n-1?'<button class="pv-nav pv-next" data-snav="'+k+'" data-d="1">›</button>':'')+'<span class="pv-cnt">'+(i+1)+'/'+n+'</span></div>'; }
   // стан TikTok-блоку оголошено ДО прев'ю: renderPrev читає нік автора (ttUser) і режим (ttMode)
-  let ttInfo=null, ttInfoErr='', ttLoading=false, ttDisclose=!!(C.tiktok&&(C.tiktok.your_brand||C.tiktok.branded));
+  let ttInfo=null, ttInfoErr='', ttInfoCode='', ttLoading=false, ttDisclose=!!(C.tiktok&&(C.tiktok.your_brand||C.tiktok.branded));
   async function loadTtInfo(fresh){ if(ttLoading) return; ttLoading=true;
-    try{ const r=await api('/integrations/tiktok/creator'+(fresh?'?fresh=1':'')); ttInfo=r||{}; ttInfoErr=(r&&r.ok===false)?(r.error||'TikTok не відповів'):''; }
-    catch(e){ ttInfo={}; ttInfoErr=e.message; } finally{ ttLoading=false; renderVid(); renderPrev(); } }
+    try{ const r=await api('/integrations/tiktok/creator'+(fresh?'?fresh=1':'')); ttInfo=r||{}; ttInfoErr=(r&&r.ok===false)?(r.error||'TikTok не відповів'):''; ttInfoCode=(r&&r.ok===false&&r.code)||''; }
+    catch(e){ ttInfo={}; ttInfoErr=e.message; ttInfoCode=''; } finally{ ttLoading=false; renderVid(); renderPrev(); } }
+  const ttErrText=()=>L(ttInfoErr, TT_ERR_EN[ttInfoCode]||'TikTok did not respond - try again.');
   const vOn=(k)=>!!(C[k]&&C[k].on)&&!isStory()&&isVideo()&&!netDone(k);
   const ttCanDirect=()=>!!(ttInfo&&ttInfo.direct)&&!ttInfoErr;
   function ttMode(){ const t=C.tiktok||{}; if(!ttCanDirect()||t.mode==='draft') return 'draft'; return (t.mode==='direct'||t.privacy)?'direct':'draft'; }
@@ -2872,17 +2894,20 @@ async function openComposer(postId, opts){
       else if(k==='youtube'||k==='tiktok'){
         // 🎬 лише відео: без відео в пості - чесно, що не вийде
         if(!isVideo()) body=head+'<div class="phone-b"><div class="pv-note" style="color:var(--danger)">⚠ '+n[1]+' приймає лише відео - прикріпи відео («🎬 Відео») або зніми '+n[1]+'</div></div>';
-        else if(k==='youtube'){ const y=C.youtube||{}; const tl=y.title||ytTitleFrom(t)||'Назва відео';
-          body=head+img+'<div class="phone-b"><div style="font-weight:700;font-size:13px;line-height:1.35">'+esc(tl)+'</div><div class="phone-txt" style="font-size:12px;color:var(--muted);margin-top:3px">'+(t?pvCap(k,t):empty)+'</div><div style="font-size:11px;color:var(--faint);margin-top:4px">'+esc(YT_PRIV[y.privacy||'public'])+(y.kids?' · для дітей':'')+(y.ai?' · змінений/синтетичний вміст':'')+'</div></div>'; }
+        else if(k==='youtube'){ const y=C.youtube||{}; const tl=y.title||ytTitleFrom(t)||L('Назва відео','Video title');
+          body=head+img+'<div class="phone-b"><div style="font-weight:700;font-size:13px;line-height:1.35">'+esc(tl)+'</div><div class="phone-txt" style="font-size:12px;color:var(--muted);margin-top:3px">'+(t?pvCap(k,t):empty)+'</div><div style="font-size:11px;color:var(--faint);margin-top:4px">'+esc(ytPrivName(y.privacy||'public'))+(y.kids?L(' · для дітей',' · made for kids'):'')+(y.ai?L(' · змінений/синтетичний вміст',' · altered or synthetic content'):'')+'</div></div>'; }
         else { const draft=ttMode()==='draft', tc=C.tiktok||{};
           body=head+img+'<div class="phone-b"><span class="phone-user">@'+esc(String(ttUser()).replace(/^@/,''))+'</span> <span class="phone-txt" style="display:inline">'+(t?pvCap(k,t):empty)+'</span>'
-            +'<div style="font-size:11px;color:var(--faint);margin-top:4px">'+(draft?'📥 чернетка в TikTok':('бачать: '+(tc.privacy?esc(TT_PRIV[tc.privacy]||tc.privacy):'<span style="color:var(--danger)">не обрано</span>')+(tc.branded?' · Paid partnership':tc.your_brand?' · Promotional content':'')))+'</div></div>'
-            +(draft?'<div class="pv-note">📥 відео піде чернеткою в TikTok - підпис вставиш там сам (кнопка ⧉ ліворуч)</div>':''); } }
+            +'<div style="font-size:11px;color:var(--faint);margin-top:4px">'+(draft?L('📥 чернетка в TikTok','📥 TikTok draft'):(L('бачать: ','Who can view: ')+(tc.privacy?esc(ttPrivName(tc.privacy)):'<span style="color:var(--danger)">'+L('не обрано','not selected')+'</span>')+(tc.branded?' · Paid partnership':tc.your_brand?' · Promotional content':'')))+'</div></div>'
+            +(draft?'<div class="pv-note">'+L('📥 відео піде чернеткою в TikTok - підпис вставиш там сам (кнопка ⧉ ліворуч)','📥 The video goes to your TikTok drafts - paste the caption there (⧉ button on the left)')+'</div>':''); } }
       else body=head+'<div class="phone-b"><div class="phone-txt">'+(t?pvCap(k,t):empty)+'</div></div>'+img;
       // Честь прев'ю: поки адаптацією не керує людина, мережа без своєї версії буде спакована
       // сервером ПРИ публікації - тобто вийде НЕ те, що показано тут. Кажемо це прямо.
-      const auto=!sent&&!C.manual_adapt&&!hasOwn(k)
-        ? '<div class="pv-note">✨ при публікації текст спакується під цю мережу автоматично. Хочеш керувати сам - тисни ✨ на каналі</div>' : '';
+      // 🎵 TikTok - виняток: підпис іде рівно той, що людина бачить тут (TikTok вимагає, щоб людина бачила
+      // й могла поправити підпис до публікації; переписаний моделлю в мить публікації - вже не той)
+      const auto=sent||hasOwn(k)?'':k==='tiktok'
+        ? '<div class="pv-note">'+L('🎵 у TikTok піде саме цей текст (✨ на каналі - підлаштувати під TikTok)','🎵 This exact caption goes to TikTok')+'</div>'
+        : !C.manual_adapt ? '<div class="pv-note">'+L('✨ при публікації текст спакується під цю мережу автоматично. Хочеш керувати сам - тисни ✨ на каналі','✨ When you publish, the text is adapted for this network automatically. To control it yourself, click ✨ on the network.')+'</div>' : '';
       const ownMark=hasOwn(k)?'<div class="pv-note" style="color:var(--brand)">✨ своя версія для цієї мережі (↺ на каналі - вернути твій текст)</div>':'';
       // 👥 кілька акаунтів мережі: куди саме піде пост (✓ з посиланням - куди вже вийшов)
       const ids=ACC_NETS.includes(k)?[...new Set([...tgtIds(k),...sentTo.filter(x=>x.net===k&&x.account).map(x=>x.account)])]:[];
@@ -2890,7 +2915,7 @@ async function openComposer(postId, opts){
         return sn?(sn.link?'<a href="'+esc(sn.link)+'" target="_blank" rel="noopener" title="Відкрити пост">✓ '+esc(accName(k,id))+' ↗</a>':'<b>✓ '+esc(accName(k,id))+'</b>'):'<span>'+esc(accName(k,id))+'</span>'; }).join(' · ')+'</div>':'';
       // 🎬 TikTok ще обробляє / відео в чернетках TikTok / YouTube залив приватним
       const vst=sentTo.find(x=>x.net===k&&(x.state||x.note));
-      const vNote=vst?'<div class="pv-note" style="color:'+(vst.note?'var(--amber)':'var(--muted)')+'">'+(vst.state==='processing'?'⏳ TikTok ще обробляє відео - посилання зʼявиться, щойно він закінчить':vst.state==='draft'?'📥 відео в чернетках TikTok - відкрий TikTok і опублікуй':'')+(vst.note?(vst.state?' · ':'')+'⚠ '+esc(vst.note):'')+'</div>':'';
+      const vNote=vst?'<div class="pv-note" style="color:'+(vst.note?'var(--amber)':'var(--muted)')+'">'+(vst.state==='processing'?L('⏳ TikTok ще обробляє відео - посилання зʼявиться, щойно він закінчить','⏳ TikTok is processing the video - it may take a few minutes to appear on your profile; the link appears here when it is ready'):vst.state==='draft'?L('📥 відео в чернетках TikTok - відкрий TikTok і опублікуй','📥 The video is in your TikTok inbox - open TikTok to finish posting'):'')+(vst.note?(vst.state?' · ':'')+'⚠ '+esc(vst.note):'')+'</div>':'';
       // 🔗 щойно мережа опублікована - поруч із її плашкою зʼявляється лінк на живий пост
       const open=(!accLine&&sentLinks[k])?'<a href="'+esc(sentLinks[k])+'" target="_blank" rel="noopener" class="pv-open" title="Відкрити пост у '+esc(n[1])+'">↗ Відкрити пост</a>':'';
       return '<div class="pv-label" style="background:var('+NETVAR[k]+')">'+n[1]+'</div>'+open+accLine+vNote+'<div class="phone">'+body+pvFc(k,av)+'</div>'+auto+ownMark; }).join('');
@@ -2921,62 +2946,77 @@ async function openComposer(postId, opts){
   // TikTok - туди його можна надіслати завжди, решту людина обере в застосунку.
   // що заважає опублікувати в TikTok/YouTube саме так (текст для людини) - перевіряємо ДО публікації й планування
   function vidBlock(){
+    if(vOn('tiktok')&&TT_CANT_POST.includes(ttInfoCode)) return 'TikTok: '+ttErrText()+L(' Зніми TikTok із цього поста або спробуй пізніше.','');
     if(vOn('tiktok')&&ttMode()==='direct'){ const t=C.tiktok||{};
-      if(!t.privacy) return 'TikTok: обери «Хто бачить» (або «У чернетки TikTok») - TikTok не дозволяє обирати це за людину';
-      if(ttDisclose&&!t.your_brand&&!t.branded) return 'TikTok: обери, яка це реклама (мій бренд чи брендований контент), або зніми «Розкрити комерційний вміст»';
-      if(t.branded&&t.privacy==='SELF_ONLY') return 'TikTok: брендований контент не може бути видно «Лише мені» - обери інше «Хто бачить»';
+      if(!t.privacy) return L('TikTok: обери «Хто бачить» (або «У чернетки TikTok») - TikTok не дозволяє обирати це за людину','TikTok: choose who can view this video (or send it to TikTok drafts) - TikTok does not allow choosing this for you');
+      if(ttDisclose&&!t.your_brand&&!t.branded) return L('TikTok: вкажи, кого рекламує відео (тебе, інший бренд чи обох), або зніми «Розкрити комерційний вміст»','TikTok: you need to indicate if your content promotes yourself, a third party, or both');
+      if(t.branded&&t.privacy==='SELF_ONLY') return L('TikTok: брендований контент не може бути видно «Лише мені» - обери інше «Хто бачить»','TikTok: branded content visibility cannot be set to private');
       const mx=ttInfo&&ttInfo.maxDurationSec, d=Number((media[0]||{}).duration)||0;
-      if(mx&&d>mx+0.5) return 'TikTok цього акаунта приймає відео до '+fmtDur(mx)+', а тут '+fmtDur(d)+' - вріж відео або зніми TikTok'; }
+      if(mx&&d>mx+0.5) return L('TikTok цього акаунта приймає відео до '+fmtDur(mx)+', а тут '+fmtDur(d)+' - вріж відео або зніми TikTok','TikTok: this account can post videos up to '+fmtDur(mx)+' long, this one is '+fmtDur(d)); }
     return ''; }
   function renderYt(){ const box=ov.querySelector('#cmpYtBox'); if(!box) return; const show=vOn('youtube'); box.style.display=show?'':'none'; if(!show) return;
     const y=C.youtube=C.youtube||{on:true}; const v=media[0]||{}, d=Number(v.duration)||0;
     const shorts=v.width&&v.height&&v.height>=v.width&&d>0&&d<=180;
     const chName=ChanStatus.video&&ChanStatus.video.youtube?ChanStatus.video.youtube.name:'';
-    box.innerHTML='<div class="vnh">▶️ YOUTUBE'+(chName?' · <span>'+esc(chName)+'</span>':'')+' <span class="qh" title="Відео піде на канал YouTube: вертикальне до 3 хв YouTube сам показує як Shorts. Опис - текст поста для YouTube.">?</span></div>'
+    box.innerHTML='<div class="vnh">▶️ YOUTUBE'+(chName?' · <span>'+esc(chName)+'</span>':'')+' <span class="qh" title="'+esc(L('Відео піде на канал YouTube: вертикальне до 3 хв YouTube сам показує як Shorts. Опис - текст поста для YouTube.','The video goes to your YouTube channel; YouTube shows vertical videos up to 3 min as Shorts. The description is the post text for YouTube.'))+'">?</span></div>'
       +'<input id="ytTitle" class="txt" maxlength="100" style="margin-top:6px;font-size:13px">'
-      +'<div class="vnrow"><label>Хто бачить <select id="ytPriv" class="txt">'+Object.keys(YT_PRIV).map(k=>'<option value="'+k+'"'+((y.privacy||'public')===k?' selected':'')+'>'+YT_PRIV[k]+'</option>').join('')+'</select></label></div>'
-      +'<div class="vnrow">Відео для дітей? <label><input type="radio" name="ytKids" value="0"'+(y.kids?'':' checked')+'> Ні</label><label><input type="radio" name="ytKids" value="1"'+(y.kids?' checked':'')+'> Так, для дітей</label> <span class="qh" title="Вимога YouTube (закон COPPA): «для дітей» вимикає коментарі й персоналізовану рекламу під відео. Обирай «Так», лише якщо відео справді зроблене для дітей.">?</span></div>'
-      +'<label class="vnrow"><input type="checkbox" id="ytAi"'+(y.ai?' checked':'')+'> 🤖 Позначка «змінений чи синтетичний вміст» <span class="qh" title="YouTube просить позначати реалістичний вміст, створений чи змінений AI: синтетичний голос, згенеровані обличчя чи сцени, що виглядають справжніми. Монтаж з AI-голосом ставить її сам.">?</span></label>'
-      +'<div class="vnmuted">'+(shorts?'▶️ Буде Shorts (вертикальне, до 3 хв).':'▶️ Буде звичайним відео: Shorts - лише вертикальне до 3 хв.')+' Якщо Holos ще не пройшов аудит YouTube, YouTube зробить відео приватним - про це скаже результат публікації.</div>';
-    const ti=box.querySelector('#ytTitle'); ti.value=y.title||''; ti.placeholder='Назва відео (порожньо - «'+(ytTitleFrom(textOf('youtube'))||'перший рядок тексту')+'»)';
+      +'<div class="vnrow"><label>'+L('Хто бачить','Visibility')+' <select id="ytPriv" class="txt">'+Object.keys(YT_PRIV).map(k=>'<option value="'+k+'"'+((y.privacy||'public')===k?' selected':'')+'>'+esc(ytPrivName(k))+'</option>').join('')+'</select></label></div>'
+      +'<div class="vnrow">'+L('Відео для дітей?','Made for kids?')+' <label><input type="radio" name="ytKids" value="0"'+(y.kids?'':' checked')+'> '+L('Ні','No, it’s not made for kids')+'</label><label><input type="radio" name="ytKids" value="1"'+(y.kids?' checked':'')+'> '+L('Так, для дітей','Yes, it’s made for kids')+'</label> <span class="qh" title="'+esc(L('Вимога YouTube (закон COPPA): «для дітей» вимикає коментарі й персоналізовану рекламу під відео. Обирай «Так», лише якщо відео справді зроблене для дітей.','YouTube requirement (COPPA): “made for kids” turns off comments and personalized ads on the video.'))+'">?</span></div>'
+      +'<label class="vnrow"><input type="checkbox" id="ytAi"'+(y.ai?' checked':'')+'> 🤖 '+L('Позначка «змінений чи синтетичний вміст»','Altered or synthetic content')+' <span class="qh" title="'+esc(L('YouTube просить позначати реалістичний вміст, створений чи змінений AI: синтетичний голос, згенеровані обличчя чи сцени, що виглядають справжніми. Монтаж з AI-голосом ставить її сам.','YouTube asks to label realistic content made or changed with AI (synthetic voice, generated faces or scenes that look real).'))+'">?</span></label>'
+      +'<div class="vnmuted">'+(shorts?L('▶️ Буде Shorts (вертикальне, до 3 хв).','▶️ This will be a Short (vertical, up to 3 min).'):L('▶️ Буде звичайним відео: Shorts - лише вертикальне до 3 хв.','▶️ This will be a regular video: Shorts are vertical and up to 3 min.'))+L(' Якщо Holos ще не пройшов аудит YouTube, YouTube зробить відео приватним - про це скаже результат публікації.',' Until Holos passes the YouTube audit, YouTube makes videos uploaded through the API private - the result will say so.')+'</div>';
+    const ti=box.querySelector('#ytTitle'); ti.value=y.title||''; const tf=ytTitleFrom(textOf('youtube'))||L('перший рядок тексту','the first line of the text'); ti.placeholder=L('Назва відео (порожньо - «'+tf+'»)','Video title (empty - “'+tf+'”)');
     ti.addEventListener('input',()=>{ const x=ti.value.replace(/[<>]/g,''); if(x.trim()) y.title=x; else delete y.title; renderPrev(); });
     box.querySelector('#ytPriv').onchange=(e)=>{ y.privacy=e.target.value; renderPrev(); };
     box.querySelectorAll('[name=ytKids]').forEach(r=>r.onchange=()=>{ y.kids=r.value==='1'; });
     box.querySelector('#ytAi').onchange=(e)=>{ y.ai=e.target.checked; }; }
+  // Блок TikTok - за правилами TikTok для прямої публікації (Content Sharing Guidelines): нік автора з
+  // creator_info, «Хто бачить» з варіантів TikTok без типового, коментарі/Duet/Stitch не позначені (вимкнене
+  // автором - сіре), «Розкрити комерційний вміст» вимкнено типово, «Мій бренд» → «Promotional content»,
+  // «Брендований контент» → «Paid partnership» і не буває «Лише я» (тоді він сірий), згода з Music Usage
+  // Confirmation (+ Branded Content Policy) перед кнопкою і «TikTok обробляє кілька хвилин». Англійською
+  // (?review=tiktok) - словами самого TikTok: так рецензент упізнає кожен пункт.
   function renderTt(){ const box=ov.querySelector('#cmpTtBox'); if(!box) return; const show=vOn('tiktok'); box.style.display=show?'':'none'; if(!show) return;
     const t=C.tiktok=C.tiktok||{on:true};
-    const head='<div class="vnh">🎵 TIKTOK <span class="qh" title="Одразу - пост виходить сам із цими налаштуваннями. Чернетка - відео чекатиме в застосунку TikTok, і ти опублікуєш його сам.">?</span></div>';
-    if(!ttInfo){ box.innerHTML=head+'<div class="vnmuted">питаю TikTok, хто публікує…</div>'; loadTtInfo(false); return; }
+    const head='<div class="vnh">🎵 TIKTOK <span class="qh" title="'+esc(L('Одразу - пост виходить сам із цими налаштуваннями. Чернетка - відео чекатиме в застосунку TikTok, і ти опублікуєш його сам.','Post now: the video is posted with these settings. Send to TikTok drafts: the video waits in the TikTok app and you post it there yourself.'))+'">?</span></div>';
+    if(!ttInfo){ box.innerHTML=head+'<div class="vnmuted">'+L('питаю TikTok, хто публікує…','Asking TikTok which account will post…')+'</div>'; loadTtInfo(false); return; }
     const info=ttInfo, can=ttCanDirect(), mode=ttMode(), d=Number((media[0]||{}).duration)||0;
     const opts=(info.privacyOptions&&info.privacyOptions.length)?info.privacyOptions:Object.keys(TT_PRIV);
     const nick=info.nickname||(ChanStatus.video&&ChanStatus.video.tiktok&&ChanStatus.video.tiktok.name)||'', un=info.username||(ChanStatus.video&&ChanStatus.video.tiktok&&ChanStatus.video.tiktok.username)||'';
-    let h=head+'<div class="vnwho">'+(info.avatarUrl?'<img src="'+esc(info.avatarUrl)+'" alt="">':'')+'Публікує: <b>'+esc(nick||'TikTok')+'</b>'+(un?' <span>@'+esc(un)+'</span>':'')+'</div>';
-    if(ttInfoErr) h+='<div class="vnerr">⚠ '+esc(ttInfoErr)+' <a href="#" id="ttRetry">↻ ще раз</a></div>';
-    h+='<div class="vnrow"><label'+(can?'':' class="off" title="Пряма публікація для Holos ще не ввімкнена"')+'><input type="radio" name="ttMode" value="direct"'+(mode==='direct'?' checked':'')+(can?'':' disabled')+'> Опублікувати одразу</label><label><input type="radio" name="ttMode" value="draft"'+(mode==='draft'?' checked':'')+'> У чернетки TikTok</label></div>';
-    if(!can&&!ttInfoErr) h+='<div class="vnmuted">Пряма публікація для Holos у TikTok ще не ввімкнена - поки відео йде в чернетки TikTok.</div>';
-    if(mode==='direct'){
-      h+='<div class="vnrow"><label>Хто бачить <select id="ttPriv" class="txt"><option value="">- обери -</option>'+opts.map(o=>'<option value="'+esc(o)+'"'+(t.privacy===o?' selected':'')+(t.branded&&o==='SELF_ONLY'?' disabled':'')+'>'+esc(TT_PRIV[o]||o)+(t.branded&&o==='SELF_ONLY'?' (не для брендованого)':'')+'</option>').join('')+'</select></label></div>';
-      const tog=(id,key,label,dis)=>'<label'+(dis?' class="off" title="Вимкнено в налаштуваннях твого TikTok"':'')+'><input type="checkbox" id="'+id+'"'+(t[key]&&!dis?' checked':'')+(dis?' disabled':'')+'> '+label+'</label>';
-      h+='<div class="vnrow">Дозволити: '+tog('ttCm','comment','коментарі',info.commentDisabled)+tog('ttDu','duet','Duet',info.duetDisabled)+tog('ttSt','stitch','Stitch',info.stitchDisabled)+'</div>';
-      if(info.commentDisabled||info.duetDisabled||info.stitchDisabled) h+='<div class="vnmuted">Сіре вимкнено в налаштуваннях твого TikTok - увімкнути можна лише там.</div>';
-      h+='<label class="vnrow"><input type="checkbox" id="ttDisc"'+(ttDisclose?' checked':'')+'> Розкрити комерційний вміст (реклама)</label>';
-      if(ttDisclose) h+='<div class="vnsub"><label><input type="checkbox" id="ttOwn"'+(t.your_brand?' checked':'')+'> Мій бренд - TikTok позначить «Promotional content»</label><label><input type="checkbox" id="ttBr"'+(t.branded?' checked':'')+'> Брендований контент (співпраця з іншим брендом) - позначка «Paid partnership»</label>'
-        +((!t.your_brand&&!t.branded)?'<div class="vnerr">обери хоча б одне - або зніми «Розкрити»</div>':'')+'</div>';
-      h+='<label class="vnrow"><input type="checkbox" id="ttAi"'+(t.ai?' checked':'')+'> 🤖 Створено з AI (AI-голос, згенеровані кадри)</label>';
-      if(info.maxDurationSec&&d>info.maxDurationSec+0.5) h+='<div class="vnerr">⚠ цей акаунт TikTok приймає відео до '+fmtDur(info.maxDurationSec)+', а тут '+fmtDur(d)+'</div>';
-      h+='<div class="vnlegal">Публікуючи, ти погоджуєшся з <a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noopener">Music Usage Confirmation</a>'+(t.branded?' і <a href="https://www.tiktok.com/legal/page/global/bc-policy/en" target="_blank" rel="noopener">Branded Content Policy</a>':'')+' TikTok. Після публікації TikTok обробляє відео кілька хвилин - посилання зʼявиться, щойно він закінчить.</div>';
-    } else h+='<div class="vnmuted">Відео прийде в TikTok чернеткою (сповіщення в застосунку чи Профіль → Чернетки): там обереш, хто бачить, і натиснеш «Опублікувати». Підпис TikTok у чернетку не переносить - <button class="dashbtn" id="ttCopy">⧉ Копіювати підпис</button></div>';
+    let h=head+'<div class="vnwho">'+(info.avatarUrl?'<img src="'+esc(info.avatarUrl)+'" alt="">':'')+L('Публікує: ','Posting to TikTok as ')+'<b>'+esc(nick||'TikTok')+'</b>'+(un?' <span>@'+esc(un)+'</span>':'')+'</div>';
+    if(ttInfoErr) h+='<div class="vnerr">⚠ '+esc(ttErrText())+' <a href="#" id="ttRetry">'+L('↻ ще раз','↻ Try again')+'</a></div>';
+    h+='<div class="vnrow"><label'+(can?'':' class="off" title="'+esc(L('Пряма публікація для Holos ще не ввімкнена','Direct posting is not available for this account yet'))+'"')+'><input type="radio" name="ttMode" value="direct"'+(mode==='direct'?' checked':'')+(can?'':' disabled')+'> '+L('Опублікувати одразу','Post now')+'</label><label><input type="radio" name="ttMode" value="draft"'+(mode==='draft'?' checked':'')+'> '+L('У чернетки TikTok','Send to TikTok drafts')+'</label></div>';
+    if(!can&&!ttInfoErr) h+='<div class="vnmuted">'+L('Пряма публікація для Holos у TikTok ще не ввімкнена - поки відео йде в чернетки TikTok.','Direct posting is not available for this account yet, so the video goes to your TikTok drafts.')+'</div>';
+    if(mode==='direct'){ const selfOnly=t.privacy==='SELF_ONLY';
+      h+='<div class="vnrow"><label>'+L('Хто бачить','Who can view this video')+' <select id="ttPriv" class="txt"><option value="">'+L('- обери -','Select')+'</option>'+opts.map(o=>'<option value="'+esc(o)+'"'+(t.privacy===o?' selected':'')+(t.branded&&o==='SELF_ONLY'?' disabled':'')+'>'+esc(ttPrivName(o))+(t.branded&&o==='SELF_ONLY'?L(' (не для брендованого)',' (not for branded content)'):'')+'</option>').join('')+'</select></label></div>';
+      const tog=(id,key,label,dis)=>'<label'+(dis?' class="off" title="'+esc(L('Вимкнено в налаштуваннях твого TikTok','Turned off in your TikTok settings'))+'"':'')+'><input type="checkbox" id="'+id+'"'+(t[key]&&!dis?' checked':'')+(dis?' disabled':'')+'> '+label+'</label>';
+      h+='<div class="vnrow">'+L('Дозволити:','Allow users to:')+' '+tog('ttCm','comment',L('коментарі','Comment'),info.commentDisabled)+tog('ttDu','duet','Duet',info.duetDisabled)+tog('ttSt','stitch','Stitch',info.stitchDisabled)+'</div>';
+      if(info.commentDisabled||info.duetDisabled||info.stitchDisabled) h+='<div class="vnmuted">'+L('Сіре вимкнено в налаштуваннях твого TikTok - увімкнути можна лише там.','Greyed out options are turned off in your TikTok privacy settings and can only be turned on in TikTok.')+'</div>';
+      h+='<label class="vnrow"><input type="checkbox" id="ttDisc"'+(ttDisclose?' checked':'')+'> '+L('Розкрити комерційний вміст (реклама)','Disclose video content')+'</label>'
+        +'<div class="vnmuted" style="margin-left:22px">'+L('Увімкни, якщо відео рекламує товари чи послуги в обмін на щось цінне: тебе, твій бізнес, інший бренд чи все разом.','Turn on to disclose that this video promotes goods or services in exchange for something of value. Your video could promote yourself, a third party, or both.')+'</div>';
+      if(ttDisclose) h+='<div class="vnsub">'
+        +'<label><input type="checkbox" id="ttOwn"'+(t.your_brand?' checked':'')+'> <span><b>'+L('Мій бренд','Your brand')+'</b><small>'+L('Рекламуєш себе чи власний бізнес - TikTok віднесе відео до Brand Organic.','You are promoting yourself or your own business. This video will be classified as Brand Organic.')+'</small></span></label>'
+        +'<label'+(selfOnly?' class="off" title="'+esc(L('Брендований контент не може бути видно «Лише мені»','Branded content visibility cannot be set to private'))+'"':'')+'><input type="checkbox" id="ttBr"'+(t.branded&&!selfOnly?' checked':'')+(selfOnly?' disabled':'')+'> <span><b>'+L('Брендований контент','Branded content')+'</b><small>'+L('Рекламуєш інший бренд чи третю сторону (оплачена співпраця) - TikTok віднесе відео до Branded Content.','You are promoting another brand or a third party. This video will be classified as Branded Content.')+'</small></span></label>'
+        +(selfOnly?'<div class="vnmuted">'+L('Брендований контент не може бути видно «Лише мені» - щоб його позначити, обери інше «Хто бачить».','Branded content visibility cannot be set to private.')+'</div>':'')
+        +((!t.your_brand&&!t.branded)?'<div class="vnerr">'+L('Вкажи, кого рекламує відео: тебе, інший бренд чи обох - або зніми «Розкрити комерційний вміст».','You need to indicate if your content promotes yourself, a third party, or both.')+'</div>'
+          :'<div class="vnlabel">'+L('TikTok позначить відео як «'+(t.branded?'Paid partnership':'Promotional content')+'»','Your video will be labeled as “'+(t.branded?'Paid partnership':'Promotional content')+'”')+'</div>')+'</div>';
+      h+='<label class="vnrow"><input type="checkbox" id="ttAi"'+(t.ai?' checked':'')+'> 🤖 '+L('Створено з AI (AI-голос, згенеровані кадри)','AI-generated content')+'</label>';
+      if(info.maxDurationSec&&d>info.maxDurationSec+0.5) h+='<div class="vnerr">⚠ '+L('цей акаунт TikTok приймає відео до '+fmtDur(info.maxDurationSec)+', а тут '+fmtDur(d),'This TikTok account can post videos up to '+fmtDur(info.maxDurationSec)+' long, this one is '+fmtDur(d))+'</div>';
+      const muc='<a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noopener">Music Usage Confirmation</a>', bcp='<a href="https://www.tiktok.com/legal/page/global/bc-policy/en" target="_blank" rel="noopener">Branded Content Policy</a>';
+      h+='<div class="vnlegal">'+L('Публікуючи, ти погоджуєшся з '+(t.branded?bcp+' і ':'')+muc+' TikTok. Після публікації TikTok обробляє відео кілька хвилин - посилання зʼявиться, щойно він закінчить.',
+        'By posting, you agree to TikTok’s '+(t.branded?bcp+' and ':'')+muc+'. After you post, it may take a few minutes for TikTok to process the video before it appears on your profile.')+'</div>';
+    } else h+='<div class="vnmuted">'+L('Відео прийде в TikTok чернеткою (сповіщення в застосунку чи Профіль → Чернетки): там обереш, хто бачить, і натиснеш «Опублікувати». Підпис TikTok у чернетку не переносить - ','The video arrives in your TikTok inbox as a draft (you get a notification in the TikTok app): open it there, choose who can view it and tap Post. TikTok does not carry the caption over - ')+'<button class="dashbtn" id="ttCopy">'+L('⧉ Копіювати підпис','⧉ Copy caption')+'</button></div>';
     box.innerHTML=h;
     const on=(id,fn)=>{ const el=box.querySelector(id); if(el) el.onchange=fn; };
     box.querySelectorAll('[name=ttMode]').forEach(r=>r.onchange=()=>{ t.mode=r.value; renderTt(); renderPrev(); });
-    on('#ttPriv',(e)=>{ if(e.target.value) t.privacy=e.target.value; else delete t.privacy; renderPrev(); });
+    // «Лише я» і брендований контент несумісні: обрали «Лише я» - брендований сірий (і знятий)
+    on('#ttPriv',(e)=>{ if(e.target.value) t.privacy=e.target.value; else delete t.privacy; if(t.privacy==='SELF_ONLY'&&t.branded) delete t.branded; renderTt(); renderPrev(); });
     on('#ttCm',(e)=>{ t.comment=e.target.checked; }); on('#ttDu',(e)=>{ t.duet=e.target.checked; }); on('#ttSt',(e)=>{ t.stitch=e.target.checked; });
-    on('#ttDisc',(e)=>{ ttDisclose=e.target.checked; if(!ttDisclose){ delete t.your_brand; delete t.branded; } renderTt(); });
-    on('#ttOwn',(e)=>{ t.your_brand=e.target.checked; renderTt(); });
-    on('#ttBr',(e)=>{ t.branded=e.target.checked; if(t.branded&&t.privacy==='SELF_ONLY') delete t.privacy; renderTt(); });
+    on('#ttDisc',(e)=>{ ttDisclose=e.target.checked; if(!ttDisclose){ delete t.your_brand; delete t.branded; } renderTt(); renderPrev(); });
+    on('#ttOwn',(e)=>{ t.your_brand=e.target.checked; renderTt(); renderPrev(); });
+    on('#ttBr',(e)=>{ t.branded=e.target.checked; if(t.branded&&t.privacy==='SELF_ONLY') delete t.privacy; renderTt(); renderPrev(); });
     on('#ttAi',(e)=>{ t.ai=e.target.checked; });
-    const rt=box.querySelector('#ttRetry'); if(rt) rt.onclick=(e)=>{ e.preventDefault(); ttInfo=null; ttInfoErr=''; loadTtInfo(true); renderTt(); };
-    const cp=box.querySelector('#ttCopy'); if(cp) cp.onclick=()=>{ try{ navigator.clipboard.writeText(textOf('tiktok')); setMsg('підпис для TikTok скопійовано ✓','var(--brand)'); }catch(e){ setMsg('не вдалося скопіювати - виділи текст вручну','var(--danger)'); } }; }
+    const rt=box.querySelector('#ttRetry'); if(rt) rt.onclick=(e)=>{ e.preventDefault(); ttInfo=null; ttInfoErr=''; ttInfoCode=''; loadTtInfo(true); renderTt(); };
+    const cp=box.querySelector('#ttCopy'); if(cp) cp.onclick=()=>{ try{ navigator.clipboard.writeText(textOf('tiktok')); setMsg(L('підпис для TikTok скопійовано ✓','Caption copied ✓'),'var(--brand)'); }catch(e){ setMsg(L('не вдалося скопіювати - виділи текст вручну','Could not copy - select the text manually'),'var(--danger)'); } }; }
   function renderVid(){ renderYt(); renderTt(); }
   // ----- 💬 перший коментар -----
   // свій текст мережі (рядок, порожній = без коментаря тут) або спільний; у сторіс і Telegram - нема
@@ -2996,9 +3036,9 @@ async function openComposer(postId, opts){
   // коментар у прев'ю мережі - так, як його побачать під постом
   function pvFc(k,av){
     if(isStory()) return '';
-    if(!FC_NETS.includes(k)) return !fcMaster.trim()?'':k==='telegram'?'<div class="pv-fc-off">💬 у Telegram коментар не піде: коментарі каналу живуть в окремій групі обговорення, бот туди не пише</div>'
-      :k==='tiktok'?'<div class="pv-fc-off">💬 у TikTok коментар не піде: TikTok коментарів через API не приймає</div>'
-      :k==='youtube'?'<div class="pv-fc-off">💬 у YouTube коментар не піде: для цього YouTube вимагає ще один дозвіл</div>':'';
+    if(!FC_NETS.includes(k)) return !fcMaster.trim()?'':k==='telegram'?'<div class="pv-fc-off">'+L('💬 у Telegram коментар не піде: коментарі каналу живуть в окремій групі обговорення, бот туди не пише','💬 No first comment in Telegram: channel comments live in a separate discussion group')+'</div>'
+      :k==='tiktok'?'<div class="pv-fc-off">'+L('💬 у TikTok коментар не піде: TikTok коментарів через API не приймає','💬 No first comment on TikTok: Holos does not post comments to TikTok')+'</div>'
+      :k==='youtube'?'<div class="pv-fc-off">'+L('💬 у YouTube коментар не піде: для цього YouTube вимагає ще один дозвіл','💬 No first comment on YouTube: it needs another YouTube permission')+'</div>':'';
     const own=fcOwn(k), t=fcOf(k), cs=fcAgg(k), per=fcList(k);
     if(!t&&!own&&!cs) return '';
     // кілька акаунтів: стан коментаря під кожним постом окремо
@@ -3143,6 +3183,15 @@ async function openComposer(postId, opts){
   // «Facebook (Rozum.one)» - коли в публікації кілька акаунтів мережі, результат називає кожен
   const resLbl=(x)=>x.channel+(x.accountName?' ('+x.accountName+')':'');
   const onSent=(l,st)=>{ sentLinks=l; if(st&&st.comments) cmStates=st.comments; if(st&&st.sentTo) sentTo=st.sentTo; if(st&&st.accounts) sentAccs=st.accounts; renderChips(); renderPrev(); };
+  // ⏳ TikTok обробляє відео кілька хвилин: поки композер відкритий, перечитуємо стан публікації - і
+  // посилання на пост зʼявляється саме, без перевідкриття (до 6 хв, потім допише сторож на сервері)
+  let procTimer=null;
+  function watchProcessing(){ if(procTimer||!sentTo.some(x=>x.state==='processing')) return; const t0=Date.now();
+    procTimer=setInterval(async()=>{
+      if(!document.body.contains(ov)||Date.now()-t0>6*60*1000){ clearInterval(procTimer); procTimer=null; return; }
+      try{ const st=await api('/posts/'+postId+'/publish-state'); (st.sent||[]).forEach(k=>sentSet.add(k)); onSent(st.links||{},st); }catch(e){}
+      if(!sentTo.some(x=>x.state==='processing')){ clearInterval(procTimer); procTimer=null; } },8000); }
+  watchProcessing();
   ov.querySelector('#cmpNow').onclick=async(e)=>{ const todo=NETS.map(n=>n[0]).filter(k=>C[k]&&C[k].on&&!netDone(k)); if(!todo.length){ setMsg('усі обрані канали вже опубліковано','var(--danger)'); return; } if(!carGuard()) return; const vb=vidBlock(); if(vb){ setMsg('⚠ '+vb,'var(--danger)'); return; } const b=e.target; b.disabled=true;
     try{
       // Авто-перепаковка мереж без власної версії - АЛЕ лише поки адаптацією не почала керувати
@@ -3150,7 +3199,8 @@ async function openComposer(postId, opts){
       // мережі, які він лишив зі своїм текстом, їдуть саме зі своїм текстом.
       // у сторіс підпису немає - пакувати текст під мережі нема чого (і платити за це теж)
       // гілка Threads пакується з майстер-тексту на сервері (threadsSplit) - під 500 символів її не ріжемо
-      const missing=(C.manual_adapt||isStory())?[]:todo.filter(k=>!hasOwn(k)&&!(k==='threads'&&C.threads&&C.threads.thread));
+      // TikTok не пакуємо: туди йде рівно той підпис, що людина бачила в прев'ю (вимога TikTok)
+      const missing=(C.manual_adapt||isStory())?[]:todo.filter(k=>k!=='tiktok'&&!hasOwn(k)&&!(k==='threads'&&C.threads&&C.threads.thread));
       if(missing.length){ setMsg('✨ пакую під канали…'); aiBusy('✨ Пакую пост під кожну мережу…');
         // ⚠️ aiBusy/aiDone - ЛІЧИЛЬНИК: без парного aiDone саме тут банер «Публікую в канали…»
         // лишався висіти назавжди, бо _aiN ніколи не падав до нуля (finally нижче гасить лише СВІЙ виклик)
@@ -3163,12 +3213,16 @@ async function openComposer(postId, opts){
           missing.forEach(k=>{ const v=ra.channels&&ra.channels[k]; if(v&&v.text) C[k]={...(C[k]||{}),on:true,text:v.text}; }); renderPrev();
         } finally { aiDone(); } }
     }catch(_){ /* адаптація не критична - публікуємо майстер-текстом */ }
-    setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const res=await runPublish(postId,setMsg); const sentRes=res.filter(x=>x.status==='sent'); const ok=sentRes.map(resLbl); const err=res.filter(x=>x.status==='error'); sentRes.forEach(x=>sentSet.add(x.channel)); await refreshSentState(postId,sentSet,onSent); renderChips(); renderPrev();
+    setMsg('📣 публікую…'); aiBusy('📣 Публікую в канали…'); try{ await saveDraft(); const res=await runPublish(postId,setMsg); const sentRes=res.filter(x=>x.status==='sent'); const ok=sentRes.map(resLbl); const err=res.filter(x=>x.status==='error'); sentRes.forEach(x=>sentSet.add(x.channel)); await refreshSentState(postId,sentSet,onSent); renderChips(); renderPrev(); watchProcessing();
       // 💬 перший коментар: окремий рядок - пост уже в мережі, навіть якщо коментар ні
       const cm=res.filter(x=>x.comment); const cmBad=cm.filter(x=>x.comment.status!=='sent');
       const cmTxt=cm.length?(' · 💬 '+cm.map(x=>resLbl(x)+(x.comment.status==='sent'?' ✓':x.comment.status==='pending'?' ⏳':' ⚠')).join(', ')):'';
-      const notes=res.filter(x=>x.status==='sent'&&x.note).map(x=>resLbl(x)+': '+x.note);
-      setMsg((ok.length?'✓ '+ok.join(', '):'')+cmTxt+(err.length?' ⚠ '+err.map(x=>resLbl(x)+': '+x.error).join('; '):'')+(cmBad.length?' · коментар: '+cmBad.map(x=>resLbl(x)+': '+(x.comment.error||'надсилається')).join('; '):'')+(notes.length?' · ⚠ '+notes.join('; '):''), (err.length||cmBad.some(x=>x.comment.status==='failed'))?'var(--danger)':notes.length?'var(--amber)':'var(--brand)');
+      // TikTok «ще обробляє» і «у чернетках» - не попередження, а що відбувається далі: ⏳ / 📥 замість ⚠
+      const INFO_RX=/ще обробляє відео|відео в чернетках TikTok/;
+      const noteAll=res.filter(x=>x.status==='sent'&&x.note);
+      const infos=noteAll.filter(x=>INFO_RX.test(x.note)).map(x=>(/обробляє/.test(x.note)?'⏳ ':'📥 ')+x.note);
+      const notes=noteAll.filter(x=>!INFO_RX.test(x.note)).map(x=>resLbl(x)+': '+x.note);
+      setMsg((ok.length?'✓ '+ok.join(', '):'')+cmTxt+(infos.length?' · '+infos.join(' · '):'')+(err.length?' ⚠ '+err.map(x=>resLbl(x)+': '+x.error).join('; '):'')+(cmBad.length?' · коментар: '+cmBad.map(x=>resLbl(x)+': '+(x.comment.error||'надсилається')).join('; '):'')+(notes.length?' · ⚠ '+notes.join('; '):''), (err.length||cmBad.some(x=>x.comment.status==='failed'))?'var(--danger)':notes.length?'var(--amber)':'var(--brand)');
       if(cmStates.some(x=>x.status==='sending'||(x.status==='pending'&&!x.error))) pollComments(); if(ok.length&&!err.length) flash('Опубліковано ✓ Якщо пост залетить - 🔥 на картці дасть 5 кутів продовження'); try{await loadStudioPosts();}catch(_){} }catch(e2){ setMsg('⚠ '+e2.message,'var(--danger)');
       // навіть при збої частина мереж могла пройти - перечитуємо ФАКТИЧНИЙ стан, щоб інтерфейс
       // не показував «не опубліковано» на пості, який уже вийшов
@@ -3424,6 +3478,10 @@ function renderIdeaList(ideas){
 if($('genIdeas')) $('genIdeas').onclick=genIdeas;
 // 🧵 тейки для Threads: N коротких чернеток з Банку ідей/щоденника (падають у глобальний пул Студії)
 if($('takesCfg')) $('takesCfg').onclick=()=>{ selectView('settings'); setSTab('channels'); };
+// ✍️ «Новий пост»: порожня чернетка одразу в композері - текст пише людина, фото чи відео додає сама
+if($('newPost')) $('newPost').onclick=async()=>{ const b=$('newPost'); b.disabled=true;
+  try{ const r=await api('/posts/blank',{method:'POST'}); await openComposer(r.id,{blank:true}); try{ await loadStudioPosts(); }catch(_){ } }
+  catch(e){ flash('⚠ '+e.message); } finally{ b.disabled=false; } };
 if($('genTakes')) $('genTakes').onclick=async()=>{ const b=$('genTakes'), m=$('takesMsg'); b.disabled=true; m.style.color='var(--muted)'; m.textContent='пишу тейки…'; aiBusy('🧵 Пишу тейки для Threads…');
   try{ const r=await api('/posts/threads-takes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:5})});
     m.style.color='var(--brand)'; m.textContent='+'+r.created+' чернеток ✓'; try{ await loadStudioPosts(); }catch(_){ } }
@@ -3804,14 +3862,20 @@ async function loadYoutube(){
 if($('ytDisconnect')) $('ytDisconnect').onclick=async()=>{ if(!confirm('Відключити YouTube?')) return; try{ await api('/integrations/youtube/disconnect',{method:'POST'}); await loadYoutube(); }catch(e){} };
 async function loadTiktok(){
   try{ const c=await api('/integrations/tiktok'); const st=$('ttStatus'), conn=$('ttConnect'), dis=$('ttDisconnect'); if(!st) return;
-    if(!c.configured){ st.textContent='🕓 Скоро: чекаємо схвалення застосунку від TikTok.'; if(conn)conn.style.display='none'; if(dis)dis.style.display='none'; return; }
-    if(c.hasToken){ st.innerHTML='✅ Підключено'+(c.name?(' як <b>'+esc(c.name)+'</b>'):'')+(c.username?' <span style="color:var(--muted)">@'+esc(c.username)+'</span>':'')
-      +(c.direct?' · пряма публікація і чернетки':' · поки лише чернетки в TikTok (пряма публікація для Holos ще не ввімкнена)');
-      if(conn){ conn.style.display='inline-flex'; conn.textContent='🔄 Підключити заново'; } if(dis)dis.style.display='inline-flex'; }
-    else { st.textContent='Не підключено.'; if(conn)conn.style.display='inline-flex'; if(dis)dis.style.display='none'; }
+    // ключів застосунку TikTok ще нема: адміну - куди їх вставити (до перевірки TikTok - ключі Sandbox), решті - «скоро»
+    if(!c.configured){
+      if(c.admin){ st.innerHTML=L('🔑 Ключів застосунку TikTok тут ще нема. Встав <b>Client key</b> і <b>Client secret</b> у Налаштування → Профіль → 🔑 Ключі провайдерів → 🌐 Застосунки мереж. Поки TikTok не перевірив застосунок - ключі <b>Sandbox</b> (developers.tiktok.com → твій застосунок → Sandbox).','🔑 TikTok app keys are not set here yet: Settings → Profile → Provider keys → Network apps.')+' <button class="ghost" id="ttOpenKeys" style="margin-left:4px">'+L('🔑 Відкрити ключі','🔑 Open keys')+'</button>';
+        const k=$('ttOpenKeys'); if(k) k.onclick=()=>{ selectView('settings','profile'); setTimeout(()=>{ const p=$('admKeysPanel'); if(p) p.scrollIntoView({behavior:'smooth',block:'start'}); },250); }; }
+      else st.textContent=L('🕓 Скоро: чекаємо схвалення застосунку від TikTok.','🕓 Coming soon.');
+      if(conn)conn.style.display='none'; if(dis)dis.style.display='none'; return; }
+    const sb=c.sandbox?'<div style="margin-top:6px;font-size:12px;color:var(--amber)">'+L('🧪 Тестовий режим TikTok (Sandbox): підключитись можуть лише TikTok-акаунти зі списку Target users застосунку, а поки TikTok не перевірив Holos - відео виходять лише з «Хто бачить: Лише я», і сам акаунт TikTok має бути приватним.','Sandbox: until TikTok approves the app, videos can be posted only to a private account and are visible only to you (“Only me”).')+'</div>':'';
+    if(c.hasToken){ st.innerHTML='✅ '+L('Підключено як ','Connected as ')+(c.avatar?'<img class="ttav" src="'+esc(c.avatar)+'" alt="" onerror="this.remove()">':'')+'<b>'+esc(c.name||'TikTok')+'</b>'+(c.username?' <span style="color:var(--muted)">@'+esc(c.username)+'</span>':'')
+      +(c.direct?L(' · пряма публікація і чернетки',' · direct posting and drafts'):L(' · поки лише чернетки в TikTok (пряма публікація для Holos ще не ввімкнена)',' · drafts only (direct posting is not enabled yet)'))+sb;
+      if(conn){ conn.style.display='inline-flex'; conn.textContent=L('🔄 Підключити заново','🔄 Reconnect TikTok'); } if(dis)dis.style.display='inline-flex'; }
+    else { st.innerHTML=L('Не підключено.','Not connected.')+sb; if(conn){ conn.style.display='inline-flex'; conn.textContent=L('🔗 Підключити TikTok','🔗 Connect TikTok'); } if(dis)dis.style.display='none'; }
   }catch(e){}
 }
-if($('ttDisconnect')) $('ttDisconnect').onclick=async()=>{ if(!confirm('Відключити TikTok?')) return; try{ await api('/integrations/tiktok/disconnect',{method:'POST'}); await loadTiktok(); }catch(e){} };
+if($('ttDisconnect')) $('ttDisconnect').onclick=async()=>{ if(!confirm(L('Відключити TikTok?','Disconnect TikTok?'))) return; try{ await api('/integrations/tiktok/disconnect',{method:'POST'}); await loadTiktok(); }catch(e){} };
 // 🎥 персональна b-roll бібліотека (вставки з автором у рілсах)
 async function loadBroll(){
   const list=$('brollList'); if(!list) return;
@@ -5215,17 +5279,39 @@ const REVIEW_TXT={
   comments:'Comments inbox: comments other people left under the user\'s own recent Instagram posts (instagram_manage_comments), Facebook Page posts (pages_read_user_content) and Threads posts. Holos suggests a draft; the user edits it and clicks “Відповісти” (Reply) to answer from their own account (instagram_manage_comments, pages_manage_engagement). “Пропустити” (Skip) hides a comment without replying.',
   composerSent:'Published. “↗ Відкрити пост” (Open post) opens the live post; under each network the editor shows whether the first comment was posted (✓).',
 };
-function reviewWanted(){
+// TikTok (?review=tiktok): той самий рядок пояснень, але про TikTok, і весь інтерфейс шляху запису -
+// англійською (UI_LANG, словник I18N_EN нижче). Рецензент TikTok шукає на відео конкретні елементи
+// (нік автора, «Who can view this video», «Allow users to», «Disclose video content», Music Usage
+// Confirmation) - українською він їх не впізнав би.
+const REVIEW_TXT_TT={
+  default:'Holos by Rozum (holos.rozum.one): a content studio for small businesses and creators. People connect their own TikTok account and post their own videos to it.',
+  today:'Home of the user’s Holos workspace. Videos are posted to the user’s own TikTok account from the post editor.',
+  create:'Drafts: posts the user prepared. “New post” starts an empty post; “Edit” opens the post editor, where the user adds their own video and posts it to TikTok.',
+  publish:'Calendar: approved posts are published at the time the user picks. A TikTok post scheduled here keeps the TikTok settings the user chose in the post editor.',
+  brand:'Brand settings of the user’s workspace.',
+  analytics:'Statistics of the user’s own published posts.',
+  settings:'Settings of the user’s workspace.',
+  tools:'Tools of the user’s workspace.',
+  channelsOff:'Settings → Channels → TikTok. “Connect TikTok” opens TikTok Login Kit: the user logs in to TikTok and authorizes Holos (user.info.basic, video.upload, video.publish).',
+  channelsOn:'TikTok is connected through Login Kit. Holos shows the display name and avatar of the connected TikTok account (user.info.basic), so the user always knows which account their videos go to. “Reconnect TikTok” runs Login Kit again; “Disconnect” removes the access.',
+  composer:'Post editor with the user’s own video. The TikTok section calls creator_info and shows the creator’s nickname, “Who can view this video” with no default, Comment / Duet / Stitch off until the user allows them, content disclosure and the Music Usage Confirmation. “Post now” uses Direct Post (video.publish); “Send to TikTok drafts” uploads to the TikTok inbox (video.upload). Nothing is sent before the user clicks “Publish now”.',
+  composerSent:'Sent to TikTok. TikTok processes the video for a few minutes; Holos checks the post status and shows “Open post” with the link when it is ready. In draft mode the video waits in the user’s TikTok inbox.',
+  comments:'Comments inbox for the user’s own posts.',
+};
+function reviewMode(){
   const q=new URLSearchParams(location.search).get('review');
-  try{ if(q==='en') localStorage.setItem(REVIEW_KEY,'1'); if(q==='off') localStorage.removeItem(REVIEW_KEY); return localStorage.getItem(REVIEW_KEY)==='1'; }
-  catch(e){ return q==='en'; }
+  try{ if(q==='en'||q==='meta') localStorage.setItem(REVIEW_KEY,'1'); if(q==='tiktok') localStorage.setItem(REVIEW_KEY,'tiktok'); if(q==='off') localStorage.removeItem(REVIEW_KEY);
+    const v=localStorage.getItem(REVIEW_KEY); return v==='1'?'meta':v==='tiktok'?'tiktok':''; }
+  catch(e){ return (q==='en'||q==='meta')?'meta':q==='tiktok'?'tiktok':''; }
 }
+function reviewWanted(){ return !!reviewMode(); }
 function reviewKey(){
+  const tt=reviewMode()==='tiktok';
   if(document.querySelector('.cmModal')) return 'comments';
   const cmp=document.querySelector('.cmp-ov');
-  if(cmp) return /Відкрити пост/.test((cmp.querySelector('#cmpPrev')||{}).textContent||'')?'composerSent':'composer';
-  if(curView==='settings'&&sTab==='channels'){ const st=$('mtStatus'); return st&&/Підключено/.test(st.textContent)?'channelsOn':'channelsOff'; }
-  return REVIEW_TXT[curView]?curView:'default';
+  if(cmp) return /Відкрити пост|Open post|TikTok is processing|TikTok inbox/.test((cmp.querySelector('#cmpPrev')||{}).textContent||'')?'composerSent':'composer';
+  if(curView==='settings'&&sTab==='channels'){ const st=$(tt?'ttStatus':'mtStatus'); return st&&/Підключено|Connected/.test(st.textContent)?'channelsOn':'channelsOff'; }
+  return (tt?REVIEW_TXT_TT:REVIEW_TXT)[curView]?curView:'default';
 }
 function startReviewCaptions(){
   if(!reviewWanted()||$('reviewBar')) return;
@@ -5236,8 +5322,332 @@ function startReviewCaptions(){
   const fit=()=>document.documentElement.style.setProperty('--rvh',bar.offsetHeight+'px');
   try{ new ResizeObserver(fit).observe(bar); }catch(e){ window.addEventListener('resize',fit); }
   // екран міняється і кліком, і з коду (композер, вкладки, підключення) - дешевше раз на 0,6 с звірити
-  let last=''; const tick=()=>{ const k=reviewKey(); if(k!==last){ last=k; $('reviewTxt').textContent=REVIEW_TXT[k]||REVIEW_TXT.default; fit(); } };
+  const TXT=reviewMode()==='tiktok'?REVIEW_TXT_TT:REVIEW_TXT;
+  let last=''; const tick=()=>{ const k=reviewKey(); if(k!==last){ last=k; $('reviewTxt').textContent=TXT[k]||TXT.default; fit(); } };
   tick(); const timer=setInterval(tick,600);
   $('reviewOff').onclick=()=>{ try{ localStorage.removeItem(REVIEW_KEY); }catch(e){} clearInterval(timer); bar.remove(); document.documentElement.classList.remove('review-on'); };
+  // TikTok: Канали - одразу до картки TikTok (на відео її видно без гортання)
+  if(reviewMode()==='tiktok'){ let shown=false; setInterval(()=>{ const on=curView==='settings'&&sTab==='channels', p=$('ttStatus')&&$('ttStatus').closest('.panel');
+    if(on&&p&&!shown){ shown=true; p.classList.add('rv-focus'); p.scrollIntoView({behavior:'smooth',block:'center'}); } if(!on) shown=false; },500); }
 }
 startReviewCaptions();
+
+// ===== 🌐 English UI: інтерфейс шляху запису відео для перевірок мереж =====
+// Вмикається /app?review=tiktok (або ?lang=en), вимикається ?review=off. Перекладаємо лише ТЕКСТ
+// ІНТЕРФЕЙСУ: точні фрази зі словника I18N_EN і кілька шаблонів I18N_RX (фрази з числами). Текст постів,
+// прев'ю й поля вводу не чіпаємо (EN_SKIP) - там слова людини. Композер і списки перемальовуються щоразу,
+// тож нові вузли ловить MutationObserver. Тексти зі змінними в коді - L(ua,en).
+const I18N_EN={
+  "Сьогодні":"Today",
+  "Створення":"Create",
+  "Публікація":"Publish",
+  "Бренд і стратегія":"Brand & strategy",
+  "Бренд":"Brand",
+  "Аналітика":"Analytics",
+  "Налаштування":"Settings",
+  "Інструменти":"Tools",
+  "Заповнення профілю - натисни, щоб побачити задачі":"Profile completeness - click to see the tasks",
+  "У базі бренду є суперечності, через які пости виходять слабкішими. Бренд → Голос → «Перевірка контексту»":"The brand base has contradictions that make posts weaker. Brand → Voice → “Context check”",
+  "Додати контент будь-коли: текст, ідею, посилання, стрічку":"Add content any time: text, an idea, a link, a feed",
+  "＋ Додати матеріал":"＋ Add material",
+  "Акаунт і налаштування":"Account and settings",
+  "Готово ✓ Можна закрити це вікно.":"Done ✓ You can close this window.",
+  "TikTok підключено ✓":"TikTok connected ✓",
+  "Не вдалося підключити TikTok.":"Could not connect TikTok.",
+  "Профіль, канали публікації та джерела":"Profile, publishing channels and sources",
+  "👤 Профіль":"👤 Profile",
+  "🔗 Канали":"🔗 Channels",
+  "📥 Джерела":"📥 Sources",
+  "Підключи другий канал":"Connect a second channel",
+  "Показати":"Show",
+  "Сховати":"Hide",
+  "📮 Конверсійні заклики (CTA)":"📮 Calls to action (CTA)",
+  "налаштувати ▾":"configure ▾",
+  "📏 Формат постів у мережах":"📏 Post format per network",
+  "Найпростіше - підключи свій канал до":"The easiest way: connect your channel to",
+  "нашого бота":"our bot",
+  "(без створення власного):":"(no need to create your own):",
+  "🔑 Відкрити ключі":"🔑 Open keys",
+  "🤖 Підключити наш бот":"🤖 Connect our bot",
+  "✅ підключено:":"✅ connected:",
+  "Канали й групи бренду":"Brand channels and groups",
+  "- куди публікує бот. Пост без вибору йде в основні, інші обираєш галочками в композері (можна в кілька одразу).":"- where the bot posts. A post without a choice goes to the main ones; tick others in the post editor (several at once is fine).",
+  "основний":"main",
+  "Прибрати":"Remove",
+  "канал":"channel",
+  "група":"group",
+  "@назва_каналу або t.me/назва":"@channel_name or t.me/name",
+  "＋ Додати канал":"＋ Add channel",
+  "＋ Через бота":"＋ Via the bot",
+  "Спершу додай бота":"First add the bot as an",
+  "адміністратором":"administrator",
+  "у новий канал (з правом публікувати) - інакше Telegram не пустить його туди писати.":"of the new channel (with the right to post) - otherwise Telegram won’t let it post there.",
+  "⚙️ Розширені налаштування (власний бот)":"⚙️ Advanced settings (own bot)",
+  "Власний бот:":"Own bot:",
+  "•••••••• (токен збережено - лиши порожнім, щоб не міняти)":"•••••••• (token saved - leave empty to keep it)",
+  "Канал (chat id або @username)":"Channel (chat id or @username)",
+  "@my_channel або -1001234567890":"@my_channel or -1001234567890",
+  "Група (chat id)":"Group (chat id)",
+  "Зберегти":"Save",
+  "Перевірити з'єднання":"Test connection",
+  "🎙 Розшифровка голосових у щоденник":"🎙 Voice note transcription (diary)",
+  "Якщо обраний сервіс не відповість, розшифровка автоматично піде другим - надиктовану думку не можна повторити, тож текст важливіший за вірність налаштуванню.":"If the chosen service does not respond, the other one transcribes the voice note automatically.",
+  "Публікуй пости з фото у свій Threads-профіль прямо звідси. Підключення - одна кнопка, вхід через твій акаунт Threads.":"Post to your Threads profile right from here. Connecting takes one button and your Threads login.",
+  "🕓 Підключення Threads тимчасово недоступне.":"🕓 Connecting Threads is temporarily unavailable.",
+  "Зробити основним":"Make main",
+  "Зробити основною":"Make main",
+  "Відключити всі":"Disconnect all",
+  "Відключити":"Disconnect",
+  "✓ дозволено":"✓ allowed",
+  "Не підключено.":"Not connected.",
+  "✅ Підключено":"✅ Connected",
+  "✅ Підключено як":"✅ Connected as",
+  "✅ Підключено канал":"✅ Connected channel",
+  "✅ Підключено акаунтів:":"✅ Accounts connected:",
+  "✅ Підключено Сторінок:":"✅ Pages connected:",
+  "· відео-пости йдуть туди з композера, бота й Claude":"· video posts go there from the editor, the bot and Claude",
+  "- пост іде основним, інший обираєш у композері":"- posts go to the main one; choose another in the post editor",
+  "- пост іде основною, іншу обираєш у композері":"- posts go to the main one; choose another in the post editor",
+  "Постинг від імені твого профілю (до 3000 символів, з фото). Токен живе 60 днів - потім перепідключення однією кнопкою.":"Posts on behalf of your profile (up to 3000 characters, with photos). Access lasts 60 days, then you reconnect with one button.",
+  "🕓 Скоро: чекаємо схвалення застосунку від LinkedIn.":"🕓 Coming soon: waiting for LinkedIn to approve the app.",
+  "⚠ Токен протух (60 днів) - перепідключи.":"⚠ Access expired (60 days) - reconnect.",
+  "🔄 Перепідключити":"🔄 Reconnect",
+  "Відео-пости йдуть на твій канал: вертикальне до 3 хв YouTube сам робить Shorts. Назва, «хто бачить», «для дітей» і позначка AI - у композері.":"Video posts go to your channel; YouTube turns vertical videos up to 3 min into Shorts. Title, visibility, “made for kids” and the AI label are set in the post editor.",
+  "🕓 Підключення YouTube тимчасово недоступне.":"🕓 Connecting YouTube is temporarily unavailable.",
+  "🔄 Інший канал":"🔄 Another channel",
+  "Відео-пости йдуть у TikTok одразу (обираєш у композері, хто бачить, коментарі, Duet, Stitch) або чернеткою: тоді відео чекає в застосунку TikTok, і ти публікуєш його сам.":"Video posts go to TikTok right away (in the post editor you choose who can view the video and whether comments, Duet and Stitch are allowed) or as a draft that waits in the TikTok app until you post it yourself.",
+  "Постинг у FB-Сторінку + аналітика FB/IG. IG-публікація потребує фото. Сторінок у бренді може бути кілька (особиста й компанії) - кожна зі своїм Instagram; для кожного поста обираєш, куди.":"Posting to your Facebook Page and Instagram, plus analytics. A brand can have several Pages, each with its own Instagram; you choose where each post goes.",
+  "🕓 Підключення Facebook/Instagram тимчасово недоступне.":"🕓 Connecting Facebook/Instagram is temporarily unavailable.",
+  "🔗 Підключити":"🔗 Connect",
+  "🔗 Підключити TikTok":"🔗 Connect TikTok",
+  "🔗 Підключити YouTube":"🔗 Connect YouTube",
+  "🔗 Підключити Threads":"🔗 Connect Threads",
+  "🔗 Підключити LinkedIn":"🔗 Connect LinkedIn",
+  "Відключити TikTok?":"Disconnect TikTok?",
+  "Переглянь і затвердь готові пости":"Review and approve ready posts",
+  "📥 Матеріали":"📥 Materials",
+  "📝 Чорновики":"📝 Drafts",
+  "💡 Ідеї":"💡 Ideas",
+  "До календаря →":"To calendar →",
+  "Активні":"Active",
+  "На перегляд":"To review",
+  "Затверджені":"Approved",
+  "✈️ Опубліковані":"✈️ Published",
+  "Порожній пост: напиши текст сам, додай фото чи відео й обери мережі":"Empty post: write the text yourself, add a photo or video and choose networks",
+  "✍️ Новий пост":"✍️ New post",
+  "🧵 Порція коротких тейків для Threads з Банку ідей і щоденника - дешевий полігон: що залетить, розвинемо в гілку чи рілс":"🧵 A batch of short takes for Threads",
+  "🧵 5 тейків":"🧵 5 takes",
+  "Налаштування Threads: стратегія, щоденна автопорція тейків":"Threads settings",
+  "Обрати для масових дій":"Select for bulk actions",
+  "Готово до перегляду":"Ready to review",
+  "Доопрацювати":"Needs work",
+  "Затверджено":"Approved",
+  "Затвердити":"Approve",
+  "✈️ Опубліковано":"✈️ Published",
+  "Редагувати зображення":"Edit image",
+  "Відео-пост: відкрити в композері":"Video post: open in the editor",
+  "Відео":"Video",
+  "📝 пост":"📝 post",
+  "🖼 карусель":"🖼 carousel",
+  "🎬 рілс":"🎬 reel",
+  "⚡ сторіс":"⚡ story",
+  "📝 Пост":"📝 Post",
+  "🖼 Карусель":"🖼 Carousel",
+  "🎬 Рілс":"🎬 Reel",
+  "⚡ Сторіс":"⚡ Story",
+  "звичайний текстовий пост":"a regular text post",
+  "кілька слайдів, які читач перегортає - найкраще збирає збереження":"several slides the reader swipes through",
+  "короткий вертикальний відео-сценарій - найкраще охоплення":"a short vertical video",
+  "ефемерний кадр на 24 години":"a frame that disappears in 24 hours",
+  "🌱 знайомство":"🌱 awareness",
+  "🤝 прогрів":"🤝 nurture",
+  "💰 продаж":"💰 sale",
+  "цінність новій аудиторії, без продажу":"value for a new audience, no selling",
+  "будує довіру, мʼякий заклик":"builds trust, soft call to action",
+  "прямий оффер за сходами":"a direct offer",
+  "🔌 з Claude":"🔌 from Claude",
+  "🤖 з бота":"🤖 from the bot",
+  "✍️ вручну":"✍️ manual",
+  "🎙 транскрипт":"🎙 transcript",
+  "✨ з бренду":"✨ from the brand",
+  "📅 з плану":"📅 from the plan",
+  "📔 щоденник":"📔 diary",
+  "🧵 тейк":"🧵 take",
+  "💡 з ідеї":"💡 from an idea",
+  "🎤 зустріч":"🎤 meeting",
+  "♻️ повтор":"♻️ repeat",
+  "♻️ у черзі":"♻️ queued",
+  "Повтор хіта з вічнозеленої черги: той самий пост зі свіжим першим рядком":"A repeat of a hit from the evergreen queue",
+  "У вічнозеленій черзі: повертатиметься через кілька тижнів зі свіжим першим рядком":"In the evergreen queue",
+  "🎯 Директор: не веде до цілі":"🎯 Director: does not lead to the goal",
+  "🎯 Директор: частково веде до цілі":"🎯 Director: partly leads to the goal",
+  "Видалити пост":"Delete post",
+  "Ще: AI-інструменти й дії":"More: AI tools and actions",
+  "Редагувати, запланувати чи опублікувати":"Edit, schedule or publish",
+  "✍ Редагувати":"✍ Edit",
+  "🏷 Всі рубрики":"🏷 All rubrics",
+  "📦 Всі джерела":"📦 All sources",
+  "🎨 Всі формати":"🎨 All formats",
+  "Є перший коментар - піде одразу після публікації":"Has a first comment - posted right after publishing",
+  "Перший коментар уже під постом":"The first comment is under the post",
+  "Перший коментар не вийшов - відкрий пост: там причина і «Надіслати коментар»":"The first comment failed - open the post to see why",
+  "Поки порожньо. Додай джерело у «Джерела» і натисни «Згенерувати».":"Nothing here yet.",
+  "✍ Композер":"✍ Post editor",
+  "← Назад":"← Back",
+  "Закрити":"Close",
+  "Канали":"Networks",
+  "Підлаштувати текст саме під цю мережу (решта мереж не зміняться)":"Adapt the text for this network only (other networks stay as they are)",
+  "мережа не підключена - клік, щоб зняти її з поста":"network not connected - click to remove it from the post",
+  "не підключено":"not connected",
+  "лише для відео-поста: прикріпи відео («🎬 Відео»)":"video posts only: attach a video (“🎬 Video”)",
+  "Вернути мій текст (прибрати окрему версію для цієї мережі)":"Restore my text for this network",
+  "Опублікувати серією повʼязаних постів: перший = гачок, далі відповіді автора":"Publish as a thread of connected posts",
+  "🧵 Гілкою":"🧵 As a thread",
+  "серія повʼязаних постів у Threads":"a series of connected posts on Threads",
+  "Нумерувати частини серії: 2/ 3/ 4/…":"Number the parts: 2/ 3/ 4/…",
+  "#⃣ Нумерація":"#⃣ Numbering",
+  "Рубрика":"Rubric",
+  "без рубрики":"no rubric",
+  "Намір керує закликом: знайомство - без продажу, прогрів - мʼякий, продаж - повний CTA":"Intent drives the call to action: awareness - no selling, nurture - soft, sale - full CTA",
+  "Намір":"Intent",
+  "Формат = як упаковано контент. Впливає на структуру тексту при перегенерації.":"Format = how the content is packaged.",
+  "Формат":"Format",
+  "🤖 ПОМІЧНИКИ ТЕКСТУ":"🤖 TEXT ASSISTANTS",
+  "Перепише текст; можна вказати, що саме змінити":"Rewrites the text; you can say what to change",
+  "✍ Переписати":"✍ Rewrite",
+  "3 варіанти сильнішого відкриття з кульмінації":"3 stronger openings",
+  "🪝 Гачок":"🪝 Hook",
+  "Знайти і точково прибрати сліди AI":"Find and remove AI traces",
+  "🔍 AI-сліди":"🔍 AI traces",
+  "5-8 релевантних хештегів у кінець тексту":"5-8 relevant hashtags at the end of the text",
+  "# Хештеги":"# Hashtags",
+  "💬 ПЕРШИЙ КОМЕНТАР":"💬 FIRST COMMENT",
+  "Одразу після публікації під постом зʼявиться коментар від тебе. Хештеги - в Instagram, посилання - в LinkedIn і Facebook (посилання в самому тексті там ріже охоплення), заклик - у Threads (відповіддю). Порожньо - без коментаря.":"Right after publishing, your comment appears under the post. Empty - no comment.",
+  "Хештеги, посилання чи заклик - піде коментарем від тебе одразу після публікації":"Hashtags, a link or a call to action - posted as your comment right after publishing",
+  "5-8 хештегів у коментар, а не в текст поста":"5-8 hashtags in the comment instead of the post text",
+  "# Хештеги в коментар":"# Hashtags in comment",
+  "Співавтори (collab): кожен отримає запрошення в Instagram, і після згоди пост зʼявиться і в його профілі, і в стрічці його підписників. До 3 акаунтів. Опис фото для незрячих (alt-текст) - кнопка ALT на кожному фото нижче.":"Collaborators: each one gets an invite in Instagram; once accepted, the post appears on their profile too. Up to 3 accounts.",
+  "👥 Співавтори: @партнер, @друг (до 3, необовʼязково)":"👥 Collaborators: @partner, @friend (up to 3, optional)",
+  "Співавтори - необовʼязково.":"Collaborators - optional.",
+  "🖼 МЕДІА":"🖼 MEDIA",
+  "Обкладинка: з галереї, з компʼютера, зі стоку чи AI-генерація, текст на фото":"Cover: from the gallery, your computer, stock or AI, text on the photo",
+  "🎨 Обкладинка":"🎨 Cover",
+  "Кілька фото в одному пості: Instagram і Threads - карусель, Facebook - галерея, Telegram - альбом":"Several photos in one post",
+  "＋ Кадри каруселі":"＋ Carousel frames",
+  "Власне відео: Instagram - Reels, Facebook - відео Сторінки, Threads, Telegram, LinkedIn, YouTube, TikTok":"Your own video: Instagram Reels, Facebook, Threads, Telegram, LinkedIn, YouTube, TikTok",
+  "🎬 Відео":"🎬 Video",
+  "Прибрати відео":"Remove video",
+  "🖼 Обкладинка Reels":"🖼 Reels cover",
+  "Її видно в сітці профілю Instagram (там кадр 3:4 - головне тримай посередині).":"Shown in your Instagram profile grid (3:4 - keep the main thing in the middle).",
+  "🎞 Кадр із відео":"🎞 Frame from the video",
+  "🖼 Фото з медіатеки":"🖼 Photo from the library",
+  "Instagram візьме кадр сам":"Instagram picks a frame itself",
+  "✅ Цей кадр":"✅ This frame",
+  "Прев'ю · мобільний":"Preview · mobile",
+  "Обери канал ліворуч.":"Choose a network on the left.",
+  "ваш_профіль":"your_profile",
+  "порожньо":"empty",
+  "більше":"more",
+  "…більше":"…more",
+  "… ще":"… more",
+  "Показати повністю":"Show more",
+  "Видалити пост назавжди":"Delete post permanently",
+  "ЧЕРНЕТКА":"DRAFT",
+  "💾 Зберегти":"💾 Save",
+  "✅ Затвердити":"✅ Approve",
+  "✅ Затверджено":"✅ Approved",
+  "ПУБЛІКАЦІЯ":"PUBLISHING",
+  "Дата":"Date",
+  "Час":"Time",
+  "Підставити найближчий найкращий час з твоєї статистики для обраних мереж":"Use the next best time from your statistics",
+  "🗓 Запланувати":"🗓 Schedule",
+  "📣 Опублікувати зараз":"📣 Publish now",
+  "↗ Відкрити пост":"↗ Open post",
+  "↗ Відкрити":"↗ Open",
+  "🎬 ставлю відео…":"🎬 attaching the video…",
+  "🎬 відео в пості ✓":"🎬 video attached ✓",
+  "💾 зберігаю…":"💾 saving…",
+  "чернетку збережено ✓":"draft saved ✓",
+  "📣 публікую…":"📣 publishing…",
+  "✨ пакую під канали…":"✨ adapting for networks…",
+  "✨ Пакую пост під кожну мережу…":"✨ Adapting the post for each network…",
+  "📣 Публікую в канали…":"📣 Publishing to your channels…",
+  "Опубліковано ✓ Якщо пост залетить - 🔥 на картці дасть 5 кутів продовження":"Published ✓",
+  "усі обрані канали вже опубліковано":"all selected networks are already published",
+  "🌐 увімкнено всі підключені мережі - збережи чи запланувай":"🌐 all connected networks are on - save or schedule",
+  "Закрити композер? Незбережені зміни в тексті загубляться.":"Close the editor? Unsaved changes to the text will be lost.",
+  "вкажи дату й час":"set the date and time",
+  "✅ Затверджено - пост готовий до календаря":"✅ Approved - the post is ready for the calendar",
+  "⬆ Завантажити з компʼютера":"⬆ Upload from computer",
+  "Скасувати":"Cancel",
+  "Відео в медіатеці ще нема - завантаж кнопкою вище.":"No videos in the library yet - upload one with the button above.",
+  "завантаження…":"uploading…",
+  "це не відео - тут приймаємо MP4, MOV, WebM":"this is not a video - MP4, MOV and WebM are accepted",
+  "🔁 Канал підключено через попереднього бота":"🔁 This channel was connected through the previous bot",
+  "- він і далі публікує. Щоб перейти на":"- it keeps posting. To switch to",
+  ": натисни «Підключити наш бот», додай його адміном у канал і перешли йому будь-який пост.":": click “Connect our bot”, add it as an admin of the channel and forward it any post.",
+  "→ токен. 2. Додай бота":"→ token. 2. Add the bot as an",
+  "адміном":"admin",
+  "у канал і групу. 3. Встав токен; канал -":"of the channel and group. 3. Paste the token; channel -",
+  "або id; група - числовий id. 4. «Перевірити».":"or id; group - numeric id. 4. “Test”.",
+  "не приймає повідомлень":"does not receive messages",
+  ": той самий бот працює на основному сервісі, і бета його не забирає. Публікація в уже підключений канал працює, а підключення через бота й DM-фічі - ні.":": the same bot runs on the main service. Posting to a connected channel works; connecting through the bot does not.",
+  "Як виправити: дай цьому середовищу окремого спільного бота -":"How to fix: give this environment its own shared bot -",
+  "Налаштування → Профіль → 🔑 Ключі провайдерів → 🤖 Telegram-бот":"Settings → Profile → 🔑 Provider keys → 🤖 Telegram bot",
+  ", токен бота, якого не використовує основний сервіс (@BotFather → /mybots → бот → API Token). Бета одразу візьме його собі для всіх брендів.":", the token of a bot the main service does not use.",
+  "У цьому середовищі спільний бот не приймає повідомлень - див. пояснення вище":"In this environment the shared bot does not receive messages - see above"
+};
+// фрази з числами й тексти сервера посеред рядка (результат публікації)
+const I18N_RX=[
+  [/^Авто \((.+) першим\)$/,'Auto ($1 first)'],
+  [/^(.+) - нема ключа$/,'$1 - no key'],
+  [/^⚠️ У цьому середовищі спільний бот (@\S+)$/,'⚠️ In this environment the shared bot $1'],
+  [/^До календаря \((\d+)\) →$/,'To calendar ($1) →'],
+  [/^🔍 AI-сліди: (\d+)$/,'🔍 AI traces: $1'],
+  [/^📖 Сторителлінг: (.+)$/,'📖 Storytelling: $1'],
+  [/^(\d+) симв\.$/,'$1 chars'],
+  [/^Карусель: (\d+) кадр\S*$/,'Carousel: $1 frames'],
+  [/^Формат: (.+)$/,(m,a)=>'Format: '+(I18N_EN[a]||a)],
+  [/^Намір поста: (.+)$/,(m,a)=>'Post intent: '+(I18N_EN[a]||a)],
+  [/^канал · /,'channel · '],
+  [/^група · /,'group · '],
+  [/^(\d+) (?:пост чекає|пости чекають|постів чекають)(?: на нього)?$/,'$1 waiting for it'],
+  [/^📣 публікую… (\d+)с$/,'📣 publishing… $1s'],
+  [/^завантаження… (\d+)%$/,'uploading… $1%'],
+  [/^завантаження… (\d+) з (\d+)$/,'uploading… $1 of $2'],
+  [/^Відкрити пост у (.+)$/,'Open the post on $1'],
+  [/^Відео замінить фото поста \((\d+)\)\. Відео публікується окремим постом, без фото поруч\. Продовжити\?$/,'The video will replace the post photos ($1): a video is posted on its own. Continue?'],
+  [/TikTok ще обробляє відео - посилання зʼявиться, щойно він закінчить \(зазвичай кілька хвилин\)/g,'TikTok is processing the video - it may take a few minutes to appear on your profile; the link appears when it is ready'],
+  [/відео в чернетках TikTok: відкрий TikTok \(сповіщення про чернетку або Профіль → Чернетки\), встав підпис і натисни «Опублікувати» - підпис TikTok у чернетку не переносить/g,'the video is in your TikTok drafts: open TikTok (draft notification or Profile → Drafts), paste the caption and tap Post - TikTok does not carry the caption over'],
+  [/пряма публікація в TikTok ще не ввімкнена для Holos - відео пішло в чернетки TikTok/g,'direct posting is not enabled for this account - the video went to your TikTok drafts'],
+  [/TikTok ще не перевірив застосунок Holos, а до того пряма публікація можлива лише в приватний акаунт - відео пішло в чернетки TikTok/g,'until TikTok approves Holos, direct posting works only for a private account - the video went to your TikTok drafts'],
+  [/TikTok ще не перевірив застосунок Holos: до аудиту пряма публікація можлива лише в приватний акаунт/g,'until TikTok approves Holos, direct posting works only for a private account']
+];
+const EN_SKIP='.phone-txt,.notr,textarea,[contenteditable],.cmText,.ptext,.pc-text,.mat-text';
+function enStr(s){
+  if(typeof s!=='string'||!/[А-ЩЬЮЯЄІЇҐа-щьюяєіїґʼ]/.test(s)) return null;
+  const k=s.trim(), hit=I18N_EN[k];
+  if(hit!=null) return s.replace(k,()=>hit);
+  // шаблони - по обрізаному рядку (пробіли довкола лишаються як були); ()=> - щоб «$» у тексті не став підстановкою
+  let r=k; for(const [rx,to] of I18N_RX) r=r.replace(rx,to);
+  return r!==k?s.replace(k,()=>r):null; }
+function enOne(n){
+  if(n.nodeType===3){ const p=n.parentElement; if(!p||p.closest(EN_SKIP)) return; const v=enStr(n.nodeValue); if(v!=null&&v!==n.nodeValue) n.nodeValue=v; return; }
+  if(n.nodeType!==1) return;
+  for(const a of ['title','placeholder','aria-label']){ const v=n.getAttribute(a); if(v){ const t=enStr(v); if(t!=null&&t!==v) n.setAttribute(a,t); } } }
+function enTree(root){ if(!root) return; enOne(root); if(root.nodeType!==1) return;
+  const w=document.createTreeWalker(root,NodeFilter.SHOW_ELEMENT|NodeFilter.SHOW_TEXT); let c; while((c=w.nextNode())) enOne(c); }
+function startEnglish(){
+  if(UI_LANG!=='en') return;
+  document.documentElement.lang='en'; document.title='Holos - content studio';
+  enTree(document.body);
+  new MutationObserver(ms=>{ for(const m of ms){
+    if(m.type==='childList') m.addedNodes.forEach(enTree);
+    else if(m.type==='characterData') enOne(m.target);
+    else if(m.type==='attributes') enOne(m.target); } })
+    .observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['title','placeholder','aria-label']});
+  // діалоги браузера (підтвердження видалення, незбережені зміни) - тими самими словами
+  const cf=window.confirm.bind(window), al=window.alert.bind(window), pr=window.prompt.bind(window);
+  window.confirm=(m)=>cf(enStr(String(m))??m); window.alert=(m)=>al(enStr(String(m))??m); window.prompt=(m,d)=>pr(enStr(String(m))??m,d);
+}
+startEnglish();

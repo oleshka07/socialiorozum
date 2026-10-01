@@ -578,6 +578,10 @@
   .vnbox .vnwho span{color:var(--muted)}
   .vnbox .vnsub{display:flex;flex-direction:column;gap:6px;margin:6px 0 0 22px;font-size:12px;color:var(--ink2)}
   .vnbox .vnsub label{display:inline-flex;gap:5px;align-items:flex-start;cursor:pointer}
+  .vnbox .vnsub label span{display:flex;flex-direction:column;gap:1px}
+  .vnbox .vnsub label small{font-size:11px;color:var(--muted);line-height:1.4}
+  .vnbox .vnlabel{font-size:11.5px;font-weight:700;color:var(--ink2);margin-top:2px}
+  .ttav{width:20px;height:20px;border-radius:50%;object-fit:cover;vertical-align:middle;margin:0 4px}
   .vnbox .vnmuted{font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.45}
   .vnbox .vnerr{font-size:11.5px;color:var(--danger);margin-top:6px}
   .vnbox .vnlegal{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.45}
@@ -695,6 +699,8 @@ html.review-on .topnav,html.review-on .topbar,html.review-on .pagehead{top:var(-
 html.review-on .cmp-ov,html.review-on .modal{top:var(--rvh,48px)}
 /* сова говорить українською і сидить поверх кнопок - у скрінкасті для Meta вона лише заважає */
 html.review-on #owl{display:none!important}
+/* запис для TikTok: картка TikTok у Каналах підсвічена, щоб на відео було видно, де саме дія */
+.panel.rv-focus{outline:2px solid var(--tt,#111);outline-offset:3px}
 </style>
 <script src="https://apis.google.com/js/api.js"></script>
 </head>
@@ -873,6 +879,7 @@ html.review-on #owl{display:none!important}
               <div class="ftabs" id="studioFilters"></div>
               <span id="studioTagFilters" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"></span>
               <span style="margin-left:auto;display:flex;gap:4px;align-items:center">
+                <button class="primary" id="newPost" style="padding:7px 12px" title="Порожній пост: напиши текст сам, додай фото чи відео й обери мережі">✍️ Новий пост</button>
                 <span id="takesMsg" style="font-size:12px;color:var(--muted)"></span>
                 <button class="ghost" id="genTakes" style="padding:7px 12px" title="🧵 Порція коротких тейків для Threads з Банку ідей і щоденника - дешевий полігон: що залетить, розвинемо в гілку чи рілс">🧵 5 тейків</button>
                 <button class="icon" id="takesCfg" title="Налаштування Threads: стратегія, щоденна автопорція тейків">⚙</button>

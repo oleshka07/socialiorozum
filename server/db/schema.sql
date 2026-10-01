@@ -1165,6 +1165,7 @@ alter table tiktok_publish add column if not exists checks int not null default 
 create index if not exists idx_ttpub_watch on tiktok_publish(check_at) where status='processing' or mode='inbox';
 alter table tiktok_config add column if not exists username text;              -- @нік (для посилання на пост)
 alter table tiktok_config add column if not exists scopes text;                -- які дозволи TikTok дала людина
+alter table tiktok_config add column if not exists avatar_url text;            -- аватар акаунта з user.info.basic (картка в Каналах)
 
 -- 📤 Усі публікації поста одним списком: мережа, акаунт (id; '' - мережа з одним акаунтом), посилання, коли.
 -- Нова мережа додається сюди, а не в пʼятнадцять union по коду (так YouTube і TikTok уже були пропущені

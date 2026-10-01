@@ -59,6 +59,15 @@ const P9POST = { id: P9, content: "Осінь у горах", review: "approved"
 CAR.set(P9, [{ id: "c9", filename: "p9.jpg", kind: "image" }]);
 // 🎬 YouTube і TikTok: вертикальне відео 45 с, обрано лише Instagram (YouTube і TikTok вмикає кнопка «＋ Увімкнути»)
 const P10 = "10101010-1010-1010-1010-101010101010";
+// ✍️ «Новий пост»: порожня чернетка (POST /posts/blank); видалення порожньої при закритті пишемо в blankDeletes
+const PNEW = "12121212-1212-1212-1212-121212121212";
+const PNEWPOST = { id: PNEW, content: "", review: null, channels: {}, format: "post", rubric: "", intent: "", sent: [], links: {} };
+const blankDeletes = [];
+// ⏳ TikTok ще обробляє відео: стан публікації спершу «processing», з другого запиту - готово з посиланням
+const P11 = "13131313-1313-1313-1313-131313131313";
+const P11POST = { id: P11, content: "Our own video", review: "approved", channels: { tiktok: { on: true, mode: "direct", privacy: "SELF_ONLY" } }, format: "post", rubric: "", intent: "", sent: [], links: {} };
+CAR.set(P11, [{ id: "v11", filename: "v11.mp4", kind: "video", duration: 12, width: 1080, height: 1920, size: 8 * 1048576 }]);
+let p11Polls = 0;
 const P10POST = { id: P10, content: "Як ми зекономили 3 години на тиждень\nДеталі в описі #holos", review: "review", channels: { instagram: { on: true } }, format: "post", rubric: "", intent: "", sent: [], links: {} };
 CAR.set(P10, [{ id: "v10", filename: "v10.mp4", kind: "video", duration: 45, width: 1080, height: 1920, size: 30 * 1048576 }]);
 const TT_CREATOR = { ok: true, direct: true, nickname: "Holos", username: "holos_rozum", avatarUrl: "", privacyOptions: ["PUBLIC_TO_EVERYONE", "FOLLOWER_OF_CREATOR", "SELF_ONLY"], commentDisabled: false, duetDisabled: true, stitchDisabled: false, maxDurationSec: 60 };
@@ -625,15 +634,21 @@ function handleApi(method, path, body) {
     CAR.set(vm[1], list);
     return { ok: true, media: list };
   }
+  if (method === "POST" && path === "/posts/blank") return { id: PNEW };
+  if (method === "DELETE" && path === "/posts/" + PNEW) { blankDeletes.push(PNEW); return { ok: true }; }
   let m = /^\/posts\/([0-9a-f-]+)\/full$/.exec(path);
   if (m) {
-    const p = m[1] === P4 ? P4POST : m[1] === P5 ? P5POST : m[1] === P7 ? P7POST : m[1] === P8 ? P8POST : m[1] === P9 ? P9POST : m[1] === P10 ? P10POST : (POSTS.find((x) => x.id === m[1]) || POSTS[0]);
+    const p = m[1] === PNEW ? PNEWPOST : m[1] === P11 ? P11POST : m[1] === P4 ? P4POST : m[1] === P5 ? P5POST : m[1] === P7 ? P7POST : m[1] === P8 ? P8POST : m[1] === P9 ? P9POST : m[1] === P10 ? P10POST : (POSTS.find((x) => x.id === m[1]) || POSTS[0]);
     return { ...p, image_prompt: "", headline: "", has_base: false, slides_text: "", cover_filename: p.id === P5 ? "cov0.jpg" : null, media: CAR.get(p.id) || (p.media_filename ? [{ id: "c0", filename: p.media_filename }] : []) };
   }
   m = /^\/posts\/([0-9a-f-]+)\/publish-state$/.exec(path);
   if (m) {
     if (m[1] === P8 && P8STATE) return P8STATE;
-    if (m[1] === P4 || m[1] === P5 || m[1] === P7 || m[1] === P8 || m[1] === P10) return { sent: [], links: {}, comments: [] };
+    if (m[1] === P4 || m[1] === P5 || m[1] === P7 || m[1] === P8 || m[1] === P10 || m[1] === PNEW) return { sent: [], links: {}, comments: [] };
+    if (m[1] === P11) {
+      const done = ++p11Polls > 1, link = "https://www.tiktok.com/@holos_rozum/video/7300000000000000123";
+      return { sent: ["tiktok"], links: done ? { tiktok: link } : {}, comments: [], sentTo: [done ? { net: "tiktok", account: "", name: null, link } : { net: "tiktok", account: "", name: null, link: null, state: "processing" }] };
+    }
     if (m[1] === P9) {
       // як справжній сервер: кожна публікація окремо (sentTo) зі станом свого коментаря
       const cs = (n) => { const c = FC9.comments.find((x) => x.network === n); return c ? { status: c.status, error: c.error || null, due_at: null } : null; };
@@ -773,7 +788,8 @@ const server = createServer((req, res) => {
     res.end(renderLanding(readFileSync(join(PUB, "index.html"), "utf8"), `http://127.0.0.1:${PORT}`, { metaAppId: "m", metaPublic: false, threadsAppId: "t", threadsPublic: false, linkedinClientId: "l", googleClientId: "g", tiktokKey: "" }));
     return;
   }
-  const file = url === "/app" || url === "/" ? "app.html" : url === "/tgapp" ? "tgapp.html" : url.split("?")[0].replace(/^\//, "");
+  const path0 = url.split("?")[0];   // /app?review=tiktok - та сама сторінка
+  const file = path0 === "/app" || path0 === "/" ? "app.html" : path0 === "/tgapp" ? "tgapp.html" : path0.replace(/^\//, "");
   const p = join(PUB, file);
   if (!existsSync(p) || !p.startsWith(PUB)) {
     res.writeHead(404).end("nope");
@@ -803,7 +819,10 @@ function chromePath() {
 
 const results = {};
 const pageErrors = [];
+// SMOKE_ONLY=назва,назва - прогнати лише ці перевірки (налагодження однієї; у CI - усі)
+const ONLY = (process.env.SMOKE_ONLY || "").split(",").map((x) => x.trim()).filter(Boolean);
 const check = async (name, fn) => {
+  if (ONLY.length && !ONLY.includes(name)) return;
   try {
     results[name] = (await fn()) === true;
   } catch (e) {
@@ -1296,10 +1315,13 @@ const run = async () => {
       await page.evaluate(() => { const s = document.querySelector("#ttPriv"); s.value = "SELF_ONLY"; s.dispatchEvent(new Event("change")); const c = document.querySelector("#ttCm"); c.checked = true; c.dispatchEvent(new Event("change")); const d = document.querySelector("#ttDisc"); d.checked = true; d.dispatchEvent(new Event("change")); });
       await page.waitForTimeout(100);
       const disc = await $t("#cmpTtBox");
+      // «Лише я» → брендований контент сірий (правило TikTok); обрали «Підписники» - тоді можна, а «Лише я» сіре
+      const brSelf = await page.evaluate(() => document.querySelector("#ttBr").disabled);
+      await page.evaluate(() => { const s = document.querySelector("#ttPriv"); s.value = "FOLLOWER_OF_CREATOR"; s.dispatchEvent(new Event("change")); });
+      await page.waitForTimeout(100);
       await page.evaluate(() => { const b = document.querySelector("#ttBr"); b.checked = true; b.dispatchEvent(new Event("change")); });
       await page.waitForTimeout(100);
-      const br = await page.evaluate(() => ({ selfOff: document.querySelector('#ttPriv option[value="SELF_ONLY"]').disabled, priv: document.querySelector("#ttPriv").value, legal: document.querySelector("#cmpTtBox .vnlegal").textContent }));
-      await page.evaluate(() => { const s = document.querySelector("#ttPriv"); s.value = "FOLLOWER_OF_CREATOR"; s.dispatchEvent(new Event("change")); });
+      const br = await page.evaluate(() => ({ selfOff: document.querySelector('#ttPriv option[value="SELF_ONLY"]').disabled, priv: document.querySelector("#ttPriv").value, legal: document.querySelector("#cmpTtBox .vnlegal").textContent, label: document.querySelector("#cmpTtBox .vnlabel").textContent }));
       // YouTube: своя назва і «за посиланням»
       await page.evaluate(() => { const t = document.querySelector("#ytTitle"); t.value = "Моя <назва>"; t.dispatchEvent(new Event("input")); const p = document.querySelector("#ytPriv"); p.value = "unlisted"; p.dispatchEvent(new Event("change")); });
       chanSaves.length = 0;
@@ -1314,13 +1336,14 @@ const run = async () => {
         && st.yt && st.ytPh.includes("Як ми зекономили 3 години на тиждень") && st.who.includes("Holos") && st.who.includes("@holos_rozum")
         && st.priv === "" && st.opts[0].includes("обери") && st.opts.length === 4 && st.duetDis && !st.cm && /Music Usage Confirmation/.test(st.legal) && st.shorts && st.user
         && /обери «Хто бачить»/.test(blocked) && started === 0
-        && /обери хоча б одне/.test(disc) && br.selfOff && br.priv === "" && /Branded Content Policy/.test(br.legal)
+        && /Вкажи, кого рекламує відео/.test(disc) && /не може бути видно «Лише мені»/.test(disc) && brSelf
+        && br.selfOff && br.priv === "FOLLOWER_OF_CREATOR" && /Branded Content Policy/.test(br.legal) && /Paid partnership/.test(br.label)
         && saved.tiktok && saved.tiktok.privacy === "FOLLOWER_OF_CREATOR" && saved.tiktok.comment === true && saved.tiktok.branded === true && !saved.tiktok.duet
         && saved.youtube && saved.youtube.title === "Моя назва" && saved.youtube.privacy === "unlisted" && saved.youtube.on === true
         // «🌐 В усі мережі» вмикає всі підключені, а не лише YouTube і TikTok
         && /В усі мережі/.test(allBtn) && saved.telegram && saved.telegram.on === true && saved.threads && saved.threads.on === true
         && !draft.priv && draft.copy && draft.pv;
-      if (!good) console.log("   ↳ vidNets:", JSON.stringify({ allBtn, photo, st, blocked, started, disc: disc.slice(0, 200), br, saved: { tiktok: saved.tiktok, youtube: saved.youtube, telegram: saved.telegram, threads: saved.threads }, draft }));
+      if (!good) console.log("   ↳ vidNets:", JSON.stringify({ allBtn, photo, st, blocked, started, disc: disc.slice(0, 400), brSelf, br, saved: { tiktok: saved.tiktok, youtube: saved.youtube, telegram: saved.telegram, threads: saved.threads }, draft }));
       if (process.env.SMOKE_SHOTS) {
         // телефон: композер відкривається вже на вузькому екрані (як у людини), а не стискається відкритим
         await closeComposers(); await page.waitForTimeout(200);
@@ -3354,6 +3377,143 @@ const run = async () => {
     const ok = !r.anim && r.rows.every((o) => o === "1") && r.rv === 0;
     if (!ok) console.log("   ↳ landingReducedMotion:", JSON.stringify(r));
     return ok;
+  });
+
+  // ✍️ «Новий пост»: порожня чернетка одразу в редакторі, мережі НЕ ввімкнені самі (інакше тестове відео
+  // поїхало б у всі підключені), а порожня й закрита - прибирається; з текстом - лишається
+  await check("newPost", async () => {
+    await closeComposers(); await page.waitForTimeout(150);
+    await page.evaluate(() => { selectView("create"); setCTab("posts"); });
+    await page.waitForSelector("#newPost", { state: "visible", timeout: 6000 });
+    const label = await $t("#newPost");
+    await page.evaluate(() => document.querySelector("#newPost").click());
+    await page.waitForSelector(".cmp-ov #cmpChips .netchip", { timeout: 6000 });
+    await page.waitForTimeout(200);
+    const st = await page.evaluate(() => ({ on: document.querySelectorAll(".cmp-ov #cmpChips .netchip.on").length, prev: document.querySelector("#cmpPrev").textContent, txt: document.querySelector("#cmpText").value }));
+    const d0 = blankDeletes.length;
+    await page.evaluate(() => document.querySelector(".cmp-ov #cmpBack").click());
+    await page.waitForTimeout(300);
+    const delEmpty = blankDeletes.length - d0;
+    // з текстом - не прибирається
+    await page.evaluate(() => document.querySelector("#newPost").click());
+    await page.waitForSelector(".cmp-ov #cmpText", { timeout: 6000 });
+    await page.evaluate(() => { const t = document.querySelector(".cmp-ov #cmpText"); t.value = "Мій власний текст"; t.dispatchEvent(new Event("input")); });
+    await page.evaluate(() => document.querySelector(".cmp-ov #cmpBack").click());
+    await page.waitForTimeout(300);
+    const delTyped = blankDeletes.length - d0 - delEmpty;
+    const ok = /Новий пост/.test(label) && st.on === 0 && /Обери канал/.test(st.prev) && st.txt === "" && delEmpty === 1 && delTyped === 0 && !(await has(".cmp-ov"));
+    if (!ok) console.log("   ↳ newPost:", JSON.stringify({ label, st, delEmpty, delTyped }));
+    return ok;
+  });
+
+  // ⏳ TikTok обробляє відео: композер сам перечитує стан, і посилання на пост зʼявляється без перевідкриття
+  await check("ttProcessing", async () => {
+    await closeComposers(); await page.waitForTimeout(150);
+    p11Polls = 0;
+    await page.evaluate((id) => openComposer(id), P11);
+    await page.waitForSelector(".cmp-ov #cmpPrev", { timeout: 6000 });
+    await page.waitForTimeout(400);
+    const before = await page.evaluate(() => document.querySelector("#cmpPrev").textContent);
+    await page.waitForFunction(() => /Відкрити пост/.test((document.querySelector("#cmpPrev") || {}).textContent || ""), undefined, { timeout: 15000 }).catch(() => {});
+    const after = await page.evaluate(() => ({ t: document.querySelector("#cmpPrev").textContent, href: (document.querySelector("#cmpPrev a.pv-open") || {}).href || "" }));
+    await closeComposers();
+    const ok = /TikTok ще обробляє відео/.test(before) && /Відкрити пост/.test(after.t) && /tiktok\.com\/@holos_rozum\/video\//.test(after.href) && !/ще обробляє/.test(after.t);
+    if (!ok) console.log("   ↳ ttProcessing:", JSON.stringify({ before: before.slice(0, 300), after }));
+    return ok;
+  });
+
+  // 🌐 англійський інтерфейс для запису відео TikTok (/app?review=tiktok): меню, Канали, Чорновики, редактор і
+  // блок TikTok - англійською, словами самого TikTok (рецензент шукає саме їх); текст поста людини - як є.
+  // SMOKE_I18N_DUMP=1 - показати, що на шляху запису лишилось українською.
+  await check("enTikTok", async () => {
+    const saved = { st: API["GET /channels/status"], tt: API["GET /integrations/tiktok"] };
+    API["GET /channels/status"] = { ...saved.st, youtube: true, tiktok: true, video: { youtube: { name: "Holos Channel" }, tiktok: { name: "Holos", username: "holos_rozum", direct: true } } };
+    API["GET /integrations/tiktok"] = { configured: true, hasToken: true, name: "Holos", username: "holos_rozum", avatar: "", direct: true, sandbox: true, admin: true };
+    const ctx = await browser.newContext({ viewport: { width: 1400, height: 950 } });
+    const ep = await ctx.newPage();
+    ep.on("pageerror", (e) => pageErrors.push("en pageerror: " + e.message));
+    if (process.env.SMOKE_I18N_DUMP) ep.on("console", (m) => { if (m.type() === "error") console.log("   ↳ en console:", m.text()); });
+    await ep.route("**/*", (route) => { const u = route.request().url(); return u.includes("127.0.0.1:" + PORT) ? route.continue() : route.abort(); });
+    await ep.addInitScript(() => { try { window.confirm = () => true; window.alert = () => {}; } catch (e) {} });
+    const cyr = (sel) => ep.evaluate((sel) => {
+      const SKIP = ".phone-txt,.phone-b .phone-user,.notr,textarea,[contenteditable]";
+      const rx = /[А-ЩЬЮЯЄІЇҐа-щьюяєіїґ]/, out = new Set();
+      for (const root of sel ? [...document.querySelectorAll(sel)] : [document.body]) {
+        const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT); let n;
+        while ((n = w.nextNode())) {
+          if (n.nodeType === 3) { const p = n.parentElement; if (!p || p.closest(SKIP)) continue; if (!p.offsetParent && getComputedStyle(p).position !== "fixed") continue; const v = n.nodeValue.trim(); if (v && rx.test(v)) out.add(v); }
+          else if (n.offsetParent || getComputedStyle(n).position === "fixed") for (const a of ["title", "placeholder"]) { const v = n.getAttribute(a); if (v && rx.test(v)) out.add("[" + a + "] " + v); }
+        }
+      }
+      return [...out];
+    }, sel);
+    const dump = {};
+    try {
+      await ep.goto(`http://127.0.0.1:${PORT}/app?review=tiktok#/settings/channels`, { waitUntil: "domcontentloaded" });
+      await ep.waitForFunction(() => { const e = document.getElementById("userEmail"); return e && e.textContent.includes("@"); }, undefined, { timeout: 20000 });
+      await ep.waitForFunction(() => /Connected as/.test((document.getElementById("ttStatus") || {}).textContent || ""), undefined, { timeout: 8000 });
+      await ep.waitForTimeout(700);
+      const ch = await ep.evaluate(() => ({
+        lang: document.documentElement.lang, title: document.title,
+        nav: [...document.querySelectorAll(".topnav .navitem .lbl")].map((x) => x.textContent),
+        tt: document.getElementById("ttStatus").closest(".panel").innerText,
+        focus: document.getElementById("ttStatus").closest(".panel").classList.contains("rv-focus"),
+        conn: document.getElementById("ttConnect").textContent,
+        bar: (document.getElementById("reviewTxt") || {}).textContent || "",
+      }));
+      dump.channels = await cyr("");
+      const ttCyr = await cyr("#ttStatus");
+      const navCyr = await cyr(".topnav");
+      if (process.env.SMOKE_SHOTS) await ep.screenshot({ path: join(HERE, "en-channels.png") });
+      // Чорновики: кнопка «Новий пост»
+      await ep.evaluate(() => { location.hash = "#/create/posts"; });
+      await ep.waitForSelector("#newPost", { state: "visible", timeout: 8000 });
+      await ep.waitForTimeout(500);
+      const np = await ep.$eval("#newPost", (b) => b.textContent);
+      dump.drafts = await cyr("");
+      // редактор: відео-пост, TikTok одразу, «Хто бачить», реклама
+      await ep.evaluate((id) => openComposer(id), P10);
+      await ep.waitForSelector(".cmp-ov #cmpVidNets", { timeout: 6000 });
+      await ep.evaluate(() => document.querySelector("#cmpVidNets").click());
+      await ep.waitForSelector('.cmp-ov #cmpTtBox [name=ttMode][value=direct]', { timeout: 6000 });
+      await ep.evaluate(() => { const r = document.querySelector('#cmpTtBox [name=ttMode][value=direct]'); r.checked = true; r.dispatchEvent(new Event("change")); });
+      await ep.waitForSelector(".cmp-ov #cmpTtBox #ttPriv", { timeout: 6000 });
+      await ep.waitForTimeout(700);
+      const blocked = await ep.evaluate(async () => { document.querySelector("#cmpNow").click(); await new Promise((r) => setTimeout(r, 250)); return document.querySelector("#cmpMsg").textContent; });
+      await ep.evaluate(() => { const s = document.querySelector("#ttPriv"); s.value = "SELF_ONLY"; s.dispatchEvent(new Event("change")); });
+      await ep.waitForTimeout(100);
+      await ep.evaluate(() => { const d = document.querySelector("#ttDisc"); d.checked = true; d.dispatchEvent(new Event("change")); });
+      await ep.waitForTimeout(150);
+      const tt1 = await ep.evaluate(() => ({ box: document.querySelector("#cmpTtBox").innerText.replace(/\s+/g, " "), brDis: document.querySelector("#ttBr").disabled,
+        opts: [...document.querySelectorAll("#ttPriv option")].map((o) => o.textContent) }));
+      await ep.evaluate(() => { const o = document.querySelector("#ttOwn"); o.checked = true; o.dispatchEvent(new Event("change")); });
+      await ep.waitForTimeout(150);
+      const tt2 = await ep.evaluate(() => ({ box: document.querySelector("#cmpTtBox").innerText.replace(/\s+/g, " "), prev: document.querySelector("#cmpPrev").innerText.replace(/\s+/g, " "),
+        foot: document.querySelector(".cmp-foot").innerText, bar: (document.getElementById("reviewTxt") || {}).textContent || "" }));
+      dump.composer = await cyr(".cmp-ov");
+      const boxCyr = await cyr("#cmpTtBox");
+      if (process.env.SMOKE_SHOTS) { await ep.evaluate(() => document.querySelector("#cmpTtBox").scrollIntoView({ block: "center" })); await ep.screenshot({ path: join(HERE, "en-composer.png") }); }
+      if (process.env.SMOKE_I18N_DUMP) console.log("   ↳ enTikTok лишилось українською:", JSON.stringify(dump, null, 1));
+      const conds = {
+        lang: ch.lang === "en" && /Holos/.test(ch.title), nav: ch.nav.join("|") === "Today|Create|Publish|Brand & strategy|Analytics" && navCyr.length === 0,
+        ttCard: /Connected as/.test(ch.tt) && /@holos_rozum/.test(ch.tt) && /Sandbox/.test(ch.tt) && ttCyr.length === 0 && ch.focus && /Reconnect TikTok/.test(ch.conn),
+        barLogin: /Login Kit/.test(ch.bar), newPost: /New post/.test(np), blocked: /choose who can view this video/.test(blocked),
+        who: /Posting to TikTok as Holos @holos_rozum/.test(tt1.box), priv: /Who can view this video/.test(tt1.box) && tt1.opts[0] === "Select" && tt1.opts.includes("Only me"),
+        allow: /Allow users to:/.test(tt1.box) && /Disclose video content/.test(tt1.box),
+        brSelf: tt1.brDis && /Branded content visibility cannot be set to private/.test(tt1.box),
+        need: /You need to indicate if your content promotes yourself, a third party, or both/.test(tt1.box),
+        label: /Your video will be labeled as “Promotional content”/.test(tt2.box), muc: /By posting, you agree to TikTok’s Music Usage Confirmation/.test(tt2.box),
+        processing: /it may take a few minutes for TikTok to process the video/.test(tt2.box), boxEn: boxCyr.length === 0,
+        prev: /Who can view: Only me/.test(tt2.prev), foot: /Publish now/.test(tt2.foot), bar: /creator_info/.test(tt2.bar),
+      };
+      const bad = Object.keys(conds).filter((k) => !conds[k]);
+      const ok = bad.length === 0;
+      if (!ok) console.log("   ↳ enTikTok:", bad.join(", "), JSON.stringify({ ch, ttCyr, navCyr, np, blocked, tt1, tt2, boxCyr }));
+      return ok;
+    } finally {
+      API["GET /channels/status"] = saved.st; API["GET /integrations/tiktok"] = saved.tt;
+      await ctx.close();
+    }
   });
 
   await browser.close();
