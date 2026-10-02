@@ -7,17 +7,20 @@
 
 ## Порядок (саме такий)
 
-1. **Застосунок (Production) - зберегти, але не подавати.** Basic information, продукти й дозволи (нижче).
-   Поле «demo video» заповнюється в самому кінці: відео можна записати лише після кроків 2-4.
-2. **Sandbox.** У ньому свої Client key і Client secret (починаються з `sb`). До перевірки TikTok
-   інтеграцію показують саме в sandbox - так написано у формі TikTok.
-3. **Ключі sandbox → Holos:** Налаштування → Профіль → 🔑 Ключі провайдерів → 🌐 Застосунки мереж →
-   «TikTok: Client key» і «TikTok: Client secret». Картка TikTok у Каналах після цього каже «🧪 Тестовий
-   режим TikTok (Sandbox)».
-4. **Підключити TikTok і перевірити:** Налаштування → Канали → TikTok → «🔗 Підключити TikTok».
-5. **Записати відео** (сценарій нижче) і **подати** застосунок.
+1. **Sandbox** (налаштовано 01.10): у нього свої Client key і Client secret (починаються з `sb`). До
+   перевірки TikTok інтеграцію показують саме в sandbox - так написано у формі TikTok.
+2. **Target users:** свій TikTok-акаунт - у Sandbox → Target users (підключитись можуть лише вони).
+3. **Ключі sandbox → Holos** (holos.rozum.one): Налаштування → Профіль → 🔑 Ключі провайдерів →
+   🌐 Застосунки мереж → «TikTok: Client key» і «TikTok: Client secret». Картка TikTok у Каналах після цього
+   каже «🧪 Тестовий режим TikTok (Sandbox)».
+4. **Підключити TikTok і перевірити:** Налаштування → Канали → TikTok → «🔗 Підключити TikTok», пробний пост.
+5. **Записати відео** (сценарій нижче).
+6. **Production і подання за один захід:** TikTok не зберігає Production без демо-відео й текстів App review,
+   тож його поля (нижче) заповнюються разом із поданням.
 
 ## Застосунок (Production)
+
+Заповнюється в кінці разом із відео: без демо-відео й текстів App review TikTok кнопку Save не дає.
 
 - **Basic information:** назва Holos (слово TikTok у назві заборонене); іконка 1024 - `meta-review/holos-icon-1024.png`;
   категорія Business або Productivity; опис (нижче); Terms of Service `https://holos.rozum.one/terms`;
