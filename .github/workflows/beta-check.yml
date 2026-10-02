@@ -34,6 +34,10 @@ name: beta-check
 # Далі - бета після TikTok-перевірки (англійський режим ?review=tiktok, блок TikTok словами TikTok, «Новий пост»):
 # версія, здоров'я, код у контейнері, колонка аватара, чи задано ключі TikTok і чи це sandbox (лише так/ні),
 # підключення TikTok (кількість), warn/error журналу. Нічого не пише.
+# Далі - ПРОД після промоушну cf505e3 (YouTube і TikTok як мережі, шлях до перевірки TikTok, коментарі в боті,
+# монтаж v3, примітки 30.09): версія, health, сторінки, стара адреса, код і фільтри ffmpeg у контейнері, міграція
+# (таблиці, колонки, індекси, post_published), ключі так/ні, бот (команди, вебхук), перший прохід коментарів,
+# тривоги й warn/error журналу. Нічого не пише.
 
 on:
   push:
@@ -50,46 +54,66 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: beta after tiktok review path (read-only)
+      - name: prod after promotion cf505e3 (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 6m
+          command_timeout: 8m
           script: |
-            cd "${{ secrets.APP_DIR }}-beta/server"
-            for i in $(seq 1 24); do
+            cd "${{ secrets.APP_DIR }}/server"
+            for i in $(seq 1 36); do
               up=$(( $(date +%s) - $(date -d "$(docker inspect -f '{{.State.StartedAt}}' $(docker compose ps -q app))" +%s) ))
-              [ "$up" -ge 90 ] && break; sleep 5
+              [ "$up" -ge 150 ] && break; sleep 5
             done
             echo "зараз $(date -u +%d.%m\ %H:%M) UTC · контейнер живе ${up} с"
             echo "HEAD $(git -C .. rev-parse --short HEAD)"
-            curl -s -o /dev/null -w "health %{http_code}\n" http://127.0.0.1:8081/health
-            curl -s -o /dev/null -w "сторінка входу %{http_code}\n" http://127.0.0.1:8081/login
-            docker compose exec -T app sh -c 'echo "кабінет: словник EN $(grep -c "const I18N_EN" public/app.js) · «Posting to TikTok as» $(grep -c "Posting to TikTok as" public/app.js) · смуга TikTok $(grep -c REVIEW_TXT_TT public/app.js) · «Новий пост» $(grep -c "id=\"newPost\"" public/app.html) · перечитування обробки $(grep -c watchProcessing public/app.js)"; echo "сервер: /posts/blank $(grep -c "/api/posts/blank" dist/server.js) · аватар $(grep -c avatar_url dist/server.js) · sandbox $(grep -c "sandbox:" dist/server.js) · підпис TikTok без моделі $(grep -c "k !== \"tiktok\"" dist/publisher.js) · бот 🚫 співпраця $(grep -c "Брендований контент не може" dist/tgcompose.js)"'
-            echo "у репозиторії на сервері: $(ls ../tiktok-review 2>/dev/null | tr '\n' ' ')"
-            JS2=$(cat <<'EOF'
+            docker compose ps --format '{{.Name}} {{.Status}}'
+            curl -s -o /dev/null -w "health %{http_code}\n" http://127.0.0.1:8080/health
+            for u in / /app "/app?review=tiktok" /login /privacy /terms /data-deletion /tgapp /robots.txt; do curl -s -o /dev/null -w "$u %{http_code}\n" "https://holos.rozum.one$u"; done
+            curl -s -o /dev/null -w "стара адреса / → %{http_code} %{redirect_url}\n" https://socialio.rozum.one/
+            curl -s -o /dev/null -w "beta health %{http_code}\n" https://beta.holos.rozum.one/health
+            docker compose exec -T app sh -c 'echo "кабінет: словник EN $(grep -c "const I18N_EN" public/app.js) · «Posting to TikTok as» $(grep -c "Posting to TikTok as" public/app.js) · смуга TikTok $(grep -c REVIEW_TXT_TT public/app.js) · «Новий пост» $(grep -c "id=\"newPost\"" public/app.html) · блоки YouTube/TikTok $(grep -c cmpYtBox public/app.js)/$(grep -c cmpTtBox public/app.js) · «💬 N» угорі $(grep -c topComments public/app.js)"; echo "сервер: сторож TikTok $(grep -c tiktokWatchTick dist/vidpub.js) · публікатор $(grep -c sendYouTube dist/publisher.js)/$(grep -c sendTikTok dist/publisher.js) · коментарі в боті $(ls dist/tgcomments.js | wc -l) · монтаж v3 $(grep -c templatePlan dist/montage-plan.js) · keepLang $(grep -c keepLang dist/pipeline.js) · /posts/blank $(grep -c "/api/posts/blank" dist/server.js)"; ffmpeg -hide_banner -version | head -1; echo "фільтри ffmpeg: $(ffmpeg -hide_banner -filters 2>/dev/null | grep -cwE "xfade|vstack|drawbox|boxblur|ass|concat|atrim|asplit|afade") з 9 · DejaVu $(fc-list 2>/dev/null | grep -c DejaVu)"'
+            JS=$(cat <<'EOF'
             const { q } = await import('/app/dist/db.js');
-            const mask = (s) => String(s ?? '').replace(/([^@\s]{2})[^@\s]*@/g, '$1***@');
-            const col = await q("select count(*)::int n from information_schema.columns where table_name='tiktok_config' and column_name='avatar_url'");
-            console.log('tiktok_config.avatar_url: ' + (col[0].n === 1));
+            const mask = (s) => String(s ?? '').replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g, '***').replace(/\d{6,}:[A-Za-z0-9_-]{20,}/g, '<token>');
+            const t = await q("select string_agg(n, ',') ok from unnest($1::text[]) n where to_regclass(n) is not null", [["comment_notice", "post_published", "comment_reply", "ops_alert", "telegram_chat"]]);
+            console.log('таблиці й view: ' + t[0].ok);
+            const ix = await q("select string_agg(indexname, ',' order by indexname) ok from pg_indexes where indexname in ('uq_ytpub_post','uq_ttpub_post','idx_ttpub_watch','idx_comment_notice_user')");
+            console.log('індекси: ' + ix[0].ok);
+            const cols = await q("select count(*)::int n from information_schema.columns where (table_name='tiktok_config' and column_name in ('username','scopes','avatar_url')) or (table_name='post' and column_name='reel_cover') or (table_name='youtube_config' and column_name='channel_id') or (table_name='tiktok_publish' and column_name in ('mode','video_id','check_at','checks','tt_status','permalink')) or (table_name='youtube_publish' and column_name in ('permalink','privacy'))");
+            console.log('нові колонки: ' + cols[0].n + ' з 13');
+            const pp = await q("select net, count(*)::int n from post_published group by 1 order by 1");
+            console.log('post_published: ' + pp.map((x) => x.net + ' ' + x.n).join(' · '));
+            const vid = await q("select (select count(*)::int from youtube_config) yt, (select count(*)::int from tiktok_config) tt, (select count(*)::int from youtube_publish) ytp, (select count(*)::int from tiktok_publish) ttp, (select count(*)::int from tiktok_publish tp where coalesce(tp.external_id,'')<>'' and (tp.status='processing' or (tp.status='sent' and tp.mode='inbox' and tp.permalink is null))) watch");
+            console.log('YouTube підключено ' + vid[0].yt + ' · TikTok ' + vid[0].tt + ' · публікацій YouTube ' + vid[0].ytp + ' · TikTok ' + vid[0].ttp + ' · сторож бачить ' + vid[0].watch);
             // лише так/ні: значення ключів не виходять із бази (префікс sandbox перевіряє сам Postgres)
             const sec = async (k) => { const r = (await q("select true as set, value ~* '^sb' as sb from app_secret where name=$1", [k]))[0]; return r ? r : { set: !!process.env[k], sb: /^sb/i.test(process.env[k] || '') }; };
-            const key = await sec('TIKTOK_CLIENT_KEY'), secret = await sec('TIKTOK_CLIENT_SECRET');
-            console.log('ключі TikTok (так/ні): key ' + key.set + ' · secret ' + secret.set + ' · sandbox ' + key.sb);
-            const c = await q("select (select count(*)::int from tiktok_config) tt, (select count(*)::int from tiktok_config where avatar_url is not null) av, (select count(*)::int from tiktok_publish) ttp");
-            console.log('TikTok підключено: ' + c[0].tt + ' (з аватаром ' + c[0].av + ') · публікацій TikTok ' + c[0].ttp);
-            const bl = await q("select count(*)::int n from source where origin='manual' and archived and transcript='' and title like '%Новий пост%'");
-            console.log('службових джерел «Новий пост»: ' + bl[0].n);
-            const w = await q("select created_at, level, scope, left(message, 170) as m from app_log where created_at > now() - interval '20 minutes' and level in ('warn','error') order by created_at desc limit 10");
-            for (const x of w) console.log(new Date(x.created_at).toISOString().slice(11, 19) + ' ' + x.level + ' ' + (x.scope || '-') + ': ' + mask(x.m));
-            if (!w.length) console.log('warn/error за 20 хв: нічого');
+            const tk = await sec('TIKTOK_CLIENT_KEY'), ts = await sec('TIKTOK_CLIENT_SECRET'), lk = await sec('LINKEDIN_CLIENT_ID'), ls = await sec('LINKEDIN_CLIENT_SECRET'), gk = await sec('GOOGLE_CLIENT_ID');
+            console.log('ключі (так/ні): TikTok ' + tk.set + '/' + ts.set + ' sandbox ' + tk.sb + ' · LinkedIn ' + lk.set + '/' + ls.set + ' · Google ' + gk.set);
+            const tok = (await q("select value from app_secret where name='TELEGRAM_BOT_TOKEN'"))[0]?.value || process.env.TELEGRAM_BOT_TOKEN || '';
+            const me = await fetch('https://api.telegram.org/bot' + tok + '/getMe').then((x) => x.json()).catch(() => ({}));
+            const cm = await fetch('https://api.telegram.org/bot' + tok + '/getMyCommands').then((x) => x.json()).catch(() => ({}));
+            const wh = await fetch('https://api.telegram.org/bot' + tok + '/getWebhookInfo').then((x) => x.json()).catch(() => ({}));
+            let host = '?'; try { host = new URL(wh.result?.url || '').host; } catch { /* */ }
+            console.log('бот: @' + (me.result?.username || '?') + ' · команди: ' + (cm.result || []).map((c) => '/' + c.command).join(' ') + ' · вебхук: ' + host + ', черга ' + (wh.result?.pending_update_count ?? '?') + (wh.result?.last_error_message ? ', остання помилка: ' + mask(wh.result.last_error_message).slice(0, 80) : ''));
+            const ow = await q("select count(*)::int n, count(*) filter (where user_id is not null)::int linked from tg_owner");
+            console.log('tg_owner: ' + ow[0].n + ' (з акаунтом ' + ow[0].linked + ')');
+            const cn = await q("select status, count(*)::int n from comment_notice group by 1 order by 1");
+            console.log('коментарі в боті (comment_notice): ' + (cn.length ? cn.map((x) => x.status + ' ' + x.n).join(' · ') : 'рядків ще нема'));
+            const al = await q("select id, severity, kind, left(title,80) t, count, notified_at is not null sent, resolved_at is not null res from ops_alert order by last_at desc limit 6");
+            for (const a of al) console.log('  alert #' + a.id + ' ' + a.severity + ' ' + a.kind + ' ×' + a.count + ' sent=' + a.sent + ' resolved=' + a.res + ' ' + mask(a.t));
+            const d = await q("select (select count(*) from post)::int p, (select count(*) from workspace)::int w, (select count(*) from app_user)::int u");
+            console.log('дані: ' + JSON.stringify(d[0]));
+            const lg = await q("select level, scope, left(message,170) m, to_char(created_at at time zone 'UTC','HH24:MI') c from app_log where created_at > now() - interval '25 minutes' and level in ('warn','error') order by created_at desc limit 12");
+            for (const l of lg) console.log('  ' + l.c + ' ' + l.level[0] + ' ' + l.scope + ': ' + mask(l.m));
+            if (!lg.length) console.log('warn/error за 25 хв: нічого');
             process.exit(0);
             EOF
             )
-            docker compose exec -T app node --input-type=module -e "$JS2" 2>&1 | head -40
-            docker compose logs --since 15m app 2>&1 | grep -E "TypeError|ReferenceError|Unhandled|migrate|міграц" | head -10 || true
+            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -40
+            docker compose logs --since 15m app 2>&1 | grep -aE "TypeError|ReferenceError|Unhandled|migrate|міграц|tgcomments|коментар" | grep -avE "DeprecationWarning" | sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/***/g' | tail -12 || true
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
