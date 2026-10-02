@@ -39,6 +39,10 @@ name: beta-check
 # (таблиці, колонки, індекси, post_published), ключі так/ні, бот (команди, вебхук), перший прохід коментарів,
 # тривоги й warn/error журналу. Нічого не пише.
 
+# 02.10 - сертифікат holos.rozum.one: Олег бачить «прострочений з 23.08». Що віддається ззовні (раннер, IPv4: DNS,
+# ланцюжок, дати, історія з crt.sh) і на сервері по кожній адресі (IPv4 / IPv6 / без SNI), які файли сертифікатів
+# підтягує nginx і їхні дати, certbot (сертифікати, таймер, журнал). Нічого не пише й не продовжує.
+
 on:
   push:
     branches: [beta-check]
@@ -54,66 +58,60 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: prod after promotion cf505e3 (read-only)
+      - name: certificate as seen from the internet (runner, IPv4)
+        run: |
+          echo "зараз $(date -u '+%d.%m %H:%M') UTC"
+          for d in holos.rozum.one beta.holos.rozum.one socialio.rozum.one www.holos.rozum.one; do
+            echo "== $d"
+            echo "   DNS 1.1.1.1: A $(dig +short A $d @1.1.1.1 | tr '\n' ' ')| AAAA $(dig +short AAAA $d @1.1.1.1 | tr '\n' ' ')| CNAME $(dig +short CNAME $d @1.1.1.1 | tr '\n' ' ')"
+            echo "   cert: $(echo | timeout 15 openssl s_client -connect "$d:443" -servername "$d" 2>/dev/null | openssl x509 -noout -subject -issuer -startdate -enddate -ext subjectAltName 2>/dev/null | tr '\n' ' ' | sed 's/  */ /g')"
+            curl -sS -o /dev/null -w "   curl https://$d/ → %{http_code} verify=%{ssl_verify_result} ip=%{remote_ip}\n" --max-time 15 "https://$d/" 2>&1 | tail -1
+          done
+          echo "== crt.sh: останні сертифікати саме на holos.rozum.one (видано → спливає · хто видав · імена)"
+          curl -s --max-time 60 'https://crt.sh/?q=holos.rozum.one&output=json' | jq -r 'map(select(.name_value|split("\n")|any(. == "holos.rozum.one"))) | unique_by(.serial_number) | sort_by(.not_before) | .[-10:][] | [.not_before, .not_after, (.issuer_name|capture("CN=(?<cn>[^,]+)").cn), (.name_value|gsub("\n";","))] | @tsv' 2>/dev/null || echo "crt.sh не відповів"
+
+      - name: certificate on the server, nginx and certbot (read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 8m
+          command_timeout: 5m
           script: |
-            cd "${{ secrets.APP_DIR }}/server"
-            for i in $(seq 1 36); do
-              up=$(( $(date +%s) - $(date -d "$(docker inspect -f '{{.State.StartedAt}}' $(docker compose ps -q app))" +%s) ))
-              [ "$up" -ge 150 ] && break; sleep 5
-            done
-            echo "зараз $(date -u +%d.%m\ %H:%M) UTC · контейнер живе ${up} с"
-            echo "HEAD $(git -C .. rev-parse --short HEAD)"
-            docker compose ps --format '{{.Name}} {{.Status}}'
-            curl -s -o /dev/null -w "health %{http_code}\n" http://127.0.0.1:8080/health
-            for u in / /app "/app?review=tiktok" /login /privacy /terms /data-deletion /tgapp /robots.txt; do curl -s -o /dev/null -w "$u %{http_code}\n" "https://holos.rozum.one$u"; done
-            curl -s -o /dev/null -w "стара адреса / → %{http_code} %{redirect_url}\n" https://socialio.rozum.one/
-            curl -s -o /dev/null -w "beta health %{http_code}\n" https://beta.holos.rozum.one/health
-            docker compose exec -T app sh -c 'echo "кабінет: словник EN $(grep -c "const I18N_EN" public/app.js) · «Posting to TikTok as» $(grep -c "Posting to TikTok as" public/app.js) · смуга TikTok $(grep -c REVIEW_TXT_TT public/app.js) · «Новий пост» $(grep -c "id=\"newPost\"" public/app.html) · блоки YouTube/TikTok $(grep -c cmpYtBox public/app.js)/$(grep -c cmpTtBox public/app.js) · «💬 N» угорі $(grep -c topComments public/app.js)"; echo "сервер: сторож TikTok $(grep -c tiktokWatchTick dist/vidpub.js) · публікатор $(grep -c sendYouTube dist/publisher.js)/$(grep -c sendTikTok dist/publisher.js) · коментарі в боті $(ls dist/tgcomments.js | wc -l) · монтаж v3 $(grep -c templatePlan dist/montage-plan.js) · keepLang $(grep -c keepLang dist/pipeline.js) · /posts/blank $(grep -c "/api/posts/blank" dist/server.js)"; ffmpeg -hide_banner -version | head -1; echo "фільтри ffmpeg: $(ffmpeg -hide_banner -filters 2>/dev/null | grep -cwE "xfade|vstack|drawbox|boxblur|ass|concat|atrim|asplit|afade") з 9 · DejaVu $(fc-list 2>/dev/null | grep -c DejaVu)"'
-            JS=$(cat <<'EOF'
-            const { q } = await import('/app/dist/db.js');
-            const mask = (s) => String(s ?? '').replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g, '***').replace(/\d{6,}:[A-Za-z0-9_-]{20,}/g, '<token>');
-            const t = await q("select string_agg(n, ',') ok from unnest($1::text[]) n where to_regclass(n) is not null", [["comment_notice", "post_published", "comment_reply", "ops_alert", "telegram_chat"]]);
-            console.log('таблиці й view: ' + t[0].ok);
-            const ix = await q("select string_agg(indexname, ',' order by indexname) ok from pg_indexes where indexname in ('uq_ytpub_post','uq_ttpub_post','idx_ttpub_watch','idx_comment_notice_user')");
-            console.log('індекси: ' + ix[0].ok);
-            const cols = await q("select count(*)::int n from information_schema.columns where (table_name='tiktok_config' and column_name in ('username','scopes','avatar_url')) or (table_name='post' and column_name='reel_cover') or (table_name='youtube_config' and column_name='channel_id') or (table_name='tiktok_publish' and column_name in ('mode','video_id','check_at','checks','tt_status','permalink')) or (table_name='youtube_publish' and column_name in ('permalink','privacy'))");
-            console.log('нові колонки: ' + cols[0].n + ' з 13');
-            const pp = await q("select net, count(*)::int n from post_published group by 1 order by 1");
-            console.log('post_published: ' + pp.map((x) => x.net + ' ' + x.n).join(' · '));
-            const vid = await q("select (select count(*)::int from youtube_config) yt, (select count(*)::int from tiktok_config) tt, (select count(*)::int from youtube_publish) ytp, (select count(*)::int from tiktok_publish) ttp, (select count(*)::int from tiktok_publish tp where coalesce(tp.external_id,'')<>'' and (tp.status='processing' or (tp.status='sent' and tp.mode='inbox' and tp.permalink is null))) watch");
-            console.log('YouTube підключено ' + vid[0].yt + ' · TikTok ' + vid[0].tt + ' · публікацій YouTube ' + vid[0].ytp + ' · TikTok ' + vid[0].ttp + ' · сторож бачить ' + vid[0].watch);
-            // лише так/ні: значення ключів не виходять із бази (префікс sandbox перевіряє сам Postgres)
-            const sec = async (k) => { const r = (await q("select true as set, value ~* '^sb' as sb from app_secret where name=$1", [k]))[0]; return r ? r : { set: !!process.env[k], sb: /^sb/i.test(process.env[k] || '') }; };
-            const tk = await sec('TIKTOK_CLIENT_KEY'), ts = await sec('TIKTOK_CLIENT_SECRET'), lk = await sec('LINKEDIN_CLIENT_ID'), ls = await sec('LINKEDIN_CLIENT_SECRET'), gk = await sec('GOOGLE_CLIENT_ID');
-            console.log('ключі (так/ні): TikTok ' + tk.set + '/' + ts.set + ' sandbox ' + tk.sb + ' · LinkedIn ' + lk.set + '/' + ls.set + ' · Google ' + gk.set);
-            const tok = (await q("select value from app_secret where name='TELEGRAM_BOT_TOKEN'"))[0]?.value || process.env.TELEGRAM_BOT_TOKEN || '';
-            const me = await fetch('https://api.telegram.org/bot' + tok + '/getMe').then((x) => x.json()).catch(() => ({}));
-            const cm = await fetch('https://api.telegram.org/bot' + tok + '/getMyCommands').then((x) => x.json()).catch(() => ({}));
-            const wh = await fetch('https://api.telegram.org/bot' + tok + '/getWebhookInfo').then((x) => x.json()).catch(() => ({}));
-            let host = '?'; try { host = new URL(wh.result?.url || '').host; } catch { /* */ }
-            console.log('бот: @' + (me.result?.username || '?') + ' · команди: ' + (cm.result || []).map((c) => '/' + c.command).join(' ') + ' · вебхук: ' + host + ', черга ' + (wh.result?.pending_update_count ?? '?') + (wh.result?.last_error_message ? ', остання помилка: ' + mask(wh.result.last_error_message).slice(0, 80) : ''));
-            const ow = await q("select count(*)::int n, count(*) filter (where user_id is not null)::int linked from tg_owner");
-            console.log('tg_owner: ' + ow[0].n + ' (з акаунтом ' + ow[0].linked + ')');
-            const cn = await q("select status, count(*)::int n from comment_notice group by 1 order by 1");
-            console.log('коментарі в боті (comment_notice): ' + (cn.length ? cn.map((x) => x.status + ' ' + x.n).join(' · ') : 'рядків ще нема'));
-            const al = await q("select id, severity, kind, left(title,80) t, count, notified_at is not null sent, resolved_at is not null res from ops_alert order by last_at desc limit 6");
-            for (const a of al) console.log('  alert #' + a.id + ' ' + a.severity + ' ' + a.kind + ' ×' + a.count + ' sent=' + a.sent + ' resolved=' + a.res + ' ' + mask(a.t));
-            const d = await q("select (select count(*) from post)::int p, (select count(*) from workspace)::int w, (select count(*) from app_user)::int u");
-            console.log('дані: ' + JSON.stringify(d[0]));
-            const lg = await q("select level, scope, left(message,170) m, to_char(created_at at time zone 'UTC','HH24:MI') c from app_log where created_at > now() - interval '25 minutes' and level in ('warn','error') order by created_at desc limit 12");
-            for (const l of lg) console.log('  ' + l.c + ' ' + l.level[0] + ' ' + l.scope + ': ' + mask(l.m));
-            if (!lg.length) console.log('warn/error за 25 хв: нічого');
-            process.exit(0);
-            EOF
-            )
-            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -40
-            docker compose logs --since 15m app 2>&1 | grep -aE "TypeError|ReferenceError|Unhandled|migrate|міграц|tgcomments|коментар" | grep -avE "DeprecationWarning" | sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/***/g' | tail -12 || true
+            D=holos.rozum.one
+            CB=$(command -v certbot || echo /snap/bin/certbot)
+            echo "зараз $(date -u '+%d.%m %H:%M') UTC · $(openssl version)"
+            V4=$(ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1 | head -1)
+            V6=$(ip -6 -o addr show scope global | awk '{print $4}' | cut -d/ -f1 | grep -v '^fe80' | head -1)
+            echo "адреси сервера: IPv4 $V4 · IPv6 ${V6:-нема}"
+            echo "== хто слухає 80/443"
+            ss -ltnpH '( sport = :443 or sport = :80 )' | awk '{print "   " $4, $6}' | sed -E 's/users:\(\("([^"]+)".*/\1/' | sort -u
+            show() { echo | timeout 10 openssl s_client -connect "$1" -servername "$2" 2>/dev/null | openssl x509 -noout -subject -enddate -ext subjectAltName 2>/dev/null | tr '\n' ' ' | sed 's/  */ /g'; echo; }
+            echo "== що віддає nginx для $D"
+            for a in "$V4:443" "[$V6]:443" "127.0.0.1:443" "[::1]:443"; do echo "   $a → $(show "$a" $D)"; done
+            for d in beta.holos.rozum.one socialio.rozum.one; do echo "   $d по IPv6 → $(show "[$V6]:443" $d)"; done
+            echo "   без SNI на $V4 → $(echo | timeout 10 openssl s_client -connect "$V4:443" -noservername 2>/dev/null | openssl x509 -noout -subject -enddate 2>/dev/null | tr '\n' ' ')"
+            echo "   без SNI на [$V6] → $(echo | timeout 10 openssl s_client -connect "[$V6]:443" -noservername 2>/dev/null | openssl x509 -noout -subject -enddate 2>/dev/null | tr '\n' ' ')"
+            for v in 4 6; do curl -$v -sS -o /dev/null -w "   curl -$v https://$D/health → %{http_code} verify=%{ssl_verify_result} ip=%{remote_ip}\n" --max-time 10 https://$D/health 2>&1 | tail -1; done
+            echo "== сертифікати certbot"
+            "$CB" certificates 2>/dev/null | grep -E 'Certificate Name|Domains|Expiry Date|Certificate Path' | sed 's/^ */   /'
+            echo "== файли сертифікатів у nginx -T (файл конфігу → сертифікат → дата)"
+            nginx -T 2>/dev/null | awk '/^# configuration file/{f=$4} $1=="ssl_certificate"{gsub(";","",$2); print f" "$2}' | sort -u | while read f c; do echo "   $f → $c → $(openssl x509 -in "$c" -noout -enddate 2>/dev/null)"; done
+            echo "== listen/server_name/сертифікат у файлах з holos"
+            for f in $(grep -rlE 'holos' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null); do echo "-- $f"; grep -nE '^\s*(listen|server_name|ssl_certificate |return)' "$f" | sed 's/^/   /'; done
+            echo "== default_server"
+            grep -rnE 'default_server' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null | sed 's/^/   /'
+            echo "== вимкнений конфіг старого Holos (копія 27.09)"
+            grep -rnE '^\s*(listen|server_name|ssl_certificate )' /root/holos-switch-*/enabled 2>/dev/null | sed 's/^/   /' | head -20
+            echo "== автопродовження"
+            systemctl list-timers --all 2>/dev/null | grep -iE 'certbot' | sed 's/^/   /' || true
+            echo "   таймери: $(systemctl is-active certbot.timer 2>/dev/null) / snap $(systemctl is-active snap.certbot.renew.timer 2>/dev/null)"
+            ls /etc/cron.d 2>/dev/null | grep -i certbot | sed 's/^/   cron.d: /'; crontab -l 2>/dev/null | grep -i certbot | sed 's/^/   crontab: /'
+            echo "== renewal/$D.conf"
+            grep -vE 'account|^\s*$|^#' /etc/letsencrypt/renewal/$D.conf 2>/dev/null | sed 's/^/   /'
+            echo "== журнал certbot"
+            ls -la --time-style=+%d.%m.%Y /var/log/letsencrypt/ 2>/dev/null | tail -4 | sed 's/^/   /'
+            grep -hE 'holos|Renewing|Congratulations|not yet due|Failed|failed|Error|error' /var/log/letsencrypt/letsencrypt.log 2>/dev/null | cut -c1-200 | tail -25 | sed 's/^/   /'
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
