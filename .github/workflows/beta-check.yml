@@ -44,6 +44,8 @@ name: beta-check
 # підтягує nginx і їхні дати, certbot (сертифікати, таймер, журнал). Нічого не пише й не продовжує.
 # Другий прохід: сам сертифікат holos дійсний до 27.12 - шукаємо «23.08» у ЛАНЦЮЖКУ (проміжний / крос-підпис), у
 # старих випусках цього імені (archive), у UDP 443 (HTTP/3) і контейнерах; перевірка ланцюжка «по-старому» (-no_alt_chains).
+# 03.10 - посилання на EvidujZdarma з holos (SEO): чи відкриваються https://evidujzdarma.cz/ і /musim-evidovat
+# (код, редиректи, заголовок, h1, мова, robots, canonical, «připravujeme», чи є квіз і перевірка IČO) - лише з раннера.
 
 on:
   push:
@@ -60,48 +62,29 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: certificate chain as served (runner)
+      - name: EvidujZdarma pages (runner, read-only)
         run: |
-          chain() {
-            echo | timeout 15 openssl s_client -connect "$1:443" -servername "$1" -showcerts 2>/dev/null | awk '/BEGIN CERT/,/END CERT/' > /tmp/c.pem
-            rm -f /tmp/cc-*; csplit -s -z -f /tmp/cc- /tmp/c.pem '/-----BEGIN CERTIFICATE-----/' '{*}'
-            i=0; for f in /tmp/cc-*; do i=$((i+1)); echo "   #$i $(openssl x509 -in "$f" -noout -subject -issuer -startdate -enddate | tr '\n' ' ' | sed 's/  */ /g')"; done
-          }
-          for d in holos.rozum.one beta.holos.rozum.one socialio.rozum.one; do
-            echo "== $d - ланцюжок, як його віддає сервер"
-            chain "$d"
-            echo "   перевірка як у сучасних клієнтів: $(echo | timeout 15 openssl s_client -connect "$d:443" -servername "$d" -verify_return_error 2>&1 | grep -m1 -E 'Verify return code' | sed 's/^ *//')"
-            echo "   перевірка «по-старому» (-no_alt_chains): $(echo | timeout 15 openssl s_client -connect "$d:443" -servername "$d" -no_alt_chains 2>&1 | grep -m1 -E 'Verify return code' | sed 's/^ *//')"
+          for u in https://evidujzdarma.cz/ https://evidujzdarma.cz/musim-evidovat https://www.evidujzdarma.cz/; do
+            echo "== $u"
+            curl -sS -L --max-time 25 -o /tmp/p.html -w '   код %{http_code} · кінцева %{url_effective} · редиректів %{num_redirects} · %{size_download} Б\n' "$u" || { echo "   не відповідає"; continue; }
+            python3 - <<'EOF'
+          import re,html
+          s=open('/tmp/p.html',encoding='utf-8',errors='replace').read()
+          def one(rx):
+              m=re.search(rx,s,re.I|re.S); return html.unescape(re.sub(r'\s+',' ',re.sub(r'<[^>]+>','',m.group(1)))).strip()[:200] if m else '-'
+          print('   lang:',one(r'<html[^>]*lang="([^"]*)"'))
+          print('   title:',one(r'<title[^>]*>(.*?)</title>'))
+          print('   h1:',one(r'<h1[^>]*>(.*?)</h1>'))
+          print('   robots:',one(r'<meta[^>]+name="robots"[^>]+content="([^"]*)"'))
+          print('   canonical:',one(r'<link[^>]+rel="canonical"[^>]+href="([^"]*)"'))
+          print('   description:',one(r'<meta[^>]+name="description"[^>]+content="([^"]*)"'))
+          t=re.sub(r'\s+',' ',html.unescape(re.sub(r'<[^>]+>',' ',re.sub(r'<(script|style)[^>]*>.*?</\1>','',s,flags=re.I|re.S))))
+          for w in ['připravujeme','připravujem','spouštíme','brzy','zdarma','2027','kartou','QR','IČO','bez signálu','offline','Musím evidovat','Swipe Scape','ubytov','українськ','Українськ']:
+              i=t.lower().find(w.lower()); print('   «%s»:'%w, ('так: …'+t[max(0,i-70):i+90].strip()+'…') if i>=0 else 'нема')
+          links=sorted(set(re.findall(r'href="(/[^"#?]*|https://evidujzdarma\.cz[^"#?]*)"',s)))
+          print('   внутрішні посилання:',', '.join(links[:40]))
+          EOF
           done
-          echo "== HTTP-заголовки holos (Alt-Svc / HSTS)"
-          curl -sSI --max-time 15 https://holos.rozum.one/ | grep -iE '^(alt-svc|strict-transport|server):' || echo "   нема Alt-Svc/HSTS"
-
-      - name: chain files, old issuances, UDP 443 (server, read-only)
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.HETZNER_HOST }}
-          username: ${{ secrets.HETZNER_USER }}
-          key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 5m
-          script: |
-            T=$(mktemp -d)
-            for n in holos.rozum.one beta.holos.rozum.one socialio.rozum.one; do
-              echo "== fullchain.pem $n (на диску)"
-              csplit -s -z -f "$T/$n-" /etc/letsencrypt/live/$n/fullchain.pem '/-----BEGIN CERTIFICATE-----/' '{*}'
-              for f in "$T/$n-"*; do echo "   $(openssl x509 -in "$f" -noout -subject -issuer -startdate -enddate | tr '\n' ' ' | sed 's/  */ /g')"; done
-            done
-            echo "== усі випуски holos.rozum.one (archive)"
-            for f in /etc/letsencrypt/archive/holos.rozum.one/cert*.pem; do echo "   $(basename $f): $(openssl x509 -in "$f" -noout -startdate -enddate -issuer | tr '\n' ' ' | sed 's/  */ /g')"; done
-            echo "== будь-який сертифікат на диску, що спливає 23 серпня"
-            for f in $(find /etc/letsencrypt /etc/nginx /etc/ssl /opt -maxdepth 6 -type f \( -name '*.pem' -o -name '*.crt' \) ! -name '*privkey*' ! -name '*key*' 2>/dev/null); do
-              e=$(openssl x509 -in "$f" -noout -enddate 2>/dev/null) || continue
-              case "$e" in *"Aug 23"*) echo "   $f → $(openssl x509 -in "$f" -noout -subject | sed 's/  */ /g') · $e";; esac
-            done
-            echo "== UDP 443 (HTTP/3) і контейнери з 80/443"
-            ss -lunpH '( sport = :443 )' | awk '{print "   udp " $4, $6}' | sed -E 's/users:\(\("([^"]+)".*/\1/'
-            docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -E ':(80|443)->' | sed 's/^/   /' || true
-            echo "   (кінець)"
-            rm -rf "$T"
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
