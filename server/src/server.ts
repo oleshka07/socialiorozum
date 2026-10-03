@@ -84,7 +84,8 @@ import { uploadLinkState, takeUploadSlot, markUploaded, refundUploadSlot, upload
 import { CLI_MODELS, cliAllowedFor, cliHealth, forgetCliAllowed, cliCooldown } from "./claudecli.js";
 import { sttChoice, sttAvailable } from "./stt.js";
 import { oauthWhy, oauthFailQuery } from "./oauthwhy.js";
-import { renderLanding, robotsTxt, sitemapXml } from "./landing.js";
+import { renderLanding, robotsTxt, sitemapXml, llmsTxt, SITEMAP_PAGES, type LandingEnv } from "./landing.js";
+import { initSeo, startIndexNow, indexNowKeyPath, indexNowKey, sitemapDates, seoView } from "./seo.js";
 
 // ============================================================================
 // ЗМІСТ ФАЙЛУ (186 роутів; шукай за банером «===== НАЗВА =====» або шляхом роуту)
@@ -147,10 +148,15 @@ app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body,
 app.addContentTypeParser("application/octet-stream", { parseAs: "buffer", bodyLimit: CHUNK_MAX + 64 * 1024 }, (_req, body, done) => done(null, body));
 
 // HTML-сторінки не кешуємо браузером - щоб після деплою одразу бачити свіжий app.html
+// 🔎 Кабінет, вхід і Mini App пошуковикам не потрібні: окрім мета-тега, кажемо це й заголовком - robots.txt
+// їх більше не закриває (інакше закрита адреса, на яку ведуть кнопки лендингу, могла б потрапити в індекс
+// голим посиланням). Бета (PIN) - уся, з будь-якої адреси.
+const NOINDEX_PAGES = new Set(["/app", "/login", "/register", "/forgot", "/reset", "/tgapp"]);
 app.addHook("onSend", async (req: any, reply, payload) => {
   const u = (req.raw.url || "").split("?")[0];
   if (["/", "/app", "/B", "/b", "/login", "/register", "/forgot", "/reset"].includes(u))
     reply.header("Cache-Control", "no-cache, must-revalidate");
+  if (env.beta.pin || NOINDEX_PAGES.has(u)) reply.header("X-Robots-Tag", "noindex, nofollow");
   return payload;
 });
 
@@ -163,6 +169,14 @@ app.addHook("onRequest", async (req: any, reply) => {
   reply.header("X-Content-Type-Options", "nosniff");
   reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
   reply.header("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
+});
+
+// 🔎 Файл ключа IndexNow (seo.ts): /<ключ>.txt з самим ключем - так пошуковик переконується, що повідомлення
+// від власника сайту. Ключ відомий після старту; на беті (і доки його нема) - звичайний 404.
+app.addHook("onRequest", async (req: any, reply) => {
+  const p = indexNowKeyPath();
+  if (!p || (req.method !== "GET" && req.method !== "HEAD")) return;
+  if ((req.raw.url || "").split("?")[0] === p) return reply.type("text/plain; charset=utf-8").header("Cache-Control", "public, max-age=3600").send(indexNowKey());
 });
 
 // простий in-memory rate-limit (додаток одноінстансний)
@@ -625,7 +639,7 @@ app.get("/api/admin/health", async (req: any, reply) => {
     if (files.length) { const f = files[files.length - 1]; const st = await stat(join(dir, f)); lastBackup = `${f} (${Math.round(st.size / 1024)}K)`; }
   } catch { /* теки нема - покажемо «не видно» */ }
   return { errorCount: counts?.errors || 0, warnCount: counts?.warns || 0, spendToday: spend?.usd || 0,
-           runningJobs: jobs?.running || 0, lostJobs: jobs?.lost || 0, lastBackup, errors };
+           runningJobs: jobs?.running || 0, lostJobs: jobs?.lost || 0, lastBackup, errors, seo: seoView() };
 });
 
 // ---- адмін: 🔔 сповіщення про збої (alerts.ts) ----
@@ -4803,22 +4817,30 @@ app.get("/app", (_req, reply) => reply.type("text/html; charset=utf-8").send(app
 // 🏠 Лендинг: шаблон index.html + адреса сервісу й статуси мереж із конфігурації (landing.ts) -
 // сторінка не обіцяє «Instagram працює», поки Meta пускає лише тестувальників.
 let landingCached = "";
+const landingEnv = (): LandingEnv => ({
+  metaAppId: env.meta.appId, metaPublic: env.meta.publicAccess,
+  threadsAppId: env.threads.appId, threadsPublic: env.threads.publicAccess,
+  linkedinClientId: env.linkedin.clientId, googleClientId: env.google.clientId, tiktokKey: env.tiktok.clientKey,
+});
 function landingHtml(): string {
   if (landingCached) return landingCached;
   const tpl = readFileSync(join(__dirname, "..", "public", "index.html"), "utf8");
-  landingCached = renderLanding(tpl, env.appBaseUrl, {
-    metaAppId: env.meta.appId, metaPublic: env.meta.publicAccess,
-    threadsAppId: env.threads.appId, threadsPublic: env.threads.publicAccess,
-    linkedinClientId: env.linkedin.clientId, googleClientId: env.google.clientId, tiktokKey: env.tiktok.clientKey,
-  });
+  landingCached = renderLanding(tpl, env.appBaseUrl, landingEnv());
   return landingCached;
+}
+// 🔎 Що зараз віддає кожна сторінка з карти сайту - для відбитків (seo.ts: дата lastmod і IndexNow)
+function sitemapContents(): Record<string, string> {
+  const dir = join(__dirname, "..", "public");
+  return Object.fromEntries(SITEMAP_PAGES.map((p) => [p.path, p.path === "/" ? landingHtml() : readFileSync(join(dir, p.path.slice(1) + ".html"), "utf8")]));
 }
 app.get("/", (_req, reply) => reply.type("text/html; charset=utf-8").send(landingHtml()));
 // сирий шаблон зі статикою віддавати не можна (там %BASE% замість адреси) - ведемо на головну
 app.get("/index.html", (_req, reply) => reply.redirect("/", 301));
 // пошуковикам: бета (PIN) закрита цілком, прод - без кабінету, API й технічних адрес
 app.get("/robots.txt", (_req, reply) => reply.type("text/plain; charset=utf-8").send(robotsTxt(env.appBaseUrl, !!env.beta.pin)));
-app.get("/sitemap.xml", (_req, reply) => reply.type("application/xml; charset=utf-8").send(sitemapXml(env.appBaseUrl)));
+app.get("/sitemap.xml", (_req, reply) => reply.type("application/xml; charset=utf-8").send(sitemapXml(env.appBaseUrl, sitemapDates())));
+// опис сервісу для AI-асистентів (той самий, що на лендингу, статуси мереж - з конфігурації)
+app.get("/llms.txt", (_req, reply) => reply.type("text/plain; charset=utf-8").send(llmsTxt(env.appBaseUrl, landingEnv())));
 // колишній другий варіант лендингу - посилання на нього ведуть на головну
 app.get("/B", (_req, reply) => reply.redirect("/", 301));
 app.get("/b", (_req, reply) => reply.redirect("/", 301));
@@ -4878,6 +4900,12 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then(async (addr) => {
   startEvergreen();     // ♻️ вічнозелена черга (працює лише в кабінетах, де її увімкнули)
   startMeetingPull();   // погодинна звірка з хмарою власного транскрибатора
   startAlerts().catch((e: any) => app.log.error("startAlerts: " + e.message));   // 🔔 сповіщення адміну про збої
+  // 🔎 дати lastmod за відбитками сторінок і IndexNow про змінене (лише прод; бета закрита). Через
+  // Promise.resolve: збій читання сторінки - лише рядок у журналі, а не обірваний старт (бот, HEIF нижче)
+  Promise.resolve()
+    .then(() => initSeo({ baseUrl: env.appBaseUrl, closed: !!env.beta.pin, pages: sitemapContents(), flag: process.env.INDEXNOW, endpoint: process.env.INDEXNOW_ENDPOINT }))
+    .then(() => startIndexNow(Number(process.env.INDEXNOW_FIRST_MS) || 15_000))
+    .catch((e: any) => app.log.error("initSeo: " + e.message));
   // спершу спільний бот (він міг узяти перевипущений токен того ж бота з кабінету), потім власні
   initTelegramBot().finally(() => refreshOwnBotWebhooks().catch(() => {}));
   // одноразово полагодити залишкові iPhone HEIF -> JPEG (у фоні; ідемпотентно)

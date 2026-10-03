@@ -90,19 +90,23 @@ export function renderLanding(tpl: string, baseUrl: string, e: LandingEnv): stri
     .replace(/%FAQ_NETS%/g, networksFaq(st));
 }
 
-/** robots.txt: закриті - кабінет, API, вхід і технічні адреси; бета не індексується зовсім. */
+/**
+ * robots.txt: бета не індексується зовсім; на проді закриті лише технічні адреси.
+ * Кабінет - рівно `/app` і `/app?…`: правило-префікс `/app` закривало й `/apple-touch-icon.png`, а іконку
+ * сайту для видачі Google бере саме з таких файлів. Вхід, реєстрація й відновлення пароля НЕ закриті:
+ * на них ведуть кнопки лендингу, і закрита для обходу адреса може потрапити в індекс голим посиланням
+ * («Проіндексовано, хоча заблоковано robots.txt»). Відкриті ж, вони кажуть `noindex` (мета-тег і
+ * заголовок X-Robots-Tag), і Google сам їх не бере.
+ */
 export function robotsTxt(baseUrl: string, closed: boolean): string {
   if (closed) return "User-agent: *\nDisallow: /\n";
   const base = baseUrl.replace(/\/$/, "");
   return [
     "User-agent: *",
     "Allow: /",
-    "Disallow: /app",
+    "Disallow: /app$",
+    "Disallow: /app?",
     "Disallow: /api/",
-    "Disallow: /login",
-    "Disallow: /register",
-    "Disallow: /forgot",
-    "Disallow: /reset",
     "Disallow: /tgapp",
     "Disallow: /mcp/",
     "Disallow: /media/",
@@ -113,16 +117,83 @@ export function robotsTxt(baseUrl: string, closed: boolean): string {
   ].join("\n");
 }
 
-/** Сторінки для пошуковиків: лише ті, що віддають 200 і відкриті для індексації. */
+/**
+ * Сторінки для пошуковиків: лише ті, що віддають 200 і відкриті для індексації. `lastmod` тут - запасна
+ * дата: справжню (коли вміст сторінки востаннє змінився) рахує seo.ts за відбитком і передає в sitemapXml.
+ */
 export const SITEMAP_PAGES: { path: string; lastmod: string }[] = [
-  { path: "/", lastmod: "2026-09-27" },
-  { path: "/privacy", lastmod: "2026-09-26" },
-  { path: "/terms", lastmod: "2026-09-26" },
-  { path: "/data-deletion", lastmod: "2026-09-26" },
+  { path: "/", lastmod: "2026-10-03" },
+  { path: "/privacy", lastmod: "2026-10-03" },
+  { path: "/terms", lastmod: "2026-10-03" },
+  { path: "/data-deletion", lastmod: "2026-10-03" },
 ];
 
-export function sitemapXml(baseUrl: string): string {
+export function sitemapXml(baseUrl: string, lastmod: Record<string, string> = {}): string {
   const base = baseUrl.replace(/\/$/, "");
-  const urls = SITEMAP_PAGES.map((p) => `  <url>\n    <loc>${base}${p.path}</loc>\n    <lastmod>${p.lastmod}</lastmod>\n  </url>`).join("\n");
+  const urls = SITEMAP_PAGES.map((p) => `  <url>\n    <loc>${base}${p.path}</loc>\n    <lastmod>${lastmod[p.path] || p.lastmod}</lastmod>\n  </url>`).join("\n");
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`;
+}
+
+/**
+ * /llms.txt - стислий опис сервісу для AI-асистентів (ChatGPT, Claude, Perplexity): що це, звідки
+ * матеріал, які мережі працюють і на яких умовах, де сторінки. Статуси мереж - ті самі, що на лендингу
+ * (з конфігурації), тож асистент не пообіцяє людині мережу, яку вона не зможе підключити.
+ */
+export function llmsTxt(baseUrl: string, e: LandingEnv): string {
+  const base = baseUrl.replace(/\/$/, "");
+  const st = networkStates(e);
+  const detail: Partial<Record<Network, string>> = {
+    telegram: "Telegram (канали й групи)",
+    facebook: "Facebook (Сторінки)",
+    linkedin: "LinkedIn (особистий профіль)",
+  };
+  const by = (s: NetState) => NETWORKS.filter((n) => st[n] === s).map((n) => detail[n] || NET_NAME[n]);
+  const nets: string[] = [];
+  if (by("live").length) nets.push(`- Працює: ${list(by("live"))}.`);
+  if (by("invite").length) nets.push(`- За запрошенням: ${list(by("invite"))} - поки платформа перевіряє застосунок Holos, підключитись можуть учасники ранньої бети.`);
+  if (by("beta").length) nets.push(`- Бета: ${list(by("beta"))} - відео виходять туди з того самого поста; до перевірки платформ YouTube показує їх лише автору, а TikTok кладе в чернетки.`);
+  if (by("soon").length) nets.push(`- Скоро: ${list(by("soon"))}.`);
+  const en = NETWORKS.filter((n) => st[n] === "live").map((n) => NET_NAME[n]);
+  return [
+    "# Holos by Rozum",
+    "",
+    "> Holos - AI-сервіс для контенту в соцмережах з українським інтерфейсом. Бере те, що автор уже сказав чи написав (дзвінки, голосові, нотатки, новини ніші, власні пости), знаходить у цьому теми й робить готові пости в голосі автора, планує їх і публікує в підключені мережі. Без затвердження автора нічого не виходить.",
+    "",
+    "Holos не вигадує фактів і цифр, яких не було в матеріалі, і прибирає шаблонні AI-фрази. Оператор - Swipe Scape s.r.o. (Карлові Вари, Чехія). Ранній доступ: оплату ще не підключено, тож зараз Holos безкоштовний; без картки.",
+    "",
+    "## Звідки матеріал",
+    "",
+    "- Транскрипти дзвінків: Fireflies, Grain, MeetGeek або власний транскрибатор.",
+    "- Голосові й думки в Telegram-боті: бот розшифровує голос і кладе в щоденник.",
+    "- Нотатки й тексти, база бренду (ніша, аудиторія, болі клієнтів, приклади постів).",
+    "- Новини ніші: Google News за темою, RSS, публічні Telegram-канали й профілі Threads.",
+    "- Фото з Google Drive і власна медіатека; конектор для Claude (MCP): пости з чату лягають у кабінет.",
+    "",
+    "## Що робить",
+    "",
+    "- Пости в голосі автора під кожну мережу: своя довжина й подача.",
+    "- Каруселі до 10 кадрів, відео й Reels, сторіс в Instagram і Facebook, перший коментар.",
+    "- Монтаж сторіс і рілс із власних кліпів: субтитри, гачок, музика, AI-голос.",
+    "- Контент-план, календар, автопублікація за розкладом, найкращий час з власної статистики.",
+    "- Аналітика постів по мережах і коментарі людей в одному місці з чернетками відповідей.",
+    "- Кілька брендів в одному акаунті, доступ колегам за поштою, Telegram-бот і Mini App.",
+    "",
+    "## Мережі",
+    "",
+    ...nets,
+    "- Особисті профілі й групи Facebook Meta через API не відкриває нікому, тож їх нема ні в Holos, ні в інших сервісів.",
+    "",
+    "## Сторінки",
+    "",
+    `- [Головна](${base}/): що таке Holos, як працює, ціни й відповіді на часті питання`,
+    `- [Створити акаунт](${base}/register)`,
+    `- [Політика конфіденційності](${base}/privacy) (англійською)`,
+    `- [Умови користування](${base}/terms) (англійською)`,
+    `- [Видалення даних](${base}/data-deletion) (англійською)`,
+    "",
+    "## In English",
+    "",
+    `Holos by Rozum is an AI content tool for social media with a Ukrainian interface. It turns what the author already said or wrote (call transcripts, voice notes in Telegram, notes, niche news, their own posts) into ready posts in the author's voice, then plans and publishes them. Nothing is published without the author's approval. Works now: ${en.length ? en.join(", ") : "Telegram"}. Early access, free for now. Operator: Swipe Scape s.r.o., Czech Republic.`,
+    "",
+  ].join("\n");
 }

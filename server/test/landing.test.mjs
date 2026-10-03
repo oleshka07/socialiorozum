@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { networkStates, renderLanding, inviteNote, networksFaq, robotsTxt, sitemapXml, NETWORKS, SITEMAP_PAGES } from "../dist/landing.js";
+import { networkStates, renderLanding, inviteNote, networksFaq, robotsTxt, sitemapXml, llmsTxt, NETWORKS, SITEMAP_PAGES } from "../dist/landing.js";
 
 const TPL = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 const BASE = "https://holos.rozum.one";
@@ -84,21 +84,69 @@ test("тексти лендингу без довгих тире (правило
   assert.doesNotMatch(TPL, /\$400|600\/міс/);
 });
 
+// Правила robots.txt так, як їх читає Google: найдовше правило, що збіглося, перемагає; при рівній довжині -
+// Allow; «*» - будь-що, «$» - кінець адреси. Перевіряємо не текст файлу, а що він насправді дозволяє.
+function robotsAllows(txt, url) {
+  const rules = txt.split("\n").map((l) => /^(Allow|Disallow):\s*(.*)$/.exec(l.trim())).filter(Boolean).map((m) => ({ allow: m[1] === "Allow", p: m[2] }));
+  let best = null;
+  for (const r of rules) {
+    if (!r.p) continue;
+    const re = new RegExp("^" + r.p.replace(/[.+?^{}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\\\$$/, "$"));
+    if (!re.test(url)) continue;
+    if (!best || r.p.length > best.p.length || (r.p.length === best.p.length && r.allow)) best = r;
+  }
+  return !best || best.allow;
+}
+
 test("robots.txt: бета закрита цілком, прод - без кабінету й API, з картою сайту", () => {
   assert.equal(robotsTxt(BASE, true), "User-agent: *\nDisallow: /\n");
   const r = robotsTxt(BASE + "/", false);
   assert.match(r, /^User-agent: \*\nAllow: \/\n/);
-  for (const p of ["/app", "/api/", "/login", "/register", "/mcp/", "/media/"]) assert.ok(r.includes(`Disallow: ${p}\n`), p);
   assert.match(r, /Sitemap: https:\/\/holos\.rozum\.one\/sitemap\.xml\n/);
+  // відкрите: сторінки з карти сайту, іконки (Google бере іконку для видачі з них), llms.txt
+  for (const u of ["/", "/privacy", "/terms", "/data-deletion", "/apple-touch-icon.png", "/favicon.ico", "/favicon.svg",
+    "/favicon-192x192.png", "/site.webmanifest", "/images/site/hero.webp", "/fonts/inter-cyrillic.woff2", "/llms.txt", "/@my-brand"])
+    assert.ok(robotsAllows(r, u), "має бути відкрито: " + u);
+  // вхід і реєстрацію пошуковик бачить і читає там noindex (закриті, вони могли б потрапити в індекс голим посиланням)
+  for (const u of ["/login", "/register", "/forgot", "/reset?token=x", "/login?next=%2Fapp"]) assert.ok(robotsAllows(r, u), "має бути відкрито (noindex): " + u);
+  // закрите: кабінет, API, конектор, медіа людей, Mini App
+  for (const u of ["/app", "/app?review=en", "/api/auth/me", "/mcp/abc", "/media/x.jpg", "/thumb/x.jpg", "/tgapp"])
+    assert.ok(!robotsAllows(r, u), "має бути закрито: " + u);
+  // бета: нічого
+  for (const u of ["/", "/privacy", "/llms.txt"]) assert.ok(!robotsAllows(robotsTxt(BASE, true), u), "бета: " + u);
 });
 
-test("sitemap.xml: лише відкриті сторінки, адреси без подвійних слешів", () => {
+test("sitemap.xml: лише відкриті сторінки, адреси без подвійних слешів, дати змін - з відбитків", () => {
   const x = sitemapXml(BASE + "/");
   assert.match(x, /^<\?xml version="1\.0" encoding="UTF-8"\?>/);
   assert.equal((x.match(/<url>/g) || []).length, SITEMAP_PAGES.length);
   assert.match(x, /<loc>https:\/\/holos\.rozum\.one\/<\/loc>/);
   assert.match(x, /<loc>https:\/\/holos\.rozum\.one\/privacy<\/loc>/);
   assert.doesNotMatch(x, /\/app|\/login|\/register|one\/\//);
+  // кожна сторінка - зі своєю датою; без даних - запасна з SITEMAP_PAGES
+  const d = sitemapXml(BASE, { "/": "2026-10-05", "/terms": "2026-10-04" });
+  assert.match(d, /<loc>https:\/\/holos\.rozum\.one\/<\/loc>\n    <lastmod>2026-10-05<\/lastmod>/);
+  assert.match(d, /<loc>https:\/\/holos\.rozum\.one\/terms<\/loc>\n    <lastmod>2026-10-04<\/lastmod>/);
+  assert.match(d, new RegExp(`<loc>https://holos\\.rozum\\.one/privacy</loc>\\n    <lastmod>${SITEMAP_PAGES.find((p) => p.path === "/privacy").lastmod}</lastmod>`));
+  for (const p of SITEMAP_PAGES) assert.match(p.lastmod, /^\d{4}-\d{2}-\d{2}$/);
+});
+
+test("llms.txt: опис для AI-асистентів - ті самі чесні статуси мереж, що на лендингу, повні адреси", () => {
+  const b = llmsTxt(BASE + "/", BEFORE);
+  assert.match(b, /^# Holos by Rozum\n\n> /);
+  assert.match(b, /- Працює: Telegram \(канали й групи\) і LinkedIn \(особистий профіль\)\./);
+  assert.match(b, /- За запрошенням: Instagram, Facebook \(Сторінки\) і Threads - поки платформа перевіряє/);
+  assert.match(b, /- Бета: YouTube Shorts/);
+  assert.match(b, /- Скоро: TikTok\./);
+  assert.match(b, /Works now: Telegram, LinkedIn\./);
+  const a = llmsTxt(BASE, AFTER);
+  assert.match(a, /- Працює: Telegram \(канали й групи\), Instagram, Facebook \(Сторінки\), Threads і LinkedIn/);
+  assert.doesNotMatch(a, /За запрошенням/);
+  // факти, які не можна переплутати: безкоштовно в ранньому доступі, без публікацій без автора, оператор
+  for (const re of [/оплату ще не підключено/, /Без затвердження автора нічого не виходить/, /Swipe Scape s\.r\.o\./, /не вигадує фактів/])
+    assert.match(b, re);
+  for (const pth of ["/", "/register", "/privacy", "/terms", "/data-deletion"]) assert.ok(b.includes(`(${BASE}${pth})`), pth);
+  assert.doesNotMatch(b, /one\/\/|%[A-Z_]+%|—|undefined|null/);
 });
 
 // 🔗 Посилання на сестринський проєкт EvidujZdarma (SEO-ТЗ Олега, 03.10): одне в тексті сторінки (у <main>, з

@@ -4731,9 +4731,25 @@ async function loadAdminHealth(){
       +'<div class="card"><b style="font-size:14px">'+(h.lastBackup?esc(h.lastBackup):'не видно')+'</b><div class="hint">останній бекап'+(h.lastBackup?'':' - тека не змонтована або ще жодного')+'</div></div></div>';
     if(errs.length) out+='<div style="font-size:12.5px">'+errs.map(e=>'<div style="display:flex;gap:8px;padding:3px 0;border-top:1px solid var(--line2)"><span style="color:'+(e.level==='error'?'var(--danger)':'var(--amber)')+';min-width:44px">'+esc(e.level)+'</span><span style="min-width:90px;color:var(--muted)">'+esc(e.scope)+'</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(e.message)+'">'+esc(e.message)+'</span><span style="color:var(--faint)">×'+e.n+'</span></div>').join('')+'</div>';
     else out+='<div class="hint">За добу - жодної помилки в журналі.</div>';
+    out+=seoHealthLine(h.seo);
     out+='<div class="hint" style="margin-top:8px">Прод і бета стежать один за одним (див. «🔔 Сповіщення про збої»). Якщо ляже весь сервер разом - сказати буде нікому: для цього зовнішня перевірка (UptimeRobot / Better Stack на <code>/health</code>), одна дія в їхньому кабінеті.</div>';
     box.innerHTML=out;
   }catch(e){ box.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
+}
+// 🔎 Пошуковики (seo.ts): дати сторінок у sitemap і чи прийняв IndexNow. Google - окремо, у Search Console.
+function seoHealthLine(seo){
+  if(!seo) return '';
+  const pages=seo.pages||[]; const last=pages.map(p=>p.lastmod).sort().pop();
+  let t='<b>🔎 Пошуковики.</b> Карта сайту: '+pages.length+' стор.'+(last?' (зміни від '+esc(fmtDay(last))+')':'')+'. ';
+  if(!seo.indexNow) t+='IndexNow тут вимкнено: цей сервіс закритий для пошуковиків (бета).';
+  else{
+    const p=seo.ping;
+    if(!p) t+='IndexNow: ще не надсилали.';
+    else if(p.status===200||p.status===202) t+='IndexNow ✓ '+esc(new Date(p.at).toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+': повідомлено '+(p.urls||[]).length+' стор. (Bing, Seznam, Yandex…)';
+    else t+='<span style="color:var(--amber)">IndexNow не прийняв ('+(p.status||'немає відповіді')+(p.error?': '+esc(String(p.error).slice(0,80)):'')+') - повторимо сам.</span>';
+    if(pages.some(x=>!x.notified)) t+=' Чекає: '+pages.filter(x=>!x.notified).map(x=>esc(x.path)).join(', ')+'.';
+  }
+  return '<div class="hint" style="margin-top:8px">'+t+' Google бере сторінки з Search Console (домен rozum.one підтверджено).</div>';
 }
 // ---------- Витрати по кабінетах (адмін) ----------
 // Стеля на кабінет живе на `workspace`, а не в settings_block: інакше кожен підняв би її собі сам.

@@ -200,7 +200,11 @@ const API = {
     cap: { spentDay: 2.55, spentMonth: 7.1, capDay: 3, capMonth: 30 },
   },
   "GET /admin/health": { errorCount: 2, warnCount: 5, spendToday: 1.23, runningJobs: 1, lostJobs: 0, lastBackup: "socialio-db-20260902-0320.dump (164K)",
-    errors: [{ level: "error", scope: "publish", message: "Telegram відмовив у доступі (403)", n: 2 }, { level: "warn", scope: "meeting", message: "хеш транскрипта не збігся", n: 5 }] },
+    errors: [{ level: "error", scope: "publish", message: "Telegram відмовив у доступі (403)", n: 2 }, { level: "warn", scope: "meeting", message: "хеш транскрипта не збігся", n: 5 }],
+    seo: { indexNow: true, keyFile: "https://holos.rozum.one/0123456789abcdef0123456789abcdef.txt",
+      ping: { at: "2026-10-03T19:20:00.000Z", status: 422, urls: ["https://holos.rozum.one/"], error: "URLs <b>do not</b> belong to host" },
+      pages: [{ path: "/", lastmod: "2026-10-03", notified: false }, { path: "/privacy", lastmod: "2026-10-01", notified: true },
+        { path: "/terms", lastmod: "2026-10-01", notified: true }, { path: "/data-deletion", lastmod: "2026-09-26", notified: true }] } },
   "GET /admin/alerts": { instance: "Holos · бета",
     settings: { tg: true, email: true, emailAll: false, emails: [], digest: true, digestHour: 9, tz: "Europe/Prague", failover: true, orLow: 2, muteUntil: null, watchUrl: "" },
     channels: { tg: { bot: "R_Socialio_bot", chats: 1 }, email: { to: ["o.stepeniev@swipescape.eu"], ok: true } },
@@ -2202,7 +2206,11 @@ const run = async () => {
     await page.evaluate(() => { selectView("settings"); setSTab("profile"); });
     await page.waitForFunction(() => document.querySelector("#admHealth .card"), undefined, { timeout: 8000 });
     const t = await $t("#admHealth");
-    return t.includes("помилок за добу") && t.includes("$1.23") && t.includes("Telegram відмовив") && t.includes("20260902-0320");
+    // 🔎 пошуковики: карта сайту з датою останньої зміни, відмова IndexNow людською мовою, що чекає; текст
+    // відповіді чужого сервера - як текст, не розмітка
+    const seoOk = t.includes("Пошуковики") && t.includes("4 стор. (зміни від 03.10)") && t.includes("IndexNow не прийняв (422")
+      && t.includes("Чекає: /.") && t.includes("Search Console") && t.includes("URLs <b>do not</b> belong");
+    return t.includes("помилок за добу") && t.includes("$1.23") && t.includes("Telegram відмовив") && t.includes("20260902-0320") && seoOk;
   });
 
   await check("adminAlerts", async () => {
