@@ -48,6 +48,8 @@ name: beta-check
 # (код, редиректи, заголовок, h1, мова, robots, canonical, «připravujeme», чи є квіз і перевірка IČO) - лише з раннера.
 # Далі - бета після посилань на EvidujZdarma: що реально віддає beta.holos (вхід за PIN беті, як у тестувальника) -
 # блок «Від тієї ж команди», посилання без rel/UTM, підвали юридичних сторінок; прод поки без змін. Нічого не пише.
+# Далі - ПРОД після промоушну 00f0508 (посилання на EvidujZdarma): що віддає holos.rozum.one ззовні (лендинг, юридичні
+# сторінки, robots, sitemap, meta robots), стара адреса; на сервері - HEAD, контейнер, health. Нічого не пише.
 
 on:
   push:
@@ -64,10 +66,8 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: beta.holos and holos - EvidujZdarma links as served (runner, read-only)
+      - name: holos.rozum.one - EvidujZdarma links as served (runner, read-only)
         run: |
-          J=$(mktemp)
-          echo "== PIN беті: $(curl -sS -c "$J" -H 'content-type: application/json' -d '{"pin":"2345"}' -o /dev/null -w '%{http_code}' https://beta.holos.rozum.one/beta-pin)"
           show() {
             python3 - "$1" <<'EOF'
           import re,sys
@@ -77,18 +77,34 @@ jobs:
           for tag,txt in links: print('   ·',re.sub(r'<[^>]+>','',txt).strip(),'|',tag[:150])
           m=s.find('<main'); e=s.find('</main>')
           if m>=0: print('   перше - у <main>:', bool(links) and s.find(links[0][0])<e)
+          r=re.search(r'<meta name="robots" content="([^"]*)"',s); print('   meta robots:', r.group(1) if r else '-')
           print('   «Від тієї ж команди»:', 'Від тієї ж команди' in s, '· «готуємо»:', 'готуємо EvidujZdarma' in s, '· rel/target/utm:', sum(1 for t,_ in links if re.search(r'\b(rel|target)=|utm_',t)))
           EOF
           }
           for pth in / /privacy /terms /data-deletion; do
-            echo "== beta.holos.rozum.one$pth: $(curl -sS -b "$J" -o /tmp/b.html -w '%{http_code} %{size_download} Б' "https://beta.holos.rozum.one$pth")"
-            show /tmp/b.html
-          done
-          echo "== beta: robots.txt"; curl -sS https://beta.holos.rozum.one/robots.txt | head -3
-          for pth in / /privacy; do
-            echo "== прод holos.rozum.one$pth (ще без змін до промоушну): $(curl -sS -o /tmp/p.html -w '%{http_code}' "https://holos.rozum.one$pth")"
+            echo "== holos.rozum.one$pth: $(curl -sS -o /tmp/p.html -w '%{http_code} %{size_download} Б' "https://holos.rozum.one$pth")"
             show /tmp/p.html
           done
+          echo "== robots.txt"; curl -sS https://holos.rozum.one/robots.txt
+          echo "== sitemap.xml"; curl -sS https://holos.rozum.one/sitemap.xml | grep -o '<loc>[^<]*</loc>'
+          echo "== стара адреса /: $(curl -sS -o /dev/null -w '%{http_code} → %{redirect_url}' https://socialio.rozum.one/)"
+          echo "== /app: $(curl -sS -o /dev/null -w '%{http_code}' https://holos.rozum.one/app) · /login: $(curl -sS -o /dev/null -w '%{http_code}' https://holos.rozum.one/login) · /health: $(curl -sS -o /dev/null -w '%{http_code}' https://holos.rozum.one/health)"
+
+      - name: prod version and container (server, read-only)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          command_timeout: 3m
+          script: |
+            echo "== HEAD прод: $(git -C /opt/socialio rev-parse --short HEAD) · бета: $(git -C /opt/socialio-beta rev-parse --short HEAD)"
+            cd /opt/socialio/server && docker compose ps --format '{{.Name}} {{.Status}}' 2>/dev/null | sed 's/^/   /'
+            echo "== health 8080: $(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/health)"
+            echo "== у контейнері: $(docker compose exec -T app sh -c 'grep -c "evidujzdarma.cz" public/index.html public/privacy.html public/terms.html public/data-deletion.html' 2>/dev/null | tr '\n' ' ')"
+            echo "== журнал app за 10 хв (warn/error):"
+            docker compose logs --since 10m app 2>/dev/null | grep -iE '"level":"(warn|error)"|error|warn' | tail -8 | cut -c1-220 || true
+            echo "   (кінець)"
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
