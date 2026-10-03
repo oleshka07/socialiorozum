@@ -46,6 +46,8 @@ name: beta-check
 # старих випусках цього імені (archive), у UDP 443 (HTTP/3) і контейнерах; перевірка ланцюжка «по-старому» (-no_alt_chains).
 # 03.10 - посилання на EvidujZdarma з holos (SEO): чи відкриваються https://evidujzdarma.cz/ і /musim-evidovat
 # (код, редиректи, заголовок, h1, мова, robots, canonical, «připravujeme», чи є квіз і перевірка IČO) - лише з раннера.
+# Далі - бета після посилань на EvidujZdarma: що реально віддає beta.holos (вхід за PIN беті, як у тестувальника) -
+# блок «Від тієї ж команди», посилання без rel/UTM, підвали юридичних сторінок; прод поки без змін. Нічого не пише.
 
 on:
   push:
@@ -62,28 +64,30 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: EvidujZdarma pages (runner, read-only)
+      - name: beta.holos and holos - EvidujZdarma links as served (runner, read-only)
         run: |
-          for u in https://evidujzdarma.cz/ https://evidujzdarma.cz/musim-evidovat https://www.evidujzdarma.cz/; do
-            echo "== $u"
-            curl -sS -L --max-time 25 -o /tmp/p.html -w '   код %{http_code} · кінцева %{url_effective} · редиректів %{num_redirects} · %{size_download} Б\n' "$u" || { echo "   не відповідає"; continue; }
-            python3 - <<'EOF'
-          import re,html
-          s=open('/tmp/p.html',encoding='utf-8',errors='replace').read()
-          def one(rx):
-              m=re.search(rx,s,re.I|re.S); return html.unescape(re.sub(r'\s+',' ',re.sub(r'<[^>]+>','',m.group(1)))).strip()[:200] if m else '-'
-          print('   lang:',one(r'<html[^>]*lang="([^"]*)"'))
-          print('   title:',one(r'<title[^>]*>(.*?)</title>'))
-          print('   h1:',one(r'<h1[^>]*>(.*?)</h1>'))
-          print('   robots:',one(r'<meta[^>]+name="robots"[^>]+content="([^"]*)"'))
-          print('   canonical:',one(r'<link[^>]+rel="canonical"[^>]+href="([^"]*)"'))
-          print('   description:',one(r'<meta[^>]+name="description"[^>]+content="([^"]*)"'))
-          t=re.sub(r'\s+',' ',html.unescape(re.sub(r'<[^>]+>',' ',re.sub(r'<(script|style)[^>]*>.*?</\1>','',s,flags=re.I|re.S))))
-          for w in ['připravujeme','připravujem','spouštíme','brzy','zdarma','2027','kartou','QR','IČO','bez signálu','offline','Musím evidovat','Swipe Scape','ubytov','українськ','Українськ']:
-              i=t.lower().find(w.lower()); print('   «%s»:'%w, ('так: …'+t[max(0,i-70):i+90].strip()+'…') if i>=0 else 'нема')
-          links=sorted(set(re.findall(r'href="(/[^"#?]*|https://evidujzdarma\.cz[^"#?]*)"',s)))
-          print('   внутрішні посилання:',', '.join(links[:40]))
+          J=$(mktemp)
+          echo "== PIN беті: $(curl -sS -c "$J" -H 'content-type: application/json' -d '{"pin":"2345"}' -o /dev/null -w '%{http_code}' https://beta.holos.rozum.one/beta-pin)"
+          show() {
+            python3 - "$1" <<'EOF'
+          import re,sys
+          s=open(sys.argv[1],encoding='utf-8',errors='replace').read()
+          links=re.findall(r'(<a\b[^>]*href="https://evidujzdarma\.cz[^"]*"[^>]*>)(.*?)</a>',s,re.S)
+          print('   посилань на EvidujZdarma:',len(links))
+          for tag,txt in links: print('   ·',re.sub(r'<[^>]+>','',txt).strip(),'|',tag[:150])
+          m=s.find('<main'); e=s.find('</main>')
+          if m>=0: print('   перше - у <main>:', bool(links) and s.find(links[0][0])<e)
+          print('   «Від тієї ж команди»:', 'Від тієї ж команди' in s, '· «готуємо»:', 'готуємо EvidujZdarma' in s, '· rel/target/utm:', sum(1 for t,_ in links if re.search(r'\b(rel|target)=|utm_',t)))
           EOF
+          }
+          for pth in / /privacy /terms /data-deletion; do
+            echo "== beta.holos.rozum.one$pth: $(curl -sS -b "$J" -o /tmp/b.html -w '%{http_code} %{size_download} Б' "https://beta.holos.rozum.one$pth")"
+            show /tmp/b.html
+          done
+          echo "== beta: robots.txt"; curl -sS https://beta.holos.rozum.one/robots.txt | head -3
+          for pth in / /privacy; do
+            echo "== прод holos.rozum.one$pth (ще без змін до промоушну): $(curl -sS -o /tmp/p.html -w '%{http_code}' "https://holos.rozum.one$pth")"
+            show /tmp/p.html
           done
 
   drop:
