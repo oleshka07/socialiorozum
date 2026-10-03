@@ -3379,6 +3379,41 @@ const run = async () => {
     return ok;
   });
 
+  // 🔗 «Від тієї ж команди»: блок EvidujZdarma видно (зʼявляється при прокрутці), посилання чисті (без rel/target),
+  // бейдж - нормальна ціль для пальця; на телефоні нічого не вилазить за край, підвал теж
+  await check("landingSister", async () => {
+    const one = async (vp, extra) => {
+      const { ctx, lp } = await land(vp, extra);
+      await lp.evaluate(() => document.getElementById("team").scrollIntoView({ block: "center" }));
+      await lp.waitForFunction(() => document.querySelector("#team .sis-in").classList.contains("in"), undefined, { timeout: 6000 });
+      await lp.waitForTimeout(700);
+      const r = await lp.evaluate(() => {
+        const w = document.documentElement.clientWidth;
+        const box = (el) => { const b = el.getBoundingClientRect(); return { l: Math.round(b.left), r: Math.round(b.right), h: Math.round(b.height) }; };
+        const links = [...document.querySelectorAll('a[href^="https://evidujzdarma.cz"]')];
+        const badge = document.querySelector("#team .sis-badge");
+        const out = [...document.querySelectorAll("#team h2, #team p, #team .sis-badge, footer .copy span")].filter((el) => { const b = el.getBoundingClientRect(); return b.width && (b.right > w + 1 || b.left < -1); }).map((el) => el.tagName + "." + el.className);
+        return {
+          n: links.length, dirty: links.filter((a) => a.rel || a.target || /utm_/.test(a.href)).length,
+          first: links[0].textContent, inMain: !!links[0].closest("main"),
+          op: getComputedStyle(document.querySelector("#team .sis-in")).opacity, badge: box(badge), badgeText: badge.textContent,
+          linkColor: getComputedStyle(document.querySelector("#team p a")).color, out,
+          foot: document.querySelector("footer .copy").textContent,
+        };
+      });
+      await ctx.close();
+      return r;
+    };
+    const d = await one({ width: 1440, height: 900 });
+    const m = await one({ width: 390, height: 844 }, { isMobile: true, hasTouch: true });
+    const good = (r) => r.n >= 4 && r.dirty === 0 && r.first === "безкоштовну касу для EET 2.0" && r.inMain && r.op === "1"
+      && r.badge.h >= 44 && r.badgeText === "EET 2.0 безкоштовно - EvidujZdarma" && r.linkColor === "rgb(178, 12, 80)" && r.out.length === 0
+      && r.foot.includes("Також від нас: EvidujZdarma - безкоштовна каса для EET 2.0");
+    const ok = good(d) && good(m);
+    if (!ok) console.log("   ↳ landingSister:", JSON.stringify({ d, m }));
+    return ok;
+  });
+
   // ✍️ «Новий пост»: порожня чернетка одразу в редакторі, мережі НЕ ввімкнені самі (інакше тестове відео
   // поїхало б у всі підключені), а порожня й закрита - прибирається; з текстом - лишається
   await check("newPost", async () => {

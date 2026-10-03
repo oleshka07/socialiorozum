@@ -100,3 +100,36 @@ test("sitemap.xml: лише відкриті сторінки, адреси бе
   assert.match(x, /<loc>https:\/\/holos\.rozum\.one\/privacy<\/loc>/);
   assert.doesNotMatch(x, /\/app|\/login|\/register|one\/\//);
 });
+
+// 🔗 Посилання на сестринський проєкт EvidujZdarma (SEO-ТЗ Олега, 03.10): одне в тексті сторінки (у <main>, з
+// описовим анкором - найцінніше), назва бренду в підвалі на всіх відкритих сторінках. Чисті: без nofollow/sponsored/
+// ugc, без UTM і target. Чесно: каса ще не запущена - «готуємо» / «in preparation».
+test("EvidujZdarma: у тексті сторінки і в підвалі, без nofollow і UTM, з чесним «готуємо»", () => {
+  const html = renderLanding(TPL, BASE, BEFORE);
+  const links = [...html.matchAll(/<a\b[^>]*href="(https:\/\/evidujzdarma\.cz[^"]*)"[^>]*>([\s\S]*?)<\/a>/g)];
+  assert.ok(links.length >= 3, "посилань: " + links.length);
+  for (const [tag, href] of links) {
+    assert.doesNotMatch(tag, /\brel=|\btarget=/, tag);
+    assert.doesNotMatch(href, /utm_|[?#]/, href);
+  }
+  // перше посилання на головну EvidujZdarma - описове, у тексті сторінки (пошуковик бере саме його анкор)
+  const first = links.find(([, href]) => href === "https://evidujzdarma.cz/");
+  assert.equal(first[2], "безкоштовну касу для EET 2.0");
+  const main = html.slice(html.indexOf("<main"), html.indexOf("</main>"));
+  assert.ok(main.includes(first[0]), "описове посилання - у <main>");
+  assert.match(main, /готуємо EvidujZdarma/);
+  assert.match(main, /href="https:\/\/evidujzdarma\.cz\/musim-evidovat"/);
+  const footer = html.slice(html.indexOf("<footer"), html.indexOf("</footer>"));
+  assert.match(footer, /<a href="https:\/\/evidujzdarma\.cz\/">EvidujZdarma<\/a> - безкоштовна каса для EET 2\.0/);
+});
+
+test("EvidujZdarma: підвал політики, умов і сторінки видалення даних", () => {
+  for (const page of ["privacy", "terms", "data-deletion"]) {
+    const h = readFileSync(new URL(`../public/${page}.html`, import.meta.url), "utf8");
+    const foot = h.slice(h.lastIndexOf("<footer"), h.lastIndexOf("</footer>"));
+    assert.match(foot, /<a href="https:\/\/evidujzdarma\.cz\/">EvidujZdarma<\/a> - a free cash register for the Czech EET 2\.0 sales records, in preparation\./, page);
+    assert.match(foot, /<a href="\/">Holos by Rozum<\/a>/, page);
+    assert.ok(!foot.includes(`href="/${page}"`), page + ": без посилання на саму себе");
+    assert.doesNotMatch(h, /—/, page);
+  }
+});

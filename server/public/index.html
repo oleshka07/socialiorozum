@@ -415,6 +415,16 @@ section{position:relative;scroll-margin-top:92px}
 .final h2{font-size:clamp(34px,4.6vw,60px);max-width:720px}
 .final .lead{max-width:560px}
 .final small{display:block;margin-top:14px;color:var(--on2);font-size:14px}
+/* від тієї ж команди: сестринський проєкт */
+.sis{padding:64px 0}
+.sis-in{max-width:700px}
+.sis h2{font-size:clamp(22px,2.4vw,28px)}
+.sis p{margin-top:12px;color:var(--ink2);font-size:16px}
+.sis p a{color:var(--berry);font-weight:600;text-underline-offset:3px}
+.sis-badge{display:inline-flex;align-items:center;gap:10px;min-height:48px;margin-top:22px;padding:10px 16px;border-radius:14px;border:1px solid var(--line);background:#fff;color:var(--wine);font-weight:600;font-size:15px;line-height:1.2;text-decoration:none;transition:border-color .18s,box-shadow .18s}
+.sis-badge:hover{border-color:var(--berry);box-shadow:0 10px 28px rgba(122,15,61,.12)}
+.sis-badge i{display:inline-flex;flex-shrink:0;width:22px;height:22px;align-items:center;justify-content:center;border-radius:50%;background:linear-gradient(135deg,var(--b1),var(--b2))}
+.sis-badge svg{width:14px;height:14px}
 /* підвал */
 footer{background:#120910;color:var(--on2);padding:64px 0 40px;font-size:15px}
 .ft{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:32px}
@@ -424,6 +434,7 @@ footer{background:#120910;color:var(--on2);padding:64px 0 40px;font-size:15px}
 .ft a:hover{color:#fff}
 .ft p{margin-top:14px;max-width:320px}
 .copy{margin-top:48px;padding-top:22px;border-top:1px solid var(--dline);font-size:13.5px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.copy a{color:var(--on);text-underline-offset:3px}
 @media (max-width:820px){.ft{grid-template-columns:1fr 1fr}}
 /* поява при прокрутці */
 .js .rv{opacity:0;transform:translateY(18px);transition:opacity .6s var(--ease),transform .6s var(--ease)}
@@ -788,6 +799,18 @@ footer{background:#120910;color:var(--on2);padding:64px 0 40px;font-size:15px}
   </div>
 </section>
 
+<!-- 15 ВІД ТІЄЇ Ж КОМАНДИ -->
+<section class="sis lt" id="team" aria-labelledby="h-team">
+  <div class="wrap">
+    <div class="sis-in rv">
+      <h2 id="h-team">Від тієї ж команди</h2>
+      <p>За Holos стоїть Swipe Scape s.r.o. з Карлових Вар. Якщо в тебе бізнес у Чехії: з 1 січня 2027 року там повертається EET - електронний облік виторгу, тепер не лише готівки, а й оплат карткою чи QR-кодом на місці.</p>
+      <p>Під це ми готуємо EvidujZdarma - <a href="https://evidujzdarma.cz/">безкоштовну касу для EET 2.0</a>, що працюватиме в телефоні навіть без звʼязку. Чи стосується це тебе, покаже <a href="https://evidujzdarma.cz/musim-evidovat">тест <span lang="cs">«Musím evidovat?»</span></a>: хвилина, безкоштовно й без реєстрації.</p>
+      <a class="sis-badge" href="https://evidujzdarma.cz/" title="EvidujZdarma - безкоштовна каса для EET 2.0 у Чехії"><i aria-hidden="true"><svg viewBox="0 0 18 18"><path d="M5 9.3l2.6 2.6L13 6.5" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></i>EET 2.0 безкоштовно - EvidujZdarma</a>
+    </div>
+  </div>
+</section>
+
 </main>
 
 <footer>
@@ -798,7 +821,7 @@ footer{background:#120910;color:var(--on2);padding:64px 0 40px;font-size:15px}
       <div><h4>Акаунт</h4><a href="/register">Створити акаунт</a><a href="/login">Увійти</a><a href="/forgot">Забули пароль?</a></div>
       <div><h4>Правове</h4><a href="/privacy">Політика конфіденційності</a><a href="/terms">Умови користування</a><a href="/data-deletion">Видалення даних</a></div>
     </div>
-    <div class="copy"><span>© 2026 ROZUM · Holos by Rozum</span><span>holos.rozum.one</span></div>
+    <div class="copy"><span>© 2026 ROZUM · Holos by Rozum</span><span>Також від нас: <a href="https://evidujzdarma.cz/">EvidujZdarma</a> - безкоштовна каса для EET 2.0</span></div>
   </div>
 </footer>
 
