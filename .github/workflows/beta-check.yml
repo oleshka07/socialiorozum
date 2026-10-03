@@ -50,6 +50,9 @@ name: beta-check
 # блок «Від тієї ж команди», посилання без rel/UTM, підвали юридичних сторінок; прод поки без змін. Нічого не пише.
 # Далі - ПРОД після промоушну 00f0508 (посилання на EvidujZdarma): що віддає holos.rozum.one ззовні (лендинг, юридичні
 # сторінки, robots, sitemap, meta robots), стара адреса; на сервері - HEAD, контейнер, health. Нічого не пише.
+# Далі - під індексацію holos (Search Console): хто тримає DNS rozum.one (NS, RDAP), чи є вже TXT-записи підтвердження
+# Google/інших, заголовки X-Robots-Tag і meta robots сторінок, що знають пошуковики (DuckDuckGo/Bing site:), що роблять
+# EvidujZdarma (robots, llms.txt, теги підтвердження - зразок), і чи заходять Googlebot/Bingbot (журнал nginx, лише боти).
 
 on:
   push:
@@ -66,31 +69,55 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: holos.rozum.one - EvidujZdarma links as served (runner, read-only)
+      - name: DNS, headers, what search engines know (runner, read-only)
         run: |
-          show() {
-            python3 - "$1" <<'EOF'
-          import re,sys
-          s=open(sys.argv[1],encoding='utf-8',errors='replace').read()
-          links=re.findall(r'(<a\b[^>]*href="https://evidujzdarma\.cz[^"]*"[^>]*>)(.*?)</a>',s,re.S)
-          print('   посилань на EvidujZdarma:',len(links))
-          for tag,txt in links: print('   ·',re.sub(r'<[^>]+>','',txt).strip(),'|',tag[:150])
-          m=s.find('<main'); e=s.find('</main>')
-          if m>=0: print('   перше - у <main>:', bool(links) and s.find(links[0][0])<e)
-          r=re.search(r'<meta name="robots" content="([^"]*)"',s); print('   meta robots:', r.group(1) if r else '-')
-          print('   «Від тієї ж команди»:', 'Від тієї ж команди' in s, '· «готуємо»:', 'готуємо EvidujZdarma' in s, '· rel/target/utm:', sum(1 for t,_ in links if re.search(r'\b(rel|target)=|utm_',t)))
-          EOF
-          }
-          for pth in / /privacy /terms /data-deletion; do
-            echo "== holos.rozum.one$pth: $(curl -sS -o /tmp/p.html -w '%{http_code} %{size_download} Б' "https://holos.rozum.one$pth")"
-            show /tmp/p.html
+          sudo apt-get -qq install -y dnsutils >/dev/null 2>&1 || true
+          echo "== NS rozum.one: $(dig +short NS rozum.one | tr '\n' ' ')"
+          echo "== SOA: $(dig +short SOA rozum.one)"
+          echo "== A rozum.one: $(dig +short A rozum.one | tr '\n' ' ') · holos: $(dig +short A holos.rozum.one | tr '\n' ' ') · CNAME holos: $(dig +short CNAME holos.rozum.one)"
+          echo "== TXT rozum.one:"; dig +short TXT rozum.one | sed 's/^/   /'
+          echo "== TXT holos.rozum.one:"; dig +short TXT holos.rozum.one | sed 's/^/   /'
+          echo "== TXT _dmarc: $(dig +short TXT _dmarc.rozum.one)"
+          echo "== MX rozum.one: $(dig +short MX rozum.one | tr '\n' ' ')"
+          echo "== RDAP rozum.one (реєстратор):"
+          curl -sS --max-time 20 https://rdap.org/domain/rozum.one -L | python3 -c "
+          import json,sys
+          try: d=json.load(sys.stdin)
+          except Exception as e: print('   не JSON',e); sys.exit()
+          for e in d.get('entities',[]):
+            roles=e.get('roles',[]); v=e.get('vcardArray',[None,[]])[1]
+            fn=[x[3] for x in v if x and x[0]=='fn']
+            if 'registrar' in roles or 'reseller' in roles: print('  ',roles,fn)
+          for ev in d.get('events',[]): print('   ',ev.get('eventAction'),ev.get('eventDate'))
+          print('   nameservers:',[n.get('ldhName') for n in d.get('nameservers',[])])
+          " || true
+          echo "== https://rozum.one: $(curl -sS -o /tmp/r.html -w '%{http_code} → %{redirect_url}' --max-time 15 https://rozum.one/) · title: $(grep -o '<title>[^<]*' /tmp/r.html | head -1)"
+          for pth in / /login /register /app /forgot /tgapp /privacy; do
+            h=$(curl -sS -D - -o /tmp/p.html --max-time 15 "https://holos.rozum.one$pth" | tr -d '\r')
+            echo "== holos$pth: $(echo "$h" | head -1) · x-robots: $(echo "$h" | grep -i '^x-robots-tag' | cut -d' ' -f2-) · meta: $(grep -o '<meta name=\"robots\" content=\"[^\"]*' /tmp/p.html | cut -d'"' -f4)"
           done
-          echo "== robots.txt"; curl -sS https://holos.rozum.one/robots.txt
-          echo "== sitemap.xml"; curl -sS https://holos.rozum.one/sitemap.xml | grep -o '<loc>[^<]*</loc>'
-          echo "== стара адреса /: $(curl -sS -o /dev/null -w '%{http_code} → %{redirect_url}' https://socialio.rozum.one/)"
-          echo "== /app: $(curl -sS -o /dev/null -w '%{http_code}' https://holos.rozum.one/app) · /login: $(curl -sS -o /dev/null -w '%{http_code}' https://holos.rozum.one/login) · /health: $(curl -sS -o /dev/null -w '%{http_code}' https://holos.rozum.one/health)"
+          echo "== verification-теги на holos /:"; curl -sS https://holos.rozum.one/ | grep -oiE '<meta name="(google-site-verification|msvalidate.01|seznam-wmt|yandex-verification|facebook-domain-verification)"[^>]*>' || echo "   нема"
+          echo "== EvidujZdarma (зразок):"
+          for pth in /robots.txt /llms.txt /sitemap.xml /.well-known/security.txt; do
+            echo "-- evidujzdarma.cz$pth: $(curl -sS -o /tmp/e.txt -w '%{http_code} %{content_type}' --max-time 15 "https://evidujzdarma.cz$pth")"
+            head -c 900 /tmp/e.txt | sed 's/^/   /'; echo
+          done
+          curl -sS https://evidujzdarma.cz/ | grep -oiE '<meta name="(google-site-verification|msvalidate.01|seznam-wmt|yandex-verification)"[^>]*>' | sed 's/content="[^"]*"/content="…"/' || echo "   теги: нема"
+          echo "== що знають пошуковики (DuckDuckGo html → Bing):"
+          for q in holos.rozum.one socialio.rozum.one; do
+            curl -sS --max-time 20 -A 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36' "https://html.duckduckgo.com/html/?q=site%3A$q" -o /tmp/d.html -w "-- ddg site:$q %{http_code}\n"
+            grep -oE 'class="result__a" href="[^"]*"' /tmp/d.html | head -8 | sed 's/^/   /' || true
+            grep -c 'result__a' /tmp/d.html | sed 's/^/   результатів: /'
+          done
+          for q in holos.rozum.one socialio.rozum.one; do
+            curl -sS --max-time 20 -A 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36' "https://www.bing.com/search?q=site%3A$q&setlang=en-US&cc=US" -o /tmp/b.html -w "-- bing site:$q %{http_code}\n"
+            grep -oE '<li class="b_algo"[^>]*>.{0,400}' /tmp/b.html | grep -oE 'href="https?://[^"]*"' | sort -u | head -8 | sed 's/^/   /' || true
+          done
+          curl -sS --max-time 20 -A 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36' "https://www.google.com/search?q=site:holos.rozum.one&hl=en&gbv=1" -o /tmp/g.html -w "-- google site:holos %{http_code}\n" || true
+          grep -oE 'https?://(holos|socialio)\.rozum\.one[^"&<]*' /tmp/g.html | sort -u | head -8 | sed 's/^/   /' || true
+          grep -oiE 'did not match any documents|unusual traffic|consent' /tmp/g.html | head -2 | sed 's/^/   /' || true
 
-      - name: prod version and container (server, read-only)
+      - name: search bots in nginx logs, app settings keys (server, read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -98,13 +125,20 @@ jobs:
           key: ${{ secrets.HETZNER_SSH_KEY }}
           command_timeout: 3m
           script: |
-            echo "== HEAD прод: $(git -C /opt/socialio rev-parse --short HEAD) · бета: $(git -C /opt/socialio-beta rev-parse --short HEAD)"
-            cd /opt/socialio/server && docker compose ps --format '{{.Name}} {{.Status}}' 2>/dev/null | sed 's/^/   /'
-            echo "== health 8080: $(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/health)"
-            echo "== у контейнері: $(docker compose exec -T app sh -c 'grep -c "evidujzdarma.cz" public/index.html public/privacy.html public/terms.html public/data-deletion.html' 2>/dev/null | tr '\n' ' ')"
-            echo "== журнал app за 10 хв (warn/error):"
-            docker compose logs --since 10m app 2>/dev/null | grep -iE '"level":"(warn|error)"|error|warn' | tail -8 | cut -c1-220 || true
-            echo "   (кінець)"
+            echo "== HEAD прод: $(git -C /opt/socialio rev-parse --short HEAD)"
+            echo "== журнали nginx:"; ls -la /var/log/nginx/ 2>/dev/null | head -30
+            echo "== формат: $(grep -h 'log_format\|access_log' /etc/nginx/nginx.conf /etc/nginx/sites-enabled/* 2>/dev/null | sort -u | head -8 | tr '\n' '|')"
+            echo "== x-robots у nginx: $(grep -rih 'x-robots' /etc/nginx/ 2>/dev/null | head -3)"
+            for bot in Googlebot bingbot YandexBot SeznamBot DuckDuckBot Applebot GPTBot ClaudeBot PerplexityBot; do
+              n=$(zcat -f /var/log/nginx/access.log* 2>/dev/null | grep -c "$bot")
+              echo "-- $bot: $n рядків (усі хости)"
+            done
+            echo "== Googlebot/bingbot останні 25 (дата, запит, код, хост якщо є):"
+            zcat -f /var/log/nginx/access.log* 2>/dev/null | grep -E 'Googlebot|bingbot' | awk '{print $4, $6, $7, $9}' | tail -25
+            echo "== holos-специфічні журнали:"
+            for f in /var/log/nginx/*holos* ; do [ -e "$f" ] && echo "-- $f: Googlebot $(zcat -f $f* | grep -c Googlebot) · bingbot $(zcat -f $f* | grep -c bingbot)"; done
+            echo "== ключі app_setting (лише назви):"
+            cd /opt/socialio/server && docker compose exec -T db psql -U socialio -d socialio -Atc "select key from app_setting order by key" 2>/dev/null | sed 's/^/   /' || docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select key from app_setting order by key"' | sed 's/^/   /'
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
