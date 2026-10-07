@@ -50,7 +50,7 @@ import { startLifecycleWorker } from "./lifecycle.js";
 import { startDigest } from "./digest.js";
 import { startCommentNotify, notifyOn, setNotify } from "./tgcomments.js";
 import { startAlerts, alertsView, saveAlertSettings, sendTestAlert, sendDigest, resolveAlert, runProbes, probeBuddy } from "./alerts.js";
-import { botBrands, setBotBrand } from "./tgbrand.js";
+import { botBrands, setBotBrand, homeIfLost } from "./tgbrand.js";
 import { moveMtSession } from "./tgmontage.js";
 import { startMetrics, networkBenchmarks, collectWorkspace, analyticsFor, bestTimesFor, bestTimeAuto } from "./metrics.js";
 import { scheduleConflicts, describeConflicts } from "./schedule.js";
@@ -77,7 +77,7 @@ import { linkSettings, saveLinkSettings, bioOf, saveBio, renderBio, resolveShort
 import { isBot } from "./linkutil.js";
 import { evergreenView, saveEgSettings, addEvergreen, removeEvergreen, forceEvergreen, makeRepeat, evergreenRunFor, startEvergreen } from "./evergreen.js";
 import { handleBody, wantsSse, sseEncode, resolveToken, mcpTokenFor, issueMcpToken, revokeMcpToken, mcpUrl, mcpLastUsed, TOOLS as MCP_TOOLS } from "./mcp.js";
-import { listWorkspaces, isMember, isOwner, members as wsMembers, grantAccess, revokeAccess, setTitle as wsSetTitle, addMember, deleteBrand, workspaceTitle } from "./workspaces.js";
+import { listWorkspaces, isMember, members as wsMembers, revokeAccess, setTitle as wsSetTitle, addMember, deleteBrand, workspaceTitle } from "./workspaces.js";
 import { postMediaList, mediaCounts, setPostMediaOrder, setPostVideo, appendPostMedia, removePostMedia, promoteIfCoverless, healCoverless, SlideError, MAX_SLIDES, altToOriginal } from "./slides.js";
 import { renderCarousel, CAROUSEL_THEMES } from "./carousel.js";
 import { uploadLinkState, takeUploadSlot, markUploaded, refundUploadSlot, uploadPageHtml, uploadResultText, uploadScript, uploadUrl, UPLOAD_FILE_MAX, UPLOAD_TEXT, type UploadResult } from "./uploadlink.js";
@@ -86,6 +86,9 @@ import { sttChoice, sttAvailable } from "./stt.js";
 import { oauthWhy, oauthFailQuery } from "./oauthwhy.js";
 import { renderLanding, robotsTxt, sitemapXml, llmsTxt, SITEMAP_PAGES, type LandingEnv } from "./landing.js";
 import { initSeo, startIndexNow, indexNowKeyPath, indexNowKey, sitemapDates, seoView } from "./seo.js";
+import { routeCap, tgRouteCap, can, deniedText, normRole, ROLE_LABEL, ROLE_ICON, ROLE_HINT, ASSIGNABLE, maskEmail, type Role, type Cap } from "./roles.js";
+import { runAs, actorId, mayAutoApprove, type Actor } from "./actor.js";
+import { teamOf, addToTeam, resendInvite, cancelInvite, changeRole, leaveBrand, acceptInvitesByEmail, acceptInviteToken, inviteInfo, isInviteToken, notifyReviewResult, roleIn, authorEditBlock, submitForReview } from "./team.js";
 
 // ============================================================================
 // ЗМІСТ ФАЙЛУ (186 роутів; шукай за банером «===== НАЗВА =====» або шляхом роуту)
@@ -203,6 +206,8 @@ if (LEGACY.size) {
 // ---- БЕТА: PIN-гейт (env BETA_PIN; на проді не заданий - блок неактивний). ----
 // Відкриті без PIN: /health, вебхуки (Telegram/Fireflies шлють POST без кукі) і /media/
 // (Telegram/Meta ТЯГНУТЬ картинку по URL при публікації - PIN зламав би фото-пости).
+// Після PIN людина лишається на тій самій адресі: посилання з листа-запрошення (/invite/<токен>) чи
+// на конкретний пост інакше губилось би (раніше після PIN завжди відкривався /app).
 if (env.beta.pin) {
   const PIN_COOKIE = "beta_ok";
   const pinToken = createHash("sha256").update(env.beta.pin + env.sessionSecret).digest("hex").slice(0, 32);
@@ -211,7 +216,7 @@ if (env.beta.pin) {
 <body><div class="c"><div class="b">BETA</div><h3 style="margin:0 0 16px;font-weight:600">Тестове середовище ${BRAND}</h3>
 <input id="p" type="password" inputmode="numeric" maxlength="8" placeholder="PIN" autofocus>
 <button onclick="go()">Увійти</button><div id="e"></div></div>
-<script>function go(){fetch('/beta-pin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin:document.getElementById('p').value})}).then(r=>{if(r.ok)location.href='/app';else document.getElementById('e').textContent='Невірний PIN';});}
+<script>function go(){fetch('/beta-pin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin:document.getElementById('p').value})}).then(r=>{if(r.ok)location.href=(location.pathname==='/'?'/app':location.href);else document.getElementById('e').textContent='Невірний PIN';});}
 document.getElementById('p').addEventListener('keydown',e=>{if(e.key==='Enter')go();});</script></body></html>`;
   app.addHook("onRequest", async (req: any, reply) => {
     const url = (req.raw.url || "").split("?")[0];
@@ -243,18 +248,55 @@ const cookieOpts = { httpOnly: true, secure: true, sameSite: "lax" as const, pat
 const emailOk = (e: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
 
 // ---- захист API: усе під /api/, крім /api/auth/*, потребує сесії + підтвердженої пошти ----
-app.addHook("preHandler", async (req: any, reply) => {
+// 👥 І ролі в бренді (roles.ts): що можна - за шаблоном маршруту, в одному місці на всі 300+ роутів.
+// Чого нема в переліку ролей, те, що змінює, лишається лише для «Повного доступу» - забутий роут
+// закритий, а не відкритий. Автор, крім того, змінює лише незатверджені чернетки, що ще не вийшли.
+// Хук callback-стилем: обробник маршруту виконується ВСЕРЕДИНІ runAs, тож код глибше (вставка поста,
+// монтаж, фонова джоба) знає, хто діє (actor.ts) - і пише автора поста, і не затверджує сам пост автора.
+app.addHook("preHandler", (req: any, reply, done) => {
+  guardApi(req, reply).then((who) => {
+    if (reply.sent) return;              // відмову вже надіслано
+    if (!who) return done();             // поза захищеним /api/ - як і було
+    runAs(who, () => done());
+  }, (e) => done(e));
+});
+async function guardApi(req: any, reply: any): Promise<Actor | null> {
   const url = (req.raw.url || "").split("?")[0];
-  if (!url.startsWith("/api/")) return;
-  if (url.startsWith("/api/auth/")) return;
-  if (url.startsWith("/api/webhooks/")) return;
-  if (url.startsWith("/api/tg/")) return;   // Mini App: перевірка не кукою, а підписом initData (tgauth.ts)
+  if (!url.startsWith("/api/")) return null;
+  if (url.startsWith("/api/auth/")) return null;
+  if (url.startsWith("/api/webhooks/")) return null;
+  const tpl = req.routeOptions?.url as string | undefined;
+  if (url.startsWith("/api/tg/")) {
+    // Mini App: перевірка не кукою, а підписом initData (tgauth.ts) - тут, один раз на запит
+    const u = await tgUser(req);
+    if (!u) { reply.code(401).send({ error: "Відкрий застосунок кнопкою в боті (підпис Telegram недійсний або кабінет не підключено)" }); return null; }
+    const cap = tgRouteCap(req.method, tpl);
+    if (!can(u.role, cap)) { reply.code(403).send({ error: deniedText(u.role, cap), code: "role" }); return null; }
+    const pid = req.params?.postId;
+    if (u.role === "author" && cap === "draft" && pid) {
+      const why = await authorBlock(u.ws, pid, u.userId, req.method === "DELETE" && tpl === "/api/tg/post/:postId");
+      if (why) { reply.code(403).send({ error: why, code: "role" }); return null; }
+    }
+    req.tgu = u;
+    auth.touchWorkspaceActive(u.ws); // Mini App - теж робота в кабінеті (інакше прибиральник вважав би людину неактивною)
+    return { userId: u.userId, role: u.role };
+  }
   const user = await auth.userBySession(req.cookies?.[COOKIE]);
-  if (!user) return reply.code(401).send({ error: "Не авторизовано" });
-  if (!user.email_verified) return reply.code(403).send({ error: "Пошта не підтверджена" });
+  if (!user) { reply.code(401).send({ error: "Не авторизовано" }); return null; }
+  if (!user.email_verified) { reply.code(403).send({ error: "Пошта не підтверджена" }); return null; }
   req.user = user;
   auth.touchActive(user.id).catch(() => {}); // оновлення активності (throttled усередині), не блокує запит
-});
+  const role = normRole(user.role);
+  const cap = routeCap(req.method, tpl, req.params);
+  if (!can(role, cap)) { reply.code(403).send({ error: deniedText(role, cap), code: "role", role, need: cap }); return null; }
+  const pid = req.params?.postId;
+  if (role === "author" && cap === "draft" && pid) {
+    const why = await authorBlock(user.workspace_id, pid, user.id, req.method === "DELETE" && tpl === "/api/posts/:postId");
+    if (why) { reply.code(403).send({ error: why, code: "role", role }); return null; }
+  }
+  return { userId: user.id, role };
+}
+const authorBlock = authorEditBlock;
 
 // володіння run/post у межах workspace юзера
 const cancelRun = new Set<string>();
@@ -298,6 +340,15 @@ app.post("/api/auth/register", async (req: any, reply) => {
   if (await auth.userByEmail(email)) return reply.code(409).send({ error: "Такий email вже зареєстрований" });
   const user = await auth.createUser(email, password);
   await logEvent("info", "register", `новий акаунт: ${email}`, null, user.id);
+  // 👥 реєстрація з листа-запрошення: посилання прийшло саме в цю скриньку - пошту вважаємо
+  // перевіреною (окремий лист підтвердження був би зайвим колом), і людина одразу в бренді
+  const inv = isInviteToken(req.body?.invite) ? await acceptInviteToken(req.body.invite, user.id, email) : null;
+  if (inv?.ok) {
+    await auth.markVerified(user.id);
+    await acceptInvitesByEmail(user.id, email);
+    reply.setCookie(COOKIE, await auth.createSession(user.id, inv.accepted.workspace_id), cookieOpts);
+    return { ok: true, loggedIn: true, brand: inv.accepted.title };
+  }
   const token = await auth.createEmailToken(user.id, "verify");
   try { await sendVerifyEmail(email, `${env.appBaseUrl}/api/auth/verify?token=${token}`); }
   catch (e: any) { await logEvent("error", "email", `verify-лист НЕ надіслано (${email}): ${e.message}`, null, user.id); }
@@ -309,7 +360,10 @@ app.get("/api/auth/verify", async (req: any, reply) => {
   const userId = await auth.consumeEmailToken(token, "verify");
   if (!userId) return reply.redirect("/login?error=verify");
   await auth.markVerified(userId);
-  const sid = await auth.createSession(userId);
+  // 👥 пошту щойно підтверджено - запрошення в бренди на неї стають доступом; людина одразу в останньому
+  const em = (await one<{ email: string }>(`select email from app_user where id=$1`, [userId]))?.email || "";
+  const acc = em ? await acceptInvitesByEmail(userId, em).catch(() => []) : [];
+  const sid = await auth.createSession(userId, acc.length ? acc[acc.length - 1].workspace_id : null);
   reply.setCookie(COOKIE, sid, cookieOpts);
   return reply.redirect("/app");
 });
@@ -327,9 +381,11 @@ app.post("/api/auth/login", async (req: any, reply) => {
   }
   if (!u.email_verified) return reply.code(403).send({ error: "Підтвердіть пошту (перевірте лист)" });
   if (u.deleted_at) { await auth.restoreAccount(u.id); await logEvent("info", "account", `відновлено акаунт при вході: ${email}`, null, u.id); }
-  const sid = await auth.createSession(u.id);
+  // 👥 вхід за посиланням із листа-запрошення: приймаємо САМЕ його (пошта збігається - лист прийшов у цю скриньку)
+  const inv = isInviteToken(req.body?.invite) ? await acceptInviteToken(req.body.invite, u.id, email) : null;
+  const sid = await auth.createSession(u.id, inv?.ok ? inv.accepted.workspace_id : null);
   reply.setCookie(COOKIE, sid, cookieOpts);
-  return { ok: true };
+  return { ok: true, ...(inv?.ok ? { brand: inv.accepted.title } : inv ? { invite: inv.reason } : {}) };
 });
 
 app.post("/api/auth/logout", async (req: any, reply) => {
@@ -471,6 +527,15 @@ app.post("/api/account/reset", async (req: any, reply) => {
   return { ok: true, message: "Готово - кабінет очищено. Зараз почнеться онбординг." };
 });
 
+// ---- 👥 запрошення в бренд: що за запрошення (сторінка входу/реєстрації показує його й підставляє пошту) ----
+app.get("/api/auth/invite/:token", async (req: any, reply) => {
+  if (rateLimited("invinfo:" + req.ip, 30)) return reply.code(429).send({ error: "Забагато запитів" });
+  const i = await inviteInfo(req.params.token);
+  if (!i) return reply.code(404).send({ error: "Запрошення не знайдено: посилання неповне або його вже замінили новим листом." });
+  return { email: i.email, brand: i.brand, role: i.role, roleLabel: `${ROLE_ICON[i.role]} ${ROLE_LABEL[i.role]}`, roleHint: ROLE_HINT[i.role],
+    by: i.by, expired: i.expired, accepted: i.accepted, hasAccount: !!(await auth.userByEmail(i.email)) };
+});
+
 // ---- Google OAuth (вхід через Google; обходить email-верифікацію) ----
 const GOOGLE_REDIRECT = `${env.appBaseUrl}/api/auth/google/callback`;
 const stateCookie = { httpOnly: true, secure: true, sameSite: "lax" as const, path: "/", maxAge: 600 };
@@ -511,7 +576,9 @@ app.get("/api/auth/google/callback", async (req: any, reply) => {
     const info: any = await ur.json();
     if (!info.email || info.email_verified === false) throw new Error("google не повернув підтверджений email");
     const user = await auth.findOrCreateGoogleUser(info.email, info.sub || "");
-    reply.setCookie(COOKIE, await auth.createSession(user.id), cookieOpts);
+    // 👥 Google підтвердив пошту - запрошення в бренди на неї стають доступом
+    const acc = await acceptInvitesByEmail(user.id, String(info.email).toLowerCase()).catch(() => []);
+    reply.setCookie(COOKIE, await auth.createSession(user.id, acc.length ? acc[acc.length - 1].workspace_id : null), cookieOpts);
     await logEvent("info", "auth", `Google-вхід: ${info.email}`, null, user.id);
     return reply.redirect("/app");
   } catch (e: any) {
@@ -1140,10 +1207,13 @@ app.get("/api/channels/status", async (req: any) => {
 // повний стан поста для композера (текст, канали, фото)
 app.get("/api/posts/:postId/full", async (req: any, reply) => {
   const p = await one(`select p.id, p.content, p.review, p.channels, p.headline, p.rubric, p.intent, p.format, p.image_prompt, p.slides_text, p.first_comment, (p.image_base is not null) as has_base, ma.filename as media_filename,
-       (select c.filename from media_asset c where c.id=p.reel_cover) as cover_filename
+       (select c.filename from media_asset c where c.id=p.reel_cover) as cover_filename,
+       p.review_note, p.submitted_at, (p.created_by = $3) as mine,
+       (select email from app_user where id=p.created_by) as created_by_email,
+       (select email from app_user where id=p.submitted_by) as submitted_by_email
      from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      left join media_asset ma on ma.id=p.media_id
-     where p.id=$1 and s.workspace_id=$2`, [req.params.postId, req.user.workspace_id]);
+     where p.id=$1 and s.workspace_id=$2`, [req.params.postId, req.user.workspace_id, req.user.id]);
   if (!p) return reply.code(404).send({ error: "пост не знайдено" });
   // 🖼 кадри поста (обкладинка першою) - для смужки кадрів і прев'ю каруселі; 🎬 відео - з тривалістю
   return { ...p, media: (await postMediaList(p.id)).map(mediaOut) };
@@ -1434,9 +1504,9 @@ app.post("/api/posts/:postId/repeat", async (req: any, reply) => {
     const hours = Math.max(1, Math.min(168, Number(req.body?.hours) || 48));
     // дубль їде лише в Threads (там повтор іншій аудиторії - валідована практика; інші мережі дублікати не люблять)
     const np = await one<{ id: string }>(
-      `insert into post(run_id, stage, content, image_prompt, rubric, media_id, channels, repeat_of)
-       values($1,'final',$2,$3,$4,$5,$6::jsonb,$7) returning id`,
-      [post.run_id, fresh, post.image_prompt, post.rubric, post.media_id, JSON.stringify({ threads: { on: true } }), req.params.postId]);
+      `insert into post(run_id, stage, content, image_prompt, rubric, media_id, channels, repeat_of, created_by)
+       values($1,'final',$2,$3,$4,$5,$6::jsonb,$7,$8) returning id`,
+      [post.run_id, fresh, post.image_prompt, post.rubric, post.media_id, JSON.stringify({ threads: { on: true } }), req.params.postId, actorId()]);
     const when = new Date(Date.now() + hours * 3600e3).toISOString();
     await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [np!.id, when]);
     return { ok: true, id: np!.id, scheduledAt: when };
@@ -1454,8 +1524,8 @@ app.post("/api/posts/:postId/expand-thread", async (req: any, reply) => {
   try {
     const full = await expandTake(ws, post.content);
     const np = await one<{ id: string }>(
-      `insert into post(run_id, stage, content, rubric, channels) values($1,'final',$2,$3,$4::jsonb) returning id`,
-      [post.run_id, full, post.rubric, JSON.stringify({ threads: { on: true, thread: true } })]);
+      `insert into post(run_id, stage, content, rubric, channels, created_by) values($1,'final',$2,$3,$4::jsonb,$5) returning id`,
+      [post.run_id, full, post.rubric, JSON.stringify({ threads: { on: true, thread: true } }), actorId()]);
     return { ok: true, id: np!.id };
   } catch (e: any) { await logEvent("error", "expand-thread", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
 });
@@ -1469,10 +1539,10 @@ app.post("/api/threads/starter-pack", async (req: any, reply) => {
       `insert into source(workspace_id, origin, title, transcript) values($1,'takes','🚀 Стартовий пакет Threads',$2) returning id`,
       [ws, pack.intro + "\n\n" + pack.pinned]);
     const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
-    const intro = await one<{ id: string }>(`insert into post(run_id, stage, content, channels) values($1,'final',$2,$3::jsonb) returning id`,
-      [run!.id, pack.intro, JSON.stringify({ threads: { on: true } })]);
-    const pinned = await one<{ id: string }>(`insert into post(run_id, stage, content, channels) values($1,'final',$2,$3::jsonb) returning id`,
-      [run!.id, pack.pinned, JSON.stringify({ threads: { on: true } })]);
+    const intro = await one<{ id: string }>(`insert into post(run_id, stage, content, channels, created_by) values($1,'final',$2,$3::jsonb,$4) returning id`,
+      [run!.id, pack.intro, JSON.stringify({ threads: { on: true } }), actorId()]);
+    const pinned = await one<{ id: string }>(`insert into post(run_id, stage, content, channels, created_by) values($1,'final',$2,$3::jsonb,$4) returning id`,
+      [run!.id, pack.pinned, JSON.stringify({ threads: { on: true } }), actorId()]);
     return { ok: true, bio: pack.bio, introId: intro!.id, pinnedId: pinned!.id };
   } catch (e: any) { await logEvent("error", "threads-starter", e.message, null, req.user.id); return reply.code(500).send({ error: e.message }); }
 });
@@ -1493,13 +1563,15 @@ async function inboxView(req: any, nets?: InboxNet[]) {
   const counts = Object.fromEntries(INBOX_NETS.map((n) => [n, inbox.items.filter((x) => x.net === n).length]));
   if (String(req.query?.countOnly || "") === "1") return { count: inbox.items.length, counts, needs: inbox.needs, connected: inbox.connected };
   const items = inbox.items.slice(0, 30);
-  const drafts = await inboxDrafts(ws, items);
+  // AI-чернетки відповідей коштують грошей і потрібні лише тим, хто відповідає (редактор і вище)
+  const canReply = can(req.user.role, "publish");
+  const drafts = canReply ? await inboxDrafts(ws, items) : {} as Record<string, string>;
   // назву акаунта показуємо, коли в мережі бренду їх кілька (інакше - шум)
   const multi = new Set(INBOX_NETS.filter((n) => (inbox.accounts[n] || 0) > 1));
   return {
     items: items.map((it) => ({ net: it.net, commentId: it.commentId, username: it.username, comment: it.comment, postTitle: it.postTitle, timestamp: it.timestamp,
       permalink: it.permalink, account: it.account, accountName: multi.has(it.net) ? it.accountName : "", draft: drafts[it.commentId] || "" })),
-    counts, needs: inbox.needs, errors: inbox.errors, connected: inbox.connected,
+    counts, needs: inbox.needs, errors: inbox.errors, connected: inbox.connected, canReply,
     hint: inbox.connected.length ? "" : "Підключи Instagram, Facebook чи Threads - тут зʼявляться коментарі під твоїми постами.",
   };
 }
@@ -1677,7 +1749,7 @@ app.post("/api/lead-magnets/build", async (req: any, reply) => {
     const src = await one<{ id: string }>(`insert into source(workspace_id, origin, title, transcript) values($1,'idea',$2,$3) returning id`,
       [ws, `🧲 ${title}`.slice(0, 200), `Лід-магніт: ${title}. ${what}`.slice(0, 2000)]);
     const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
-    const post = await one<{ id: string }>(`insert into post(run_id, stage, content) values($1,'final',$2) returning id`, [run!.id, text]);
+    const post = await one<{ id: string }>(`insert into post(run_id, stage, content, created_by) values($1,'final',$2,$3) returning id`, [run!.id, text, actorId()]);
     return { ok: true, postId: post!.id };
   } catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
@@ -1801,6 +1873,9 @@ app.get("/api/guide/next", async (req: any) => {
   const ws = req.user.workspace_id;
   const off = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='guide_off'`, [ws]);
   if (off?.content === "1") return { off: true, tips: [] };
+  // 👥 поради сови - про налаштування бренду (канали, стратегія, план); людині без «Повного доступу»
+  // вони лише показували б кнопки, які їй не відкриються
+  if (!can(req.user.role, "manage")) return { tips: [] };
   const S: Record<string, string> = {};
   for (const r of await q<{ key: string; content: string }>(`select key, content from settings_block where workspace_id=$1`, [ws])) S[r.key] = (r.content || "").trim();
   const [chan, plan, drafts, approvedUnsched, noImg, src, thConn, thToday, ideas] = await Promise.all([
@@ -2511,6 +2586,9 @@ app.post("/api/integrations/telegram/chats/remove", async (req: any, reply) => {
 // спільний бот: видати deep-link для підключення каналу
 app.post("/api/integrations/telegram/connect-link", async (req: any, reply) => {
   if (!botEnabled()) return reply.code(400).send({ error: "Спільний бот не налаштований на сервері" });
+  // привʼязати СЕБЕ до бота може кожен учасник; додати бренду канал - лише «Повний доступ» і власник
+  // (пересланий пост каналу перевіряє роль того, хто взяв посилання, ще раз - attachChannel)
+  if (req.body?.add === true && !can(req.user.role, "manage")) return reply.code(403).send({ error: deniedText(req.user.role, "manage"), code: "role" });
   // імʼя бота - з самого посилання: воно веде в бота, що обслуговує кабінет (власний або спільний)
   // add: «＋ Додати канал» - переслана з каналу публікація ДОДАСТЬ його до бренду, а не замінить основний
   try { const link = await createConnectLink(req.user.workspace_id, req.user.id, req.body?.add === true ? "add" : "main"); return { link, bot: /t\.me\/([^?/]+)/.exec(link)?.[1] || botUsername() }; }
@@ -3099,11 +3177,25 @@ app.put("/api/posts/:postId", async (req: any, reply) => {
   return { ok: true };
 });
 
+// 📨 Автор надсилає пост на затвердження: редактори й власник отримують повідомлення в бот (без бота - лист).
+app.post("/api/posts/:postId/submit", async (req: any, reply) => {
+  if (!(await postOwned(req.params.postId, req.user.workspace_id))) return reply.code(404).send({ error: "пост не знайдено" });
+  const r = await submitForReview(req.user.workspace_id, req.params.postId, req.user.id);   // сповіщення - у фоні
+  if (!r.ok) return reply.code(409).send({ error: r.error });
+  return r;
+});
+
 app.post("/api/posts/:postId/review", async (req: any, reply) => {
   if (!(await postOwned(req.params.postId, req.user.workspace_id))) return reply.code(404).send({ error: "пост не знайдено" });
   const status = String(req.body?.status ?? "");
   if (!["approved", "needs_work", "archived", ""].includes(status)) return reply.code(400).send({ error: "невідомий статус" });
-  await q(`update post set review=nullif($2,'') where id=$1`, [req.params.postId, status]);
+  const prev = await one<{ review: string | null }>(`select review from post where id=$1`, [req.params.postId]);
+  // повернути на доопрацювання можна з коментарем - автор побачить його в редакторі
+  const note = status === "needs_work" ? String(req.body?.note ?? "").trim().slice(0, 1000) || null : null;
+  await q(`update post set review=nullif($2,''), review_note=$3 where id=$1`, [req.params.postId, status, note]);
+  // автор чекав рішення - кажемо йому (затвердили чи повернули), сам собі не пише
+  if (prev?.review === "pending" && (status === "approved" || status === "needs_work"))
+    notifyReviewResult(req.user.workspace_id, req.params.postId, req.user.id, status === "approved", note).catch(() => {});
   // незатверджений пост не має лишатись у календарі: автопостер відправив би його в мережу
   const unscheduled = status === "approved" ? 0 : await unschedulePost(req.params.postId);
   // синхронізація скелета плану: затвердив -> слот approved; заархівував -> слот звільняється
@@ -3370,7 +3462,7 @@ app.post("/api/materials/:id/reels", async (req: any, reply) => {
   try {
     const script = await reelsScript(ws, m.transcript, Number(req.body?.targetSec) || undefined);
     const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [m.id]);
-    const post = await one<{ id: string }>(`insert into post(run_id, stage, content, format) values($1,'final',$2,'reel') returning id`, [run!.id, script]);
+    const post = await one<{ id: string }>(`insert into post(run_id, stage, content, format, created_by) values($1,'final',$2,'reel',$3) returning id`, [run!.id, script, actorId()]);
     return { ok: true, postId: post!.id };
   } catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
@@ -3385,7 +3477,7 @@ app.post("/api/materials/:id/reel-slices", async (req: any, reply) => {
     const scripts = await sliceToReels(ws, m.transcript, Number(req.body?.targetSec) || undefined);
     if (!scripts.length) return reply.code(500).send({ error: "не вдалося нарізати сценарії" });
     const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [m.id]);
-    for (const sc of scripts) await q(`insert into post(run_id, stage, content, format) values($1,'final',$2,'reel')`, [run!.id, sc]);
+    for (const sc of scripts) await q(`insert into post(run_id, stage, content, format, created_by) values($1,'final',$2,'reel',$3)`, [run!.id, sc, actorId()]);
     return { ok: true, count: scripts.length };
   } catch (e: any) { return reply.code(500).send({ error: e.message }); }
 });
@@ -3569,7 +3661,7 @@ app.post("/api/posts/blank", async (req: any) => {
   const ws = req.user.workspace_id;
   const src = await one<{ id: string }>(`insert into source(workspace_id, origin, title, transcript, archived) values($1,'manual',$2,'',true) returning id`, [ws, "✍️ Новий пост"]);
   const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
-  const p = await one<{ id: string }>(`insert into post(run_id, stage, content, channels) values($1,'final','','{}'::jsonb) returning id`, [run!.id]);
+  const p = await one<{ id: string }>(`insert into post(run_id, stage, content, channels, created_by) values($1,'final','','{}'::jsonb,$2) returning id`, [run!.id, actorId()]);
   return { id: p!.id };
 });
 
@@ -3577,12 +3669,16 @@ app.post("/api/posts/blank", async (req: any) => {
 // + sent: у які мережі пост УЖЕ опубліковано (іконки на картці + фільтр «Опубліковані»)
 app.get("/api/posts/studio", async (req: any) => {
   const rows = await q<any>(`select p.id, p.content, p.review, p.channels, p.rubric, p.intent, p.reel_video, p.format, p.qa, p.first_comment, src.origin as source_origin, ma.filename as media_filename, ma.kind as media_kind, ma.duration as media_duration, p.created_at, src.title as source_title,
-                   p.repeat_of, eg.status as evergreen
+                   p.repeat_of, eg.status as evergreen,
+                   -- 👥 хто написав і хто надіслав на затвердження (картка показує це, коли в бренді кілька людей)
+                   p.review_note, cu.email as created_by_email, su.email as submitted_by_email, p.submitted_at, (p.created_by = $2) as mine
             from post p join pipeline_run r on r.id=p.run_id join source src on src.id=r.source_id
             left join media_asset ma on ma.id=p.media_id
             left join evergreen_item eg on eg.post_id=p.id
+            left join app_user cu on cu.id=p.created_by
+            left join app_user su on su.id=p.submitted_by
             where src.workspace_id=$1 and p.stage='final' and (p.review is null or p.review <> 'archived')
-            order by p.created_at desc`, [req.user.workspace_id]);
+            order by p.created_at desc`, [req.user.workspace_id, req.user.id]);
   const ids = rows.map((r: any) => r.id);
   const sentMap = new Map<string, string[]>();
   // 🔗 links[postId][мережа] = URL опублікованого поста: іконки мереж на картці стають клікабельними
@@ -4180,9 +4276,10 @@ app.post("/api/webhooks/fireflies/:token", async (req: any, reply) => {
 // уже резолвиться з урахуванням членства (auth.userBySession).
 const isUuid = (v: unknown) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v ?? ""));
 app.get("/api/workspaces", async (req: any) => ({
-  items: await listWorkspaces(req.user.id),
+  items: (await listWorkspaces(req.user.id)).map((w) => ({ ...w, role: normRole(w.role) })),
   active: req.user.workspace_id,
   home: req.user.home_workspace_id,
+  role: normRole(req.user.role),   // 👥 моя роль в активному бренді - кабінет ховає те, чого вона не дозволяє
 }));
 
 // Новий бренд усередині того самого акаунта: до цього другий бренд вимагав окремої реєстрації на
@@ -4218,27 +4315,83 @@ app.post("/api/workspaces/delete", async (req: any, reply) => {
   return { ok: true };
 });
 
-app.put("/api/workspaces/title", async (req: any, reply) => {
-  if (!(await isOwner(req.user.id, req.user.workspace_id))) return reply.code(403).send({ error: "Перейменувати може лише власник" });
+app.put("/api/workspaces/title", async (req: any) => {
+  // права - preHandler (manage: власник і «Повний доступ»)
   await wsSetTitle(req.user.workspace_id, String(req.body?.title ?? ""));
   return { ok: true };
 });
 
-// доступи до ПОТОЧНОГО кабінету: список, видати за поштою, відкликати
+// ===================== 👥 КОМАНДА БРЕНДУ =====================
+// Обрав бренд (меню аватара) → Налаштування → «👥 Команда» → пошта й рівень доступу. Права (roles.ts)
+// перевіряє preHandler; тут - самі дії. Людина з акаунтом отримує доступ одразу, без акаунта - лист-запрошення.
+app.get("/api/workspaces/team", async (req: any) => {
+  const ws = req.user.workspace_id;
+  const role = normRole(req.user.role);
+  const manage = can(role, "team");
+  const t = await teamOf(ws);
+  const roles = ["owner", ...ASSIGNABLE].map((k) => ({ key: k, label: ROLE_LABEL[k as Role], icon: ROLE_ICON[k as Role], hint: ROLE_HINT[k as Role] }));
+  const brand = { id: ws, title: await workspaceTitle(ws), home: ws === req.user.home_workspace_id };
+  const me = { id: req.user.id, email: req.user.email, role };
+  if (manage) return { brand, me, manage, roles, members: t.members.map((m) => ({ ...m, you: m.user_id === req.user.id })), invites: t.invites };
+  // меншим ролям - хто власник і хто я; пошти колег не показуємо (клієнт з «Переглядом» не мусить бачити всю команду)
+  const members = t.members.filter((m) => m.role === "owner" || m.user_id === req.user.id)
+    .map((m) => ({ user_id: m.user_id, email: m.user_id === req.user.id ? m.email : maskEmail(m.email), role: m.role, since: m.since, added_by_email: null, you: m.user_id === req.user.id }));
+  return { brand, me, manage, roles, members, invites: [] };
+});
+app.post("/api/workspaces/invite", async (req: any, reply) => {
+  if (rateLimited("invite:" + req.user.id, 20, 3600_000)) return reply.code(429).send({ error: "Забагато запрошень за годину - зачекай трохи." });
+  const r = await addToTeam(req.user.workspace_id, req.user.id, req.body?.email, req.body?.role);
+  if (!r.ok) return reply.code(r.status).send({ error: r.error });
+  return r;
+});
+app.put("/api/workspaces/members/:userId", async (req: any, reply) => {
+  const uid = String(req.params.userId || "");
+  if (!isUuid(uid)) return reply.code(400).send({ error: "невірний користувач" });
+  const r = await changeRole(req.user.workspace_id, req.user.id, uid, req.body?.role);
+  if (!r.ok) return reply.code(r.status).send({ error: r.error });
+  return r;
+});
+app.delete("/api/workspaces/members/:userId", async (req: any, reply) => {
+  const uid = String(req.params.userId || "");
+  if (!isUuid(uid)) return reply.code(400).send({ error: "невірний користувач" });
+  if (uid === req.user.id) return reply.code(400).send({ error: "Себе не прибирають - «Покинути бренд» нижче." });
+  const r = await revokeAccess(req.user.workspace_id, uid);
+  if (!r.ok) return reply.code(400).send({ error: r.error });
+  await logEvent("info", "team", `прибрано з бренду: ${uid}`, { ws: req.user.workspace_id }, req.user.id);
+  return { ok: true };
+});
+app.post("/api/workspaces/invites/:id/resend", async (req: any, reply) => {
+  const id = String(req.params.id || "");
+  if (!isUuid(id)) return reply.code(400).send({ error: "невірне запрошення" });
+  if (rateLimited("invite:" + req.user.id, 20, 3600_000)) return reply.code(429).send({ error: "Забагато листів за годину - зачекай трохи." });
+  const r = await resendInvite(req.user.workspace_id, req.user.id, id);
+  if (!r.ok) return reply.code(r.status).send({ error: r.error });
+  return r;
+});
+app.delete("/api/workspaces/invites/:id", async (req: any, reply) => {
+  const id = String(req.params.id || "");
+  if (!isUuid(id)) return reply.code(400).send({ error: "невірне запрошення" });
+  if (!(await cancelInvite(req.user.workspace_id, id))) return reply.code(404).send({ error: "Цього запрошення вже нема." });
+  return { ok: true };
+});
+// покинути бренд (не власнику): сесія сама впаде в домашній кабінет, бот теж
+app.post("/api/workspaces/leave", async (req: any, reply) => {
+  const r = await leaveBrand(req.user.workspace_id, req.user.id);
+  if (!r.ok) return reply.code(r.status).send({ error: r.error });
+  return { ok: true };
+});
+// давні адреси (кабінет, відкритий до оновлення): список, доступ за поштою (= «Повний доступ», як було), відкликати
 app.get("/api/workspaces/members", async (req: any) => ({
-  items: await wsMembers(req.user.workspace_id),
-  owner: await isOwner(req.user.id, req.user.workspace_id),
+  items: (await wsMembers(req.user.workspace_id)).map((m) => ({ ...m, role: normRole(m.role) })),
+  owner: can(req.user.role, "team"),
   me: req.user.id,
 }));
 app.post("/api/workspaces/grant", async (req: any, reply) => {
-  if (!(await isOwner(req.user.id, req.user.workspace_id))) return reply.code(403).send({ error: "Давати доступ може лише власник кабінету" });
-  const r = await grantAccess(req.user.workspace_id, String(req.body?.email ?? ""));
-  if (!r.ok) return reply.code(400).send({ error: r.error });
-  await logEvent("info", "workspace", `доступ видано: ${String(req.body?.email ?? "")}`, null, req.user.id);
-  return { ok: true };
+  const r = await addToTeam(req.user.workspace_id, req.user.id, req.body?.email, req.body?.role || "admin");
+  if (!r.ok) return reply.code(r.status).send({ error: r.error });
+  return r;
 });
 app.post("/api/workspaces/revoke", async (req: any, reply) => {
-  if (!(await isOwner(req.user.id, req.user.workspace_id))) return reply.code(403).send({ error: "Відкликати доступ може лише власник кабінету" });
   const uid = String(req.body?.userId ?? "");
   if (!isUuid(uid)) return reply.code(400).send({ error: "невірний користувач" });
   const r = await revokeAccess(req.user.workspace_id, uid);
@@ -4455,7 +4608,8 @@ app.post("/api/integrations/mcp/revoke", async (req: any) => {
 // підписаний `initData` (див. tgauth.ts), а воркспейс береться з tg_owner: той самий звʼязок
 // «цей телеграм-юзер = цей кабінет», що вже закріплюється при підключенні бота.
 // Тому ці роути свідомо ЗВІЛЬНЕНІ від кукі-хука (їхня перевірка не слабша, а інша).
-async function tgUser(req: any): Promise<{ ws: string; tgId: number; token: string; own: boolean } | null> {
+type TgU = { ws: string; tgId: number; token: string; own: boolean; userId: string | null; role: Role };
+async function tgUser(req: any): Promise<TgU | null> {
   const initData = String(req.headers["x-tg-init-data"] || req.body?.initData || "");
   if (!initData) return null;
   // Спільний бот (і колишній спільний - Mini App відкривають і з його меню): підпис зробив сам
@@ -4463,8 +4617,8 @@ async function tgUser(req: any): Promise<{ ws: string; tgId: number; token: stri
   for (const t of await liveSharedTokens()) {
     const u = verifyInitData(initData, t);
     if (u) {
-      const own = await one<{ workspace_id: string }>(`select workspace_id from tg_owner where tg_user_id=$1`, [u.id]);
-      return own ? { ws: own.workspace_id, tgId: u.id, token: t, own: false } : null;
+      const own = await one<{ workspace_id: string; user_id: string | null }>(`select workspace_id, user_id from tg_owner where tg_user_id=$1`, [u.id]);
+      return own ? withTgRole({ ws: own.workspace_id, tgId: u.id, token: t, own: false }, own.user_id) : null;
     }
   }
   // Власний бот: його токен знає власник кабінету, тож таким підписом можна «назватись» будь-ким.
@@ -4474,16 +4628,31 @@ async function tgUser(req: any): Promise<{ ws: string; tgId: number; token: stri
   for (const r of own) {
     const u = verifyInitData(initData, r.bot_token);
     if (!u) continue;
-    const row = await one<{ workspace_id: string }>(
-      `select o.workspace_id from tg_owner o join telegram_config c on c.workspace_id=o.workspace_id and c.bot_token=$2 where o.tg_user_id=$1`, [u.id, r.bot_token]);
-    return row ? { ws: row.workspace_id, tgId: u.id, token: r.bot_token, own: true } : null;
+    const row = await one<{ workspace_id: string; user_id: string | null }>(
+      `select o.workspace_id, o.user_id from tg_owner o join telegram_config c on c.workspace_id=o.workspace_id and c.bot_token=$2 where o.tg_user_id=$1`, [u.id, r.bot_token]);
+    return row ? withTgRole({ ws: row.workspace_id, tgId: u.id, token: r.bot_token, own: true }, row.user_id) : null;
   }
   return null;
 }
-const tgGuard = async (req: any, reply: any) => {
+// 👥 роль людини в бренді, з яким працює бот. Давня привʼязка без акаунта (до вересня) - власник кабінету;
+// доступ забрали - бот і Mini App вертаються в домашній бренд людини, а без нього не відкриваються.
+async function withTgRole(base: Omit<TgU, "userId" | "role">, userId: string | null): Promise<TgU | null> {
+  if (!userId) return { ...base, userId: null, role: "owner" };
+  let role = await roleIn(userId, base.ws);
+  let ws = base.ws;
+  if (!role) {
+    const home = await homeIfLost(base.tgId, base.ws, userId).catch(() => null);
+    if (!home) return null;
+    ws = home; role = await roleIn(userId, home);
+    if (!role) return null;
+  }
+  return { ...base, ws, userId, role };
+}
+const tgGuard = async (req: any, reply: any): Promise<TgU | null> => {
+  // перевірено в preHandler (підпис, роль); сюди - лише для старих викликів без нього
+  if (req.tgu) return req.tgu as TgU;
   const u = await tgUser(req);
   if (!u) { reply.code(401).send({ error: "Відкрий застосунок кнопкою в боті (підпис Telegram недійсний або кабінет не підключено)" }); return null; }
-  auth.touchWorkspaceActive(u.ws); // Mini App - теж робота в кабінеті (інакше прибиральник вважав би людину неактивною)
   return u;
 };
 
@@ -4503,7 +4672,9 @@ app.get("/api/tg/me", async (req: any, reply) => {
   // 🏢 кілька брендів - перемикач угорі (той самий вибір, що /brand у боті)
   const b = await botBrands(u.tgId, u.own, u.token).catch(() => null);
   return { ok: true, drafts: +(drafts?.c || 0), materials: +(mats?.c || 0), nets, vnets, tz: tz?.content || "Europe/Kyiv",
-    brand: u.ws, brands: b && b.linked && b.list.length > 1 ? b.list : [] };
+    brand: u.ws, brands: b && b.linked && b.list.length > 1 ? b.list : [],
+    // 👥 що людині тут можна (кнопки, яких роль не дозволяє, застосунок ховає)
+    role: u.role, roleLabel: `${ROLE_ICON[u.role]} ${ROLE_LABEL[u.role]}`, canDraft: can(u.role, "draft"), canPublish: can(u.role, "publish") };
 });
 
 // 🏢 перемкнути бренд із Mini App: бот і Mini App працюють з одним і тим самим брендом
@@ -4565,11 +4736,12 @@ async function tgOwnPost(ws: string, postId: string): Promise<string | null> {
 // 📄 повна картка поста для редактора Mini App
 app.get("/api/tg/post/:postId", async (req: any, reply) => {
   const u = await tgGuard(req, reply); if (!u) return;
-  const p = await one<{ id: string; content: string; channels: any; review: string | null; rubric: string | null; filename: string | null; first_comment: string | null; format: string | null }>(
-    `select p.id, p.content, p.channels, p.review, p.rubric, p.first_comment, p.format, ma.filename from post p
+  const p = await one<{ id: string; content: string; channels: any; review: string | null; rubric: string | null; filename: string | null; first_comment: string | null; format: string | null; review_note: string | null; mine: boolean }>(
+    `select p.id, p.content, p.channels, p.review, p.rubric, p.first_comment, p.format, p.review_note,
+            (p.created_by is not null and p.created_by=$3) as mine, ma.filename from post p
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
        left join media_asset ma on ma.id=p.media_id
-     where p.id=$1 and s.workspace_id=$2`, [req.params.postId, u.ws]);
+     where p.id=$1 and s.workspace_id=$2`, [req.params.postId, u.ws, u.userId]);
   if (!p) return reply.code(404).send({ error: "пост не знайдено" });
   const slot = await one<{ id: string; scheduled_at: string }>(
     `select id, scheduled_at from schedule_slot where post_id=$1 and status='planned' order by scheduled_at limit 1`, [p.id]);
@@ -4665,9 +4837,21 @@ app.post("/api/tg/post/:postId/approve", async (req: any, reply) => {
   const id = await tgOwnPost(u.ws, req.params.postId);
   if (!id) return reply.code(404).send({ error: "пост не знайдено" });
   const on = req.body?.approved !== false;
+  const prev = await one<{ review: string | null }>(`select review from post where id=$1`, [id]);
   await q(`update post set review=$2 where id=$1`, [id, on ? "approved" : "review"]);
   const unscheduled = on ? 0 : await unschedulePost(id);
+  // 👥 автор чекав рішення - кажемо йому
+  if (on && prev?.review === "pending") notifyReviewResult(u.ws, id, u.userId, true).catch(() => {});
   return { ok: true, review: on ? "approved" : "review", unscheduled };
+});
+// 📨 автор надсилає пост на затвердження з Mini App (ті самі сповіщення, що з кабінету й бота)
+app.post("/api/tg/post/:postId/submit", async (req: any, reply) => {
+  const u = await tgGuard(req, reply); if (!u) return;
+  const id = await tgOwnPost(u.ws, req.params.postId);
+  if (!id) return reply.code(404).send({ error: "пост не знайдено" });
+  const r = await submitForReview(u.ws, id, u.userId);
+  if (!r.ok) return reply.code(409).send({ error: r.error });
+  return { ...r, review: "pending" };
 });
 
 // 🗓 планування: реюз тієї самої функції, що й композер у DM (перенос наявного слота, а не
@@ -4848,6 +5032,26 @@ app.get("/login", (_req, reply) => reply.sendFile("auth.html"));
 app.get("/register", (_req, reply) => reply.sendFile("auth.html"));
 app.get("/forgot", (_req, reply) => reply.sendFile("auth.html"));
 app.get("/reset", (_req, reply) => reply.sendFile("auth.html"));
+// 👥 посилання з листа-запрошення: у браузері вже є вхід тією поштою - людина одразу в бренді; інший
+// акаунт - кабінет скаже, на яку пошту прийшло запрошення; без входу - реєстрація чи вхід з підставленою поштою
+app.get("/invite/:token", async (req: any, reply) => {
+  reply.header("X-Robots-Tag", "noindex, nofollow");
+  const token = String(req.params.token || "");
+  const info = await inviteInfo(token);
+  if (!info) return reply.redirect("/login?error=invite");
+  const user = await auth.userBySession(req.cookies?.[COOKIE]).catch(() => null);
+  if (user?.email_verified) {
+    const r = await acceptInviteToken(token, user.id, user.email);
+    if (r.ok) {
+      await q(`update user_session set active_workspace_id=$2 where token=$1`, [req.cookies?.[COOKIE], r.accepted.workspace_id]);
+      return reply.redirect("/app?joined=1");
+    }
+    if (r.reason === "mismatch") return reply.redirect(`/app?invite=mismatch&to=${encodeURIComponent(maskEmail(info.email))}`);
+    return reply.redirect(`/app?invite=${r.reason}`);
+  }
+  if (info.expired && !info.accepted) return reply.redirect("/login?error=invite_expired");
+  return reply.redirect(`/${(await auth.userByEmail(info.email)) ? "login" : "register"}?invite=${token}`);
+});
 app.get("/privacy", (_req, reply) => reply.sendFile("privacy.html"));
 app.get("/terms", (_req, reply) => reply.sendFile("terms.html"));
 app.get("/data-deletion", (_req, reply) => reply.sendFile("data-deletion.html"));

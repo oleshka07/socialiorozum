@@ -68,6 +68,11 @@ let cTab='posts', pTab='cal', bTab='voice', sTab='profile';
 let _cmpOpenId=null;      // id поста, відкритого в композері (для deep-лінка #/post/<id>)
 let _routeSilent=false;   // перемикаємо розділ БЕЗ запису адреси (її пише той, хто головний - напр. композер)
 let Finals = [];
+// 👥 моя роль в активному бренді (roles.ts на сервері - там і справжня перевірка; тут - що показати й сховати)
+let ROLE='owner';
+const ROLE_RANK={viewer:0,author:1,editor:2,admin:3,owner:4}, CAP_NEED={read:0,draft:1,publish:2,manage:3,team:3,owner:4};
+const ROLE_UI={owner:['👑','Власник'],admin:['🔑','Повний доступ'],editor:['✍️','Редактор'],author:['📝','Автор'],viewer:['👁','Перегляд']};
+function canDo(cap){ return (ROLE_RANK[ROLE]??0)>=(CAP_NEED[cap]??3); }
 let Guide={tips:[],i:0,on:true,busy:false,shownAt:0}; // 🦉 сова-провідник (стан угорі - selectView його читає)
 // 📈 Аналітика: фільтр (памʼятається в браузері), останні дані, сортування й «таблиця замість графіка»
 let AnState={days:90,net:'all'}, AnData=null, AnSort={key:'created_at',dir:-1}, AnShown=30, AnTableView={};
@@ -167,6 +172,8 @@ function renderViewActions(v){
        ['rhythmHost','📡 Ритм каналів','Дні/час/формати публікацій по мережах'],
        ['evergreenHost','♻️ Вічнозелене','Хіти повертаються через тижні новим постом зі свіжим першим рядком']]
     : [];
+  // план, ритм і вічнозелене веде редактор і вище - авторові й перегляду ці панелі нічого не дадуть зробити
+  if(!canDo('publish')) btns.length=0;
   btns.forEach(([hostId,label,tip])=>{
     const b=document.createElement('button'); b.className='ghost'; b.title=tip; b.textContent=label;
     b.style.cssText='padding:6px 12px;font-size:12.5px';
@@ -194,7 +201,7 @@ const ROUTE_TABS={
   create:  { keys:['materials','posts','ideas'], set:(t)=>setCTab(t), get:()=>cTab },
   publish: { keys:['cal','plan'],                set:(t)=>setPTab(t), get:()=>pTab },
   brand:   { keys:['voice','visual','strat'],    set:(t)=>setBTab(t), get:()=>bTab },
-  settings:{ keys:['profile','channels','sources'], set:(t)=>setSTab(t), get:()=>sTab },
+  settings:{ keys:['profile','channels','sources','team'], set:(t)=>setSTab(t), get:()=>sTab },
 };
 const ROUTE_VIEWS=['today','create','publish','brand','analytics','settings','tools'];
 function writeRoute(v,tab){
@@ -276,8 +283,9 @@ document.querySelectorAll('#bTabs .tab').forEach(x=>x.onclick=()=>setBTab(x.data
 function setSTab(s){
   sTab=s; if(curView==='settings') writeRoute('settings',s);
   document.querySelectorAll('#sTabs .tab').forEach(x=>x.classList.toggle('on',x.dataset.stab===s));
-  const M={profile:'setProfile',channels:'setChannels',sources:'setSources'};
+  const M={profile:'setProfile',channels:'setChannels',sources:'setSources',team:'setTeam'};
   for(const k in M){ const el=$(M[k]); if(el) el.style.display=k===s?'':'none'; }
+  if(s==='team') loadTeam();
 }
 document.querySelectorAll('#sTabs .tab').forEach(x=>x.onclick=()=>setSTab(x.dataset.stab));
 
@@ -287,7 +295,7 @@ document.querySelectorAll('#sTabs .tab').forEach(x=>x.onclick=()=>setSTab(x.data
   const close=()=>{ um.style.display='none'; };
   av.onclick=(e)=>{ e.stopPropagation(); um.style.display=um.style.display==='none'?'':'none'; };
   document.addEventListener('click',(e)=>{ if(um.style.display!=='none' && !um.contains(e.target) && e.target!==av) close(); });
-  um.querySelectorAll('.umitem[data-um]').forEach(it=>it.onclick=()=>{ close(); selectView('settings'); setSTab({profile:'profile',channels:'channels',sources:'sources'}[it.dataset.um]); });
+  um.querySelectorAll('.umitem[data-um]').forEach(it=>it.onclick=()=>{ close(); selectView('settings'); setSTab({profile:'profile',channels:'channels',sources:'sources',team:'team'}[it.dataset.um]); });
   // 🧰 Інструменти: окремий розділ з розширеними функціями (конвеєр, промт, GDrive, транскрибатори)
   const tools=$('umTools'); if(tools) tools.onclick=()=>{ close(); selectView('tools'); };
   // 🦉 «Помічник Розум» у меню - обробник навішується в owlInit (щоб не викликати до визначення)
@@ -444,7 +452,7 @@ function renderMaterials(){
         +'<div style="font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+esc(m.preview||'')+'</div>'
       +'</div>'
       +(open?'<div id="matFull" style="margin-top:10px;background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:12px 14px;font-size:13px;line-height:1.6;color:var(--ink2);white-space:pre-wrap;max-height:300px;overflow:auto"><span class="spin"></span></div>'
-        +'<div class="btnrow" style="margin-top:10px;flex-wrap:wrap"><button class="primary" data-ma="post">✨ Створити пост</button><button class="ghost" data-ma="series">⚡ Серія (~6 постів)</button><button class="ghost" data-ma="ideas">💡 Витягнути ідеї</button>'+(PRO?'<button class="ghost" data-ma="reels">🎬 Сценарій Reels</button>':'')+(PRO&&(m.chars||0)>800?'<button class="ghost" data-ma="slices" title="Довгий матеріал → 5-7 самостійних сценаріїв Reels, тиждень відео-контенту">🎞 Нарізка на рілси</button>':'')+'<button class="ghost" data-ma="del" style="margin-left:auto;color:var(--danger)">🗑 Прибрати</button></div>':'')
+        +'<div class="btnrow need-draft" style="margin-top:10px;flex-wrap:wrap"><button class="primary" data-ma="post">✨ Створити пост</button><button class="ghost" data-ma="series">⚡ Серія (~6 постів)</button><button class="ghost" data-ma="ideas">💡 Витягнути ідеї</button>'+(PRO?'<button class="ghost" data-ma="reels">🎬 Сценарій Reels</button>':'')+(PRO&&(m.chars||0)>800?'<button class="ghost" data-ma="slices" title="Довгий матеріал → 5-7 самостійних сценаріїв Reels, тиждень відео-контенту">🎞 Нарізка на рілси</button>':'')+'<button class="ghost need-publish" data-ma="del" style="margin-left:auto;color:var(--danger)">🗑 Прибрати</button></div>':'')
       +'</div>';
   }).join('');
   feed.querySelectorAll('[data-mat]').forEach(row=>{
@@ -491,14 +499,14 @@ async function loadIdeasTab(){
 async function refreshIdeaViews(){ await loadMaterials(); if(cTab==='ideas') await loadIdeasTab(); }
 function bindIbAdd(){ const b=$('ibAdd'); if(b) b.onclick=async()=>{ const t=prompt('Нова ідея (1 рядок):'); if(!t||!t.trim()) return; try{ await api('/ideas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t.trim()})}); await refreshIdeaViews(); }catch(e){ flash('⚠ '+e.message); } }; }
 function renderIdeaBank(feed){
-  const addBtn='<div style="padding:12px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px"><span style="font-size:12.5px;color:var(--muted)">Готові концепти постів. Витягуються в Telegram-боті командою /idea.</span><button class="ghost" id="ibAdd" style="margin-left:auto">＋ Додати ідею</button></div>';
+  const addBtn='<div style="padding:12px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px"><span style="font-size:12.5px;color:var(--muted)">Готові концепти постів. Витягуються в Telegram-боті командою /idea.</span><button class="ghost need-draft" id="ibAdd" style="margin-left:auto">＋ Додати ідею</button></div>';
   if(!Ideas.length){ feed.innerHTML=addBtn+'<div class="empty" style="padding:20px">Банк порожній. Додай ідею вручну - або вони зʼявляться сюди з Telegram-бота.</div>'; bindIbAdd(); return; }
   feed.innerHTML=addBtn+Ideas.map(it=>{
     const tag=(s,c)=>'<span class="ptag"'+(c?' style="color:'+c+';border-color:'+c+'"':'')+'>'+s+'</span>';
     const meta=(it.rubric?tag('🏷 '+esc(it.rubric)):'')+(it.origin==='bot'?tag('🤖 з Telegram','var(--tg)'):'')+(it.origin==='ai'?tag('✨ AI'):'');
     return '<div data-idea="'+it.id+'" style="padding:13px 18px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">'
       +'<div style="flex:1;min-width:180px;font-size:14px;line-height:1.5">'+esc(it.text||'')+(meta?' '+meta:'')+'</div>'
-      +'<div class="btnrow" style="margin:0"><button class="primary" data-ia="post">✨ Пост</button><button class="ghost" data-ia="del" style="color:var(--danger)">🗑</button></div>'
+      +'<div class="btnrow need-draft" style="margin:0"><button class="primary" data-ia="post">✨ Пост</button><button class="ghost" data-ia="del" style="color:var(--danger)">🗑</button></div>'
       +'</div>';
   }).join('');
   bindIbAdd();
@@ -775,7 +783,7 @@ function anBestPanel(a){ const net=String(a.net||'all').split(':')[0];
   const items=(a.best||[]).filter(b=>(net==='all'||b.net===net)&&b.show!==false); if(!items.length) return '';
   return '<div class="panel" id="anBest"><div class="vz-head"><div class="vz-title">⏰ Найкращий час публікації</div>'
     +'<span class="vz-sub">за пів року, «×норма» постів старших за 2 доби; '+(a.bestAuto?'AI-розподіл календаря ставить пости саме сюди':'AI-розподіл зараз бере час зі стратегії')+'</span>'
-    +'<button class="ghost vz-toggle" id="anBestToggle">'+(a.bestAuto?'Не ставити в календар':'Ставити в календар')+'</button></div>'
+    +'<button class="ghost vz-toggle need-publish" id="anBestToggle">'+(a.bestAuto?'Не ставити в календар':'Ставити в календар')+'</button></div>'
     +'<ul class="an-ins">'+items.map(b=>'<li><span class="ic '+(b.times&&b.times.length?'good':'info')+'">'+(b.times&&b.times.length?'⏰':'ℹ')+'</span><span>'+esc(b.text)+'</span></li>').join('')+'</ul></div>'; }
 function renderPlan(){
   const list=$('planList'); if(!list) return;
@@ -789,8 +797,8 @@ function renderPlan(){
     const d=new Date(String(s.slot_date).slice(0,10)+'T12:00:00Z');
     const day=DOW[d.getUTCDay()]+' '+String(d.getUTCDate()).padStart(2,'0')+'.'+String(d.getUTCMonth()+1).padStart(2,'0');
     let act='';
-    if(s.status==='empty') act='<button class="ghost" data-pa="theme">Згенерувати з теми</button>';
-    if(s.status==='matched') act='<button class="primary" data-pa="material">✨ З матеріалу</button><button class="ghost" data-pa="theme">З теми</button>';
+    if(s.status==='empty'&&canDo('draft')) act='<button class="ghost" data-pa="theme">Згенерувати з теми</button>';
+    if(s.status==='matched'&&canDo('draft')) act='<button class="primary" data-pa="material">✨ З матеріалу</button><button class="ghost" data-pa="theme">З теми</button>';
     if(s.status==='drafted') act='<button class="ghost" data-pa="topost">→ до чорновика</button>';
     if(s.status==='approved'||s.status==='scheduled') act='<button class="ghost" data-pa="tocal">→ календар</button>';
     return '<div data-slot="'+s.id+'" style="display:flex;align-items:center;gap:11px;padding:12px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap">'
@@ -868,8 +876,8 @@ async function loadToday(){
     ? t.drafts.map(d=>'<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)">'
         +(d.rubric?'<span class="ptag" style="flex:none">🏷 '+esc(d.rubric)+'</span>':'')
         +'<span style="flex:1;min-width:0;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(d.title||'')+'</span>'
-        +'<button class="ghost tdEdit" data-post="'+d.id+'" style="padding:5px 11px;font-size:12px;flex:none">✍ Редагувати</button>'
-        +'<button class="primary tdOk" data-post="'+d.id+'" style="padding:5px 11px;font-size:12px;flex:none">✅ Затвердити</button></div>').join('')
+        +'<button class="ghost tdEdit" data-post="'+d.id+'" style="padding:5px 11px;font-size:12px;flex:none">'+(canDo('draft')?'✍ Редагувати':'👁 Відкрити')+'</button>'
+        +'<button class="primary tdOk need-publish" data-post="'+d.id+'" style="padding:5px 11px;font-size:12px;flex:none">✅ Затвердити</button></div>').join('')
     : '<div class="empty" style="padding:14px 0">Все затверджено 🙌</div>';
   const th=t.threads;
   // 🚀 швидкий старт: 3 кроки до першої публікації - видно, поки хоч один не виконано
@@ -880,7 +888,7 @@ async function loadToday(){
     ['✅','Затверди перший пост','переглянь чернетку і натисни «Затвердити»', (qs.approved||0)>0, 'До чернеток →', ()=>{ selectView('create'); setCTab('posts'); }],
   ];
   const qsLeft=qsSteps.filter(s=>!s[3]).length;
-  const qsHtml=(t.quickstart&&qsLeft)
+  const qsHtml=(t.quickstart&&qsLeft&&canDo('manage'))
     ? '<div class="panel" style="margin:0 0 16px;border:1px solid var(--brand-soft2)"><div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><div style="font-weight:700;font-size:14.5px">🚀 Швидкий старт</div><span style="font-size:12px;color:var(--muted)">'+(qsSteps.length-qsLeft)+' з '+qsSteps.length+' виконано</span></div>'
       +qsSteps.map((s,i)=>'<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)">'
         +'<span style="width:24px;height:24px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:12px;'+(s[3]?'background:var(--brand);color:#fff':'border:2px solid var(--line2);color:var(--faint)')+'">'+(s[3]?'✓':(i+1))+'</span>'
@@ -909,7 +917,7 @@ async function loadToday(){
         +'<span style="font-size:14px">'+chanIcons(Object.fromEntries((x.nets||[]).map(n=>[n,{on:true}])))+'</span>'
         +'<span style="flex:1;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(x.title||'')+'</span>'
         +'<button class="ghost tdEg" data-post="'+x.id+'" data-act="open" style="padding:4px 10px;font-size:12px;flex:none">✍ Відкрити</button>'
-        +'<button class="ghost tdEg" data-post="'+x.id+'" data-act="cancel" style="padding:4px 10px;font-size:12px;flex:none;color:var(--danger)" title="Скасувати цей повтор">✕</button></div>').join('')
+        +'<button class="ghost tdEg need-publish" data-post="'+x.id+'" data-act="cancel" style="padding:4px 10px;font-size:12px;flex:none;color:var(--danger)" title="Скасувати цей повтор">✕</button></div>').join('')
       +'</div>'
     : '';
   const fm=t.freshMaterials||{};
@@ -932,7 +940,7 @@ async function loadToday(){
       return '<div class="tdChan" data-net="'+k+'" style="flex:1;min-width:130px;border:1px solid var(--line);border-radius:var(--r);padding:12px;cursor:pointer'+(on?'':';opacity:.75')+'">'
         +'<div style="display:flex;align-items:center;gap:8px"><span style="width:26px;height:26px;border-radius:50%;flex:none;display:grid;place-items:center;background:'+(on?'var('+NETVAR[k]+')':'var(--line2)')+'"><svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="'+NETICON[k]+'"></path></svg></span><b style="font-size:13.5px">'+label+'</b></div>'
         +(on?'<div style="font-size:12px;color:var(--muted);margin-top:6px">'+n+' сьогодні · <span style="color:var(--brand)">✓ підключено</span></div>'
-            :'<div style="font-size:12px;color:var(--muted);margin-top:6px">не підключено</div><button class="ghost tdChanGo" style="margin-top:6px;padding:4px 10px;font-size:11.5px;width:100%">Підключити →</button>')
+            :'<div style="font-size:12px;color:var(--muted);margin-top:6px">не підключено</div><button class="ghost tdChanGo need-manage" style="margin-top:6px;padding:4px 10px;font-size:11.5px;width:100%">Підключити →</button>')
         +'</div>'; }).join('')
     +'</div></div>';
   const tiles=[
@@ -947,11 +955,11 @@ async function loadToday(){
       +'<div class="panel" style="margin:0"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="font-weight:700;font-size:14.5px">📤 Сьогодні виходить</div><button class="ghost" id="tdCal" style="margin-left:auto;padding:5px 11px;font-size:12px">🗓 Календар</button></div>'+slots+'</div>'
       +'<div class="panel" style="margin:0"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="font-weight:700;font-size:14.5px">✅ На затвердження</div><button class="ghost" id="tdAll" style="margin-left:auto;padding:5px 11px;font-size:12px">Всі чернетки →</button></div>'+drafts+'</div>'
     +'</div>'
-    +'<div class="panel" style="margin-top:16px"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
+    +'<div class="panel need-draft" style="margin-top:16px"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
       +'<div style="flex:1;min-width:220px"><div style="font-weight:700;font-size:14.5px;margin-bottom:3px">⚡ Зробити зараз</div>'
       +(t.nextSlot?'<div style="font-size:13px;color:var(--ink2)">Наступна тема плану: <b>'+esc(String(t.nextSlot.theme||'').slice(0,90))+'</b> <span style="color:var(--faint)">('+esc(String(t.nextSlot.slot_date).slice(5))+')</span></div>':'<div style="font-size:13px;color:var(--muted)">План порожній - згенеруй скелет у «Публікація → План і ритм».</div>')+'</div>'
-      +(t.nextSlot?'<button class="primary" id="tdGenSlot">✍️ Пост із теми дня</button>':'')
-      +(th?'<button class="ghost" id="tdTakes" title="3 короткі тейки в чернетки - врятувати день у Threads">🧵 3 тейки</button>':'')
+      +(t.nextSlot?'<button class="primary need-draft" id="tdGenSlot">✍️ Пост із теми дня</button>':'')
+      +(th?'<button class="ghost need-draft" id="tdTakes" title="3 короткі тейки в чернетки - врятувати день у Threads">🧵 3 тейки</button>':'')
     +'</div></div>'
     +chanHtml;
   // дії
@@ -1326,6 +1334,7 @@ async function renderEvergreen(note,color){
   const msg=(t,c)=>{ const m=$('egMsg'); if(m){ m.textContent=t; m.style.color=c||'var(--muted)'; } };
   if(note) msg(note,color);
   const save=async(patch,after)=>{ try{ await api('/evergreen/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)}); if(after) renderEvergreen('збережено ✓','var(--brand)'); else msg('збережено ✓','var(--brand)'); }catch(e){ msg('⚠ '+e.message,'var(--danger)'); } };
+  if(!canDo('manage')){ box.querySelectorAll('#egOn,#egFresh,#egAuto,.egNum').forEach(x=>{ x.disabled=true; x.title='Налаштування вічнозеленої черги змінює власник або людина з повним доступом'; }); }
   $('egOn').onchange=()=>save({on:$('egOn').checked},true);
   $('egFresh').onchange=()=>save({fresh:$('egFresh').checked});
   $('egAuto').onchange=()=>save({autoAdd:$('egAuto').checked},true);
@@ -1374,7 +1383,7 @@ async function loadAnalytics(){
     +'<button class="ghost" id="anCsv" title="Усі публікації періоду з цифрами - файл для Excel чи Google Таблиць">⬇ CSV</button></div>'
     +anCoverage(a)+anKpi(a)
     +'<div class="panel" style="margin:0 0 18px"><div class="vz-head"><div class="vz-title">💡 Висновки</div><span class="vz-sub">порівняння з твоєю ж нормою, без чужих бенчмарків</span>'
-      +'<button class="ghost vz-toggle" id="topPatBtn" title="AI читає твої найкращі пости й шукає, що в них спільного">🔍 Що спрацювало</button></div>'
+      +'<button class="ghost vz-toggle need-draft" id="topPatBtn" title="AI читає твої найкращі пости й шукає, що в них спільного">🔍 Що спрацювало</button></div>'
       +'<ul class="an-ins">'+ins.map(x=>'<li><span class="ic '+x.tone+'">'+(x.tone==='good'?'▲':x.tone==='bad'?'▼':'ℹ')+'</span><span>'+esc(x.text)+'</span></li>').join('')+'</ul></div>'
     +'<div class="grid2" style="grid-template-columns:1.4fr 1fr;margin-bottom:18px">'
       +'<div class="panel" style="margin:0"><div class="vz-head"><div class="vz-title">Перегляди за '+(a.series.unit==='week'?'тижнями':'місяцями')+'</div><span class="vz-sub">постів, що вийшли в цей '+(a.series.unit==='week'?'тиждень':'місяць')+'</span>'
@@ -1487,7 +1496,7 @@ async function topPatterns(){ aiBusy('🔍 Розбираю топ-пости: �
   ov.innerHTML='<div class="modal-card" style="max-width:560px;padding:20px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px">🔍 Що спрацювало (розбір '+(r.sample||0)+' топ-постів)</b><button class="icon" id="tpX" style="margin-left:auto">✕</button></div>'
     +'<div class="hint" style="margin-bottom:10px">Патерни, що повторюються у ВСІХ твоїх найкращих постах. Те, що було лише в одному хіті - шум, його тут нема.</div>'
     +(r.patterns||[]).map(p=>'<div class="card" style="margin-bottom:8px"><b>'+esc(p.pattern)+'</b><div style="font-size:12.5px;color:var(--ink2);margin-top:4px;line-height:1.45">'+esc(p.evidence||'')+'</div></div>').join('')
-    +(r.rule?'<div style="margin-top:12px;padding:12px;border-radius:10px;background:var(--brand-soft)"><div style="font-size:12px;color:var(--brand);font-weight:700;margin-bottom:4px">Готове правило для генерації:</div><div style="font-size:13px">'+esc(r.rule)+'</div><div class="btnrow" style="margin-top:10px"><button class="primary" id="tpSave">✍ Запамʼятати як правило голосу</button><span id="tpMsg" style="font-size:12px;color:var(--muted)"></span></div></div>':'')
+    +(r.rule?'<div style="margin-top:12px;padding:12px;border-radius:10px;background:var(--brand-soft)"><div style="font-size:12px;color:var(--brand);font-weight:700;margin-bottom:4px">Готове правило для генерації:</div><div style="font-size:13px">'+esc(r.rule)+'</div><div class="btnrow" style="margin-top:10px"><button class="primary need-manage" id="tpSave">✍ Запамʼятати як правило голосу</button><span id="tpMsg" style="font-size:12px;color:var(--muted)"></span></div></div>':'')
     +'</div>';
   document.body.appendChild(ov); const close=()=>ov.remove();
   ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#tpX').onclick=close;
@@ -1789,7 +1798,7 @@ if($('thStarter')) $('thStarter').onclick=async()=>{ const b=$('thStarter'); b.d
 const CM_NET={instagram:['📸','Instagram','--ig'],facebook:['📘','Facebook','--fb'],threads:['🧵','Threads','--th']};
 function cmAgo(ts){ const t=Date.parse(ts); if(!isFinite(t)) return ''; const m=Math.round((Date.now()-t)/60000);
   return m<60?Math.max(1,m)+' хв тому':m<1440?Math.round(m/60)+' год тому':Math.round(m/1440)+' дн. тому'; }
-async function openComments(btn,onlyNet){ const b=btn||null; if(b) b.disabled=true; aiBusy('💬 Збираю коментарі і пишу чернетки відповідей…');
+async function openComments(btn,onlyNet){ const b=btn||null; if(b) b.disabled=true; aiBusy(canDo('publish')?'💬 Збираю коментарі і пишу чернетки відповідей…':'💬 Збираю коментарі…');
   let r, nt={on:true,bot:false}; try{ [r,nt]=await Promise.all([api('/comments/inbox'),api('/comments/notify').catch(()=>({on:true,bot:false}))]); }catch(e){ flash('⚠ '+e.message); if(b) b.disabled=false; aiDone(); return; }
   if(b) b.disabled=false; aiDone();
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='70';
@@ -1801,7 +1810,7 @@ async function openComments(btn,onlyNet){ const b=btn||null; if(b) b.disabled=tr
     items.forEach(it=>{ if(done.has(it.net+':'+it.commentId)){ c.all=Math.max(0,c.all-1); c[it.net]=Math.max(0,(c[it.net]||0)-1); } }); return c; };
   function render(){ const c=counts(), nets=(r.connected||[]).filter(n=>CM_NET[n]);
     const chips=nets.length>1?'<div class="cmChips">'+[['all','Усі']].concat(nets.map(n=>[n,CM_NET[n][0]+' '+CM_NET[n][1]])).map(x=>'<button class="netchip'+(filt===x[0]?' on':'')+'" data-cmf="'+x[0]+'">'+x[1]+' <b>'+(c[x[0]]||0)+'</b></button>').join('')+'</div>':'';
-    const needs=(r.needs||[]).filter(n=>filt==='all'||n.net===filt).map(n=>'<div class="cmNeed">⚠ '+esc(n.text)+(n.perm==='comments'||n.perm==='inbox'?' <button class="ghost" data-cmperm="'+n.perm+'">'+(n.perm==='inbox'?'📥 Дозволити читати коментарі':'💬 Дозволити коментарі')+'</button>':' <button class="ghost" data-cmchan="1">Канали →</button>')+'</div>').join('');
+    const needs=(r.needs||[]).filter(n=>filt==='all'||n.net===filt).map(n=>'<div class="cmNeed">⚠ '+esc(n.text)+((n.perm==='comments'||n.perm==='inbox')&&canDo('manage')?' <button class="ghost" data-cmperm="'+n.perm+'">'+(n.perm==='inbox'?'📥 Дозволити читати коментарі':'💬 Дозволити коментарі')+'</button>':' <button class="ghost" data-cmchan="1">Канали →</button>')+'</div>').join('');
     const list=items.map((it,i)=>({it,i})).filter(x=>filt==='all'||x.it.net===filt);
     const cards=list.map(({it,i})=>{ const n=CM_NET[it.net]||['💬',it.net,'--brand']; const isDone=done.has(it.net+':'+it.commentId);
       return '<div class="card cmCard'+(isDone?' done':'')+'" data-ci="'+i+'">'
@@ -1809,8 +1818,8 @@ async function openComments(btn,onlyNet){ const b=btn||null; if(b) b.disabled=tr
           +'<span class="cmPost">під постом: '+esc(it.postTitle||'…')+'</span><span class="sp"></span><span class="cmAgo">'+esc(cmAgo(it.timestamp))+'</span>'
           +(it.permalink?'<a href="'+esc(it.permalink)+'" target="_blank" rel="noopener" title="Відкрити в мережі">↗</a>':'')+'</div>'
         +'<div class="cmText"><b>'+esc(it.username?(it.net==='facebook'?it.username:'@'+it.username):'Читач')+':</b> '+esc(it.comment)+'</div>'
-        +'<textarea class="txt cmTxt" rows="2"'+(isDone?' disabled':'')+'>'+esc(it.draft||'')+'</textarea>'
-        +'<div class="btnrow" style="margin-top:6px"><button class="primary cmSend"'+(isDone?' disabled':'')+'>↩ Відповісти</button><button class="ghost cmSkip"'+(isDone?' disabled':'')+' title="Прибрати зі списку без відповіді (спам, «дякую», уже відповів деінде)">Пропустити</button><span class="cmMsg"></span></div>'
+        +(r.canReply===false?'<div class="hint" style="margin-top:6px">Відповідає редактор, людина з повним доступом чи власник.</div>':'<textarea class="txt cmTxt" rows="2"'+(isDone?' disabled':'')+'>'+esc(it.draft||'')+'</textarea>'
+        +'<div class="btnrow" style="margin-top:6px"><button class="primary cmSend"'+(isDone?' disabled':'')+'>↩ Відповісти</button><button class="ghost cmSkip"'+(isDone?' disabled':'')+' title="Прибрати зі списку без відповіді (спам, «дякую», уже відповів деінде)">Пропустити</button><span class="cmMsg"></span></div>')
         +'</div>'; }).join('');
     const empty=!list.length?'<div class="empty">'+esc(r.hint||'Свіжих коментарів без відповіді нема. Зазирни після наступної публікації.')+'</div>':'';
     const tot=Object.values(r.counts||{}).reduce((a,x)=>a+(+x||0),0);
@@ -1818,7 +1827,7 @@ async function openComments(btn,onlyNet){ const b=btn||null; if(b) b.disabled=tr
     ov.innerHTML='<div class="modal-card cmModal">'
       +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:16px">💬 Коментарі під твоїми постами</b><button class="icon" id="cmRefresh" title="Перечитати з мереж" style="margin-left:auto">↻</button><button class="icon" id="cmX">✕</button></div>'
       +'<div class="hint" style="margin-bottom:10px">Відповідь автора повертає людину під пост і розганяє його. Чернетку можна правити перед відправкою; відповідає той акаунт, під чиїм постом коментар.</div>'
-      +'<label class="cmBot"><input type="checkbox" id="cmBotOn"'+(nt.on?' checked':'')+'> 🔔 Нові коментарі - в Telegram-бот, з чернеткою: відповідати просто з чату'+(nt.bot?'':' <span class="hint">(спершу «Підключити наш бот» у Каналах)</span>')+'</label>'
+      +(r.canReply===false?'':'<label class="cmBot"><input type="checkbox" id="cmBotOn"'+(nt.on?' checked':'')+'> 🔔 Нові коментарі - в Telegram-бот, з чернеткою: відповідати просто з чату'+(nt.bot?'':' <span class="hint">(спершу «Підключити наш бот» у Каналах)</span>')+'</label>')
       +chips+needs+cards+empty+more+((r.errors||[]).length?'<div class="hint" style="margin-top:8px;color:var(--amber)">Не прочиталось: '+esc(r.errors.join('; '))+'</div>':'')+'</div>';
     ov.querySelector('#cmX').onclick=close;
     const cbx=ov.querySelector('#cmBotOn'); if(cbx) cbx.onchange=async()=>{ try{ const rr=await api('/comments/notify',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({on:cbx.checked})}); nt.on=rr.on; flash(rr.on?'🔔 Нові коментарі надсилатиму в бот':'🔕 У бот більше не надсилаю'); }catch(e){ flash('⚠ '+e.message); cbx.checked=!cbx.checked; } };
@@ -1827,6 +1836,7 @@ async function openComments(btn,onlyNet){ const b=btn||null; if(b) b.disabled=tr
     ov.querySelectorAll('[data-cmperm]').forEach(x=>x.onclick=()=>connectPopup('/api/integrations/meta/connect?add='+x.dataset.cmperm));
     ov.querySelectorAll('[data-cmchan]').forEach(x=>x.onclick=()=>{ close(); selectView('settings','channels'); });
     ov.querySelectorAll('[data-ci]').forEach(card=>{ const it=items[+card.dataset.ci]; const m=card.querySelector('.cmMsg');
+      if(!card.querySelector('.cmTxt')) return;
       const finish=(txt)=>{ done.add(it.net+':'+it.commentId); m.style.color='var(--brand)'; m.textContent=txt; card.classList.add('done');
         card.querySelectorAll('button,textarea').forEach(x=>x.disabled=true); refreshCounts(); };
       card.querySelector('.cmTxt').oninput=(ev)=>{ it.draft=ev.target.value; typed[it.net+':'+it.commentId]=ev.target.value; };
@@ -1868,7 +1878,7 @@ if($('thNiche')) $('thNiche').onclick=async()=>{ const b=$('thNiche'); b.disable
       +(r.patterns||[]).map((p,i)=>'<div class="card" style="margin-bottom:10px;padding:12px 14px"><b style="font-size:13.5px">'+esc(p.name)+'</b>'
         +'<div style="font-size:13px;color:var(--ink2);margin:5px 0;line-height:1.5">'+esc(p.formula)+'</div>'
         +(p.example?'<div style="font-size:12px;color:var(--muted);line-height:1.5">💡 '+esc(p.example)+'</div>':'')
-        +'<div class="btnrow" style="margin-top:8px"><button class="ghost nrRule" data-i="'+i+'" style="font-size:12px">💾 Запамʼятати як правило голосу</button></div></div>').join('')
+        +'<div class="btnrow" style="margin-top:8px"><button class="ghost nrRule need-manage" data-i="'+i+'" style="font-size:12px">💾 Запамʼятати як правило голосу</button></div></div>').join('')
       +(r.ideasAdded?'<div class="hint" style="margin-top:6px">💡 +'+r.ideasAdded+' ідей за цими формулами вже в Банку ідей (Матеріали → 💡 Банк ідей).</div>':'')+'</div>';
     document.body.appendChild(ov); const close=()=>ov.remove();
     ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#nrX').onclick=close;
@@ -2053,7 +2063,9 @@ function sentDots(sent,links){ const EXTRA={youtube:['YouTube','#FF0000','M12 4c
     return '<span class="cdot" title="Опубліковано: '+esc(name)+'" style="background:'+bg+'">'+inner+'</span>'; }).join('')
     +((sent||[]).length?'<span style="font-size:11px;color:var(--ok,#22a06b);font-weight:700;margin-left:2px">✓</span>':'');
 }
-function statusPill(rv){ if(rv==='approved') return ['Затверджено','sp-ok']; if(rv==='needs_work') return ['Доопрацювати','sp-warn']; return ['Готово до перегляду','sp-soft']; }
+function statusPill(rv){ if(rv==='approved') return ['Затверджено','sp-ok']; if(rv==='pending') return ['📨 На затвердженні','sp-warn']; if(rv==='needs_work') return ['↩ Доопрацювати','sp-warn']; return ['Готово до перегляду','sp-soft']; }
+// 👥 хто написав: «kostya» з kostya@gmail.com - коротко, повна пошта в підказці
+const whoShort=(e)=>String(e||'').split('@')[0];
 
 // ---------- фінальні пости: Конвеєр (компактно) / Студія / Інбокс ----------
 function renderFinals(posts){
@@ -2078,7 +2090,9 @@ function renderStudio(){
   const appr=act.filter(p=>p.review==='approved').length; const rev=act.length-appr;
   const pub=all.length-act.length;
   const tc=$('toCalendar'); if(tc){ tc.style.display=appr>0?'':'none'; tc.textContent='До календаря ('+appr+') →'; }
-  const ft=$('studioFilters'); if(ft){ ft.innerHTML=[['all','Активні',act.length],['review','На перегляд',rev],['approved','Затверджені',appr],['published','✈️ Опубліковані',pub]].map(f=>'<div class="ftab'+(StudioFilter===f[0]?' on':'')+'" data-sf="'+f[0]+'">'+f[1]+' <span style="opacity:.6">'+f[2]+'</span></div>').join(''); ft.querySelectorAll('[data-sf]').forEach(t=>t.onclick=()=>{ StudioFilter=t.dataset.sf; renderStudio(); }); }
+  // 👥 пости, що чекають рішення (автор надіслав на затвердження) - окрема вкладка, коли такі є
+  const pend=act.filter(p=>p.review==='pending').length;
+  const ft=$('studioFilters'); if(ft){ ft.innerHTML=[['all','Активні',act.length],['review','На перегляд',rev]].concat(pend?[['pending','📨 На затвердженні',pend]]:[]).concat([['approved','Затверджені',appr],['published','✈️ Опубліковані',pub]]).map(f=>'<div class="ftab'+(StudioFilter===f[0]?' on':'')+'" data-sf="'+f[0]+'">'+f[1]+' <span style="opacity:.6">'+f[2]+'</span></div>').join(''); ft.querySelectorAll('[data-sf]').forEach(t=>t.onclick=()=>{ StudioFilter=t.dataset.sf; renderStudio(); }); }
   // рубрика × джерело - компактні дропдауни (було: два ряди чіпів = візуальний шум)
   const tf=$('studioTagFilters');
   if(tf){
@@ -2095,6 +2109,7 @@ function renderStudio(){
   }
   let show=act; if(StudioFilter==='review') show=act.filter(p=>p.review!=='approved'); if(StudioFilter==='approved') show=act.filter(p=>p.review==='approved');
   if(StudioFilter==='published') show=all.filter(isSent);
+  if(StudioFilter==='pending') show=act.filter(p=>p.review==='pending');
   if(StudioRubric) show=show.filter(p=>p.rubric===StudioRubric);
   if(StudioFormat) show=show.filter(p=>(p.format||'post')===StudioFormat);
   if(StudioOrigin) show=show.filter(p=>p.source_origin===StudioOrigin);
@@ -2114,7 +2129,10 @@ function renderStudio(){
     // ♻️ вічнозелена черга: оригінал у черзі / сам пост - повтор хіта
     const egTag=p.repeat_of?'<span class="ptag" title="Повтор хіта з вічнозеленої черги: той самий пост зі свіжим першим рядком">♻️ повтор</span>'
       :p.evergreen==='active'?'<span class="ptag" title="У вічнозеленій черзі: повертатиметься через кілька тижнів зі свіжим першим рядком">♻️ у черзі</span>':'';
-    const tags=egTag+fmTag+fcTag+(im?'<span class="ptag" title="Намір поста: '+im[2]+'">'+im[0]+' '+im[1]+'</span>':'')+(p.rubric?'<span class="ptag">🏷 '+esc(p.rubric)+'</span>':'')+(p.source_origin&&p.source_origin!=='manual'?'<span class="ptag">'+(ORIGIN_LABEL[p.source_origin]||esc(p.source_origin))+'</span>':'');
+    // 👥 автор поста (коли це не я) і коментар «доопрацювати» - видно команді прямо на картці
+    const whoTag=(p.created_by_email&&!p.mine)?'<span class="ptag" title="Написав(ла) '+esc(p.created_by_email)+'">✍ '+esc(whoShort(p.created_by_email))+'</span>':'';
+    const noteTag=(p.review==='needs_work'&&p.review_note)?'<span class="ptag" style="color:var(--amber);border-color:var(--amber)" title="Коментар: '+esc(p.review_note)+'">↩ '+esc(String(p.review_note).slice(0,40))+(String(p.review_note).length>40?'…':'')+'</span>':'';
+    const tags=whoTag+noteTag+egTag+fmTag+fcTag+(im?'<span class="ptag" title="Намір поста: '+im[2]+'">'+im[0]+' '+im[1]+'</span>':'')+(p.rubric?'<span class="ptag">🏷 '+esc(p.rubric)+'</span>':'')+(p.source_origin&&p.source_origin!=='manual'?'<span class="ptag">'+(ORIGIN_LABEL[p.source_origin]||esc(p.source_origin))+'</span>':'');
     // 🛡 бейджі автоперевірок (settings_block.qa_gates) - показуються ЛИШЕ якщо перевірка знайшла слабке місце
     const qa=p.qa||{}; const qaBad=[];
     if(qa.director&&qa.director!=='yes') qaBad.push(['qad','🎯 '+(qa.director==='no'?'Директор: не веде до цілі':'Директор: частково веде до цілі')]);
@@ -2122,20 +2140,23 @@ function renderStudio(){
     if(qa.storytelling!=null&&qa.storytelling<7) qaBad.push(['qas','📖 Сторителлінг: '+qa.storytelling+'/10']);
     const qaHtml=qaBad.length?'<div style="display:flex;gap:5px;flex-wrap:wrap;padding:0 14px 4px">'+qaBad.map(b=>'<span class="ptag qabadge" data-qa="'+b[0]+'" style="cursor:pointer;color:var(--amber);border-color:var(--amber)">'+b[1]+'</span>').join('')+'</div>':'';
     return '<div class="pcard'+(ap?' appr':'')+(sel?' selc':'')+'" data-post="'+p.id+'">'
-      +'<div class="pcard-h"><input type="checkbox" class="psel" '+(sel?'checked':'')+' title="Обрати для масових дій">'+dots+'<span class="statuspill '+sp[1]+'" style="margin-left:auto">'+sp[0]+'</span></div>'
+      +'<div class="pcard-h">'+(canDo('publish')?'<input type="checkbox" class="psel" '+(sel?'checked':'')+' title="Обрати для масових дій">':'')+dots+'<span class="statuspill '+sp[1]+'" style="margin-left:auto">'+sp[0]+'</span></div>'
       +(p.media_filename?(p.media_kind==='video'
         // 🎬 відео-пост: кадр із ролика + тривалість; клік - у композер (текст на відео не накладається)
         ?'<div class="pcard-img" data-a="composer" style="cursor:pointer" title="Відео-пост: відкрити в композері"><img loading="lazy" src="/thumb/'+esc(p.media_filename)+'" onerror="this.style.opacity=.25"><span class="pcard-cnt" title="Відео">▶ '+(fmtDur(p.media_duration)||'відео')+'</span></div>'
         :'<div class="pcard-img" data-a="image" style="cursor:pointer" title="Редагувати зображення"><img loading="lazy" src="/thumb/'+esc(p.media_filename)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(p.media_filename)+'\'">'+(p.media_count>1?'<span class="pcard-cnt" title="Карусель: '+p.media_count+' кадрів">🖼 '+p.media_count+'</span>':'')+'</div>'):'')
-      +'<div class="pcard-text pcontent" contenteditable="true">'+esc(p.content)+'</div>'
+      +'<div class="pcard-text pcontent" contenteditable="'+(canDo('draft')&&(canDo('publish')||(!isPub&&p.review!=='approved'))?'true':'false')+'">'+esc(p.content)+'</div>'
       +(tags?'<div style="display:flex;gap:5px;flex-wrap:wrap;padding:0 14px 4px">'+tags+'</div>':'')
       +qaHtml
       +'<div class="pcard-f"><span class="chars">'+(p.content||'').replace(/\n/g,'').length+' симв.</span><span style="flex:1"></span>'
         +(PRO&&p.reel_video?'<button class="icon" data-a="reelplay" data-rv="'+esc(p.reel_video)+'" title="▶ Дивитися зібраний рілс">▶️</button>':'')
-        +(!isPub?'<button class="icon" data-a="del" title="Видалити пост" style="color:var(--danger)">🗑</button>':'')
-        +'<button class="icon" data-a="menu" title="Ще: AI-інструменти й дії">⋯</button>'
-        +'<button class="ghost" data-a="composer" title="Редагувати, запланувати чи опублікувати" style="padding:7px 12px;font-size:12.5px;font-weight:700">✍ Редагувати</button>'
-        +'<button class="approve'+(ap?' on':'')+'" data-a="approve"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg>'+(ap?'Затверджено':'Затвердити')+'</button>'
+        // 👥 видалити: редактор і вище - будь-яку чернетку, автор - лише свою; затвердити - редактор і вище,
+        // автор натомість «📨 На затвердження»; «Перегляд» - лише відкрити пост
+        +(!isPub&&(canDo('publish')||(canDo('draft')&&p.mine&&p.review!=='approved'))?'<button class="icon" data-a="del" title="Видалити пост" style="color:var(--danger)">🗑</button>':'')
+        +(canDo('publish')||(canDo('draft')&&!isPub&&p.review!=='approved')?'<button class="icon" data-a="menu" title="Ще: AI-інструменти й дії">⋯</button>':'')
+        +'<button class="ghost" data-a="composer" title="'+(canDo('draft')?'Редагувати, запланувати чи опублікувати':'Відкрити пост')+'" style="padding:7px 12px;font-size:12.5px;font-weight:700">'+(canDo('draft')?'✍ Редагувати':'👁 Відкрити')+'</button>'
+        +(canDo('publish')?'<button class="approve'+(ap?' on':'')+'" data-a="approve"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg>'+(ap?'Затверджено':'Затвердити')+'</button>'
+          :(canDo('draft')&&!isPub&&!ap?'<button class="ghost" data-a="submit" title="Надіслати редактору чи власнику на затвердження" style="padding:7px 12px;font-size:12.5px;font-weight:700"'+(p.review==='pending'?' disabled':'')+'>'+(p.review==='pending'?'⏳ На затвердженні':'📨 На затвердження')+'</button>':''))
       +'</div></div>';
   }).join('');
   grid.querySelectorAll('.pcard').forEach(card=>{ const id=card.dataset.post; const cont=card.querySelector('.pcontent');
@@ -2143,12 +2164,19 @@ function renderStudio(){
     // зливав рядки («Перший рядок⏎НОВИЙ» зберігалось як «Перший рядокНОВИЙ»)
     cont.addEventListener('blur',()=>saveContent(id,cont.innerText));
     const cb=card.querySelector('.psel'); if(cb) cb.onchange=()=>{ cb.checked?SelPosts.add(id):SelPosts.delete(id); card.classList.toggle('selc',cb.checked); renderBulkBar(); };
-    card.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(id); return; } if(a==='image'){ openImageEditor(id); return; } if(a==='atomize'){ openAtomize(id); return; } if(a==='director'){ directorCheck(id); return; } if(a==='develop'){ developPost(id); return; } if(a==='magnet'){ postMagnet(id); return; } if(a==='reelvideo'){ reelVideoRun(id); return; } if(a==='reelplay'){ openVideoModal(b.dataset.rv); return; } if(a==='reelpub'){ openReelPublish(id); return; }
+    card.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if(a==='composer'){ openComposer(id); return; } if(a==='image'){ const pp=Finals.find(x=>x.id===id); if(canDo('publish')||(canDo('draft')&&pp&&!(pp.sent||[]).length&&pp.review!=='approved')) openImageEditor(id); else openComposer(id); return; } if(a==='atomize'){ openAtomize(id); return; } if(a==='director'){ directorCheck(id); return; } if(a==='develop'){ developPost(id); return; } if(a==='magnet'){ postMagnet(id); return; } if(a==='reelvideo'){ reelVideoRun(id); return; } if(a==='reelplay'){ openVideoModal(b.dataset.rv); return; } if(a==='reelpub'){ openReelPublish(id); return; }
       if(a==='menu'){ const p=Finals.find(x=>x.id===id); if(p) openCardMenu(p,b,card); return; }
       if(a==='del'){ deletePost(id); return; }
+      if(a==='submit'){ submitPost(id,b); return; }
       postAction(card,id,a); });
-    card.querySelectorAll('.qabadge').forEach(b=>b.onclick=()=>{ const qa=b.dataset.qa; if(qa==='qad') directorCheck(id); else if(qa==='qas') storytellingCheck(id); else openComposer(id); });
+    card.querySelectorAll('.qabadge').forEach(b=>b.onclick=()=>{ const qa=b.dataset.qa; if(!canDo('draft')){ openComposer(id); return; } if(qa==='qad') directorCheck(id); else if(qa==='qas') storytellingCheck(id); else openComposer(id); });
   });
+}
+// 📨 автор надсилає пост на затвердження: редактори й власник отримають повідомлення в бот (або лист)
+async function submitPost(id,btn){
+  if(btn) btn.disabled=true;
+  try{ await api('/posts/'+id+'/submit',{method:'POST'}); flash('📨 Надіслано на затвердження - редактор чи власник отримає повідомлення'); await loadStudioPosts(); }
+  catch(e){ flash('⚠ '+e.message); if(btn) btn.disabled=false; }
 }
 // панель масових дій (зʼявляється коли є обрані пости)
 function renderBulkBar(){
@@ -2292,7 +2320,7 @@ function openCardMenu(p, btn, card){
     ['⧉','Копіювати текст','',()=>postAction(card,id,'copy')],
   ];
   // ♻️ опублікований оригінал (не повтор, не сторіс) - у вічнозелену чергу чи з неї
-  if((p.sent||[]).length&&!p.repeat_of&&p.format!=='story'){
+  if((p.sent||[]).length&&!p.repeat_of&&p.format!=='story'&&canDo('publish')){
     if(p.evergreen==='active') freq.push(['♻️','Прибрати з вічнозеленої черги','більше не повертатиметься',()=>evergreenToggle(id,false)]);
     else freq.push(['♻️','Повертати цей пост','вічнозелена черга: через кілька тижнів - знову, зі свіжим першим рядком',()=>evergreenToggle(id,true)]);
   }
@@ -2300,7 +2328,7 @@ function openCardMenu(p, btn, card){
   const G=[];
   G.push(['Покращити',[['🎯','Перевірка Директора','чи веде пост до твоєї цілі',()=>directorCheck(id)],['📖','Сторителлінг','12 прийомів - чи чіпляє і тримає до кінця',()=>storytellingCheck(id)]]]);
   const dev=[['🧲','Лід-магніт під тему','що віддати аудиторії за контакт',()=>postMagnet(id)]];
-  if((p.sent||[]).includes('threads')){
+  if((p.sent||[]).includes('threads')&&canDo('publish')){
     dev.push(['🔁','Повторити хіт (через 48 год)','дубль зі свіжим гачком - покажеться іншій аудиторії',()=>repeatHit(id)]);
     dev.push(['🧵','Розгорнути в гілку','тейк → повний пост, поїде гілкою в Threads',()=>expandToThread(id)]);
   }
@@ -2308,7 +2336,7 @@ function openCardMenu(p, btn, card){
   G.push(['Розвинути',dev]);
   if(PRO&&(isReelScript||p.reel_video)){ const reel=[];
     if(isReelScript) reel.push(['🎞','Зібрати відео','озвучка + кліпи + монтаж, 1-3 хв',()=>reelVideoRun(id)]);
-    if(p.reel_video) reel.push(['▶️','Дивитися рілс','',()=>openVideoModal(p.reel_video)],['📤','Опублікувати рілс','Instagram / Facebook / YouTube / TikTok',()=>openReelPublish(id)]);
+    if(p.reel_video){ reel.push(['▶️','Дивитися рілс','',()=>openVideoModal(p.reel_video)]); if(canDo('publish')) reel.push(['📤','Опублікувати рілс','Instagram / Facebook / YouTube / TikTok',()=>openReelPublish(id)]); }
     G.push(['Рілс',reel]); }
   const item=(it,attrs)=>'<button class="cm-i" '+attrs+'><span style="width:22px;text-align:center">'+it[0]+'</span><span style="flex:1"><span style="display:block">'+it[1]+'</span>'+(it[2]?'<span style="display:block;font-size:11px;color:var(--faint)">'+it[2]+'</span>':'')+'</span></button>';
   const bg=document.createElement('div'); bg.className='cardmenu-bg';
@@ -2377,7 +2405,7 @@ function openRegenModal(postId, cont){
 // «Коваль» (самонавчання голосу): правка юзера може стати постійним правилом tone_of_voice
 function rememberVoiceRule(instruction){
   const t=String(instruction||'').trim();
-  if(!t || t.length<8) return; // разові дрібниці не пропонуємо
+  if(!t || t.length<8 || !canDo('manage')) return; // разові дрібниці не пропонуємо; правило бренду - лише «Повний доступ»
   setTimeout(()=>{ if(confirm('Запамʼятати цю правку як ПОСТІЙНЕ правило голосу бренду?\n\n«'+t+'»\n\nAI застосовуватиме її до всіх наступних постів.'))
     api('/voice-rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rule:t})}).then(()=>flash('Правило голосу збережено ✓')).catch(e=>flash('⚠ '+e.message)); }, 300);
 }
@@ -2648,6 +2676,38 @@ async function openComposer(postId, opts){
     const setAp=(on)=>{ apBtn.textContent=on?'✅ Затверджено':'✅ Затвердити'; apBtn.style.color=on?'var(--brand)':''; };
     setAp(cur&&cur.review==='approved');
     apBtn.onclick=async()=>{ apBtn.disabled=true; try{ await saveDraft(); await api('/posts/'+postId+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'approved'})}); setAp(true); try{ await loadStudioPosts(); }catch(_){ } try{loadGuide(true);}catch(e){} flash('✅ Затверджено - пост готовий до календаря'); close(); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); apBtn.disabled=false; } }; }
+  // 👥 ролі в бренді: стан затвердження вгорі (на затвердженні / повернуто з коментарем) і кнопки за роллю -
+  // автор надсилає на затвердження замість «Опублікувати», редактор може повернути автору з коментарем,
+  // «Перегляд» лише дивиться. Сервер перевіряє те саме ще раз.
+  { const rv=full.review||''; const foot=ov.querySelector('.cmp-foot'); const left=ov.querySelector('.cmp-left');
+    let note='';
+    if(rv==='pending') note='📨 <b>На затвердженні</b>'+(full.submitted_by_email?' - надіслав(ла) '+esc(full.submitted_by_email):'')+'. '+(canDo('publish')?'Затверди пост або поверни автору з коментарем.':'Редактор чи власник отримав повідомлення.');
+    else if(rv==='needs_work') note='↩ <b>Повернуто на доопрацювання</b>'+(full.review_note?': «'+esc(full.review_note)+'»':'')+(canDo('publish')?'':'. Поправ і надішли ще раз.');
+    if(note&&left){ const d=document.createElement('div'); d.className='cmp-review'; d.innerHTML=note; left.prepend(d); }
+    const roOnly=(why)=>{ ov.classList.add('cmp-ro'); ov.querySelectorAll('.cmp-left textarea,.cmp-left input,.cmp-left select').forEach(el=>{ el.disabled=true; });
+      foot.innerHTML='<span style="flex:1;font-size:12.5px;color:var(--muted)">'+why+'</span><button class="ghost" id="cmpRoClose">Закрити</button>';
+      foot.querySelector('#cmpRoClose').onclick=()=>close(); };
+    if(!canDo('draft')) roOnly('👁 У тебе доступ «Перегляд»: пост можна лише дивитись.');
+    else if(!canDo('publish')){
+      if(sentSet.size||rv==='approved') roOnly('🔒 Пост уже '+(sentSet.size?'опубліковано':'затверджено')+' - змінювати його може редактор чи власник.');
+      else {
+        ['#cmpApprove','#cmpSched','#cmpNow','#cmpBest'].forEach(q=>{ const el=ov.querySelector(q); if(el) el.style.display='none'; });
+        foot.querySelectorAll('label').forEach(l=>{ l.style.display='none'; });
+        if(!full.mine){ const d=ov.querySelector('#cmpDel'); if(d) d.style.display='none'; }
+        const sb=document.createElement('button'); sb.className='primary'; sb.id='cmpSubmit';
+        sb.textContent=rv==='pending'?'⏳ На затвердженні':'📨 На затвердження'; sb.disabled=rv==='pending';
+        sb.title='Редактор чи власник отримає повідомлення і затвердить пост або поверне з коментарем';
+        sb.onclick=async()=>{ sb.disabled=true; try{ await saveDraft(); await api('/posts/'+postId+'/submit',{method:'POST'}); flash('📨 Надіслано на затвердження'); try{ await loadStudioPosts(); }catch(_){ } close(); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); sb.disabled=false; } };
+        foot.appendChild(sb);
+      }
+    } else if(rv==='pending'){
+      const rb=document.createElement('button'); rb.className='ghost'; rb.id='cmpReturn'; rb.textContent='↩ Повернути автору';
+      rb.title='Повернути на доопрацювання з коментарем - автор отримає повідомлення';
+      rb.onclick=async()=>{ const n=prompt('Що поправити? Автор побачить цей коментар (можна лишити порожнім).',''); if(n===null) return;
+        rb.disabled=true; try{ await api('/posts/'+postId+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'needs_work',note:n})}); flash('↩ Повернуто автору'); try{ await loadStudioPosts(); }catch(_){ } close(); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); rb.disabled=false; } };
+      if(apBtn) apBtn.after(rb); else foot.appendChild(rb);
+    }
+  }
   // ----- канали (надіслані = заблоковані з ✓) + пер-канальна адаптація -----
   const hasOwn=(k)=>!!(C[k]&&typeof C[k].text==='string'&&C[k].text.trim());
   const netName=(k)=>{ const n=NETS.find(x=>x[0]===k); return n?n[1]:k; };
@@ -3515,7 +3575,7 @@ function renderBank(){
   if($('btCal')) $('btCal').textContent=groups.cal.length;
   if($('btPub')) $('btPub').textContent=groups.pub.length;
   document.querySelectorAll('#bankTabs .tab').forEach(x=>x.classList.toggle('on',x.dataset.bt===BankTab));
-  const HINT={ new:'Перетягни картку на день у календарі (час за замовч. 09:00) або «AI-розподіл».',
+  const HINT={ new:canDo('publish')?'Перетягни картку на день у календарі (час за замовч. 09:00) або «AI-розподіл».':'Затверджені пости, яких ще нема в календарі. Ставить їх у календар редактор чи власник.',
     cal:'Ці пости вже стоять у календарі й вийдуть автоматично у свій час.',
     pub:'Уже опубліковані - лишаються як історія публікацій і аналітика.' };
   if($('bankHint')) $('bankHint').textContent=HINT[BankTab]||'';
@@ -3524,7 +3584,7 @@ function renderBank(){
   o.innerHTML='';
   show.forEach(p=>{ const placed=BankTab!=='new';
     const c=document.createElement('div'); c.className='chip'+(placed?' placed':'');
-    c.draggable=BankTab==='new'; c.dataset.post=p.id;   // тягнути в календар має сенс лише для «нових»
+    c.draggable=BankTab==='new'&&canDo('publish'); c.dataset.post=p.id;   // тягнути в календар має сенс лише для «нових»
     c.innerHTML='<b>'+esc((p.content||'').replace(/\n+/g,' ').slice(0,46))+'</b><small>'+(p.source_title?esc(p.source_title):'джерело')+(BankTab==='cal'?' · у календарі':(BankTab==='pub'?' · ✈️ опубліковано':''))+'</small>';
     if(BankTab==='new') c.addEventListener('dragstart',ev=>ev.dataTransfer.setData('text/plain','post:'+p.id));
     o.appendChild(c);
@@ -3585,11 +3645,11 @@ function renderCal(){
     (byDay[iso]||[]).sort((a,b)=>String(a.scheduled_at).localeCompare(String(b.scheduled_at))).forEach(s=>{
       const time=locHM(s.scheduled_at); const st=s.status;
       const icon=st==='posted'?' ✅':(st==='failed'?' ⚠️':(st==='posting'?' ⏳':''));
-      const movable=(st==='planned'||st==='failed');
+      const movable=(st==='planned'||st==='failed')&&canDo('publish');
       const ch=document.createElement('div'); ch.className='pchip'+(st==='failed'?' failed':'')+(st==='posted'?' posted':'');
       ch.title=(s.result||(st==='planned'?'заплановано':st))+(movable?' · тягни на інший день':'');
       ch.innerHTML='<b>'+time+icon+'</b> '+(s.repeat_of?'<span title="Повтор хіта з вічнозеленої черги">♻️</span> ':'')+chanIcons(s.channels)+' '+esc((s.content||'').replace(/\n+/g,' ').slice(0,maxTxt))
-        +(st!=='posted'?'<span class="pchip-x" data-del="'+s.id+'" title="Прибрати з календаря" style="float:right;margin-left:4px;padding:0 4px;border-radius:4px;color:var(--faint);cursor:pointer">✕</span>':'');
+        +(st!=='posted'&&canDo('publish')?'<span class="pchip-x" data-del="'+s.id+'" title="Прибрати з календаря" style="float:right;margin-left:4px;padding:0 4px;border-radius:4px;color:var(--faint);cursor:pointer">✕</span>':'');
       // перетягування запланованого чіпа на інший день (час зберігається)
       if(movable){ ch.draggable=true; ch.addEventListener('dragstart',ev=>{ ev.dataTransfer.setData('text/plain','slot:'+s.id+':'+time); }); }
       ch.onclick=(ev)=>{ ev.stopPropagation();
@@ -3606,6 +3666,7 @@ function renderCal(){
       g.innerHTML='<b>'+(drafted?'✍️ чернетка':'📋 тема')+'</b> '+((p.format&&p.format!=='post'&&FMT_META[p.format])?FMT_META[p.format][0]+' ':'')+((p.channel&&p.channel!=='all')?(CP_ICON[p.channel]||'')+' ':'')+esc(String(p.theme||p.rubric||'').replace(/\n+/g,' ').slice(0,maxTxt));
       g.onclick=async(ev)=>{ ev.stopPropagation();
         if(drafted&&p.post_id){ openComposer(p.post_id); return; }
+        if(!canDo('draft')){ flash('Тема з плану - пост ще не створено'); return; }
         const from=p.match_source_id?'material':'theme';
         if(!confirm('Згенерувати пост із теми «'+String(p.theme||'').slice(0,80)+'»'+(from==='material'?' (є підібраний матеріал)':'')+'?')) return;
         aiBusy('✨ Генерую пост із теми плану…');
@@ -3621,7 +3682,7 @@ function renderCal(){
         if(d.indexOf('slot:')===0){ const rest=d.slice(5); const sep=rest.indexOf(':'); const slotId=sep>0?rest.slice(0,sep):rest; const time=sep>0?rest.slice(sep+1):'09:00';
           await scheduleApi('/schedule/'+slotId,'PUT',{scheduledAt:zonedToUTCISO(iso,time||'09:00')}); await loadPublish(); return; }
       }catch(e){ flash('⚠ '+e.message); } });
-    cell.addEventListener('click',ev=>{ if(ev.target.closest('.pchip')) return; openDayScheduler(iso); });
+    cell.addEventListener('click',ev=>{ if(ev.target.closest('.pchip')||!canDo('publish')) return; openDayScheduler(iso); });
     cal.appendChild(cell);
   }
 }
@@ -3648,6 +3709,7 @@ function renderWeekGrid(wrap, days, byDay, todayIso){
         g.innerHTML='<b>'+(drafted?'✍️':'📋')+'</b> '+((p.channel&&p.channel!=='all')?(CP_ICON[p.channel]||'')+' ':'')+esc(String(p.theme||p.rubric||'').replace(/\n+/g,' ').slice(0,26));
         g.onclick=async(ev)=>{ ev.stopPropagation();
           if(drafted&&p.post_id){ openComposer(p.post_id); return; }
+          if(!canDo('draft')){ flash('Тема з плану - пост ще не створено'); return; }
           const from=p.match_source_id?'material':'theme';
           if(!confirm('Згенерувати пост із теми «'+String(p.theme||'').slice(0,80)+'»'+(from==='material'?' (є підібраний матеріал)':'')+'?')) return;
           aiBusy('✨ Генерую пост із теми плану…');
@@ -3670,11 +3732,11 @@ function renderWeekGrid(wrap, days, byDay, todayIso){
     (byDay[iso]||[]).sort((a,b)=>String(a.scheduled_at).localeCompare(String(b.scheduled_at))).forEach(s=>{
       const time=locHM(s.scheduled_at); const st=s.status;
       const icon=st==='posted'?' ✅':(st==='failed'?' ⚠️':(st==='posting'?' ⏳':''));
-      const movable=(st==='planned'||st==='failed');
+      const movable=(st==='planned'||st==='failed')&&canDo('publish');
       const ch=document.createElement('div'); ch.className='pchip'+(st==='failed'?' failed':'')+(st==='posted'?' posted':'');
       ch.title=(s.result||(st==='planned'?'заплановано':st))+(movable?' · тягни на інший день/час':'');
       ch.innerHTML='<b>'+time+icon+'</b> '+(s.repeat_of?'<span title="Повтор хіта з вічнозеленої черги">♻️</span> ':'')+chanIcons(s.channels)+' '+esc((s.content||'').replace(/\n+/g,' ').slice(0,60))
-        +(st!=='posted'?'<span class="pchip-x" data-del="'+s.id+'" title="Прибрати з календаря" style="float:right;margin-left:4px;padding:0 4px;border-radius:4px;color:var(--faint);cursor:pointer">✕</span>':'');
+        +(st!=='posted'&&canDo('publish')?'<span class="pchip-x" data-del="'+s.id+'" title="Прибрати з календаря" style="float:right;margin-left:4px;padding:0 4px;border-radius:4px;color:var(--faint);cursor:pointer">✕</span>':'');
       const [hh,mm]=time.split(':').map(Number);
       let top=(hh*60+mm)/60*HPX;
       if(top<lastBottom+2) top=lastBottom+2; // чіпи на близький час не накладаються
@@ -3697,7 +3759,7 @@ function renderWeekGrid(wrap, days, byDay, todayIso){
         if(d.indexOf('slot:')===0){ const rest=d.slice(5); const sep=rest.indexOf(':'); const slotId=sep>0?rest.slice(0,sep):rest;
           await scheduleApi('/schedule/'+slotId,'PUT',{scheduledAt:zonedToUTCISO(iso,time)}); await loadPublish(); return; }
       }catch(e){ flash('⚠ '+e.message); } });
-    col.addEventListener('click',ev=>{ if(ev.target.closest('.pchip')) return; openDayScheduler(iso); });
+    col.addEventListener('click',ev=>{ if(ev.target.closest('.pchip')||!canDo('publish')) return; openDayScheduler(iso); });
     grid.appendChild(col);
   });
   // лінія «зараз» у сьогоднішньому дні
@@ -4145,10 +4207,11 @@ async function loadMedia(){
   try{ const m=await api('/media');
     if(!m.length){ MediaSel=null; o.innerHTML='<div class="empty">Порожньо.</div>'; return; }
     const sel=MediaSel;
-    const bar='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%;margin-bottom:8px">'
+    // вибір кількох - для монтажу (автор і вище) і масового видалення (редактор і вище); перегляд лише дивиться
+    const bar=!canDo('draft')?'':'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%;margin-bottom:8px">'
       +(sel
         ?(()=>{ const clips=m.filter(x=>sel.has(x.id)&&x.kind!=='audio').length;
-            return '<button class="ghost" id="mSelAll">Вибрати всі</button><button id="mSelMont"'+(clips?'':' disabled')+' title="Склеїти обрані відео й фото (у порядку, як обирав) у сторіс чи рілс 9:16 із субтитрами">🎬 Змонтувати ('+clips+')</button><button class="danger" id="mSelDel"'+(sel.size?'':' disabled')+'>🗑 Видалити обрані ('+sel.size+')</button><button class="ghost" id="mSelOff">Скасувати</button>'; })()
+            return '<button class="ghost" id="mSelAll">Вибрати всі</button><button id="mSelMont"'+(clips?'':' disabled')+' title="Склеїти обрані відео й фото (у порядку, як обирав) у сторіс чи рілс 9:16 із субтитрами">🎬 Змонтувати ('+clips+')</button><button class="danger need-publish" id="mSelDel"'+(sel.size?'':' disabled')+'>🗑 Видалити обрані ('+sel.size+')</button><button class="ghost" id="mSelOff">Скасувати</button>'; })()
         :'<button class="ghost" id="mSelOn">☑️ Вибрати кілька</button><span style="font-size:12px;color:var(--muted)">змонтувати відео чи видалити</span>')
       +'</div>';
     o.innerHTML=bar+m.map(x=>{ const on=sel&&sel.has(x.id);
@@ -4160,7 +4223,7 @@ async function loadMedia(){
         +(x.kind==='video'?'<span class="vbadge">▶ '+fmtDur(x.duration)+'</span>':'')
         +(ord&&x.kind!=='audio'?'<span style="position:absolute;bottom:4px;left:4px;min-width:20px;height:20px;border-radius:10px;background:var(--brand);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;padding:0 5px">'+ord+'</span>':'')
         +(sel?'<span style="position:absolute;top:4px;left:4px;width:20px;height:20px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;background:'+(on?'var(--brand)':'rgba(0,0,0,.55)')+';color:#fff">'+(on?'✓':'')+'</span>'
-             :'<button class="mediaDel" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;padding:1px 6px">✕</button>')
+             :!canDo('publish')?'':'<button class="mediaDel" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;padding:1px 6px">✕</button>')
         +'</div>'; }).join('');
     if(sel){
       o.querySelectorAll('[data-id]').forEach(c=>{ c.onclick=()=>{ const id=c.dataset.id; if(sel.has(id)) sel.delete(id); else sel.add(id); loadMedia(); }; });
@@ -4348,9 +4411,89 @@ $('mediaUpload').onclick=async()=>{
 // так гарантовано оновляться всі 20+ списків, а не половина, яку ми згадали б оновити руками.
 let Wss=[], WsActive='', WsHome='';
 async function loadWorkspaces(){
-  try{ const r=await api('/workspaces'); Wss=r.items||[]; WsActive=r.active||''; WsHome=r.home||''; renderWsSwitch(WsActive); renderDangerZone();
+  try{ const r=await api('/workspaces'); Wss=r.items||[]; WsActive=r.active||''; WsHome=r.home||''; ROLE=r.role||'owner'; applyRoleUI(); renderWsSwitch(WsActive); renderDangerZone();
     const t=$('wsTitle'), cur=Wss.find(w=>w.id===WsActive); if(t&&cur&&!t.value) t.value=cur.title||''; }catch(e){}
 }
+// 👥 роль в активному бренді → що показати. Справжня перевірка - на сервері (кожна дія, якої роль не
+// дозволяє, отримає людську відмову); тут лише не підсовуємо кнопок, які все одно відмовлять.
+function applyRoleUI(){
+  const b=document.body;
+  b.classList.toggle('ro-draft',!canDo('draft')); b.classList.toggle('ro-publish',!canDo('publish'));
+  b.classList.toggle('ro-manage',!canDo('manage')); b.classList.toggle('ro-owner',ROLE!=='owner');
+  const chip=$('roleChip'), u=ROLE_UI[ROLE]||ROLE_UI.viewer;
+  if(chip){ chip.style.display=ROLE==='owner'?'none':''; chip.textContent=u[0]+' '+u[1]; chip.onclick=()=>{ selectView('settings'); setSTab('team'); }; }
+  // розділи, які змінює лише власник і «Повний доступ»: видно, але без кнопок і з поясненням угорі
+  const lock=(el,text)=>{ if(!el) return; el.classList.add('ro-lockable');
+    let bn=el.querySelector(':scope > .rolelock');
+    if(canDo('manage')){ if(bn) bn.remove(); return; }
+    if(!bn){ bn=document.createElement('div'); bn.className='rolelock'; el.prepend(bn); }
+    bn.innerHTML='<span>🔒</span><span>'+esc(text)+' Твоя роль - '+u[0]+' '+esc(u[1])+'.</span>';
+    el.querySelectorAll('input:not(.rl-keep),textarea,select').forEach(f=>{ f.readOnly=true; if(f.tagName==='SELECT'||f.type==='checkbox'||f.type==='radio') f.disabled=true; }); };
+  lock(document.querySelector('.viewsec[data-view="brand"]'),'Голос, візуал і стратегію бренду змінює власник або людина з повним доступом.');
+  lock($('setChannels'),'Підключення мереж і каналів змінює власник або людина з повним доступом. Свій Telegram до бота - у вкладці «👥 Команда».');
+  lock($('rssPanel'),'Стрічки-джерела налаштовує власник або людина з повним доступом.');
+  lock($('linksPanel'),'Короткі посилання й сторінку в біо налаштовує власник або людина з повним доступом.');
+}
+// 👥 Команда бренду: хто має доступ і з якою роллю, запрошення, «Що може кожна роль»
+let TeamRoles=[];
+const tmDay=(d)=>{ try{ return new Date(d).toLocaleDateString('uk-UA',{day:'numeric',month:'short'}); }catch(e){ return ''; } };
+async function loadTeam(){
+  const list=$('teamList'); if(!list) return;
+  let r; try{ r=await api('/workspaces/team'); }catch(e){ list.innerHTML='<div class="hint">⚠ '+esc(e.message)+'</div>'; return; }
+  TeamRoles=r.roles||[];
+  if($('teamBrand')) $('teamBrand').textContent='«'+(r.brand&&r.brand.title||'')+'»';
+  const roleOpt=(sel)=>TeamRoles.filter(x=>x.key!=='owner').map(x=>'<option value="'+x.key+'"'+(x.key===sel?' selected':'')+'>'+x.icon+' '+esc(x.label)+'</option>').join('');
+  const add=$('teamAdd'); if(add) add.style.display=r.manage?'':'none';
+  const rs=$('teamRole'); if(rs&&!rs.options.length){ rs.innerHTML=roleOpt('editor'); }
+  const hint=()=>{ const x=TeamRoles.find(t=>t.key===(rs&&rs.value)); if($('teamRoleHint')) $('teamRoleHint').textContent=x?(x.icon+' '+x.label+': '+x.hint+'.'):''; };
+  if(rs){ rs.onchange=hint; hint(); }
+  const me=r.me||{};
+  list.innerHTML='<div style="font-size:11px;font-weight:800;letter-spacing:.06em;color:var(--faint);margin:4px 0 2px">ЛЮДИ</div>'+(r.members||[]).map(m=>{
+    const ri=TeamRoles.find(t=>t.key===m.role)||{icon:'',label:m.role};
+    const editable=r.manage&&m.role!=='owner'&&!m.you;
+    return '<div class="tmrow"><span class="tmmail">'+esc(m.email)+(m.you?' <span class="tmtag">це ти</span>':'')+'</span>'
+      +(editable?'<select class="txt tmSel" data-uid="'+esc(m.user_id)+'">'+roleOpt(m.role)+'</select><button class="icon tmDel" data-uid="'+esc(m.user_id)+'" data-mail="'+esc(m.email)+'" title="Прибрати з бренду" style="color:var(--danger)">✕</button>'
+        :'<span class="tmrole">'+ri.icon+' '+esc(ri.label)+'</span>')
+      +'</div>'; }).join('')
+    +(!r.manage?'<div class="hint" style="margin-top:10px">'+esc((ROLE_UI[me.role]||['',''])[0]+' '+((TeamRoles.find(t=>t.key===me.role)||{}).label||''))+': '+esc((TeamRoles.find(t=>t.key===me.role)||{}).hint||'')+'. Командою керує власник бренду.</div>':'');
+  list.querySelectorAll('.tmSel').forEach(sel=>sel.onchange=async()=>{ try{ await api('/workspaces/members/'+sel.dataset.uid,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({role:sel.value})}); flash('Роль змінено ✓'); }catch(e){ flash('⚠ '+e.message); loadTeam(); } });
+  list.querySelectorAll('.tmDel').forEach(b=>b.onclick=async()=>{ if(!confirm('Прибрати '+b.dataset.mail+' з бренду? Доступ зникне одразу (і в боті теж).')) return;
+    try{ await api('/workspaces/members/'+b.dataset.uid,{method:'DELETE'}); flash('Прибрано'); loadTeam(); }catch(e){ flash('⚠ '+e.message); } });
+  const inv=$('teamInvites');
+  if(inv){ const items=r.invites||[];
+    inv.innerHTML=items.length?'<div style="font-size:11px;font-weight:800;letter-spacing:.06em;color:var(--faint);margin:14px 0 2px">ЗАПРОШЕННЯ (ЩЕ НЕ ПРИЙНЯЛИ)</div>'+items.map(i=>{ const ri=TeamRoles.find(t=>t.key===i.role)||{icon:'',label:i.role};
+      return '<div class="tmrow"><span class="tmmail">'+esc(i.email)+'</span><span class="tmrole">'+ri.icon+' '+esc(ri.label)+'</span><span class="tmtag">'+(i.expired?'⌛ прострочене':'надіслано '+tmDay(i.created_at))+'</span>'
+        +'<button class="icon tiRe" data-id="'+esc(i.id)+'" title="Надіслати лист ще раз">↻</button><button class="icon tiX" data-id="'+esc(i.id)+'" title="Скасувати запрошення" style="color:var(--danger)">✕</button></div>'; }).join(''):'';
+    inv.querySelectorAll('.tiRe').forEach(b=>b.onclick=async()=>{ b.disabled=true; try{ const x=await api('/workspaces/invites/'+b.dataset.id+'/resend',{method:'POST'}); flash(x.message||'Надіслано'); loadTeam(); }catch(e){ flash('⚠ '+e.message); b.disabled=false; } });
+    inv.querySelectorAll('.tiX').forEach(b=>b.onclick=async()=>{ if(!confirm('Скасувати запрошення? Посилання з листа перестане діяти.')) return; try{ await api('/workspaces/invites/'+b.dataset.id,{method:'DELETE'}); loadTeam(); }catch(e){ flash('⚠ '+e.message); } }); }
+  // що може кожна роль - таблиця, щоб обирати, а не вгадувати
+  const tr=$('teamRoles');
+  if(tr){ const rows=[['Бачити пости, план, календар, аналітику',0],['Писати чернетки, генерувати, медіа',1],['Затверджувати, публікувати, планувати, відповідати на коментарі',2],['Канали, налаштування бренду, джерела',3],['Додавати людей і змінювати їм ролі',3],['Видалити бренд',4]];
+    const cols=['viewer','author','editor','admin','owner'];
+    tr.innerHTML='<table class="rolegrid"><tr><th></th>'+cols.map(k=>'<th title="'+esc((TeamRoles.find(t=>t.key===k)||{}).hint||'')+'">'+(ROLE_UI[k]||['',''])[0]+'<br><span style="font-weight:600">'+esc((ROLE_UI[k]||['',''])[1])+'</span></th>').join('')+'</tr>'
+      +rows.map(rw=>'<tr><td>'+esc(rw[0])+'</td>'+cols.map(k=>'<td>'+(ROLE_RANK[k]>=rw[1]?'✓':'-')+'</td>').join('')+'</tr>').join('')+'</table>'
+      +'<div class="hint" style="margin-top:8px">Автор надсилає пост кнопкою «📨 На затвердження» - редактори й власник отримують повідомлення в бот (або лист) і затверджують чи повертають з коментарем.</div>'; }
+  const lv=$('teamLeave'); if(lv) lv.style.display=(me.role&&me.role!=='owner')?'':'none';
+}
+if($('teamInvite')) $('teamInvite').onclick=async()=>{
+  const email=($('teamEmail').value||'').trim(), role=$('teamRole').value, m=$('teamMsg'), b=$('teamInvite');
+  if(!email){ m.textContent='Введи пошту людини'; m.style.color='var(--danger)'; return; }
+  b.disabled=true; m.textContent='надсилаю…'; m.style.color='var(--muted)';
+  try{ const r=await api('/workspaces/invite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,role})});
+    m.textContent='✓ '+(r.message||'Готово'); m.style.color='var(--brand)'; $('teamEmail').value=''; loadTeam(); }
+  catch(e){ m.textContent='⚠ '+e.message; m.style.color='var(--danger)'; }
+  finally{ b.disabled=false; }
+};
+if($('teamLeaveBtn')) $('teamLeaveBtn').onclick=async()=>{
+  const cur=Wss.find(w=>w.id===WsActive); if(!confirm('Покинути бренд «'+(cur?cur.title:'')+'»? Повернути доступ зможе лише власник.')) return;
+  try{ await api('/workspaces/leave',{method:'POST'}); alert('Ти покинув(ла) бренд. Повертаю в основний кабінет.'); location.reload(); }catch(e){ flash('⚠ '+e.message); }
+};
+if($('teamBotBtn')) $('teamBotBtn').onclick=async()=>{
+  const m=$('teamBotMsg');
+  try{ const r=await api('/integrations/telegram/connect-link',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); window.open(r.link,'_blank'); if(m) m.textContent='Відкрив Telegram - натисни там «Start».'; }
+  catch(e){ if(m) m.textContent='⚠ '+e.message; }
+};
+if($('wsTeamBtn')) $('wsTeamBtn').onclick=()=>{ selectView('settings'); setSTab('team'); };
 // Небезпечна зона знає, ДЕ ти стоїш. Раніше в ній була лише «Видалити акаунт», і людина, яка хотіла
 // прибрати бренд, натиснула саме її: акаунт пішов на видалення, а її вилогінило. Тепер у бренді
 // першою стоїть «Видалити бренд», а кнопка акаунта чесно каже, що забирає з собою ВСІ бренди.
@@ -4380,7 +4523,7 @@ function renderWsSwitch(active){
   list.innerHTML=Wss.map(w=>'<div class="umitem" data-ws="'+esc(w.id)+'" style="display:flex;gap:8px;align-items:center">'
     +'<span style="width:14px;color:var(--brand)">'+(w.id===active?'✓':'')+'</span>'
     +'<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(w.title)+'</span>'
-    +(w.role==='owner'?'<span style="font-size:10px;color:var(--faint)">власник</span>':'')+'</div>').join('')
+    +'<span style="font-size:10px;color:var(--faint)" title="Твоя роль у бренді">'+((ROLE_UI[w.role]||ROLE_UI.viewer)[0]+' '+(w.role==='owner'?'власник':(ROLE_UI[w.role]||ROLE_UI.viewer)[1].toLowerCase()))+'</span></div>').join('')
     +'<div class="umitem" id="wsAddMenu" style="color:var(--brand)">＋ Додати бренд</div>';
   const add=$('wsAddMenu'); if(add) add.onclick=addBrand;
   list.querySelectorAll('[data-ws]').forEach(el=>el.onclick=async()=>{
@@ -4395,27 +4538,6 @@ async function addBrand(){
   catch(e){ flash('⚠ '+e.message); }
 }
 if($('wsAddBtn')) $('wsAddBtn').onclick=addBrand;
-async function loadWsMembers(){
-  const box=$('wsMembers'); if(!box) return;
-  try{
-    const r=await api('/workspaces/members');
-    box.innerHTML=(r.items||[]).map(m=>'<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)">'
-      +'<span style="flex:1;font-size:13px">'+esc(m.email)+(m.role==='owner'?' <span style="font-size:10px;color:var(--faint)">власник</span>':'')+'</span>'
-      +(r.owner&&m.role!=='owner'?'<button class="ghost" data-rev="'+esc(m.user_id)+'" style="padding:3px 9px;font-size:12px">Прибрати</button>':'')+'</div>').join('')
-      ||'<div class="hint">Доступ має лише ти.</div>';
-    box.querySelectorAll('[data-rev]').forEach(b=>b.onclick=async()=>{
-      if(!confirm('Прибрати доступ до цього кабінету?')) return;
-      try{ await api('/workspaces/revoke',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:b.dataset.rev})}); loadWsMembers(); flash('Доступ прибрано'); }
-      catch(e){ flash('⚠ '+e.message); }
-    });
-  }catch(e){}
-}
-if($('wsGrantBtn')) $('wsGrantBtn').onclick=async()=>{
-  const email=($('wsGrantEmail').value||'').trim(); if(!email) return;
-  try{ await api('/workspaces/grant',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
-    $('wsGrantEmail').value=''; $('wsMsg').textContent='доступ видано ✓'; loadWsMembers(); }
-  catch(e){ $('wsMsg').textContent='⚠ '+e.message.replace(/^\d+:\s*/,''); }
-};
 if($('wsTitleSave')) $('wsTitleSave').onclick=async()=>{
   try{ await api('/workspaces/title',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:$('wsTitle').value})});
     flash('Назву збережено'); loadWorkspaces(); }catch(e){ flash('⚠ '+e.message); }
@@ -5248,6 +5370,14 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
   try{ const me=await api('/auth/me'); $('userEmail').textContent=me.email; if(me.email) $('avatar').textContent=(me.email[0]||'О').toUpperCase(); }
   // посилання з бота, відкрите без входу (вбудований браузер Telegram): адресу памʼятаємо до входу
   catch(e){ try{ if(location.hash) sessionStorage.setItem('kg_next',location.hash); }catch(_){ } location.href='/login'; return; }
+  // 👥 посилання «Відкрити бренд» з листа (/app?ws=<id>) і повернення з запрошення (/invite/<токен>)
+  { const _p=new URLSearchParams(location.search); const _ws=_p.get('ws'), _inv=_p.get('invite'), _joined=_p.get('joined');
+    if(_ws||_inv||_joined){ history.replaceState(null,'','/app'+location.hash);
+      if(_ws&&/^[0-9a-f-]{36}$/i.test(_ws)){ try{ const w=await api('/workspaces'); if(w.active!==_ws&&(w.items||[]).some(x=>x.id===_ws)){ await api('/workspaces/switch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:_ws})}); location.reload(); return; } if(!(w.items||[]).some(x=>x.id===_ws)) flash('До цього бренду в тебе вже немає доступу.'); }catch(_){ } }
+      if(_joined) setTimeout(()=>flash('👥 Готово: ти в бренді. Перемкнути бренд - у меню аватара.'),600);
+      if(_inv==='mismatch') setTimeout(()=>alert('Запрошення в бренд надіслано на '+(_p.get('to')||'іншу пошту')+', а ти увійшов(ла) іншим акаунтом. Вийди (меню аватара → Вийти) і відкрий посилання з листа ще раз - зареєструйся чи увійди саме з тією поштою.'),300);
+      if(_inv==='expired') setTimeout(()=>alert('Це запрошення прострочене. Попроси надіслати його ще раз - у Holos: Налаштування → «👥 Команда» → ↻.'),300);
+      if(_inv==='invalid') setTimeout(()=>alert('Запрошення не знайдено: можливо, його скасували або надіслали новим листом.'),300); } }
   await loadSettings();
   await loadTelegram(); loadThreads(); loadMeta(); loadLinkedin(); loadYoutube(); loadTiktok();
   const _sp=new URLSearchParams(location.search); const _thq=_sp.get('threads'), _mtq=_sp.get('meta'), _gdq=_sp.get('gdrive');
@@ -5256,7 +5386,7 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
   if(_mtq){ go('settings'); alert(_mtq==='ok'?'Facebook/Instagram підключено ✓':(_mtq==='nopage'?'Немає FB-Сторінки під цим акаунтом (потрібна Сторінка, де ти адмін).':oauthFailText('meta',_sp.get('why')))); }
   if(_gdq){ go('sources'); alert(_gdq==='ok'?'Google Drive підключено ✓':'Не вдалося підключити Google Drive.'); }
   await loadPrompts();
-  const _rubP=loadRubrics(); loadStrategy(); loadFF(); loadMcp(); loadWorkspaces(); loadWsMembers(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadSttProvider(); loadTasks(); loadStudioPosts(); loadGoalCta(); loadMagnets();
+  const _rubP=loadRubrics(); loadStrategy(); loadFF(); loadMcp(); const _wsP=loadWorkspaces(); loadRss(); loadRecent(); loadMedia(); loadGdrive(); loadImageProvider(); loadSttProvider(); loadTasks(); loadStudioPosts(); loadGoalCta(); loadMagnets();
   const _matsP=loadMaterials().then(()=>{ try{ fillAbSources(); }catch(_){ } }); // стрічка + лічильник
   // ⚠️ вкладку Створення тут БІЛЬШЕ НЕ смикаємо: раніше цей рядок безумовно кликав setCTab і
   // перебивав адресу (#/create/ideas відкривався й одразу з'їжджав на Чорновики). Початкову вкладку
@@ -5266,7 +5396,10 @@ function owlInit(){ const o=owlEl(); if(!o||o._wired) return; o._wired=true;
   try{ await Promise.all([_matsP,_rubP]); }catch(_){ }
   _bootDone();
   setTimeout(loadTopComments,2500); // 💬 N угорі - не заважає першому малюванню (живі виклики мереж)
-  let _onb=true; try{ const st=await api('/settings'); if(!st.some(r=>r.key==='onboarded')){ _onb=false; showOnboarding(); } }catch(e){}
+  // онбординг бренду - лише тим, хто може налаштовувати бренд (власник і «Повний доступ»): редактор чи
+  // автор у ще не налаштованому бренді бачать кабінет як є, а не майстер, який усе одно не збережеться
+  try{ await _wsP; }catch(_){ }
+  let _onb=true; try{ const st=await api('/settings'); if(!st.some(r=>r.key==='onboarded')&&canDo('manage')){ _onb=false; showOnboarding(); } }catch(e){}
   // 🦉 сова-провідник (лише після онбордингу; не заважає першому налаштуванню)
   if(_onb){ try{ owlInit(); setTimeout(loadGuide,1500); }catch(e){} }
   updRunLabel();

@@ -517,7 +517,10 @@ async function maybeDigest(): Promise<void> {
  *  і кнопкою на пост. Раніше це видно було лише в «Сьогодні», тобто людина дізнавалась, коли зайде. */
 export async function notifyPublishFailed(ws: string, postId: string, errors: Array<{ net: string; error: string }>, title = "⚠️ Запланований пост не вийшов"): Promise<void> {
   try {
-    const owners = await q<{ chat_id: string }>(`select chat_id from tg_owner where workspace_id=$1 and chat_id is not null`, [ws]);
+    // 👥 тим, хто може виправити й опублікувати знову: редактор і вище (давня привʼязка без акаунта - власник)
+    const owners = await q<{ chat_id: string }>(
+      `select o.chat_id from tg_owner o left join workspace_member m on m.workspace_id=o.workspace_id and m.user_id=o.user_id
+        where o.workspace_id=$1 and o.chat_id is not null and (o.user_id is null or m.role in ('owner','admin','member','editor'))`, [ws]);
     if (!owners.length || !errors.length) return;
     const p = await one<{ content: string }>(`select content from post where id=$1`, [postId]);
     const first = String(p?.content || "").replace(/\s+/g, " ").trim();

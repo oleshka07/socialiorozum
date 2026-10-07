@@ -112,6 +112,23 @@
   .usermenu{position:absolute;right:0;top:calc(100% + 8px);z-index:80;min-width:250px;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow-lg, 0 12px 40px rgba(0,0,0,.18));animation:pop .18s ease;overflow:hidden}
   .umitem{padding:10px 14px;font-size:13.5px;font-weight:600;cursor:pointer;color:var(--ink2)}
   .umitem:hover{background:var(--surface2)}
+  /* 👥 ролі в бренді: що роль не дозволяє - не показуємо (сервер усе одно перевіряє) */
+  .rolechip{font-size:11.5px;font-weight:700;padding:5px 10px;border-radius:999px;background:var(--surface2);color:var(--ink2);border:1px solid var(--line);white-space:nowrap;cursor:pointer}
+  body.ro-draft .need-draft, body.ro-publish .need-publish, body.ro-manage .need-manage, body.ro-owner .need-owner{display:none!important}
+  .rolelock{display:flex;gap:10px;align-items:flex-start;padding:10px 13px;margin:0 0 14px;border:1px dashed var(--line);border-radius:12px;background:var(--surface2);font-size:13px;color:var(--ink2)}
+  body.ro-manage .ro-lockable button:not(.rl-keep):not(.pfh-keep),body.ro-manage .ro-lockable .dashbtn{display:none!important}
+  body.ro-manage .ro-lockable input:not(.rl-keep),body.ro-manage .ro-lockable textarea,body.ro-manage .ro-lockable select{pointer-events:none;opacity:.8}
+  .tmrow{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+  .tmrow .tmmail{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px}
+  .tmrow select{width:auto;padding:5px 8px;font-size:12.5px}
+  .tmrole{font-size:12px;font-weight:700;color:var(--ink2);white-space:nowrap}
+  .tmtag{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+  .rolegrid{width:100%;border-collapse:collapse;font-size:12.5px}
+  .rolegrid th,.rolegrid td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:center}
+  .rolegrid th:first-child,.rolegrid td:first-child{text-align:left}
+  .cmp-review{padding:9px 12px;margin:0 0 12px;border-radius:10px;font-size:13px;border:1px solid var(--amber,#d97706);color:var(--ink);background:color-mix(in srgb, var(--amber,#d97706) 10%, transparent)}
+  .cmp-ro .cmp-left button,.cmp-ro .cmp-left .netchip{pointer-events:none;opacity:.55}
+  .cmp-ro .cmp-left .dashbtn{display:none}
   @media(max-width:1000px){ .topnav{flex-wrap:wrap} .topnav-right{margin-left:0} }
   .ptag{font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--line);border-radius:6px;padding:2px 7px;white-space:nowrap}
   .pcard.selc{outline:2px solid var(--brand);outline-offset:-1px}
@@ -741,9 +758,10 @@ html.review-on #owl{display:none!important}
     </nav>
     <div class="topnav-right">
       <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--faint)"><span class="cdot" id="srvDot" style="width:8px;height:8px;background:var(--danger)"></span><span id="saved" style="opacity:0;transition:.3s;color:var(--brand)">✓</span></span>
-      <button id="scorePill" title="Заповнення профілю - натисни, щоб побачити задачі">⚙ <span id="scoreVal">…</span></button>
+      <button id="scorePill" class="need-manage" title="Заповнення профілю - натисни, щоб побачити задачі">⚙ <span id="scoreVal">…</span></button>
       <button id="topComments" class="ghost" style="display:none" title="Коментарі людей без відповіді (Instagram, Facebook, Threads)">💬 <span id="topCommN">0</span></button>
-      <button class="primary" id="genPostsBtn" title="Додати контент будь-коли: текст, ідею, посилання, стрічку">＋ Додати матеріал</button>
+      <span id="roleChip" class="rolechip" style="display:none" title="Твоя роль у цьому бренді"></span>
+      <button class="primary need-draft" id="genPostsBtn" title="Додати контент будь-коли: текст, ідею, посилання, стрічку">＋ Додати матеріал</button>
       <div style="position:relative">
         <div class="avatar" id="avatar" title="Акаунт і налаштування" style="cursor:pointer">О<span id="avProBadge" style="display:none;position:absolute;top:-4px;right:-5px;font-size:10px">⚡</span></div>
         <div id="userMenu" class="usermenu" style="display:none">
@@ -752,11 +770,12 @@ html.review-on #owl{display:none!important}
             <div style="padding:9px 14px 4px;font-size:11px;font-weight:800;letter-spacing:.06em;color:var(--faint)">КАБІНЕТ</div>
             <div id="wsList" style="padding-bottom:6px"></div>
           </div>
-          <div style="padding:10px 14px;display:flex;align-items:center;gap:10px"><span style="flex:1;font-size:13px;font-weight:600">Режим</span><div class="modeseg"><span id="segLite" class="on">Lite</span><span id="segPro" class="pro">⚡ PRO</span></div></div>
+          <div class="need-manage" style="padding:10px 14px;display:flex;align-items:center;gap:10px"><span style="flex:1;font-size:13px;font-weight:600">Режим</span><div class="modeseg"><span id="segLite" class="on">Lite</span><span id="segPro" class="pro">⚡ PRO</span></div></div>
           <div style="padding:4px 14px 10px;display:flex;align-items:center;gap:10px"><span style="flex:1;font-size:13px;font-weight:600">Тема</span><button class="icon" id="themeToggle" title="Тема" style="width:33px;height:33px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path id="themeIcon" d="M21 12.8A9 9 0 1111.2 3a7 7 0 109.8 9.8z"></path></svg></button></div>
           <div style="padding:0 14px 10px;display:flex;align-items:center;gap:10px"><span style="flex:1;font-size:13px;font-weight:600">Мова застосунку</span><select id="appLang" style="width:auto;font-size:12.5px;padding:6px 9px" disabled title="Мультимовність скоро"><option>Українська</option></select></div>
           <div style="height:1px;background:var(--line)"></div>
           <div class="umitem" data-um="profile">👤 Профіль</div>
+          <div class="umitem" data-um="team" title="Хто ще керує цим брендом і з яким доступом">👥 Команда бренду</div>
           <div class="umitem" data-um="channels">🔗 Канали</div>
           <div class="umitem" data-um="sources">📥 Джерела</div>
           <div class="umitem" id="umTools" title="Розширені інструменти: конвеєр, промт генерації, Google Drive, транскрибатори">🧰 Інструменти</div>
@@ -850,8 +869,8 @@ html.review-on #owl{display:none!important}
                 <span class="qh" title="Для щільного темпу (Threads кожні 3 години) часи публікацій розкладаються рівномірно 08:00-22:00; свої часи на мережу - у панелі «📡 Ритм каналів».">?</span>
               </div>
               <div class="btnrow" style="margin-top:8px">
-                <button class="primary" id="planGenBtn">↻ Згенерувати скелет</button>
-                <button class="ghost" id="planMatchBtn" title="Підібрати наявні матеріали під теми слотів">🔗 Підібрати матеріали</button>
+                <button class="primary need-publish" id="planGenBtn">↻ Згенерувати скелет</button>
+                <button class="ghost need-publish" id="planMatchBtn" title="Підібрати наявні матеріали під теми слотів">🔗 Підібрати матеріали</button>
                 <span id="planMsg" style="font-size:12px;color:var(--muted)"></span>
               </div>
             </div></div>
@@ -879,7 +898,7 @@ html.review-on #owl{display:none!important}
               <div class="ftabs" id="studioFilters"></div>
               <span id="studioTagFilters" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"></span>
               <span style="margin-left:auto;display:flex;gap:4px;align-items:center">
-                <button class="primary" id="newPost" style="padding:7px 12px" title="Порожній пост: напиши текст сам, додай фото чи відео й обери мережі">✍️ Новий пост</button>
+                <button class="primary need-draft" id="newPost" style="padding:7px 12px" title="Порожній пост: напиши текст сам, додай фото чи відео й обери мережі">✍️ Новий пост</button>
                 <span id="takesMsg" style="font-size:12px;color:var(--muted)"></span>
                 <button class="ghost" id="genTakes" style="padding:7px 12px" title="🧵 Порція коротких тейків для Threads з Банку ідей і щоденника - дешевий полігон: що залетить, розвинемо в гілку чи рілс">🧵 5 тейків</button>
                 <button class="icon" id="takesCfg" title="Налаштування Threads: стратегія, щоденна автопорція тейків">⚙</button>
@@ -958,7 +977,7 @@ html.review-on #owl{display:none!important}
           <div class="hint" id="bankHint" style="margin:0 0 8px">Перетягни картку на день у календарі (час за замовч. 09:00) або «AI-розподіл».</div>
           <div class="tray" id="bank"></div>
           <div class="btnrow" style="margin:10px 0 0;flex-direction:column;align-items:stretch;gap:6px">
-            <button class="primary" id="aiDistribute" style="justify-content:center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.8L19 9l-5.1 1.2L12 15l-1.9-4.8L5 9l5.1-1.2z"></path></svg>AI-розподіл</button>
+            <button class="primary need-publish" id="aiDistribute" style="justify-content:center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.8L19 9l-5.1 1.2L12 15l-1.9-4.8L5 9l5.1-1.2z"></path></svg>AI-розподіл</button>
             <button class="ghost" id="reloadPub" style="justify-content:center">↻ Оновити</button>
           </div>
           <span id="pubMsg" style="font-size:11.5px;color:var(--muted);margin-top:6px"></span>
@@ -1162,10 +1181,11 @@ html.review-on #owl{display:none!important}
           <div class="tab on" data-stab="profile">👤 Профіль</div>
           <div class="tab" data-stab="channels">🔗 Канали</div>
           <div class="tab" data-stab="sources">📥 Джерела</div>
+          <div class="tab" data-stab="team">👥 Команда</div>
         </div>
         <div id="setProfile">
-        <div class="panel"><label class="fl">🕒 Часовий пояс</label><select id="tzSel"></select><div class="hint">Час планування й календаря рахується за цим поясом (визначається автоматично, можна змінити).</div></div>
-        <div class="panel">
+        <div class="panel need-manage"><label class="fl">🕒 Часовий пояс</label><select id="tzSel"></select><div class="hint">Час планування й календаря рахується за цим поясом (визначається автоматично, можна змінити).</div></div>
+        <div class="panel need-manage">
           <div class="ph">💎 Тариф</div>
           <div class="grid2" style="margin-top:6px">
             <div id="planLite" style="border:2px solid var(--line);border-radius:12px;padding:16px">
@@ -1198,16 +1218,14 @@ html.review-on #owl{display:none!important}
               <div class="btnrow"><button class="primary" id="accEmailSave">Змінити email</button><span id="accEmailMsg" style="font-size:12px;color:var(--muted)"></span></div>
             </div>
           </div>
-          <div class="btnrow" style="margin-top:14px"><button id="accExport">📤 Експорт моїх даних (JSON)</button></div>
+          <div class="btnrow need-manage" style="margin-top:14px"><button id="accExport">📤 Експорт даних бренду (JSON)</button></div>
         </div>
         <div class="panel">
           <div class="ph">🏢 Кабінет і доступи</div>
           <div class="hint">Кабінет = окремий бренд зі своїм контентом, каналами й голосом. Даси доступ іншому акаунту - людина перемикатиметься між брендами в меню аватара, а її конектор Claude побачить обидва.</div>
-          <div class="fld" style="margin-top:10px"><label class="fl">Назва цього кабінету (видно лише тобі й тим, кому дав доступ)</label><div style="display:flex;gap:8px"><input class="txt" id="wsTitle" placeholder="напр. Бренд А"><button class="ghost" type="button" id="wsTitleSave">Зберегти</button></div></div>
+          <div class="fld need-manage" style="margin-top:10px"><label class="fl">Назва цього кабінету (видно лише тобі й тим, кому дав доступ)</label><div style="display:flex;gap:8px"><input class="txt" id="wsTitle" placeholder="напр. Бренд А"><button class="ghost" type="button" id="wsTitleSave">Зберегти</button></div></div>
           <div class="btnrow" style="margin-top:8px"><button class="ghost" type="button" id="wsAddBtn">＋ Додати бренд</button><span class="hint" style="margin:0">Створить порожній кабінет і перемкне в нього - далі короткий онбординг бренду.</span></div>
-          <div id="wsMembers" class="out" style="margin-top:10px"></div>
-          <div class="fld" style="margin-top:8px"><label class="fl">Дати доступ за поштою (людина має вже мати акаунт)</label><div style="display:flex;gap:8px"><input class="txt" id="wsGrantEmail" type="email" placeholder="pошта@приклад.com"><button class="primary" type="button" id="wsGrantBtn">Дати доступ</button></div></div>
-          <span id="wsMsg" style="font-size:12px;color:var(--muted)"></span>
+          <div class="btnrow" style="margin-top:4px"><button class="ghost" type="button" id="wsTeamBtn">👥 Команда бренду →</button><span class="hint" style="margin:0">Хто ще керує цим брендом: додати людину за поштою з рівнем доступу.</span></div>
         </div>
         <div class="panel">
           <div class="ph" style="color:var(--danger)">⚠ Небезпечна зона</div>
@@ -1216,8 +1234,8 @@ html.review-on #owl{display:none!important}
             <div class="btnrow"><button class="danger" type="button" id="wsDelBtn">🗑 Видалити бренд</button></div>
           </div>
           <div class="hint" id="accDelHint">Видалення акаунта: вихід на всіх пристроях, а через 14 днів акаунт зітреться остаточно. Передумаєш - просто увійди протягом цього часу.</div>
-          <div class="hint" style="margin-top:10px">«Почати з чистого листа» - стерти весь контент (бренд, стратегію, пости, календар, медіа) і пройти онбординг заново. Підключені канали лишаються.</div>
-          <div class="btnrow"><button class="ghost" id="accReset">🔄 Почати з чистого листа</button><button class="danger" id="accDelete">Видалити акаунт</button></div>
+          <div class="hint need-owner" style="margin-top:10px">«Почати з чистого листа» - стерти весь контент (бренд, стратегію, пости, календар, медіа) і пройти онбординг заново. Підключені канали лишаються.</div>
+          <div class="btnrow"><button class="ghost need-owner" id="accReset">🔄 Почати з чистого листа</button><button class="danger" id="accDelete">Видалити акаунт</button></div>
         </div>
         <div class="panel" id="admKeysPanel" style="display:none">
           <div class="ph" style="margin:0 0 6px">🔑 Ключі провайдерів (адміністратор)</div>
@@ -1333,9 +1351,34 @@ html.review-on #owl{display:none!important}
           </div>
         </div>
         </div>
+        <div id="setTeam" style="display:none">
+        <div class="panel">
+          <div class="ph" style="margin:0 0 4px">👥 Команда бренду <span id="teamBrand" style="color:var(--brand)"></span></div>
+          <div class="hint" id="teamIntro" style="margin-bottom:12px">Хто ще керує цим брендом і з яким доступом. Інший бренд - перемкни в меню аватара (угорі праворуч), і тут буде його команда.</div>
+          <div id="teamAdd" style="display:none;margin-bottom:14px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface2)">
+            <div style="font-weight:700;font-size:13.5px;margin-bottom:8px">＋ Додати людину</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <input class="txt" id="teamEmail" type="email" placeholder="пошта людини, напр. kostya@gmail.com" style="flex:2;min-width:200px">
+              <select class="txt" id="teamRole" style="flex:1;min-width:170px;width:auto"></select>
+              <button class="primary" type="button" id="teamInvite">Надіслати запрошення</button>
+            </div>
+            <div class="hint" id="teamRoleHint" style="margin:8px 0 0"></div>
+            <div id="teamMsg" style="font-size:12.5px;margin-top:6px;min-height:16px"></div>
+          </div>
+          <div id="teamList"></div>
+          <div id="teamInvites"></div>
+          <details style="margin-top:14px"><summary style="cursor:pointer;font-size:13px;font-weight:700">Що може кожна роль</summary><div id="teamRoles" style="margin-top:8px"></div></details>
+          <div id="teamLeave" class="btnrow" style="display:none;margin-top:14px"><button class="ghost" type="button" id="teamLeaveBtn" style="color:var(--danger)">Покинути цей бренд</button><span class="hint" style="margin:0">Бренд зникне з твого меню; повернути доступ може власник.</span></div>
+        </div>
+        <div class="panel">
+          <div class="ph" style="margin:0 0 4px">🤖 Мій Telegram</div>
+          <div class="hint" style="margin-bottom:10px">Привʼяжи свій Telegram до бота Holos: сповіщення про пости на затвердження, коментарі людей (для редакторів), щоденник і чернетки з телефона - у брендах, де в тебе є доступ.</div>
+          <div class="btnrow"><button class="ghost" type="button" id="teamBotBtn">🔗 Підключити бот</button><span id="teamBotMsg" style="font-size:12px;color:var(--muted)"></span></div>
+        </div>
+        </div>
         <div id="setSources" style="display:none">
 
-        <div class="panel">
+        <div class="panel need-draft">
           <div class="ph">📝 Встав транскрипт або думку</div>
           <div class="hint" style="margin-bottom:10px">Найшвидший шлях - вставити текст і натиснути «У роботу».</div>
           <textarea id="transcript" placeholder="Встав транскрипт сесії, голосову нотатку чи думку…" style="min-height:130px"></textarea>
@@ -1346,7 +1389,7 @@ html.review-on #owl{display:none!important}
           <div class="panel" style="margin:0">
             <div class="ph">🖼️ Медіа-бібліотека</div>
             <div class="hint">Фото для постів. Можна завантажити одразу пачкою: Claude у конекторі бачить їх і сам підбирає до постів. А в Claude Code чи Cowork можна просто сказати «залий фото з папки …» - він зробить це сам, повтори не задвоюються.</div>
-            <div class="btnrow"><input type="file" id="mediaFile" accept="image/*,video/*" multiple style="font-size:13px"><button class="primary" id="mediaUpload">Завантажити</button><span id="mediaMsg" style="font-size:12px;color:var(--muted)"></span></div>
+            <div class="btnrow need-draft"><input type="file" id="mediaFile" accept="image/*,video/*" multiple style="font-size:13px"><button class="primary" id="mediaUpload">Завантажити</button><span id="mediaMsg" style="font-size:12px;color:var(--muted)"></span></div>
             <div id="mediaGrid" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"></div>
           </div>
           <div class="panel" style="margin:0">
@@ -1361,7 +1404,7 @@ html.review-on #owl{display:none!important}
             </div>
           </div>
         </div>
-        <div class="panel">
+        <div class="panel" id="rssPanel">
           <div class="ph">📡 Стрічки-джерела (авто-інжест)</div>
           <div class="hint">Нові пости стрічки самі падають у «Матеріали» кожні ~15 хв. «Новини за темою» - введи ключові слова, решту зробить Google News. «Авто» = одразу генерувати чорновики (обережно з вартістю AI).</div>
           <div class="btnrow" style="flex-wrap:wrap">
@@ -1415,17 +1458,17 @@ html.review-on #owl{display:none!important}
 
       <!-- ІНСТРУМЕНТИ: розширені й рідко вживані функції (щоденні розділи лишаються чистими) -->
       <section class="viewsec" data-view="tools">
-        <div class="panel">
+        <div class="panel need-draft">
           <div class="ph">🧰 Розширені інструменти</div>
           <div class="hint">Все, що потрібно не щодня: покроковий конвеєр генерації, службові перегляди й інтеграції для просунутих сценаріїв.</div>
           <div class="btnrow" style="margin-top:10px;flex-wrap:wrap">
-            <button class="ghost" id="toolsPipeline" title="Покроковий PRO-конвеєр: ідеї → чернетки → тон → формат → де-AI → стратегія">🧪 Конвеєр генерації <span style="font-size:9px;font-weight:800;background:var(--brand);color:var(--brand-ink);border-radius:5px;padding:1px 5px;margin-left:3px">PRO</span></button>
+            <button class="ghost need-publish" id="toolsPipeline" title="Покроковий PRO-конвеєр: ідеї → чернетки → тон → формат → де-AI → стратегія">🧪 Конвеєр генерації <span style="font-size:9px;font-weight:800;background:var(--brand);color:var(--brand-ink);border-radius:5px;padding:1px 5px;margin-left:3px">PRO</span></button>
             <button class="ghost" id="viewPrompt" title="Переглянути спільний промт генерації - що саме бачить AI">👁 Промт генерації</button>
           </div>
         </div>
         <!-- 🧪 порівняння моделей: один матеріал, один промт, різні моделі поруч. Відповідає на
              питання «контент слабкий через модель чи через промт», яке інакше лишається на око. -->
-        <div class="panel">
+        <div class="panel need-draft">
           <div class="ph">🧪 Порівняти моделі</div>
           <div class="hint">Беремо ОДИН твій матеріал, будуємо звичайний промт генерації і даємо його <b>дослівно</b> кожній моделі. Різниця в результатах = різниця МОДЕЛЕЙ (промт однаковий). Назви моделей сховані, поки не оціниш тексти - щоб гучне імʼя не впливало на вибір.</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:10px">
@@ -1443,7 +1486,7 @@ html.review-on #owl{display:none!important}
             <span id="abMsg" style="font-size:12px;color:var(--muted)"></span>
           </div>
           <div id="abOut" style="margin-top:14px"></div>
-          <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+          <div class="need-manage" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
             <label style="font-size:12px;color:var(--muted)">Головна модель генерації
               <select id="abMain" class="txt" style="width:auto;padding:7px 9px;display:inline-block;margin-left:4px;max-width:340px"></select>
             </label>
@@ -1469,7 +1512,7 @@ html.review-on #owl{display:none!important}
           <div style="font-weight:700;font-size:13.5px;margin:16px 0 6px">📇 Сторінка в біо</div>
           <label style="cursor:pointer;font-size:13px"><input type="checkbox" id="bioOn"> Сторінка відкрита</label>
           <div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap;font-size:13px"><span id="bioBase" style="color:var(--muted)">holos.rozum.one/@</span><input id="bioSlug" class="txt" style="width:180px;display:inline-block;padding:6px 9px" placeholder="rozum" maxlength="30">
-            <a id="bioOpen" class="ghost" target="_blank" rel="noopener" style="display:none;padding:5px 10px;font-size:12px;text-decoration:none">Відкрити ↗</a><button class="ghost" id="bioCopy" style="display:none;padding:5px 10px;font-size:12px">⧉ Копіювати</button></div>
+            <a id="bioOpen" class="ghost" target="_blank" rel="noopener" style="display:none;padding:5px 10px;font-size:12px;text-decoration:none">Відкрити ↗</a><button class="ghost rl-keep" id="bioCopy" style="display:none;padding:5px 10px;font-size:12px">⧉ Копіювати</button></div>
           <input id="bioTitle" class="txt" style="margin-top:8px" placeholder="Назва (бренд чи твоє ім'я)" maxlength="80">
           <textarea id="bioText" class="txt" rows="2" style="margin-top:6px" placeholder="Коротко: хто ти і що робиш (до 300 символів)" maxlength="300"></textarea>
           <div id="bioLinks" style="display:flex;flex-direction:column;gap:6px;margin-top:8px"></div>
@@ -1480,11 +1523,11 @@ html.review-on #owl{display:none!important}
           </div>
           <div id="bioMsg" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
           <div style="font-weight:700;font-size:13.5px;margin:16px 0 6px">✂️ Скоротити посилання вручну</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap"><input id="lkUrl" class="txt" style="flex:1;min-width:220px" placeholder="https://…"><button class="ghost" id="lkShorten">Скоротити</button></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap"><input id="lkUrl" class="txt rl-keep" style="flex:1;min-width:220px" placeholder="https://…"><button class="ghost rl-keep need-draft" id="lkShorten">Скоротити</button></div>
           <div id="lkShortOut" style="font-size:12.5px;margin-top:6px"></div>
         </div>
-        <div id="toolsGdriveHost"></div>
-        <div id="toolsTransHost"></div>
+        <div id="toolsGdriveHost" class="need-manage"></div>
+        <div id="toolsTransHost" class="need-manage"></div>
       </section>
 
     </div>

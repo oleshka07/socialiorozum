@@ -18,6 +18,7 @@ import * as tg from "./telegram.js";
 import { collectInbox, inboxDrafts, replyToComment, skipComment, type Inbox, type InboxItem, type InboxNet } from "./inbox.js";
 import { getSettingText, setSetting } from "./settings.js";
 import { listWorkspaces, isMember } from "./workspaces.js";
+import { can, normRole } from "./roles.js";
 import { logEvent } from "./log.js";
 import { liveSend, wsBotToken } from "./tgbot.js";
 
@@ -60,10 +61,11 @@ async function brandTitle(ws: string): Promise<string> {
   return r?.t || "бренд";
 }
 /** Бренди людини, куди бот може їй писати: усі, де вона учасник (стара привʼязка без акаунта - лише свій). */
+// 👥 лише бренди, де людина може відповідати людям від імені бренду (редактор і вище): автору чи
+// «Перегляду» картка з «↩ Надіслати чернетку» була б кнопкою, яка все одно відмовить
 async function brandsFor(o: Owner): Promise<string[]> {
-  if (!o.user_id) return [o.workspace_id];
-  const list = (await listWorkspaces(o.user_id)).map((w) => w.id);
-  return list.includes(o.workspace_id) ? list : [o.workspace_id, ...list];
+  if (!o.user_id) return [o.workspace_id];          // давня привʼязка без акаунта - власник свого кабінету
+  return (await listWorkspaces(o.user_id)).filter((w) => can(normRole(w.role), "publish")).map((w) => w.id);
 }
 /** Рядки comment_notice для коментарів без відповіді (нові - одразу «показані», якщо не сказано інше). */
 async function ensureNotices(ws: string, tgUser: string, items: InboxItem[], status = "shown"): Promise<Map<string, string>> {
@@ -201,6 +203,11 @@ async function noticeFor(fromId: number, id: string): Promise<Notice | null> {
   const o = await one<{ user_id: string | null; workspace_id: string }>(`select user_id, workspace_id from tg_owner where tg_user_id=$1`, [fromId]);
   if (!o) return null;
   if (o.user_id ? !(await isMember(o.user_id, n.workspace_id)) : o.workspace_id !== n.workspace_id) return null;
+  // 👥 відповісти чи пропустити - лише поки людина редактор і вище (роль могли змінити після сповіщення)
+  if (o.user_id) {
+    const m = await one<{ role: string }>(`select role from workspace_member where user_id=$1 and workspace_id=$2`, [o.user_id, n.workspace_id]);
+    if (!m || !can(normRole(m.role), "publish")) return null;
+  }
   return n;
 }
 async function itemOf(n: Notice): Promise<InboxItem | null> {

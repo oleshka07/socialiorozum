@@ -3,6 +3,7 @@
 // (source origin='diary', один запис на день, усе дописується в нього).
 // Питання не копляться: liveSend категорії 'diary' видаляє попереднє. Ігнор 3 дні поспіль → лишається
 // тільки вечірнє питання. Голос розшифровує Whisper (OPENAI_API_KEY). Медіа → галерея source='diary'.
+import { can } from "./roles.js";
 import { canTry, failedTry, succeededTry } from "./dailytry.js";
 import { q, one } from "./db.js";
 import { env } from "./env.js";
@@ -229,8 +230,13 @@ export async function weekDiaryText(ws: string): Promise<string> {
 const LUNCH_HOUR = 13, EVENING_HOUR = 20;
 async function tick(): Promise<void> {
   if (!env.telegram.botToken) return;
-  const owners = await q<{ workspace_id: string; chat_id: string }>(`select workspace_id, chat_id from tg_owner where chat_id is not null`);
+  // 👥 питання щоденника - лише тим, хто може писати в бренд (автор і вище): «Перегляд» відповісти не зміг би
+  const owners = await q<{ workspace_id: string; chat_id: string; role: string | null }>(
+    `select o.workspace_id, o.chat_id, case when o.user_id is null then 'owner' else m.role end as role
+       from tg_owner o left join workspace_member m on m.workspace_id=o.workspace_id and m.user_id=o.user_id
+      where o.chat_id is not null`);
   for (const o of owners) {
+    if (!can(o.role, "draft")) continue;
     let key = "";
     let day = "";
     try {

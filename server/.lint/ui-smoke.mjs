@@ -103,6 +103,47 @@ const POSTS = [
   },
 ];
 
+// 👥 команда бренду: стан змінюється від дій, тож перевірка доводить «натиснув → сталося», а не вміння віддати константу
+const TEAM_ROLES = [
+  { key: "owner", label: "Власник", icon: "👑", hint: "усе, зокрема видалити бренд" },
+  { key: "admin", label: "Повний доступ", icon: "🔑", hint: "усе, крім видалення бренду" },
+  { key: "editor", label: "Редактор", icon: "✍️", hint: "пише, затверджує й публікує пости" },
+  { key: "author", label: "Автор", icon: "📝", hint: "пише чернетки; публікує редактор" },
+  { key: "viewer", label: "Перегляд", icon: "👁", hint: "бачить пости, план, календар і аналітику" },
+];
+const TEAM = {
+  members: [
+    { user_id: "u1", email: "smoke@rozum.one", role: "owner", since: "2026-09-01T08:00:00Z", added_by_email: null, you: true },
+    { user_id: "c0ffee00-0000-4000-8000-000000000002", email: "editor@rozum.one", role: "editor", since: "2026-10-01T08:00:00Z", added_by_email: "smoke@rozum.one", you: false },
+  ],
+  invites: [{ id: "c0ffee00-0000-4000-8000-0000000000a1", email: "new@rozum.one", role: "author", created_at: "2026-10-06T09:00:00Z", expired: false }],
+};
+const teamCalls = [], submitCalls = [];
+function handleTeam(method, path, body) {
+  const role = API["GET /workspaces"].role || "owner", manage = role === "owner" || role === "admin";
+  if (method === "GET" && path === "/workspaces/team") {
+    return { brand: { id: "11111111-1111-1111-1111-111111111111", title: "Бренд А", home: true }, me: { id: "u1", email: "smoke@rozum.one", role }, manage, roles: TEAM_ROLES,
+      members: manage ? TEAM.members : TEAM.members.filter((m) => m.role === "owner").concat([{ user_id: "u1", email: "smoke@rozum.one", role, you: true }]), invites: manage ? TEAM.invites : [] };
+  }
+  if (method === "POST" && path === "/workspaces/invite") {
+    teamCalls.push({ k: "invite", email: body?.email, role: body?.role });
+    TEAM.invites.unshift({ id: "c0ffee00-0000-4000-8000-0000000000a2", email: body?.email, role: body?.role, created_at: new Date().toISOString(), expired: false });
+    return { ok: true, status: "invited", message: "Запрошення надіслано на " + body?.email };
+  }
+  if (method === "PUT" && path.startsWith("/workspaces/members/")) {
+    const uid = path.split("/")[3], m = TEAM.members.find((x) => x.user_id === uid); teamCalls.push({ k: "role", uid, role: body?.role });
+    if (m) m.role = body?.role; return { ok: true };
+  }
+  if (method === "DELETE" && path.startsWith("/workspaces/members/")) {
+    const uid = path.split("/")[3]; teamCalls.push({ k: "remove", uid }); TEAM.members = TEAM.members.filter((x) => x.user_id !== uid); return { ok: true };
+  }
+  if (method === "POST" && /^\/workspaces\/invites\/[^/]+\/resend$/.test(path)) { teamCalls.push({ k: "resend", id: path.split("/")[3] }); return { ok: true, message: "Лист надіслано ще раз" }; }
+  if (method === "DELETE" && path.startsWith("/workspaces/invites/")) {
+    const id = path.split("/")[3]; teamCalls.push({ k: "cancel", id }); TEAM.invites = TEAM.invites.filter((i) => i.id !== id); return { ok: true };
+  }
+  return null;
+}
+
 const iso = (dayShift, hh) => {
   const d = new Date();
   d.setUTCDate(d.getUTCDate() + dayShift);
@@ -553,6 +594,13 @@ function handleApi(method, path, body) {
     cmDone.add(body?.commentId);
     const it = CM_ITEMS.find((x) => x.commentId === body?.commentId);
     return path === "/comments/reply" ? { ok: true, id: "r1", accountName: it?.accountName || "@olegalisio" } : { ok: true };
+  }
+  if (path.startsWith("/workspaces/team") || path === "/workspaces/invite" || path.startsWith("/workspaces/members/") || path.startsWith("/workspaces/invites/")) {
+    const r = handleTeam(method, path.split("?")[0], body); if (r) return r;
+  }
+  // 📨 автор надсилає пост на затвердження
+  if (method === "POST" && /^\/posts\/[^/]+\/submit$/.test(path)) {
+    const id = path.split("/")[2]; submitCalls.push(id); const p = POSTS.find((x) => x.id === id); if (p) p.review = "pending"; return { ok: true, review: "pending" };
   }
   const key = method + " " + path.split("?")[0];
   if (key === "GET /admin/keys") return { keys: KEYS, kie: { ready: KEYS[1].set, credits: KEYS[1].set ? 1200 : null } };
@@ -1778,12 +1826,16 @@ const run = async () => {
   });
 
   await check("wsSwitcher", async () => {
+    // список брендів тягнеться окремим запитом на старті - чекаємо на нього, а не на таймер
+    await page.waitForFunction(() => (document.getElementById("wsList") || {}).innerText?.includes("Бренд Б"), undefined, { timeout: 8000 }).catch(() => {});
     const box = await page.$eval("#wsSwitch", (el) => el.style.display).catch(() => "none");
     const list = await page.$eval("#wsList", (el) => el.innerText).catch(() => "");
     const active = await page.$eval("#wsList", (el) => (el.querySelector("[data-ws]")?.innerText || "")).catch(() => "");
-    const mem = await page.$eval("#wsMembers", (el) => el.innerText).catch(() => "");
-    return box !== "none" && list.includes("Бренд А") && list.includes("Бренд Б") && active.includes("✓")
-      && list.includes("Додати бренд") && mem.includes("friend@rozum.one");
+    const team = await page.$eval("#wsTeamBtn", (el) => el.textContent).catch(() => "");
+    const good = box !== "none" && list.includes("Бренд А") && list.includes("Бренд Б") && active.includes("✓")
+      && list.includes("Додати бренд") && /Команда бренду/.test(team);
+    if (!good) console.log("   ↳ wsSwitcher:", JSON.stringify({ box, list, active, team }));
+    return good;
   });
 
   // Меню аватара мусить бути НАД липкою плашкою розділу. Раніше .pagehead (z-index 45) накривав
@@ -3269,6 +3321,149 @@ const run = async () => {
       && off.gone && !off.cls && off.ls === null;
     if (!good) console.log("   ↳ reviewCaptions:", JSON.stringify({ st, cmp, cmTxt, off }));
     return good;
+  });
+
+  // 👥 Команда бренду (власник): додати людину з роллю, змінити роль, запрошення, «Що може кожна роль»
+  await check("teamTab", async () => {
+    await page.evaluate(() => { selectView("settings"); setSTab("team"); });
+    await page.waitForFunction(() => document.querySelectorAll("#teamList .tmrow").length >= 2, undefined, { timeout: 8000 });
+    const st = await page.evaluate(() => ({
+      add: getComputedStyle(document.getElementById("teamAdd")).display !== "none",
+      opts: [...document.querySelectorAll("#teamRole option")].map((o) => o.value),
+      sel: document.getElementById("teamRole").value,
+      hint: document.getElementById("teamRoleHint").textContent,
+      rows: [...document.querySelectorAll("#teamList .tmrow")].map((r) => r.innerText.replace(/\s+/g, " ")),
+      ownerSel: [...document.querySelectorAll("#teamList .tmrow")].some((r) => r.innerText.includes("smoke@rozum.one") && r.querySelector(".tmSel")),
+      edSel: !!document.querySelector("#teamList .tmSel"),
+      inv: document.getElementById("teamInvites").innerText,
+      grid: document.querySelectorAll("#teamRoles .rolegrid tr").length,
+      leave: getComputedStyle(document.getElementById("teamLeave")).display,
+    }));
+    await page.evaluate(() => { document.getElementById("teamEmail").value = "kostya@gmail.com"; const r = document.getElementById("teamRole"); r.value = "author"; r.dispatchEvent(new Event("change")); });
+    const hint2 = await page.$eval("#teamRoleHint", (m) => m.textContent);
+    await page.evaluate(() => document.getElementById("teamInvite").click());
+    await page.waitForFunction(() => document.getElementById("teamInvites").innerText.includes("kostya@gmail.com"), undefined, { timeout: 6000 });
+    const msg = await page.$eval("#teamMsg", (m) => m.textContent);
+    await page.evaluate(() => { const x = document.querySelector("#teamList .tmSel"); x.value = "admin"; x.dispatchEvent(new Event("change")); });
+    await page.waitForTimeout(300);
+    const ok = st.add && st.opts.join(",") === "admin,editor,author,viewer" && st.sel === "editor" && /Редактор/.test(st.hint)
+      && st.rows.length === 2 && st.rows[0].includes("це ти") && !st.ownerSel && st.edSel
+      && /new@rozum\.one/.test(st.inv) && st.grid === 7 && st.leave === "none" && /Автор/.test(hint2)
+      && teamCalls.some((c) => c.k === "invite" && c.email === "kostya@gmail.com" && c.role === "author") && /Запрошення надіслано/.test(msg)
+      && teamCalls.some((c) => c.k === "role" && c.role === "admin");
+    if (!ok) console.log("   ↳ teamTab:", JSON.stringify({ st, hint2, msg, teamCalls }));
+    return ok;
+  });
+
+  // Заглушка станова: попередні перевірки «публікують» P1, а опублікований пост живе лише у вкладці
+  // «Опубліковані» - ролям потрібна чернетка. unsent() робить пости неопублікованими й вертає відкат.
+  const unsent = (...ids) => {
+    const keep = ids.map((id) => POSTS.find((x) => x.id === id)).filter(Boolean).map((p) => ({ p, sent: p.sent, links: p.links }));
+    for (const k of keep) { k.p.sent = []; k.p.links = {}; }
+    return () => { for (const k of keep) { k.p.sent = k.sent; k.p.links = k.links; } };
+  };
+
+  // 👁 «Перегляд»: бачить пости, календар і бренд, але кнопок, які сервер відхилить, не бачить
+  await check("roleViewer", async () => {
+    const C1 = '.pcard[data-post="' + P1 + '"]';
+    const back = unsent(P1);
+    try {
+      // власник - точка відліку: інакше «кнопок нема» нічого б не доводило
+      await page.evaluate(() => { selectView("publish", "cal"); });
+      await page.waitForTimeout(400);
+      const base = await page.evaluate(() => ({ x: document.querySelectorAll(".pchip-x").length, drag: document.querySelectorAll('.pchip[draggable="true"]').length }));
+      API["GET /workspaces"].role = "viewer";
+      await page.evaluate(() => loadWorkspaces());
+      await page.evaluate(async () => { selectView("create", "posts"); setLayout("studio"); StudioFilter = "all"; StudioRubric = ""; StudioOrigin = ""; StudioFormat = ""; await loadStudioPosts(); renderStudio(); });
+      await page.waitForSelector(C1, { timeout: 6000 });
+      const st = await page.evaluate((sel) => {
+        const vis = (q) => { const e = document.querySelector(q); return !!e && e.offsetParent !== null; };
+        const card = document.querySelector(sel);
+        return { body: document.body.className, chip: (document.getElementById("roleChip") || {}).textContent, chipVis: vis("#roleChip"),
+          newPost: vis("#newPost"), addMat: vis("#genPostsBtn"), approve: !!card.querySelector('[data-a="approve"]'), submit: !!card.querySelector('[data-a="submit"]'),
+          menu: !!card.querySelector('[data-a="menu"]'), del: !!card.querySelector('[data-a="del"]'), psel: !!card.querySelector(".psel"),
+          open: card.querySelector('[data-a="composer"]').textContent, editable: card.querySelector(".pcontent").getAttribute("contenteditable") };
+      }, C1);
+      await page.evaluate(() => { selectView("publish", "cal"); });
+      await page.waitForTimeout(400);
+      const cal = await page.evaluate(() => ({ ai: getComputedStyle(document.getElementById("aiDistribute")).display, x: document.querySelectorAll(".pchip-x").length,
+        drag: document.querySelectorAll('.pchip[draggable="true"]').length, bank: document.querySelectorAll('#bank .chip[draggable="true"]').length }));
+      await page.evaluate(() => { selectView("brand"); });
+      await page.waitForTimeout(300);
+      const brand = await page.evaluate(() => { const sec = document.querySelector('.viewsec[data-view="brand"]'), lk = sec.querySelector(":scope > .rolelock");
+        return { lock: lk ? lk.innerText : "", btns: [...sec.querySelectorAll("button")].filter((b) => b.offsetParent !== null && !b.classList.contains("pfh-keep") && !b.classList.contains("rl-keep")).map((b) => b.textContent.trim().slice(0, 30)) }; });
+      const ok = base.x > 0 && /ro-draft/.test(st.body) && /ro-publish/.test(st.body) && /ro-manage/.test(st.body)
+        && st.chipVis && /Перегляд/.test(st.chip) && !st.newPost && !st.addMat
+        && !st.approve && !st.submit && !st.menu && !st.del && !st.psel && /Відкрити/.test(st.open) && st.editable === "false"
+        && cal.ai === "none" && cal.x === 0 && cal.drag === 0 && cal.bank === 0
+        && /повним доступом/.test(brand.lock) && brand.btns.length === 0;
+      if (!ok) console.log("   ↳ roleViewer:", JSON.stringify({ base, st, cal, brand }));
+      return ok;
+    } finally { back(); delete API["GET /workspaces"].role; await page.evaluate(() => loadWorkspaces()); }
+  });
+
+  // 📝 Автор: пише й надсилає «📨 На затвердження»; затверджене чи чуже - лише дивиться
+  await check("roleAuthor", async () => {
+    const C1 = '.pcard[data-post="' + P1 + '"]', C2 = '.pcard[data-post="' + P2 + '"]';
+    const back = unsent(P1, P2);
+    try {
+      API["GET /workspaces"].role = "author";
+      await page.evaluate(() => loadWorkspaces());
+      await page.evaluate(async () => { selectView("create", "posts"); setLayout("studio"); StudioFilter = "all"; StudioRubric = ""; StudioOrigin = ""; StudioFormat = ""; await loadStudioPosts(); renderStudio(); });
+      await page.waitForSelector(C1, { timeout: 6000 });
+      const st = await page.evaluate(([a, b]) => { const c1 = document.querySelector(a), c2 = document.querySelector(b);
+        return { sub: !!c1.querySelector('[data-a="submit"]'), approve1: !!c1.querySelector('[data-a="approve"]'), menu1: !!c1.querySelector('[data-a="menu"]'),
+          ed1: c1.querySelector(".pcontent").getAttribute("contenteditable"), psel: !!c1.querySelector(".psel"),
+          sub2: !!c2.querySelector('[data-a="submit"]'), approve2: !!c2.querySelector('[data-a="approve"]'), menu2: !!c2.querySelector('[data-a="menu"]'), del2: !!c2.querySelector('[data-a="del"]'),
+          ed2: c2.querySelector(".pcontent").getAttribute("contenteditable"), newPost: document.getElementById("newPost").offsetParent !== null }; }, [C1, C2]);
+      await page.evaluate((a) => document.querySelector(a + ' [data-a="submit"]').click(), C1);
+      await page.waitForFunction((a) => { const x = document.querySelector(a + ' [data-a="submit"]'); return x && x.disabled && /На затвердженні/.test(x.textContent); }, C1, { timeout: 6000 });
+      await page.evaluate(() => { selectView("publish", "plan"); });
+      await page.waitForTimeout(300);
+      const plan = await page.evaluate(() => document.querySelectorAll("#phActions button").length);
+      // PRO-конвеєр перезбирає готові пости прогону - автору його не видно (сервер теж відмовить)
+      await page.evaluate(() => { selectView("tools"); });
+      await page.waitForTimeout(200);
+      const tools = await page.evaluate(() => ({ conv: document.getElementById("toolsPipeline").offsetParent !== null, prompt: document.getElementById("viewPrompt").offsetParent !== null }));
+      const ok = st.sub && !st.approve1 && st.menu1 && st.ed1 === "true" && !st.psel && st.newPost
+        && !st.sub2 && !st.approve2 && !st.menu2 && !st.del2 && st.ed2 === "false"
+        && submitCalls.includes(P1) && plan === 0 && !tools.conv && tools.prompt;
+      if (!ok) console.log("   ↳ roleAuthor:", JSON.stringify({ st, submitCalls, plan, tools }));
+      return ok;
+    } finally {
+      back(); delete API["GET /workspaces"].role; const p = POSTS.find((x) => x.id === P1); if (p) p.review = "review";
+      await page.evaluate(() => loadWorkspaces()); await page.evaluate(() => loadStudioPosts());
+    }
+  });
+
+  // ✍️ Редактор: затверджує, веде план і календар; канали, бренд і команда - лише дивиться
+  await check("roleEditor", async () => {
+    const C1 = '.pcard[data-post="' + P1 + '"]';
+    const back = unsent(P1);
+    try {
+      API["GET /workspaces"].role = "editor";
+      await page.evaluate(() => loadWorkspaces());
+      await page.evaluate(async () => { selectView("create", "posts"); setLayout("studio"); StudioFilter = "all"; StudioRubric = ""; StudioOrigin = ""; StudioFormat = ""; await loadStudioPosts(); renderStudio(); });
+      await page.waitForSelector(C1, { timeout: 6000 });
+      const card = await page.evaluate((a) => { const c = document.querySelector(a); return { approve: !!c.querySelector('[data-a="approve"]'), menu: !!c.querySelector('[data-a="menu"]'), psel: !!c.querySelector(".psel") }; }, C1);
+      await page.evaluate(() => { selectView("tools"); });
+      await page.waitForTimeout(200);
+      card.conv = await page.evaluate(() => document.getElementById("toolsPipeline").offsetParent !== null);
+      await page.evaluate(() => { selectView("publish", "plan"); });
+      await page.waitForTimeout(300);
+      const plan = await page.evaluate(() => [...document.querySelectorAll("#phActions button")].map((b) => b.textContent));
+      await page.evaluate(() => { selectView("settings"); setSTab("channels"); });
+      await page.waitForTimeout(200);
+      const ch = await page.evaluate(() => { const lk = document.querySelector("#setChannels > .rolelock"); return lk ? lk.innerText : ""; });
+      await page.evaluate(() => { setSTab("team"); });
+      await page.waitForFunction(() => /Командою керує/.test(document.getElementById("teamList").innerText), undefined, { timeout: 6000 });
+      const team = await page.evaluate(() => ({ add: getComputedStyle(document.getElementById("teamAdd")).display, leave: getComputedStyle(document.getElementById("teamLeave")).display,
+        sels: document.querySelectorAll("#teamList .tmSel").length, txt: document.getElementById("teamList").innerText }));
+      const ok = card.approve && card.menu && card.psel && card.conv && plan.length === 3 && /Ритм/.test(plan.join("|"))
+        && /повним доступом/.test(ch) && team.add === "none" && team.leave !== "none" && team.sels === 0 && /Редактор/.test(team.txt);
+      if (!ok) console.log("   ↳ roleEditor:", JSON.stringify({ card, plan, ch, team }));
+      return ok;
+    } finally { back(); delete API["GET /workspaces"].role; await page.evaluate(() => loadWorkspaces()); }
   });
 
   // 🗑 Видалення бренду. Раніше в «Небезпечній зоні» була лише «Видалити акаунт», і її натиснули,

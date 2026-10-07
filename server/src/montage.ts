@@ -9,6 +9,7 @@
 //
 // Сервер спільний з іншими проєктами, тож ffmpeg іде з nice і двома потоками, а монтаж - по одному:
 // черга до 4 робіт, решті - «спробуй за кілька хвилин».
+import { actorId, mayAutoApprove } from "./actor.js";
 import { spawn } from "node:child_process";
 import { mkdtemp, writeFile, readFile, rm, mkdir, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -794,8 +795,9 @@ export async function montagePost(ws: string, format: MontageFormat, nets: strin
   // тоді, коли мережу ще не ввімкнено: «🌐 В усі мережі» потім лише вмикає її, позначка лишається.
   if (format === "reel" && aiVoice) for (const n of ["youtube", "tiktok"]) ch[n] = { ...(ch[n] || { on: false }), ai: true };
   const post = await one<{ id: string }>(
-    `insert into post(run_id, stage, content, channels, format, review) values($1,'final',$2,$3,$4,'approved') returning id`,
-    [run!.id, body, JSON.stringify(ch), format]);
+    // 👥 ролик автора не стає затвердженим сам - його затверджує редактор чи власник
+    `insert into post(run_id, stage, content, channels, format, review, created_by) values($1,'final',$2,$3,$4,$6,$5) returning id`,
+    [run!.id, body, JSON.stringify(ch), format, actorId(), mayAutoApprove() ? "approved" : null]);
   await attachMontage(ws, post!.id, format, videoIds, coverId);
   return post!.id;
 }

@@ -33,7 +33,8 @@ export async function isOwner(userId: string, wsId: string): Promise<boolean> {
   return !!(await one(`select 1 from workspace_member where user_id=$1 and workspace_id=$2 and role='owner'`, [userId, wsId]));
 }
 
-export const addMember = (wsId: string, userId: string, role: "owner" | "member" = "member") =>
+// role - з roles.ts (owner | admin | editor | author | viewer); давнє 'member' читається як admin
+export const addMember = (wsId: string, userId: string, role: string = "admin") =>
   q(`insert into workspace_member(workspace_id, user_id, role) values($1,$2,$3) on conflict do nothing`, [wsId, userId, role]);
 
 export async function members(wsId: string): Promise<{ user_id: string; email: string; role: string }[]> {
@@ -47,7 +48,7 @@ export async function grantAccess(wsId: string, email: string): Promise<{ ok: bo
   const u = await one<{ id: string }>(`select id from app_user where email=$1 and deleted_at is null`, [String(email || "").trim().toLowerCase()]);
   if (!u) return { ok: false, error: "Такого акаунта немає. Спершу нехай зареєструється, тоді дай доступ." };
   if (await isMember(u.id, wsId)) return { ok: false, error: "У цієї людини вже є доступ." };
-  await addMember(wsId, u.id, "member");
+  await addMember(wsId, u.id, "admin");
   return { ok: true };
 }
 

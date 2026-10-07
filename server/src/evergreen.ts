@@ -5,6 +5,7 @@
 // Бібліотека: evergreen_item (пост-оригінал; active | off з причиною). Повтори: evergreen_run (кожен
 // створений повтор - і тоді, коли людина його потім скасувала: тижневий ліміт рахує саме створені) +
 // post.repeat_of у самого повтору. Налаштування - settings_block «evergreen» (типово черга вимкнена).
+import { actorId } from "./actor.js";
 import { q, one } from "./db.js";
 import { env } from "./env.js";
 import { chat } from "./openrouter.js";
@@ -249,10 +250,10 @@ export async function makeRepeat(ws: string, postId: string, o: { manual?: boole
   }
   const np = await one<{ id: string }>(
     `insert into post(run_id, stage, content, channels, format, media_id, image_prompt, image_base, headline, rubric, intent,
-                      slides_text, first_comment, reel_video, review, repeat_of)
-     values($1,'final',$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'approved',$14) returning id`,
+                      slides_text, first_comment, reel_video, review, repeat_of, created_by)
+     values($1,'final',$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'approved',$14,$15) returning id`,
     [orig.run_id, content, JSON.stringify(ch), orig.format || "post", orig.media_id, orig.image_prompt, orig.image_base, orig.headline,
-      orig.rubric, orig.intent, orig.slides_text, orig.first_comment, orig.reel_video, orig.id]);
+      orig.rubric, orig.intent, orig.slides_text, orig.first_comment, orig.reel_video, orig.id, actorId()]);
   await q(`insert into post_slide(post_id, pos, media_id) select $1, pos, media_id from post_slide where post_id=$2`, [np!.id, orig.id]);
   await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [np!.id, slot.at.toISOString()]);
   await q(`update evergreen_item set last_at=$2 where post_id=$1`, [orig.id, slot.at.toISOString()]);

@@ -75,7 +75,7 @@ button.go.danger{background:transparent;color:var(--bad);border:1px solid var(--
 </style>
 </head>
 <body>
-<div class="brandbar" id="brandBar" style="display:none">🏢 <select id="brandSel" aria-label="Бренд"></select></div>
+<div class="brandbar" id="brandBar" style="display:none"><span id="brandPick" style="display:none;flex:1;min-width:0;align-items:center;gap:8px">🏢 <select id="brandSel" aria-label="Бренд"></select></span><span id="roleTag" class="pill" style="display:none" title="Твоя роль у цьому бренді"></span></div>
 <div class="tabs">
   <div class="tab on" data-t="new">✍️ Новий</div>
   <div class="tab" data-t="drafts">📝 Пости</div>
@@ -129,6 +129,8 @@ async function runJob(path, body, onTick) {
 
 let NETS = [], VNETS = [], TZ = 'Europe/Kyiv', tab = 'new', draftFilter = 'active';
 let draft = { text: '', nets: [] };          // «Новий»: чернетка, якої ще нема в базі
+// 👥 роль у бренді (сервер перевіряє кожну дію сам - тут лише не показуємо кнопок, які він відхилить)
+let ME = { role: 'owner', roleLabel: '', canDraft: true, canPublish: true };
 const NETNAME = { telegram:'✈️ Telegram', instagram:'📸 Instagram', facebook:'📘 Facebook', threads:'🧵 Threads', linkedin:'💼 LinkedIn', youtube:'▶️ YouTube', tiktok:'🎵 TikTok' };
 const TT_PRIV = { PUBLIC_TO_EVERYONE:'усі', MUTUAL_FOLLOW_FRIENDS:'друзі', FOLLOWER_OF_CREATOR:'підписники', SELF_ONLY:'лише я' };
 const ORIGIN = { diary:'📔 щоденник', rss:'📡 RSS', bot:'🤖 з бота', manual:'✍️ нотатка', idea:'💡 ідея', plan:'📅 план',
@@ -172,14 +174,15 @@ function renderNew() {
     '<textarea id="t" placeholder="Про що пост? Пиши як є - опублікується саме твій текст."></textarea>'
     + '<div class="nets" id="nets"></div>'
     + '<button class="go" id="save">💾 Зберегти й відкрити</button>'
-    + '<button class="go ghost" id="pub">🚀 Опублікувати одразу</button>'
+    + (ME.canPublish ? '<button class="go ghost" id="pub">🚀 Опублікувати одразу</button>' : '')
     + '<div class="msg" id="m"></div>'
-    + '<div class="hint">У чернетці можна додати фото, попросити AI переписати, затвердити й запланувати.</div>';
+    + '<div class="hint">' + (ME.canPublish ? 'У чернетці можна додати фото, попросити AI переписати, затвердити й запланувати.'
+      : 'У чернетці можна додати фото й попросити AI переписати. Готовий пост надішли «📨 На затвердження» - редактор чи власник його опублікує.') + '</div>';
   $('t').value = draft.text;
   $('t').oninput = (e) => { draft.text = e.target.value; };
   drawNets();
   $('save').onclick = () => createDraft(false);
-  $('pub').onclick = () => createDraft(true);
+  if ($('pub')) $('pub').onclick = () => createDraft(true);
 }
 
 function drawNets() {
@@ -196,7 +199,7 @@ function drawNets() {
 async function createDraft(publishNow) {
   const text = (draft.text || '').trim();
   if (text.length < 3) { $('m').textContent = 'Спершу напиши текст.'; return; }
-  $('save').disabled = $('pub').disabled = true;
+  $('save').disabled = true; if ($('pub')) $('pub').disabled = true;
   $('m').textContent = '💾 Зберігаю…';
   try {
     const { id } = await api('/post', { method: 'POST', body: JSON.stringify({ text }) });
@@ -206,7 +209,7 @@ async function createDraft(publishNow) {
     await openEditor(id, publishNow);
   } catch (e) {
     $('m').textContent = '⚠️ ' + e.message;
-  } finally { if ($('save')) $('save').disabled = $('pub').disabled = false; }
+  } finally { if ($('save')) $('save').disabled = false; if ($('pub')) $('pub').disabled = false; }
 }
 
 // ---------------------------------------------------------------- 📝 Пости
@@ -233,6 +236,8 @@ function statusPill(p) {
   if (p.sent) return '<span class="pill ok">✈️ опубліковано</span>';
   if (p.scheduled_at) return '<span class="pill warn">🗓 ' + fmtWhen(p.scheduled_at) + '</span>';
   if (p.review === 'approved') return '<span class="pill ok">✅ затверджено</span>';
+  if (p.review === 'pending') return '<span class="pill warn">📨 на затвердженні</span>';
+  if (p.review === 'needs_work') return '<span class="pill bad">↩ на доопрацювання</span>';
   return '<span class="pill">чернетка</span>';
 }
 
@@ -280,7 +285,7 @@ async function renderMats() {
       + '<div class="meta"><span class="pill">' + esc(ORIGIN[m.origin] || m.origin) + '</span>'
       + (m.ai_score ? '<span class="pill">⭐ ' + m.ai_score + '/10</span>' : '')
       + '<span>' + shortDate(m.created_at) + '</span></div>'
-      + '<button class="go ghost" data-mk="' + m.id + '">✨ Зробити пост</button></div>').join('');
+      + (ME.canDraft ? '<button class="go ghost" data-mk="' + m.id + '">✨ Зробити пост</button>' : '') + '</div>').join('');
     $('view').querySelectorAll('[data-mk]').forEach((b) => b.onclick = async () => {
       b.disabled = true; b.textContent = '✨ Пишу…';
       try {
@@ -309,6 +314,9 @@ function closeEditor(reload) {
 function drawEditor() {
   const p = cur, ch = p.channels || {};
   const done = (p.sent || []).length > 0;
+  // 👥 змінювати: редактор і вище - будь-який пост; автор - свою ще не затверджену чернетку; перегляд - лише дивиться
+  const editable = ME.canPublish || (ME.canDraft && !done && p.review !== 'approved');
+  p._ro = !editable;
   // відео-пост (не сторіс) - ще YouTube і TikTok; вже обрані показуємо завжди, щоб їх можна було зняти
   const vidPost = isVid(p) && p.format !== 'story';
   const allNets = NETS.concat(VNETS.filter((k) => vidPost || (ch[k] && ch[k].on)));
@@ -319,7 +327,7 @@ function drawEditor() {
   const offAll = allNets.filter((k) => !(ch[k] && ch[k].on) && !(p.sent || []).includes(k));
   const netBtns = allNets.length ? allNets.map((k) => {
     const isSent = (p.sent || []).includes(k);
-    return '<button class="net' + (ch[k] && ch[k].on ? ' on' : '') + '" data-n="' + k + '"' + (isSent ? ' disabled' : '') + '>'
+    return '<button class="net' + (ch[k] && ch[k].on ? ' on' : '') + '" data-n="' + k + '"' + (isSent || !editable ? ' disabled' : '') + '>'
       + (isSent ? '✓ ' : '') + (NETNAME[k] || k) + '</button>';
   }).join('') : '<span class="pill">Канали не підключені</span>';
   const links = Object.keys(p.links || {}).map((k) =>
@@ -327,30 +335,36 @@ function drawEditor() {
 
   $('sheet').innerHTML = '<div class="sheet">'
     + '<div class="sheethead"><button class="back" id="bk">‹ Назад</button><b>' + (done ? '✈️ Опублікований' : '📝 Чернетка') + '</b>'
-    + (p.review === 'approved' && !done ? '<span class="pill ok">✅</span>' : '') + '</div>'
+    + (p.review === 'approved' && !done ? '<span class="pill ok">✅</span>' : '') + (ME.role !== 'owner' && ME.roleLabel ? '<span class="pill">' + esc(ME.roleLabel) + '</span>' : '') + '</div>'
+    + (p.review === 'pending' && !done ? '<div class="meta"><span class="pill warn">📨 на затвердженні</span>' + (ME.canPublish ? '<span>автор чекає рішення</span>' : '<span>редактор чи власник отримав повідомлення</span>') + '</div>' : '')
+    + (p.review === 'needs_work' && !done ? '<div class="meta"><span class="pill bad">↩ повернуто на доопрацювання</span>' + (p.review_note ? '<span>«' + esc(p.review_note) + '»</span>' : '') + '</div>' : '')
     + mediaBlock(p)
-    + '<textarea id="et">' + esc(p.content || '') + '</textarea>'
-    + '<div class="acts">'
+    + '<textarea id="et"' + (editable ? '' : ' readonly') + '>' + esc(p.content || '') + '</textarea>'
+    + (editable ? '<div class="acts">'
     + '<button id="aPhoto">🖼 ' + (p.filename ? 'Обкладинка' : 'Фото') + '</button>'
     + (p.filename && !isVid(p) && (p.media || []).length < 10 ? '<button id="aMore">＋ Ще фото</button>' : '')
     + '<button id="aVid">🎬 Відео</button>'
     + '<button id="aAi">🎨 AI-фото</button>'
     + '<button id="aRw">🤖 Переписати</button>'
-    + '</div>'
-    + (p.filename ? '<button class="go ghost" id="aDelPic">🗑 ' + (isVid(p) ? 'Прибрати відео' : (p.media || []).length > 1 ? 'Прибрати всі фото' : 'Прибрати фото') + '</button>' : '')
+    + '</div>' : '')
+    + (p.filename && editable ? '<button class="go ghost" id="aDelPic">🗑 ' + (isVid(p) ? 'Прибрати відео' : (p.media || []).length > 1 ? 'Прибрати всі фото' : 'Прибрати фото') + '</button>' : '')
     + '<div class="nets" id="enets">' + netBtns + '</div>'
-    + (vidPost && offAll.length >= 2 && !done ? '<button class="go ghost" id="aAll">🌐 В усі мережі</button>' : '')
+    + (vidPost && offAll.length >= 2 && !done && editable ? '<button class="go ghost" id="aAll">🌐 В усі мережі</button>' : '')
     + ttNote
     + fcBlock(p)
     + (p.scheduled_at ? '<div class="meta"><span class="pill warn">🗓 ' + fmtWhen(p.scheduled_at) + '</span>'
-        + '<button class="back" id="aUnsched">скасувати</button></div>' : '')
+        + (ME.canPublish ? '<button class="back" id="aUnsched">скасувати</button>' : '') + '</div>' : '')
     + (links ? '<div class="meta">' + links + '</div>' : '')
     + '<div class="msg" id="em"></div>'
-    + (done ? '' :
+    + (done ? '' : ME.canPublish ?
         '<button class="go" id="aPub">🚀 Опублікувати зараз</button>'
         + '<button class="go ghost" id="aWhen">🗓 Запланувати</button>'
         + '<button class="go ghost" id="aAppr">' + (p.review === 'approved' ? '↩ Вернути в чернетки' : '✅ Затвердити') + '</button>'
-        + '<button class="go danger" id="aDel">🗑 Видалити</button>')
+        + '<button class="go danger" id="aDel">🗑 Видалити</button>'
+      // автор: замість публікації - на затвердження; видаляє лише власні чернетки
+      : editable ? '<button class="go" id="aSub"' + (p.review === 'pending' ? ' disabled' : '') + '>' + (p.review === 'pending' ? '⏳ На затвердженні' : '📨 На затвердження') + '</button>'
+        + (p.mine ? '<button class="go danger" id="aDel">🗑 Видалити</button>' : '')
+      : '<div class="hint">' + (p.review === 'approved' ? 'Пост уже затверджено - змінює його редактор чи власник.' : 'У тебе доступ «Перегляд»: пост можна лише дивитись.') + '</div>')
     + '<input type="file" id="ef" accept="image/*" style="display:none">'
     + '<input type="file" id="efm" accept="image/*" multiple style="display:none">'
     + '<input type="file" id="efv" accept="video/*" style="display:none">'
@@ -370,6 +384,7 @@ function drawEditor() {
     try { await api('/post/' + cur.id, { method: 'PUT', body: JSON.stringify({ channels: cur.channels }) }); haptic('success'); drawEditor(); }
     catch (e) { $('em').textContent = '⚠️ ' + e.message; }
   };
+  if (editable) {
   $('aPhoto').onclick = () => $('ef').click();
   $('ef').onchange = uploadPhoto;
   if ($('aMore')) $('aMore').onclick = () => $('efm').click();
@@ -378,6 +393,7 @@ function drawEditor() {
   $('efv').onchange = uploadVideo;
   $('aAi').onclick = genImage;
   $('aRw').onclick = aiRewrite;
+  }
   if ($('aDelPic')) $('aDelPic').onclick = async () => {
     const r = await api('/post/' + cur.id + '/media?all=1', { method: 'DELETE' });
     cur.media = r.media || []; cur.filename = cur.media[0] || null; drawEditor();
@@ -393,6 +409,15 @@ function drawEditor() {
     const r = await api('/post/' + cur.id + '/approve', { method: 'POST', body: JSON.stringify({ approved: cur.review !== 'approved' }) });
     cur.review = r.review; haptic('success'); drawEditor();
   };
+  if ($('aSub')) $('aSub').onclick = async () => {
+    await saveText();
+    $('aSub').disabled = true;
+    try {
+      await api('/post/' + cur.id + '/submit', { method: 'POST' });
+      cur.review = 'pending'; haptic('success'); drawEditor();
+      $('em').textContent = '📨 Надіслано: редактор чи власник отримає повідомлення';
+    } catch (e) { $('em').textContent = '⚠️ ' + e.message; if ($('aSub')) $('aSub').disabled = false; }
+  };
   if ($('aDel')) $('aDel').onclick = async () => {
     if (!confirm('Видалити цю чернетку?')) return;
     try { await api('/post/' + cur.id, { method: 'DELETE' }); closeEditor(true); }
@@ -403,7 +428,7 @@ function drawEditor() {
 // текст зберігаємо на виході з редактора: автозбереження на кожен символ у чаті-застосунку
 // давало б запит на кожну літеру, а «Зберегти» окремою кнопкою люди забувають натиснути
 async function saveText() {
-  const el = $('et'); if (!el || !cur) return;
+  const el = $('et'); if (!el || !cur || cur._ro) return;
   const t = el.value.trim();
   const fc = $('efc') ? $('efc').value.trim() : (cur.first_comment || '');
   const body = {};
@@ -418,6 +443,7 @@ async function saveText() {
 const FC_NETS = ['instagram', 'facebook', 'linkedin', 'threads'];
 function fcBlock(p) {
   if (p.format === 'story') return '';
+  if (p._ro && !p.first_comment && !(p.comments || []).length) return '';
   const cs = p.comments || [];
   const st = cs.map((c) => {
     // пост вийшов кількома акаунтами мережі - коментар під кожним, і підписуємо, під яким
@@ -431,10 +457,10 @@ function fcBlock(p) {
   const missing = p.fcMissing ? p.fcMissing.map((x) => (NETNAME[x.network] || x.network) + (x.name ? ' · ' + x.name : ''))
     : (p.sent || []).filter((k) => FC_NETS.includes(k)).filter((k) => !cs.some((c) => c.network === k && (c.status === 'sent' || c.status === 'sending'))).map((k) => NETNAME[k] || k);
   return '<div class="fclab">💬 Перший коментар</div>'
-    + '<textarea class="fc" id="efc" placeholder="Необовʼязково: посилання, хештеги чи заклик - зʼявиться першим коментарем під постом">' + esc(p.first_comment || '') + '</textarea>'
+    + '<textarea class="fc" id="efc"' + (p._ro ? ' readonly' : '') + ' placeholder="Необовʼязково: посилання, хештеги чи заклик - зʼявиться першим коментарем під постом">' + esc(p.first_comment || '') + '</textarea>'
     + '<div class="hint">Instagram, Facebook, LinkedIn, Threads. У Telegram коментар не йде.</div>'
     + (st ? '<div class="meta">' + st + '</div>' : '') + errs
-    + (missing.length ? '<button class="go ghost" id="aFc">💬 Надіслати коментар (' + esc(missing.join(', ')) + ')</button>' : '');
+    + (missing.length && ME.canPublish ? '<button class="go ghost" id="aFc">💬 Надіслати коментар (' + esc(missing.join(', ')) + ')</button>' : '');
 }
 async function sendComment() {
   await saveText();
@@ -630,7 +656,15 @@ async function doPublish() {
   try {
     const me = await api('/me');
     // 🏢 кілька брендів: вибір угорі - той самий, що /brand у боті (пости, чернетки, план - обраного бренду)
+    ME = { role: me.role || 'owner', roleLabel: me.roleLabel || '', canDraft: me.canDraft !== false, canPublish: me.canPublish !== false };
+    if (ME.role !== 'owner' && ME.roleLabel) { $('roleTag').textContent = ME.roleLabel; $('roleTag').style.display = ''; $('brandBar').style.display = ''; }
+    // «Перегляд» не пише постів: вкладка «Новий» йому ні до чого - відкриваємо одразу пости
+    if (!ME.canDraft) {
+      const nt = document.querySelector('.tab[data-t="new"]'); if (nt) nt.style.display = 'none';
+      tab = 'drafts'; document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x.dataset.t === 'drafts'));
+    }
     if ((me.brands || []).length > 1) {
+      $('brandPick').style.display = 'flex';
       const sel = $('brandSel');
       sel.innerHTML = me.brands.map((b) => '<option value="' + esc(b.id) + '"' + (b.id === me.brand ? ' selected' : '') + '>' + esc(b.title) + '</option>').join('');
       $('brandBar').style.display = '';

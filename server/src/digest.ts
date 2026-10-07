@@ -5,6 +5,7 @@ import { env } from "./env.js";
 import { logEvent } from "./log.js";
 import { canTry, failedTry, succeededTry } from "./dailytry.js";
 import { nextInsight } from "./pipeline.js";
+import { can, botCap, normRole } from "./roles.js";
 import { liveSend } from "./tgbot.js";
 import { networkBenchmarks } from "./metrics.js";
 import { weekDiary } from "./diary.js";
@@ -62,7 +63,7 @@ const plusDay = (date: string, n: number): string => {
   const d = new Date(date + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10);
 };
 
-async function sendDigest(ws: string, chatId: string, localDate: string): Promise<void> {
+async function sendDigest(ws: string, chatId: string, localDate: string, role: string | null = "owner"): Promise<void> {
   let insight = "Контент, який ти не опублікував, не працює.";
   try { insight = await nextInsight(ws); } catch { /* фолбек лишається */ }
   const tomorrow = plusDay(localDate, 1);
@@ -144,20 +145,27 @@ async function sendDigest(ws: string, chatId: string, localDate: string): Promis
   if (ideasCount?.n) buttons.push([{ text: "💡 Показати ідеї", data: "idea_list" }]);
   if (!(anyPlan?.n)) buttons.push([{ text: "⚡ Сформувати план", data: "plan_gen" }]);
   buttons.push([{ text: "🌐 Відкрити застосунок", url: env.appBaseUrl + "/app" }]);
-  await liveSend(ws, chatId, "daily", lines.join("\n"), buttons);
+  // 👥 лише кнопки, які роль людини в бренді дозволяє (решта відмовила б уже після натискання)
+  const mine = buttons.map((row) => row.filter((b) => b.url || can(role, botCap(b.data || "")))).filter((row) => row.length);
+  await liveSend(ws, chatId, "daily", lines.join("\n"), mine);
 }
 
 // Надіслати зведення НЕГАЙНО (команда /digest у боті - для перевірки без очікування 9:00).
-export async function sendDigestNow(ws: string, chatId: string): Promise<void> {
+export async function sendDigestNow(ws: string, chatId: string, role: string | null = "owner"): Promise<void> {
   const tzRow = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='timezone'`, [ws]);
   const { date } = localParts(tzRow?.content || "Europe/Kyiv");
-  await sendDigest(ws, chatId, date);
+  await sendDigest(ws, chatId, date, role);
 }
 
 async function tick(): Promise<void> {
   if (!env.telegram.botToken) return;
-  const owners = await q<{ workspace_id: string; chat_id: string }>(`select workspace_id, chat_id from tg_owner where chat_id is not null`);
+  // 👥 роль людини в бренді, з яким працює її бот (давня привʼязка без акаунта - власник); без доступу - не шлемо
+  const owners = await q<{ workspace_id: string; chat_id: string; role: string | null }>(
+    `select o.workspace_id, o.chat_id, case when o.user_id is null then 'owner' else m.role end as role
+       from tg_owner o left join workspace_member m on m.workspace_id=o.workspace_id and m.user_id=o.user_id
+      where o.chat_id is not null`);
   for (const o of owners) {
+    if (!o.role) continue;
     try {
       const tzRow = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='timezone'`, [o.workspace_id]);
       const { hour, date } = localParts(tzRow?.content || "Europe/Kyiv");
@@ -166,7 +174,7 @@ async function tick(): Promise<void> {
       if (last?.content === date) continue; // вже слали сьогодні
       const key = o.workspace_id + ":digest";
       if (!canTry(key, date)) continue; // після збою - до 3 спроб із паузою, а не кожні 5 хв до кінця години
-      try { await sendDigest(o.workspace_id, o.chat_id, date); succeededTry(key); }
+      try { await sendDigest(o.workspace_id, o.chat_id, date, normRole(o.role)); succeededTry(key); }
       catch (e: any) {
         const gaveUp = failedTry(key, date, e);
         await logEvent("error", "digest", e.message + (gaveUp ? " (на сьогодні спроби вичерпано)" : " (повтор за 20 хв)"), { ws: o.workspace_id });

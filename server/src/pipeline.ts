@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { actorId } from "./actor.js";
 import { q, one } from "./db.js";
 import { chat, extractJsonArray, extractJsonObject } from "./openrouter.js";
 // памʼять контенту: пост дистилюється ОДИН раз при публікації, генерація лише читає збережене
@@ -533,8 +534,8 @@ export async function executeStep(runId: string, step: StepKey, opts?: { count?:
         const txt = await chat(tpl.model, system,
           `Зміст сесії (першоджерело):\n---\n${transcript}\n---\nЗроби пост за цією ідеєю, спираючись на конкретику сесії вище:\nІдея: ${it.idea}\nКут: ${it.angle}`, ctx);
         outs.push(txt);
-        await q(`insert into post(run_id, idea_id, stage, content) values($1,$2,'draft',$3)`,
-          [runId, it.id, txt]);
+        await q(`insert into post(run_id, idea_id, stage, content, created_by) values($1,$2,'draft',$3,$4)`,
+          [runId, it.id, txt, actorId()]);
       }
       await upsertStepRun(runId, step, { status: "fresh", model: tpl.model, prompt_version: tpl.version, output: outs });
     } else if (step === "tone" || step === "format" || step === "deai") {
@@ -542,12 +543,18 @@ export async function executeStep(runId: string, step: StepKey, opts?: { count?:
       const stage = stageOf[step];
       const src = await getPosts(runId, inputStage);
       if (!src.length) throw new Error(`немає вхідних постів стадії ${inputStage}`);
-      await q(`delete from post where run_id=$1 and stage=$2`, [runId, stage]);
+      // Готові пости, з якими вже працюють, перезапуск не стирає: затверджені, на затвердженні, повернуті
+      // з приміткою, у календарі чи опубліковані (разом із постом зникли б історія публікацій і метрики -
+      // DELETE /api/posts такого теж не дозволяє). Замінюються лише чисті чернетки цієї стадії.
+      await q(`delete from post p where p.run_id=$1 and p.stage=$2
+                 and not (p.stage='final' and (coalesce(p.review,'') not in ('','archived')
+                   or exists (select 1 from post_published pp where pp.post_id=p.id)
+                   or exists (select 1 from schedule_slot s where s.post_id=p.id)))`, [runId, stage]);
       const outs: string[] = [];
       for (const p of src) {
         const txt = await chat(tpl.model, system, `---\n${p.content}`, ctx);
         outs.push(txt);
-        await q(`insert into post(run_id, stage, content) values($1,$2,$3)`, [runId, stage, txt]);
+        await q(`insert into post(run_id, stage, content, created_by) values($1,$2,$3,$4)`, [runId, stage, txt, actorId()]);
       }
       await upsertStepRun(runId, step, { status: "fresh", model: tpl.model, prompt_version: tpl.version, output: outs });
     } else if (step === "strategy") {
@@ -867,8 +874,8 @@ export async function generatePostsOnePass(runId: string, count: number, ideas?:
   for (let i = 0; i < posts.length; i++) {
     const p = posts[i];
     const row = await one<{ id: string }>(
-      `insert into post(run_id, stage, content, image_prompt, rubric, intent, format) values($1,'final',$2,$3,$4,$5,$6) returning id`,
-      [runId, p.text, p.image_prompt || null, p.rubric || null, p.intent, normFormat(formats?.[i])]);
+      `insert into post(run_id, stage, content, image_prompt, rubric, intent, format, created_by) values($1,'final',$2,$3,$4,$5,$6,$7) returning id`,
+      [runId, p.text, p.image_prompt || null, p.rubric || null, p.intent, normFormat(formats?.[i]), actorId()]);
     if (row) ids.push(row.id);
   }
   // Одна відома мережа: текст уже нативний → manual_adapt, щоб публікація НЕ переписувала його вдруге
@@ -1044,8 +1051,8 @@ export async function generateThreadsTakes(workspaceId: string, count: number): 
     [workspaceId, "🧵 Тейки для Threads", takes.join("\n\n")]);
   const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
   for (const t of takes)
-    await q(`insert into post(run_id, stage, content, channels) values($1,'final',$2,$3::jsonb)`,
-      [run!.id, t, JSON.stringify({ threads: { on: true } })]);
+    await q(`insert into post(run_id, stage, content, channels, created_by) values($1,'final',$2,$3::jsonb,$4)`,
+      [run!.id, t, JSON.stringify({ threads: { on: true } }), actorId()]);
   return takes.length;
 }
 

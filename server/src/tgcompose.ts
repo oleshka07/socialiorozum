@@ -7,6 +7,8 @@
 // наступного повідомлення (тексту? фото? дати?). Тримаємо це в settings_block під ключем
 // `tg_compose`: {postId, await, chat}. Один активний чернетковий пост на воркспейс - цього
 // достатньо (власник один) і не потребує нової таблиці.
+import { actorId } from "./actor.js";
+import { approvedNotice } from "./team.js";
 import { q, one } from "./db.js";
 import * as tg from "./telegram.js";
 import { getSetting, setSetting } from "./settings.js";
@@ -110,8 +112,8 @@ export async function createBotDraft(ws: string, text: string): Promise<string> 
   const ch: Record<string, any> = {};
   if (nets.includes("telegram")) ch.telegram = { on: true, text: "" };
   const p = await one<{ id: string }>(
-    `insert into post(run_id, stage, content, channels) values($1,'final',$2,$3) returning id`,
-    [run!.id, body, JSON.stringify(ch)]);
+    `insert into post(run_id, stage, content, channels, created_by) values($1,'final',$2,$3,$4) returning id`,
+    [run!.id, body, JSON.stringify(ch), actorId()]);
   return p!.id;
 }
 
@@ -357,6 +359,7 @@ export async function toggleApprove(ws: string, postId: string): Promise<string>
   const p = await loadPost(ws, postId); if (!p) throw new Error("пост не знайдено");
   const on = p.review !== "approved";
   await q(`update post set review=$2 where id=$1`, [postId, on ? "approved" : "review"]);
+  if (on) approvedNotice(ws, postId, p.review, actorId()).catch(() => {});   // 👥 автор чекав рішення
   // незатверджений пост не має лишатись у календарі: автопостер відправив би його в мережу
   const gone = on ? 0 : await unschedulePost(postId);
   return on ? "✅ Затверджено" : `↩ Вернуто в чернетки${gone ? " і знято з розкладу" : ""}`;
@@ -490,6 +493,7 @@ export async function schedule(ws: string, postId: string, at: Date): Promise<st
   // insert із ним падав би в рантаймі, а tsc такого не бачить. Той самий набір колонок, що в /api/schedule.
   else await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [postId, at.toISOString()]);
   await q(`update post set review='approved' where id=$1`, [postId]); // запланований = затверджений
+  approvedNotice(ws, postId, p.review, actorId()).catch(() => {});
   const tz = await wsTz(ws);
   const when = new Intl.DateTimeFormat("uk-UA", { timeZone: tz, weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(at);
   await logEvent("info", "tgbot", `заплановано з бота на ${when}`, null);

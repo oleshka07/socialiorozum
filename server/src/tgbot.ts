@@ -20,6 +20,10 @@ import { setSecret } from "./secrets.js";
 import { getMt, startMt, montageMessage, montageCallback, moveMtSession } from "./tgmontage.js";
 import { commentCallback, commentText, showComments } from "./tgcomments.js";
 import { botBrands, pickBrand, setBotBrand, homeIfLost, brandOfCallback, brandLabel, moveDraft, type BotBrands } from "./tgbrand.js";
+import { can, botCap, deniedText, normRole, type Role, type Cap } from "./roles.js";
+import { runAs, setActor, actorRole, actorId } from "./actor.js";
+import { workspaceTitle } from "./workspaces.js";
+import { authorEditBlock, submitForReview } from "./team.js";
 const postDeepLink = (postId: string) => cabinetPostLink(env.appBaseUrl, postId);
 
 let BOT_ID = 0;
@@ -359,9 +363,15 @@ export async function createConnectLink(workspaceId: string, userId?: string, mo
 
 async function attachChannel(fromId: number, chatId: number, title: string, token: string): Promise<string> {
   const row = token !== env.telegram.botToken
-    ? await one<{ workspace_id: string; mode: string }>(`select t.workspace_id, t.mode from tg_connect t join telegram_config c on c.workspace_id=t.workspace_id and c.bot_token=$2 where t.tg_user_id=$1 order by t.created_at desc limit 1`, [fromId, token])
-    : await one<{ workspace_id: string; mode: string }>(`select workspace_id, mode from tg_connect where tg_user_id=$1 order by created_at desc limit 1`, [fromId]);
+    ? await one<{ workspace_id: string; mode: string; created_by: string | null }>(`select t.workspace_id, t.mode, t.created_by from tg_connect t join telegram_config c on c.workspace_id=t.workspace_id and c.bot_token=$2 where t.tg_user_id=$1 order by t.created_at desc limit 1`, [fromId, token])
+    : await one<{ workspace_id: string; mode: string; created_by: string | null }>(`select workspace_id, mode, created_by from tg_connect where tg_user_id=$1 order by created_at desc limit 1`, [fromId]);
   if (!row) return "Спершу відкрий посилання підключення з кабінету Holos (кнопка «Підключити наш бот»).";
+  // 👥 канал бренду змінює лише власник і «Повний доступ»: посилання «Підключити наш бот» бере кожен
+  // учасник (привʼязати себе), але пересланий пост каналу від редактора чи автора канал не підмінить
+  if (row.created_by) {
+    const role = await roleOf(row.created_by, row.workspace_id);
+    if (!can(role, "manage")) return "🔒 " + deniedText(role, "manage", await workspaceTitle(row.workspace_id).catch(() => ""));
+  }
   // перевіряємо членство ТИМ ботом, якому переслали пост (власний або спільний); id бота = префікс токена
   const botId = Number(token.split(":")[0]) || BOT_ID;
   let member: { status: string };
@@ -417,6 +427,28 @@ async function ownerWorkspace(fromId: number, token: string): Promise<string | n
 async function setOwner(fromId: number, workspaceId: string, chatId: string, userId: string | null = null): Promise<void> {
   await q(`insert into tg_owner(tg_user_id, workspace_id, chat_id, user_id) values($1,$2,$3,$4)
            on conflict (tg_user_id) do update set workspace_id=excluded.workspace_id, chat_id=excluded.chat_id, user_id=excluded.user_id`, [fromId, workspaceId, chatId, userId]);
+}
+
+// 👥 Роль людини з Telegram у бренді (roles.ts). Акаунт відомий (tg_owner.user_id) - її роль; давня
+// привʼязка без акаунта (до вересня) - власник: так її колись привʼязав сам власник кабінету.
+async function roleOf(userId: string | null, ws: string): Promise<Role | null> {
+  if (!userId) return "owner";
+  const r = await one<{ role: string }>(`select role from workspace_member where user_id=$1 and workspace_id=$2`, [userId, ws]);
+  return r ? normRole(r.role) : null;
+}
+async function botRole(fromId: number, ws: string): Promise<Role | null> {
+  const o = await one<{ user_id: string | null }>(`select user_id from tg_owner where tg_user_id=$1`, [fromId]);
+  return roleOf(o?.user_id ?? null, ws);
+}
+/** Чи можна ЦЕ людині в бренді; ні - людська відмова (у відповідь на кнопку чи повідомленням). */
+async function allowed(fromId: number, ws: string, cap: Cap, token: string, chatId: string, cbqId?: string): Promise<boolean> {
+  const role = await botRole(fromId, ws);
+  setActor({ role });
+  if (can(role, cap)) return true;
+  const why = "🔒 " + deniedText(role, cap, await workspaceTitle(ws).catch(() => ""));
+  if (cbqId) await tg.answerCallbackQuery(token, cbqId, why.slice(0, 195));
+  else await tg.sendMessage(token, chatId, why + (role === "viewer" ? "\n\nІнший бренд - /brand." : ""));
+  return false;
 }
 
 // Відповідь на апдейт іде тим ботом, якому людина написала (liveSend бере його звідси): після зміни
@@ -656,7 +688,10 @@ async function sendPlan(ws: string, chatId: string): Promise<void> {
 
 export async function handleUpdate(update: any, tokenOverride?: string): Promise<void> {
   const token = tokenOverride || env.telegram.botToken; if (!token) return;
-  await viaBot.run(token, () => handleUpdateIn(update, token));
+  // 👤 хто діє (actor.ts): пости з бота пишуть свого автора; роль уточнює allowed(), коли відомий бренд дії
+  const who = update?.callback_query?.from?.id ?? update?.message?.from?.id;
+  const uid = who ? (await one<{ user_id: string | null }>(`select user_id from tg_owner where tg_user_id=$1`, [who]).catch(() => null))?.user_id ?? null : null;
+  await runAs({ userId: uid, role: null }, () => viaBot.run(token, () => handleUpdateIn(update, token)));
   // колишній спільний бот обробив, що просили (нічого не губиться), і раз на добу кличе перейти
   const from = update?.callback_query?.from?.id ?? update?.message?.from?.id;
   const chat = update?.callback_query?.message?.chat ?? update?.message?.chat;
@@ -756,12 +791,14 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
       const ws = await ownerWorkspace(fromId, token);
       if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos."); return; }
       // 💬 коментарі людей без відповіді - картка з чернеткою (поточний бренд, а коли там порожньо - інший)
-      if (text === KB_COMMENTS || text.toLowerCase().startsWith("/comments")) { await showComments(fromId, chatId, ws); return; }
-      if (text === KB_MONTAGE) { await startMt(ws, chatId); return; }
+      // 👥 відповідати людям від імені бренду - як публікувати: редактор і вище
+      if (text === KB_COMMENTS || text.toLowerCase().startsWith("/comments")) { if (await allowed(fromId, ws, "publish", token, chatId)) await showComments(fromId, chatId, ws); return; }
+      if (text === KB_MONTAGE) { if (await allowed(fromId, ws, "draft", token, chatId)) await startMt(ws, chatId); return; }
       if (text === KB_IDEAS) { await sendIdeaList(ws, chatId); return; }
-      if (text === KB_DIARY) { await sendDiaryNow(ws, chatId); return; }
+      if (text === KB_DIARY) { if (await allowed(fromId, ws, "draft", token, chatId)) await sendDiaryNow(ws, chatId); return; }
       if (text === KB_PLAN)  { await sendPlan(ws, chatId); return; }
-      if (text === KB_DIGEST) { await sendDigestNow(ws, chatId); return; }
+      if (text === KB_DIGEST) { await sendDigestNow(ws, chatId, await botRole(fromId, ws)); return; }
+      if (!(await allowed(fromId, ws, "draft", token, chatId))) return;
       await cmp.expect(ws, "", "text", chatId);
       await tg.sendMessage(token, chatId, "📝 Надішли текст поста наступним повідомленням.");
       return;
@@ -771,6 +808,7 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
     if (text.toLowerCase().startsWith("/post")) {
       const ws = await ownerWorkspace(fromId, token);
       if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos."); return; }
+      if (!(await allowed(fromId, ws, "draft", token, chatId))) return;
       const body = text.slice(5).trim();
       if (!body) { await cmp.expect(ws, "", "text", chatId); await tg.sendMessage(token, chatId, "📝 Надішли текст поста наступним повідомленням."); return; }
       await openCompose(ws, chatId, await cmp.createBotDraft(ws, body), token);
@@ -781,6 +819,7 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
     if (text.toLowerCase().startsWith("/montage")) {
       const ws = await ownerWorkspace(fromId, token);
       if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos."); return; }
+      if (!(await allowed(fromId, ws, "draft", token, chatId))) return;
       await startMt(ws, chatId);
       return;
     }
@@ -820,7 +859,7 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
     if (text.toLowerCase().startsWith("/digest")) {
       const ws = await ownerWorkspace(fromId, token);
       if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos."); return; }
-      await sendDigestNow(ws, chatId);
+      await sendDigestNow(ws, chatId, await botRole(fromId, ws));
       return;
     }
 
@@ -828,6 +867,7 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
     if (text.toLowerCase().startsWith("/diary")) {
       const ws = await ownerWorkspace(fromId, token);
       if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos."); return; }
+      if (!(await allowed(fromId, ws, "draft", token, chatId))) return;
       await sendDiaryNow(ws, chatId);
       return;
     }
@@ -847,10 +887,14 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
       }
       if (wsC) {
         const st = await cmp.getCompose(wsC);
-        if (st.await && await composeReply(wsC, chatId, msg, st, token)) return;
+        if (st.await) {
+          // 👥 роль могли змінити, поки бот чекав відповіді: дата - це вже планування (редактор і вище)
+          if (!(await allowed(fromId, wsC, st.await === "when" ? "publish" : "draft", token, chatId))) { await cmp.stopExpecting(wsC); return; }
+          if (await composeReply(wsC, chatId, msg, st, token)) return;
+        }
         // 🎬 відкрита сесія монтажу: відео, фото й голосові - у монтаж, а не в щоденник
         const mt = await getMt(wsC);
-        if (mt && await montageMessage(wsC, chatId, msg, mt, token)) return;
+        if (mt && await allowed(fromId, wsC, "draft", token, chatId) && await montageMessage(wsC, chatId, msg, mt, token)) return;
       }
     }
 
@@ -858,6 +902,7 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
     if (msg.voice?.file_id) {
       const ws = await ownerWorkspace(fromId, token);
       if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos."); return; }
+      if (!(await allowed(fromId, ws, "draft", token, chatId))) return;
       try {
         const f = await tg.getFileBuffer(token, msg.voice.file_id);
         const heard = await transcribeVoice(f.buffer, "voice.ogg", ws);
@@ -874,6 +919,7 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
     if (media) {
       const ws = await ownerWorkspace(fromId, token);
       if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos."); return; }
+      if (!(await allowed(fromId, ws, "draft", token, chatId))) return;
       if ((media.size || 0) > 19.5 * 1024 * 1024) { await tg.sendMessage(token, chatId, "⚠️ Telegram віддає ботам файли лише до 20 МБ. Закороти відео або завантаж його через застосунок (Матеріали → медіа)."); return; }
       try {
         const buf = (await tg.getFileBuffer(token, media.fileId)).buffer;
@@ -906,6 +952,7 @@ async function handleUpdateIn(update: any, token: string): Promise<void> {
     if (text && !text.startsWith("/")) {
       const ws = await ownerWorkspace(fromId, token);
       if (!ws) { await tg.sendMessage(token, chatId, "Спершу під'єднай мене з кабінету Holos (кнопка «Підключити наш бот»), тоді я збережу твої ідеї."); return; }
+      if (!(await allowed(fromId, ws, "draft", token, chatId))) return;
       if (await isDiaryPending(ws)) { await appendDiaryText(ws, chatId, text); return; }
       await captureIdea(ws, chatId, text);
       return;
@@ -922,7 +969,16 @@ async function openCompose(ws: string, chatId: string, postId: string, token: st
   const card = await cmp.composeCard(ws, postId, await brandLabel(ws, chatId).catch(() => ""));
   if (!card) { await cmp.clearCompose(ws); await tg.sendMessage(token, chatId, "Пост не знайдено - можливо, його видалили в кабінеті."); return; }
   await cmp.expect(ws, postId, null, chatId);
-  await liveSend(ws, chatId, "compose", card.text, [...card.buttons, [{ text: "🌐 Відкрити в кабінеті", url: postDeepLink(postId) }]]);
+  let buttons = card.buttons;
+  // 👥 автор пише, а публікує редактор: без «Опублікувати», «Запланувати», «Затвердити» й переносу в інший бренд -
+  // натомість «📨 На затвердження» (редактори й власник отримають повідомлення)
+  if (actorRole() === "author") {
+    const hide = /^(cgo|cs|cw|cwx|ca|cb|cbm|cad):/;
+    buttons = buttons.map((row) => row.filter((b) => !(b.data && hide.test(b.data)))).filter((row) => row.length);
+    const p = await one<{ review: string | null }>(`select review from post where id=$1`, [postId]);
+    buttons.push([p?.review === "pending" ? { text: "⏳ Уже на затвердженні", data: `cc:${postId}` } : { text: "📨 На затвердження", data: `csub:${postId}` }]);
+  }
+  await liveSend(ws, chatId, "compose", card.text, [...buttons, [{ text: "🌐 Відкрити в кабінеті", url: postDeepLink(postId) }]]);
 }
 
 // 🖼 альбом → карусель. Telegram шле альбом окремими повідомленнями з одним media_group_id, і
@@ -1031,6 +1087,13 @@ async function composeCallback(ws: string, chatId: string, data: string, cbq: an
   if (!postId || !/^c/.test(head)) return false;
   switch (head) {
     case "cc":  await tg.answerCallbackQuery(token, cbq.id); await openCompose(ws, chatId, postId, token); return true;
+    case "csub": {
+      // 📨 автор надсилає пост на затвердження (редактори й власник отримають повідомлення)
+      if (!(await cmp.loadPost(ws, postId))) { await tg.answerCallbackQuery(token, cbq.id, "Пост не знайдено"); return true; }
+      const r = await submitForReview(ws, postId, actorId());
+      await tg.answerCallbackQuery(token, cbq.id, !r.ok ? r.error : r.already ? "⏳ Уже на затвердженні" : "📨 Надіслано на затвердження");
+      await openCompose(ws, chatId, postId, token); return true;
+    }
     case "cn":  await cmp.toggleNet(ws, postId, arg); await tg.answerCallbackQuery(token, cbq.id); await openCompose(ws, chatId, postId, token); return true;
     case "cp":  await cmp.expect(ws, postId, "photo", chatId); await tg.answerCallbackQuery(token, cbq.id, "Надішли фото чи відео"); await tg.sendMessage(token, chatId, "🖼 Надішли фото чи відео наступним повідомленням. Кілька фото альбомом - вийде карусель (до 10). Відео - до 20 МБ (межа Telegram для ботів); більші - через «🚀 Кабінет»."); return true;
     case "ce":  await cmp.expect(ws, postId, "text", chatId);  await tg.answerCallbackQuery(token, cbq.id, "Надішли новий текст"); await tg.sendMessage(token, chatId, "✍ Надішли новий текст поста."); return true;
@@ -1140,13 +1203,16 @@ async function composeCallback(ws: string, chatId: string, data: string, cbq: an
   return false;
 }
 
+// 👥 автору замість «Опублікувати» - «На затвердження» (публікує редактор чи власник)
 const draftButtons = (postId: string): tg.TgButton[][] => [
-  [{ text: "✅ Опублікувати в Telegram", data: `pub:${postId}` }],
+  [actorRole() === "author" ? { text: "📨 На затвердження", data: `csub:${postId}` } : { text: "✅ Опублікувати в Telegram", data: `pub:${postId}` }],
   [{ text: "✍️ Переробити", data: `rw:${postId}` }, { text: "📋 Ще ідеї", data: "idea_list" }],
   // deep-лінк: відкрити ЦЕЙ пост у композері кабінету (доредагувати, додати фото, обрати мережі)
   [{ text: "🌐 Відкрити в кабінеті", url: postDeepLink(postId) }],
 ];
 
+// кнопки, що ЗМІНЮЮТЬ наявний пост (а не роблять новий з нього): автору - лише незатверджені, що ще не вийшли
+const AUTHOR_EDIT = new Set(["cc", "cn", "cp", "ce", "cr", "cac", "cat", "cal", "ctt", "cyt", "csub", "rw"]);
 const repTapped = new Map<string, number>();
 // натискання inline-кнопок (tokenOverride = власний бот воркспейсу)
 async function handleCallback(cbq: any, tokenOverride?: string): Promise<void> {
@@ -1175,6 +1241,14 @@ async function handleCallback(cbq: any, tokenOverride?: string): Promise<void> {
   // кнопка зі старого повідомлення після перемикання бренду - діє в бренді свого запису (якщо людина має туди доступ)
   const who = await one<{ user_id: string | null }>(`select user_id from tg_owner where tg_user_id=$1`, [fromId]);
   const ws = await brandOfCallback(data, active, who?.user_id || null, !sharedLike(token), token);
+  // 👥 роль у бренді САМЕ цієї кнопки (стара кнопка може належати іншому бренду, ніж поточний)
+  const cap = botCap(data);
+  if (!(await allowed(Number(fromId), ws, cap, token, chatId, cbq.id))) return;
+  // автор не правит затверджене й опубліковане (картка поста, переписати)
+  if (actorRole() === "author" && cap === "draft" && AUTHOR_EDIT.has(data.split(":")[0])) {
+    const why = await authorEditBlock(ws, data.split(":")[1] || "", who?.user_id || null);
+    if (why) { await tg.answerCallbackQuery(token, cbq.id, ("🔒 " + why).slice(0, 195)); return; }
+  }
   try {
     if (data.startsWith("idea_raw:")) {
       const it = await one<{ text: string }>(`select text from idea_bank where id=$1 and workspace_id=$2`, [data.slice(9), ws]);
@@ -1222,9 +1296,9 @@ async function handleCallback(cbq: any, tokenOverride?: string): Promise<void> {
       if (!post) { await tg.sendMessage(token, chatId, "Пост не знайдено."); return; }
       const fresh = await repeatVariant(ws, post.content);
       const np = await one<{ id: string }>(
-        `insert into post(run_id, stage, content, image_prompt, rubric, media_id, channels, repeat_of)
-         values($1,'final',$2,$3,$4,$5,$6::jsonb,$7) returning id`,
-        [post.run_id, fresh, post.image_prompt, post.rubric, post.media_id, JSON.stringify({ threads: { on: true } }), postId]);
+        `insert into post(run_id, stage, content, image_prompt, rubric, media_id, channels, repeat_of, created_by)
+         values($1,'final',$2,$3,$4,$5,$6::jsonb,$7,$8) returning id`,
+        [post.run_id, fresh, post.image_prompt, post.rubric, post.media_id, JSON.stringify({ threads: { on: true } }), postId, actorId()]);
       const when = new Date(Date.now() + 48 * 3600e3);
       await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [np!.id, when.toISOString()]);
       const tz = (await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='timezone'`, [ws]))?.content || "Europe/Kyiv";
@@ -1290,7 +1364,7 @@ async function handleCallback(cbq: any, tokenOverride?: string): Promise<void> {
       try {
         const script = await reelsScript(ws, src.transcript, 30);
         const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src.id]);
-        const np = await one<{ id: string }>(`insert into post(run_id, stage, content, format) values($1,'final',$2,'reel') returning id`, [run!.id, script]);
+        const np = await one<{ id: string }>(`insert into post(run_id, stage, content, format, created_by) values($1,'final',$2,'reel',$3) returning id`, [run!.id, script, actorId()]);
         // 🔗 deep-лінк веде ПРЯМО в цей пост, а не просто «в застосунок»
         await tg.sendMessage(token, chatId, "🎬 Сценарій рілса з твого дня. Зібрати відео - кнопка 🎞 на картці.", [[{ text: "✍ Відкрити пост", url: postDeepLink(np!.id) }]]);
       } catch (e: any) { await tg.sendMessage(token, chatId, "Не вдалося: " + String(e.message).slice(0, 200)); }
@@ -1320,7 +1394,7 @@ async function handleCallback(cbq: any, tokenOverride?: string): Promise<void> {
           const scripts = await sliceToReels(ws, weekText, 30);
           if (!scripts.length || !anchor) { await tg.sendMessage(token, chatId, "Не вдалося нарізати - спробуй у застосунку."); return; }
           const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [anchor.id]);
-          for (const sc of scripts) await q(`insert into post(run_id, stage, content, format) values($1,'final',$2,'reel')`, [run!.id, sc]);
+          for (const sc of scripts) await q(`insert into post(run_id, stage, content, format, created_by) values($1,'final',$2,'reel',$3)`, [run!.id, sc, actorId()]);
           await tg.sendMessage(token, chatId, `🎞 Тиждень нарізано: ${scripts.length} сценаріїв рілсів у Чорновиках, у порядку публікації.`, [[{ text: "🌐 Відкрити застосунок", url: env.appBaseUrl + "/app" }]]);
         } catch (e: any) { await tg.sendMessage(token, chatId, "Не вдалося: " + String(e.message).slice(0, 200)); }
       }
@@ -1351,7 +1425,7 @@ async function handleCallback(cbq: any, tokenOverride?: string): Promise<void> {
       if (!post) { await tg.sendMessage(token, chatId, "Пост не знайдено."); return; }
       try {
         const script = await reelsScript(ws, post.content, 30);
-        const np = await one<{ id: string }>(`insert into post(run_id, stage, content, format) values($1,'final',$2,'reel') returning id`, [post.run_id, script]);
+        const np = await one<{ id: string }>(`insert into post(run_id, stage, content, format, created_by) values($1,'final',$2,'reel',$3) returning id`, [post.run_id, script, actorId()]);
         await tg.sendMessage(token, chatId, "🎬 Сценарій рілса за темою хіта готовий. Зібрати відео - кнопка 🎞 на картці.",
           [[{ text: "✍ Відкрити пост", url: postDeepLink(np!.id) }]]);
       } catch (e: any) { await tg.sendMessage(token, chatId, "Не вдалося скласти сценарій: " + e.message); }

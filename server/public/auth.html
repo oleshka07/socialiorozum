@@ -57,6 +57,9 @@ button:disabled{opacity:.5}
 .msg{margin-top:14px;padding:11px 13px;border-radius:11px;font-size:14px;display:none}
 .msg.err{display:block;background:var(--danger-soft,#F7E4DF);border:1px solid var(--stale);color:#8a2e1f}
 .msg.ok{display:block;background:#E3F6EA;border:1px solid #9BD8B3;color:var(--ok)}
+.invite{display:none;margin:0 0 16px;padding:12px 14px;border-radius:12px;background:var(--brand-soft);border:1px solid var(--brand-soft2);font-size:13.5px;line-height:1.5;color:var(--ink2)}
+.invite b{color:var(--ink)}
+.invite small{display:block;margin-top:4px;color:var(--muted);font-size:12.5px}
 .spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:s .7s linear infinite;vertical-align:-2px}
 .back{display:block;text-align:center;margin-top:18px;font-size:12px;color:var(--faint);text-decoration:none}
 .gbtn{display:flex;align-items:center;justify-content:center;gap:10px;background:var(--surface);color:var(--ink);border:1px solid var(--line2);border-radius:11px;padding:12px;font-weight:600;text-decoration:none;font-size:14px}
@@ -95,6 +98,7 @@ button:disabled{opacity:.5}
     <div class="card">
       <h1 id="title"></h1>
       <div class="sub" id="sub"></div>
+      <div class="invite" id="invite" role="status"></div>
       <form id="form">
         <div id="fEmail"><label>Email</label><input id="email" type="email" autocomplete="email" placeholder="you@example.com"></div>
         <div id="fPass"><label id="passLabel">Пароль</label><input id="password" type="password" autocomplete="current-password" placeholder="••••••••"></div>
@@ -116,6 +120,10 @@ button:disabled{opacity:.5}
 <script>
 const $=id=>document.getElementById(id);
 const path=location.pathname, params=new URLSearchParams(location.search), token=params.get('token');
+// 👥 посилання з листа-запрошення в бренд: токен іде разом із входом чи реєстрацією - так сервер знає,
+// що лист прийшов саме в цю скриньку, і людина одразу опиняється в бренді (без окремого листа підтвердження)
+const invite=/^[0-9a-f]{64}$/.test(params.get('invite')||'')?params.get('invite'):'';
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 let mode = path.indexOf('/register')===0?'register' : path.indexOf('/forgot')===0?'forgot' : path.indexOf('/reset')===0?'reset' : 'login';
 
 async function api(p,body){
@@ -156,6 +164,25 @@ const CFG={
   if(params.get('error')==='verify') show('err','Посилання верифікації недійсне або застаріле.');
   if(params.get('error')==='google') show('err','Не вдалося увійти через Google. Спробуйте ще раз.');
   if(params.get('error')==='google_off') show('err','Google-вхід ще не налаштований. Зайдіть поштою.');
+  if(params.get('error')==='invite') show('err','Запрошення не знайдено: посилання неповне або його вже замінили новим листом. Попроси надіслати запрошення ще раз.');
+  if(params.get('error')==='invite_expired') show('err','Запрошення прострочене - воно діє 14 днів. Попроси власника бренду надіслати його ще раз (Налаштування → 👥 Команда → ↻).');
+  if(invite){
+    // перемикач вхід ↔ реєстрація не губить запрошення
+    $('alt').querySelectorAll('a[href="/login"],a[href="/register"]').forEach(a=>a.href=a.getAttribute('href')+'?invite='+invite);
+    fetch('/api/auth/invite/'+invite).then(r=>r.json().then(j=>({ok:r.ok,j}))).then(({ok,j})=>{
+      if(!ok){ show('err', j.error||'Запрошення не знайдено'); return; }
+      const box=$('invite');
+      box.innerHTML='👥 '+(j.by?'<b>'+esc(j.by)+'</b> запрошує':'Тебе запрошено')+' в бренд <b>«'+esc(j.brand||'')+'»</b> з роллю <b>'+esc(j.roleLabel||'')+'</b>.'
+        +'<small>'+esc(j.roleHint||'')+'.</small>'
+        +(j.expired&&!j.accepted?'<small style="color:var(--stale)">Запрошення прострочене - попроси надіслати його ще раз.</small>'
+          :'<small>'+(mode==='register'?'Створи акаунт на цю пошту - і одразу потрапиш у бренд, без листа підтвердження.':'Увійди з цією поштою - бренд зʼявиться в меню аватара.')+'</small>');
+      box.style.display='block';
+      if(j.email){ $('email').value=j.email; $('email').readOnly=true; $('email').title='Запрошення надіслано саме на цю пошту'; }
+      // акаунт на цю пошту вже є - реєструватись нема чого; і навпаки
+      if(mode==='register'&&j.hasAccount) location.replace('/login?invite='+invite);
+      if(mode==='login'&&j.hasAccount===false) location.replace('/register?invite='+invite);
+    }).catch(()=>{});
+  }
 })();
 
 $('form').onsubmit=async(e)=>{
@@ -164,10 +191,13 @@ $('form').onsubmit=async(e)=>{
   try{
     const email=$('email').value.trim(), password=$('password').value;
     if(mode==='login'){
-      try{ await api('/auth/login',{email,password}); location.href='/app'; return; }
+      try{ const r=await api('/auth/login',invite?{email,password,invite}:{email,password});
+        location.href=r.brand?'/app?joined=1':(r.invite?'/app?invite='+encodeURIComponent(r.invite):'/app'); return; }
       catch(err){ show('err', err.message); if(/підтверд/i.test(err.message)) offerResend(email); return; }
     }
-    if(mode==='register'){ const r=await api('/auth/register',{email,password}); show('ok', (r.message||'Перевірте пошту.')+' Не бачиш листа - перевір «Спам».'); offerResend(email); $('password').value=''; }
+    if(mode==='register'){ const r=await api('/auth/register',invite?{email,password,invite}:{email,password});
+      if(r.loggedIn){ location.href='/app?joined=1'; return; }
+      show('ok', (r.message||'Перевірте пошту.')+' Не бачиш листа - перевір «Спам».'); offerResend(email); $('password').value=''; }
     if(mode==='forgot'){ const r=await api('/auth/request-reset',{email}); show('ok', r.message||'Перевірте пошту.'); }
     if(mode==='reset'){ await api('/auth/reset',{token,password}); show('ok','Пароль змінено! Перенаправляю на вхід…'); setTimeout(()=>location.href='/login',1500); }
   }catch(err){ show('err', err.message); }

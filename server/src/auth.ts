@@ -47,7 +47,8 @@ export async function createWorkspaceWithDefaults(name: string): Promise<string>
   return ws!.id;
 }
 
-export type User = { id: string; email: string; email_verified: boolean; workspace_id: string; home_workspace_id: string };
+// role - роль у АКТИВНОМУ кабінеті (roles.ts); домашній кабінет - завжди власник
+export type User = { id: string; email: string; email_verified: boolean; workspace_id: string; home_workspace_id: string; role?: string };
 
 export async function createUser(email: string, password: string): Promise<User> {
   const wsId = await createWorkspaceWithDefaults("user:" + email.toLowerCase());
@@ -89,11 +90,12 @@ export const markVerified = (userId: string) =>
   q(`update app_user set email_verified=true where id=$1`, [userId]);
 
 // ---- сесії (cookie -> token у БД) ----
-export async function createSession(userId: string): Promise<string> {
+/** activeWs - у який бренд одразу (людина прийшла за запрошенням у чужий бренд). */
+export async function createSession(userId: string, activeWs?: string | null): Promise<string> {
   const token = newToken();
   await q(
-    `insert into user_session(token, user_id, expires_at) values($1,$2, now() + ($3 || ' days')::interval)`,
-    [token, userId, String(SESSION_DAYS)]
+    `insert into user_session(token, user_id, expires_at, active_workspace_id) values($1,$2, now() + ($3 || ' days')::interval, $4)`,
+    [token, userId, String(SESSION_DAYS), activeWs || null]
   );
   return token;
 }
@@ -102,12 +104,15 @@ export async function userBySession(token: string | undefined): Promise<User | n
   return one<User>(
     `select u.id, u.email, u.email_verified,
             coalesce(m.workspace_id, u.workspace_id) as workspace_id,
-            u.workspace_id as home_workspace_id
+            u.workspace_id as home_workspace_id,
+            -- роль у тому кабінеті, де людина зараз (👥 roles.ts): домашній - її власний
+            coalesce(m.role, hm.role, 'owner') as role
      from user_session s
      join app_user u on u.id = s.user_id
      -- членство перевіряється ТУТ, у тому ж запиті: якщо доступ відкликали, join не зматчиться
      -- і людина мовчки повертається у свій домашній кабінет замість того, щоб далі бачити чужий
      left join workspace_member m on m.workspace_id = s.active_workspace_id and m.user_id = u.id
+     left join workspace_member hm on hm.workspace_id = u.workspace_id and hm.user_id = u.id
      where s.token=$1 and s.expires_at > now() and u.deleted_at is null`,
     [token]
   );

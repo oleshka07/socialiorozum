@@ -19,6 +19,9 @@
 // власнику, перевипуск одним кліком (стара адреса одразу мертва), а ФОРМАТ перевіряємо ДО запиту
 // в БД - інакше порожнє чи сміттєве значення зматчилось би з іншим ключем settings_block
 // (ця пастка вже траплялась на токені діалогів).
+import { actorId, runAs } from "./actor.js";
+import { can, toolCap, deniedText, normRole, ROLE_LABEL, ROLE_ICON, ROLE_HINT } from "./roles.js";
+import { roleIn, authorEditBlock, submitForReview, approvedNotice } from "./team.js";
 import { touchActive } from "./auth.js";
 import { randomBytes } from "node:crypto";
 import { q, one } from "./db.js";
@@ -223,6 +226,9 @@ function touchUsed(token: string, userId: string): void {
 
 const wsTz = async (ws: string) => (await getSettingText(ws, "timezone")) || "Europe/Kyiv";
 const short = (id: string) => "#" + String(id).slice(0, 8);
+// стан затвердження людською мовою (👥 автор надсилає, редактор затверджує чи повертає з коментарем)
+const reviewLabel = (r: string | null | undefined, note?: string | null) =>
+  r === "approved" ? "затверджено" : r === "pending" ? "на затвердженні" : r === "needs_work" ? `повернуто на доопрацювання${note ? ` («${String(note).slice(0, 200)}»)` : ""}` : "чернетка";
 const oneLine = (s: unknown, n = 140) => {
   const t = String(s ?? "").replace(/\s+/g, " ").trim();
   return t.length > n ? t.slice(0, n - 1) + "…" : t;
@@ -242,7 +248,7 @@ type PostRow = {
   intent: string | null; format: string | null; created_at: string; origin: string; media: string | null;
   first_comment: string | null;
 };
-const POST_SELECT = `select p.id, p.content, p.review, p.channels, p.rubric, p.intent, p.format, p.created_at,
+const POST_SELECT = `select p.id, p.content, p.review, p.review_note, p.channels, p.rubric, p.intent, p.format, p.created_at,
                             p.first_comment, s.origin, ma.filename as media
                        from post p
                        join pipeline_run r on r.id=p.run_id
@@ -907,7 +913,7 @@ export const TOOLS: ToolDef[] = [
       const list = await listWorkspaces(ctx.userId);
       if (list.length < 2) return `Кабінет один: ${ctx.wsTitle}. Усі інструменти працюють із ним.`;
       return ["Кабінети (активний позначено ▸):", ...list.map((w) =>
-        `${w.id === ctx.wsId ? "▸" : " "} ${short(w.id)} ${w.title}${w.role === "owner" ? " (власник)" : ""}`),
+        `${w.id === ctx.wsId ? "▸" : " "} ${short(w.id)} ${w.title} (${ROLE_ICON[normRole(w.role)]} ${ROLE_LABEL[normRole(w.role)]})`),
         "", "Перемкнути: switch_workspace. Разова дія в іншому кабінеті: аргумент workspace у будь-якому інструменті."].join("\n");
     },
   },
@@ -929,9 +935,10 @@ export const TOOLS: ToolDef[] = [
     description: "Огляд кабінету Holos: бренд, підключені мережі, скільки чернеток, матеріалів, ідей і запланованих публікацій. Почни з цього, якщо не знаєш стану.",
     properties: {},
     readOnly: true,
-    run: async (ws) => {
+    run: async (ws, _a, ctx) => {
       const rows = await q<{ key: string; content: string }>(
         `select key, content from settings_block where workspace_id=$1 and key in ('marketing_context','brand_thesis','timezone','output_language','primary_goal')`, [ws]);
+      const myRole = await roleIn(ctx.userId, ws);
       const s: Record<string, string> = {};
       for (const r of rows) s[r.key] = r.content || "";
       const [nets, counts] = await Promise.all([
@@ -955,6 +962,8 @@ export const TOOLS: ToolDef[] = [
       const acc = await accountNames(ws);
       return [
         "КАБІНЕТ Holos",
+        // 👥 що людині тут можна - щоб модель не пропонувала публікацію автору чи правки «Перегляду»
+        myRole && myRole !== "owner" ? `Твоя роль у цьому бренді: ${ROLE_ICON[myRole]} ${ROLE_LABEL[myRole]} - ${ROLE_HINT[myRole]}.` : "",
         s.marketing_context ? `Бренд і аудиторія: ${oneLine(s.marketing_context, 400)}` : "Бренд ще не заповнений (Бренд → Голос у кабінеті).",
         s.brand_thesis ? `Позиціонування: ${oneLine(s.brand_thesis, 200)}` : "",
         s.primary_goal && GOAL_LABELS[s.primary_goal] ? `Головна ціль: ${GOAL_LABELS[s.primary_goal]}` : "",
@@ -1117,7 +1126,7 @@ export const TOOLS: ToolDef[] = [
       if (!picked.length) return `Постів за фільтром «${status}» немає.`;
       return picked.map((r) => {
         const s = sent.get(r.id) || [];
-        const state = s.length ? `опубліковано: ${netList([...new Set(s.map((x) => x.net))])}` : r.review === "approved" ? "затверджено" : "чернетка";
+        const state = s.length ? `опубліковано: ${netList([...new Set(s.map((x) => x.net))])}` : reviewLabel(r.review);
         const nets = enabledNets(r.channels);
         // два часи: коли пост створено і коли він вийшов / вийде - «список показує лише створення»
         const when = [`створено ${fmtWhen(r.created_at, tz)}`,
@@ -1149,7 +1158,7 @@ export const TOOLS: ToolDef[] = [
       const live = isPublishingNow(p.id);
       const variants = NETS.filter((n) => p.channels?.[n]?.text).map((n) => `— ${NET_LABEL[n]}: ${oneLine(p.channels[n].text, 300)}`);
       return [
-        `${short(p.id)} · створено ${fmtWhen(p.created_at, tz)} · ${p.review === "approved" ? "затверджено" : "чернетка"}${mediaLine(await postMediaList(p.id), p.format)}`,
+        `${short(p.id)} · створено ${fmtWhen(p.created_at, tz)} · ${reviewLabel(p.review, (p as any).review_note)}${mediaLine(await postMediaList(p.id), p.format)}`,
         `мережі: ${enabledNets(p.channels).length ? netList(enabledNets(p.channels)) : "не обрані"}${p.rubric ? ` · рубрика: ${p.rubric}` : ""}${p.format && p.format !== "post" ? ` · формат: ${p.format}` : ""}`,
         await accountsLine(ws, p.channels, enabledNets(p.channels).filter((n) => !sent.some((x) => x.net === n))),
         slot?.scheduled_at ? `заплановано: ${fmtWhen(slot.scheduled_at, tz)} (${SLOT_STATE[slot.status] || slot.status})` : "",
@@ -1199,12 +1208,12 @@ export const TOOLS: ToolDef[] = [
         [ws, oneLine(text, 90), text]);
       const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
       const post = await one<{ id: string }>(
-        `insert into post(run_id, stage, content, channels, rubric, format, intent, review)
-         values($1,'final',$2,$3,$4,$5,$6,$7) returning id`,
+        `insert into post(run_id, stage, content, channels, rubric, format, intent, review, created_by)
+         values($1,'final',$2,$3,$4,$5,$6,$7,$8) returning id`,
         [run!.id, text, JSON.stringify(authoredChannels({}, nets, true)),
          str(a.rubric, 60) || null, normFormat(a.format),
          ["awareness", "nurture", "sale"].includes(String(a.intent)) ? String(a.intent) : null,
-         a.approve === true ? "approved" : null]);
+         a.approve === true ? "approved" : null, actorId()]);
       await logEvent("info", "mcp", `чернетку створено з Claude (${text.length} симв.)`, null);
       const fc = (a.first_comment !== undefined || a.first_comment_by_network !== undefined)
         ? await applyFirstComment(post!.id, authoredChannels({}, nets, true), a.first_comment, a.first_comment_by_network) : null;
@@ -1330,6 +1339,7 @@ export const TOOLS: ToolDef[] = [
       }
       if (typeof a.approve === "boolean") {
         await q(`update post set review=$2 where id=$1`, [p.id, a.approve ? "approved" : null]);
+        if (a.approve) approvedNotice(ws, p.id, p.review, actorId()).catch(() => {});   // 👥 автор чекав рішення
         done.push(a.approve ? "затверджено" : "затвердження знято");
         // незатверджений текст не має лишатись у календарі: автопостер відправив би його в мережу
         if (!a.approve) { const n = await unschedulePost(p.id); if (n) done.push(`знято з розкладу (${n})`); }
@@ -1986,6 +1996,7 @@ export const TOOLS: ToolDef[] = [
       if (ex) await q(`update schedule_slot set scheduled_at=$2, retry_at=null, attempts=0, updated_at=now() where id=$1`, [ex.id, at.toISOString()]);
       else await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [p.id, at.toISOString()]);
       await q(`update post set review='approved' where id=$1`, [p.id]);   // запланований = затверджений
+      approvedNotice(ws, p.id, p.review, actorId()).catch(() => {});
       const fcPlan = commentPlanLines({ ...p, channels: chNow }, on, await commentStates(p.id), await alreadySentNetworks(p.id), await metaGranted(ws));
       return `🗓 ${short(p.id)} заплановано на ${fmtWhen(at, tz)}: ${planLineFor(chNow, p.content, p.format)}.${ex ? " Наявний слот перенесено." : ""}`
         + bestNote + (fcPlan.length ? "\n" + fcPlan.join("\n") : "");
@@ -2239,6 +2250,20 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "submit_for_review",
+    title: "Надіслати на затвердження",
+    description: "Надіслати чернетку на затвердження. Потрібно ролі «Автор»: автор пише, а публікує й планує редактор чи власник бренду. Вони отримають повідомлення в Telegram-бот (або лист) і затвердять пост чи повернуть з коментарем - стан видно в get_post.",
+    properties: { id: S("Id поста.") },
+    required: ["id"],
+    run: async (ws, a) => {
+      const p = await findPost(ws, a.id);
+      const r = await submitForReview(ws, p.id, actorId());
+      if (!r.ok) throw new Error(r.error);
+      if (r.already) return `Пост ${short(p.id)} уже чекає на затвердження - редактори й власник бренду отримали повідомлення раніше; рішення - у get_post.`;
+      return `Пост ${short(p.id)} надіслано на затвердження. Редактори й власник бренду отримали повідомлення; рішення - у get_post.`;
+    },
+  },
+  {
     name: "delete_post",
     title: "Видалити пост",
     description: "Видалити чернетку чи запланований пост НАЗАВЖДИ (разом із його слотами в календарі). Опублікований пост видалити не можна - він лишається в історії й аналітиці; прибрати його з календаря - unschedule_post. Незворотно: спершу покажи людині, що саме видаляєш.",
@@ -2374,6 +2399,8 @@ export const TOOLS: ToolDef[] = [
 ];
 
 const TOOL_BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
+// інструменти, що ЗМІНЮЮТЬ наявний пост: автору - лише незатверджені, що ще не вийшли (видаляє - свої)
+const AUTHOR_EDIT_TOOLS = new Set(["update_post", "attach_media", "edit_post_media", "render_carousel", "attach_stock_photo", "generate_image", "montage_video", "delete_post", "submit_for_review"]);
 
 // Опис інструментів у вигляді, якого чекає клієнт MCP.
 // Разовий вибір кабінету без перемикання: дешевий запобіжник від «опублікував не в той бренд».
@@ -2424,6 +2451,7 @@ export const SERVER_INSTRUCTIONS = [
   "Статистика постів (перегляди, лайки, відповіді, репости, підписники, що працює) - analytics.",
   "Хіти можна повертати через тижні зі свіжим першим рядком - evergreen (вічнозелена черга; повтори стають у календар за добу, їх видно й можна скасувати).",
   "Посилання в постах можна робити короткими з лічильником переходів і UTM, а для біо - сторінка з кнопками й останніми постами - links.",
+  "Ролі в бренді: workspace_info каже твою роль. «Автор» пише чернетки, а публікує редактор чи власник - після тексту виклич submit_for_review; «Перегляд» лише читає.",
   "Факти не вигадуй: бери їх з list_materials / get_material або питай автора.",
   "Перед публікацією показуй текст людині - опублікований пост відкликати не можна.",
 ].join(" ");
@@ -2441,7 +2469,20 @@ export async function callTool(ctx: McpCtx, name: string, args: Record<string, a
     const target = a.workspace && !WS_TOOLS.includes(name) ? await resolveWsArg(ctx.userId, a.workspace) : null;
     const wsId = target?.id || ctx.wsId;
     if (target && !(await isMember(ctx.userId, wsId))) throw new ToolError("Немає доступу до цього кабінету.");
-    const out = await tool.run(wsId, a, ctx);
+    // 👥 роль людини в ЦЬОМУ бренді (roles.ts): конектор не дає більше, ніж кабінет
+    const role = WS_TOOLS.includes(name) ? null : await roleIn(ctx.userId, wsId);
+    const cap = toolCap(name, a);
+    if (!WS_TOOLS.includes(name) && !can(role, cap))
+      throw new ToolError(deniedText(role, cap, target?.title || ctx.wsTitle) + (role === "author" && cap === "publish" ? " Для цього - submit_for_review." : ""));
+    if (role === "author" && cap === "draft" && AUTHOR_EDIT_TOOLS.has(name)) {
+      const ref = name === "update_post" || name === "delete_post" || name === "send_first_comment" ? a.id : a.post;
+      if (ref) {
+        const p = await findPost(wsId, ref).catch(() => null);
+        const why = p ? await authorEditBlock(wsId, p.id, ctx.userId, name === "delete_post") : null;
+        if (why) throw new ToolError(why);
+      }
+    }
+    const out = await runAs({ userId: ctx.userId, role }, () => tool.run(wsId, a, ctx));
     // Коли кабінетів кілька, КОЖНА відповідь називає бренд. Без цього людина не побачить, що
     // модель працює не в тому кабінеті, аж поки пост не вийде не там.
     const head = ctx.wsCount > 1 && !WS_TOOLS.includes(name) ? `[Кабінет: ${target?.title || ctx.wsTitle}]\n` : "";

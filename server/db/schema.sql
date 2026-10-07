@@ -1167,6 +1167,38 @@ alter table tiktok_config add column if not exists username text;              -
 alter table tiktok_config add column if not exists scopes text;                -- які дозволи TikTok дала людина
 alter table tiktok_config add column if not exists avatar_url text;            -- аватар акаунта з user.info.basic (картка в Каналах)
 
+-- 👥 Команда бренду (roles.ts): власник дає бренд в управління іншим людям з рівнем доступу.
+-- owner (власник) · admin (повний доступ) · editor (редактор) · author (автор, публікує редактор) · viewer (перегляд).
+-- Давнє 'member' (доступ до 07.10) означало «все, крім видалення бренду» - це і є повний доступ.
+update workspace_member set role='admin' where role='member';
+alter table workspace_member alter column role set default 'viewer';
+alter table workspace_member add column if not exists added_by uuid references app_user(id) on delete set null;
+-- Запрошення людині, якої в сервісі ще немає: бренд зʼявиться в неї, щойно вона зареєструється з цією поштою
+-- (лист підтвердження чи вхід через Google - пошта перевірена) або прийме запрошення за посиланням з листа.
+-- Сам токен у базі не лежить - лише sha256: посилання з листа не відновити з копії бази.
+create table if not exists workspace_invite (
+  id           uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspace(id) on delete cascade,
+  email        text not null,
+  role         text not null,
+  invited_by   uuid references app_user(id) on delete set null,
+  token_hash   text not null unique,
+  created_at   timestamptz not null default now(),
+  expires_at   timestamptz not null,
+  sent_at      timestamptz,
+  accepted_at  timestamptz,
+  accepted_by  uuid references app_user(id) on delete set null
+);
+create unique index if not exists uq_ws_invite_open on workspace_invite(workspace_id, lower(email)) where accepted_at is null;
+create index if not exists idx_ws_invite_email on workspace_invite(lower(email)) where accepted_at is null;
+-- хто написав пост (кабінет, бот, конектор; воркери - null) і хто надіслав його на затвердження.
+-- review: null (чернетка) · pending (на затвердженні) · needs_work (повернуто автору, review_note - чому)
+--         · approved · archived
+alter table post add column if not exists created_by uuid references app_user(id) on delete set null;
+alter table post add column if not exists submitted_by uuid references app_user(id) on delete set null;
+alter table post add column if not exists submitted_at timestamptz;
+alter table post add column if not exists review_note text;
+
 -- 📤 Усі публікації поста одним списком: мережа, акаунт (id; '' - мережа з одним акаунтом), посилання, коли.
 -- Нова мережа додається сюди, а не в пʼятнадцять union по коду (так YouTube і TikTok уже були пропущені
 -- в «Сьогодні», банку, аналітиці й розкладі). TikTok, що ще обробляє відео, - теж «уже там»: повтор
