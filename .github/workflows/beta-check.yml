@@ -59,6 +59,8 @@ name: beta-check
 # без входу, команда без сесії), на сервері - версія, міграція (ролі учасників, таблиця запрошень, колонки постів),
 # журнал. І ПРОД: карта сайту й robots очима Googlebot (Search Console пише «Не вдалось отримати») і чи заходили
 # Googlebot/bingbot по карту після подання (журнал nginx, лише боти). Нічого не пише.
+# Другий прохід - після деплою 07f3328 на бету: те саме, плюс чи лягла міграція команди (ролі, запрошення,
+# колонки постів), PRO-конвеєр у коді контейнера і журнал після рестарту. Нічого не пише.
 
 on:
   push:
@@ -109,6 +111,8 @@ jobs:
             echo "== типова роль: $(docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select column_default from information_schema.columns where table_name='"'"'workspace_member'"'"' and column_name='"'"'role'"'"'"')"
             echo "== запрошення (колонок / рядків):"; Q "select (select count(*) from information_schema.columns where table_name='workspace_invite'), (select count(*) from workspace_invite)"
             echo "== нові колонки post:"; Q "select string_agg(column_name, ',' order by column_name) from information_schema.columns where table_name='post' and column_name in ('created_by','submitted_by','submitted_at','review_note')"
+            echo "== код у контейнері: ролі $(docker compose exec -T app sh -c 'ls dist/roles.js dist/team.js dist/actor.js 2>/dev/null | wc -l') файли · конвеєр з редактора: $(docker compose exec -T app sh -c "grep -c 'steps/:step/run' dist/roles.js") · захист готових постів: $(docker compose exec -T app sh -c "grep -c \"and not (p.stage='final'\" dist/pipeline.js")"
+            echo "== старт застосунку (міграція, помилки):"; docker compose logs --since 30m app 2>&1 | grep -E "migrate|error|Error|warn" | grep -v '"level":30' | tail -8 | cut -c1-220 | sed 's/^/   /'
             echo "== журнал беті: warn/error за 20 хв:"; Q "select to_char(created_at,'HH24:MI:SS'), level, scope, left(message,160) from app_log where created_at > now() - interval '20 minutes' and level in ('warn','error') order by created_at"
             echo; echo "== ПРОД: Googlebot/bingbot по robots і карту сайту після подання (07.10):"
             for f in /var/log/nginx/*holos*access*; do [ -e "$f" ] || continue; echo "-- $f"; zcat -f $f* 2>/dev/null | grep -E 'Googlebot|bingbot|Google-Site-Verification|Google-InspectionTool' | grep -E '07/Oct/2026|08/Oct/2026' | awk '{print $4, $6, $7, $9, $10}' | tail -25 | sed 's/^/   /'; done
