@@ -55,6 +55,10 @@ name: beta-check
 # EvidujZdarma (robots, llms.txt, теги підтвердження - зразок), і чи заходять Googlebot/Bingbot (журнал nginx, лише боти).
 # Далі - бета після 489ff36 (IndexNow, lastmod, robots, llms.txt, X-Robots-Tag): що віддає beta.holos (вхід за PIN),
 # стан 'seo' у базі беті (дати, чи слали - бета не має), журнал seo. Нічого не пише.
+# 07.10 - бета після команди бренду (ролі, запрошення): що віддає beta.holos (PIN-сторінка лишає адресу, запрошення
+# без входу, команда без сесії), на сервері - версія, міграція (ролі учасників, таблиця запрошень, колонки постів),
+# журнал. І ПРОД: карта сайту й robots очима Googlebot (Search Console пише «Не вдалось отримати») і чи заходили
+# Googlebot/bingbot по карту після подання (журнал nginx, лише боти). Нічого не пише.
 
 on:
   push:
@@ -71,21 +75,25 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: beta.holos after 489ff36 - robots, llms.txt, X-Robots-Tag (runner, read-only, PIN login)
+      - name: beta.holos team + prod sitemap as Googlebot (runner, read-only)
         run: |
-          B=https://beta.holos.rozum.one
-          echo "== robots (без PIN): $(curl -sS $B/robots.txt | tr '\n' '|') · x-robots: $(curl -sSI $B/robots.txt | tr -d '\r' | grep -i '^x-robots-tag' | cut -d' ' -f2-)"
+          B=https://beta.holos.rozum.one; P=https://holos.rozum.one
+          GB='Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
+          echo "== PIN-сторінка беті лишає адресу: $(curl -sS $B/invite/$(printf '0%.0s' $(seq 1 64)) | grep -c "location.pathname==='/'?'/app':location.href")"
           curl -sS -c /tmp/jar -H 'content-type: application/json' -d '{"pin":"2345"}' $B/beta-pin -o /dev/null -w "== PIN: %{http_code}\n"
-          for pth in / /login /register /app /privacy /llms.txt /sitemap.xml; do
-            h=$(curl -sS -b /tmp/jar -D - -o /tmp/p.out "$B$pth" | tr -d '\r')
-            echo "-- $pth: $(echo "$h" | head -1) · type: $(echo "$h" | grep -i '^content-type' | cut -d' ' -f2-) · x-robots: $(echo "$h" | grep -i '^x-robots-tag' | cut -d' ' -f2-)"
-          done
-          echo "== llms.txt (бета, перші рядки):"; curl -sS -b /tmp/jar $B/llms.txt | head -12 | sed 's/^/   /'
-          echo "== llms.txt мережі:"; curl -sS -b /tmp/jar $B/llms.txt | sed -n '/## Мережі/,/## Сторінки/p' | sed 's/^/   /'
-          echo "== sitemap (бета):"; curl -sS -b /tmp/jar $B/sitemap.xml | grep -oE '<loc>[^<]*</loc>|<lastmod>[^<]*</lastmod>' | paste - - | sed 's/^/   /'
-          echo "== прод поки без змін: robots /app: $(curl -sS https://holos.rozum.one/robots.txt | grep -c 'Disallow: /app$') · /llms.txt: $(curl -sS -o /dev/null -w '%{http_code}' https://holos.rozum.one/llms.txt)"
+          echo "== /invite/<невідомий> → $(curl -sS -b /tmp/jar -o /dev/null -w '%{http_code} %{redirect_url}' $B/invite/$(printf 'a%.0s' $(seq 1 64)))"
+          echo "== /api/auth/invite/<невідомий>: $(curl -sS -b /tmp/jar $B/api/auth/invite/$(printf 'a%.0s' $(seq 1 64)))"
+          echo "== /api/workspaces/team без входу: $(curl -sS -b /tmp/jar -o /dev/null -w '%{http_code}' $B/api/workspaces/team)"
+          echo "== /register?invite= - банер і передача токена в сторінці: $(curl -sS -b /tmp/jar $B/register | grep -c "api/auth/invite/")"
+          echo "== /app - вкладка Команда: $(curl -sS -b /tmp/jar $B/app | grep -c 'id=\"setTeam\"') · app.js ролі: $(curl -sS -b /tmp/jar $B/app.js | grep -c 'function applyRoleUI')"
+          echo; echo "== ПРОД sitemap очима Googlebot:"
+          curl -sS -A "$GB" -D /tmp/sh -o /tmp/sm.xml $P/sitemap.xml; tr -d '\r' < /tmp/sh | grep -iE '^HTTP|^content-type|^x-robots|^content-length|^cache-control' | sed 's/^/   /'
+          python3 -c "import xml.dom.minidom,sys; d=xml.dom.minidom.parse('/tmp/sm.xml'); print('   XML ок, адрес:', len(d.getElementsByTagName('loc')), '· ns:', d.documentElement.getAttribute('xmlns'))" || echo "   XML НЕ розбирається"
+          grep -oE '<loc>[^<]*</loc>|<lastmod>[^<]*</lastmod>' /tmp/sm.xml | paste - - | sed 's/^/   /'
+          echo "== ПРОД robots.txt очима Googlebot: $(curl -sS -A "$GB" -o /dev/null -w '%{http_code} %{content_type}' $P/robots.txt)"; curl -sS -A "$GB" $P/robots.txt | sed 's/^/   /'
+          echo "== HEAD sitemap (Google іноді питає HEAD): $(curl -sSI -A "$GB" -o /dev/null -w '%{http_code}' $P/sitemap.xml) · без www/https: http→ $(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' http://holos.rozum.one/sitemap.xml)"
 
-      - name: beta seo state and logs (server, read-only)
+      - name: beta team migration + prod search bots (server, read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -96,11 +104,15 @@ jobs:
             echo "== HEAD прод: $(git -C /opt/socialio rev-parse --short HEAD) · бета: $(git -C /opt/socialio-beta rev-parse --short HEAD)"
             cd /opt/socialio-beta/server && docker compose ps --format '{{.Name}} {{.Status}}' 2>/dev/null | sed 's/^/   /'
             echo "== health 8081: $(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/health)"
-            echo "== seo у базі беті:"
-            docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select (value->>'"'"'key'"'"') ~ '"'"'^[0-9a-f]{32}$'"'"' as key_ok, value->'"'"'pages'"'"' as pages, value->'"'"'ping'"'"' as ping, updated_at from app_setting where name='"'"'seo'"'"'"' 2>&1 | sed 's/^/   /'
-            echo "== журнал беті: seo і помилки за 15 хв:"
-            docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select to_char(created_at,'"'"'HH24:MI:SS'"'"'), level, scope, left(message,160) from app_log where created_at > now() - interval '"'"'15 minutes'"'"' and (scope='"'"'seo'"'"' or level in ('"'"'warn'"'"','"'"'error'"'"')) order by created_at"' 2>&1 | sed 's/^/   /'
-            docker compose logs --since 15m app 2>/dev/null | grep -E 'initSeo|"level":50' | tail -5 | cut -c1-220 || true
+            Q(){ docker compose exec -T db sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -Atc \"$1\"" 2>&1 | sed 's/^/   /'; }
+            echo "== ролі учасників беті (було owner/member):"; Q "select role, count(*) from workspace_member group by role order by role"
+            echo "== типова роль: $(docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select column_default from information_schema.columns where table_name='"'"'workspace_member'"'"' and column_name='"'"'role'"'"'"')"
+            echo "== запрошення (колонок / рядків):"; Q "select (select count(*) from information_schema.columns where table_name='workspace_invite'), (select count(*) from workspace_invite)"
+            echo "== нові колонки post:"; Q "select string_agg(column_name, ',' order by column_name) from information_schema.columns where table_name='post' and column_name in ('created_by','submitted_by','submitted_at','review_note')"
+            echo "== журнал беті: warn/error за 20 хв:"; Q "select to_char(created_at,'HH24:MI:SS'), level, scope, left(message,160) from app_log where created_at > now() - interval '20 minutes' and level in ('warn','error') order by created_at"
+            echo; echo "== ПРОД: Googlebot/bingbot по robots і карту сайту після подання (07.10):"
+            for f in /var/log/nginx/*holos*access*; do [ -e "$f" ] || continue; echo "-- $f"; zcat -f $f* 2>/dev/null | grep -E 'Googlebot|bingbot|Google-Site-Verification|Google-InspectionTool' | grep -E '07/Oct/2026|08/Oct/2026' | awk '{print $4, $6, $7, $9, $10}' | tail -25 | sed 's/^/   /'; done
+            echo "== усі запити ботів Google за 07.10 (кількість): $(zcat -f /var/log/nginx/*holos*access* 2>/dev/null | grep '07/Oct/2026' | grep -cE 'Googlebot|Google-InspectionTool|GoogleOther')"
             echo "   (кінець)"
 
   drop:
