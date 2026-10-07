@@ -61,6 +61,10 @@ name: beta-check
 # Googlebot/bingbot по карту після подання (журнал nginx, лише боти). Нічого не пише.
 # Другий прохід - після деплою 07f3328 на бету: те саме, плюс чи лягла міграція команди (ролі, запрошення,
 # колонки постів), PRO-конвеєр у коді контейнера і журнал після рестарту. Нічого не пише.
+# 07.10 вечір - ПРОД після промоушну пошуковиків ff6048f (лише 489ff36 і документи, без команди бренду): що віддає
+# holos.rozum.one ззовні (robots і його правила справжнім зіставленням, X-Robots-Tag і meta robots сторінок, llms.txt,
+# sitemap з датами, стара адреса), на сервері - HEAD, контейнер, health, стан 'seo' у базі проду (дати сторінок, відповідь
+# IndexNow), файл ключа ззовні (сам ключ у журнал не пишемо), хто його читав і які боти зайшли, журнал seo. Нічого не пише.
 
 on:
   push:
@@ -77,25 +81,49 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: beta.holos team + prod sitemap as Googlebot (runner, read-only)
+      - name: prod holos after ff6048f - robots, X-Robots-Tag, llms.txt, sitemap (runner, read-only)
         run: |
-          B=https://beta.holos.rozum.one; P=https://holos.rozum.one
+          P=https://holos.rozum.one; O=https://socialio.rozum.one
           GB='Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
-          echo "== PIN-сторінка беті лишає адресу: $(curl -sS $B/invite/$(printf '0%.0s' $(seq 1 64)) | grep -c "location.pathname==='/'?'/app':location.href")"
-          curl -sS -c /tmp/jar -H 'content-type: application/json' -d '{"pin":"2345"}' $B/beta-pin -o /dev/null -w "== PIN: %{http_code}\n"
-          echo "== /invite/<невідомий> → $(curl -sS -b /tmp/jar -o /dev/null -w '%{http_code} %{redirect_url}' $B/invite/$(printf 'a%.0s' $(seq 1 64)))"
-          echo "== /api/auth/invite/<невідомий>: $(curl -sS -b /tmp/jar $B/api/auth/invite/$(printf 'a%.0s' $(seq 1 64)))"
-          echo "== /api/workspaces/team без входу: $(curl -sS -b /tmp/jar -o /dev/null -w '%{http_code}' $B/api/workspaces/team)"
-          echo "== /register?invite= - банер і передача токена в сторінці: $(curl -sS -b /tmp/jar $B/register | grep -c "api/auth/invite/")"
-          echo "== /app - вкладка Команда: $(curl -sS -b /tmp/jar $B/app | grep -c 'id=\"setTeam\"') · app.js ролі: $(curl -sS -b /tmp/jar $B/app.js | grep -c 'function applyRoleUI')"
-          echo; echo "== ПРОД sitemap очима Googlebot:"
-          curl -sS -A "$GB" -D /tmp/sh -o /tmp/sm.xml $P/sitemap.xml; tr -d '\r' < /tmp/sh | grep -iE '^HTTP|^content-type|^x-robots|^content-length|^cache-control' | sed 's/^/   /'
-          python3 -c "import xml.dom.minidom,sys; d=xml.dom.minidom.parse('/tmp/sm.xml'); print('   XML ок, адрес:', len(d.getElementsByTagName('loc')), '· ns:', d.documentElement.getAttribute('xmlns'))" || echo "   XML НЕ розбирається"
+          echo "== health: $(curl -sS -o /dev/null -w '%{http_code}' $P/health)"
+          echo "== robots.txt: $(curl -sS -A "$GB" -o /tmp/robots.txt -w '%{http_code} %{content_type}' $P/robots.txt) · x-robots: $(curl -sSI $P/robots.txt | tr -d '\r' | grep -i '^x-robots-tag' | cut -d' ' -f2-)"
+          sed 's/^/   /' /tmp/robots.txt
+          echo "== правила robots - зіставлення, як у Google (найдовше правило; рівні - Allow):"
+          python3 - <<'EOF'
+          import re
+          rules=[]
+          for line in open('/tmp/robots.txt'):
+              line=line.split('#')[0].strip()
+              if ':' not in line: continue
+              k,v=[x.strip() for x in line.split(':',1)]
+              if k.lower() in ('allow','disallow') and v: rules.append((k.lower(),v))
+          def rx(p):
+              end=p.endswith('$'); p=p[:-1] if end else p
+              return re.compile(re.escape(p).replace(r'\*','.*')+('$' if end else ''))
+          def allowed(path):
+              best=None
+              for k,v in rules:
+                  if rx(v).match(path):
+                      if best is None or len(v)>best[0] or (len(v)==best[0] and k=='allow'): best=(len(v),k)
+              return best is None or best[1]=='allow'
+          for p in ['/','/privacy','/terms','/data-deletion','/llms.txt','/sitemap.xml','/apple-touch-icon.png','/favicon.svg','/favicon-192x192.png','/@demo','/s/abc1234','/login','/register','/app.js','/app','/app?x=1','/api/me','/tgapp','/mcp/x','/media/a.jpg','/thumb/a.jpg']:
+              print('   ', 'ALLOW' if allowed(p) else 'BLOCK', p)
+          EOF
+          echo "== сторінки (код · тип · X-Robots-Tag · meta robots):"
+          for pth in / /privacy /terms /data-deletion /llms.txt /sitemap.xml /apple-touch-icon.png /app '/app?x=1' /login /register /forgot /reset /tgapp; do
+            h=$(curl -sS -A "$GB" -D - -o /tmp/p.out "$P$pth" | tr -d '\r')
+            echo "-- $pth: $(echo "$h" | head -1 | cut -d' ' -f2) · $(echo "$h" | grep -i '^content-type' | cut -d' ' -f2- | cut -d';' -f1) · x-robots: $(echo "$h" | grep -i '^x-robots-tag' | cut -d' ' -f2-) · meta: $(grep -oiE '<meta name="robots"[^>]*>' /tmp/p.out | head -1 | grep -oE 'content="[^"]*"')"
+          done
+          echo "== llms.txt (перші рядки):"; curl -sS $P/llms.txt | head -8 | sed 's/^/   /'
+          echo "== llms.txt мережі:"; curl -sS $P/llms.txt | sed -n '/## Мережі/,/## Сторінки/p' | sed 's/^/   /'
+          echo "== sitemap очима Googlebot:"
+          curl -sS -A "$GB" -o /tmp/sm.xml $P/sitemap.xml
+          python3 -c "import xml.dom.minidom; d=xml.dom.minidom.parse('/tmp/sm.xml'); print('   XML ок, адрес:', len(d.getElementsByTagName('loc')))" || echo "   XML НЕ розбирається"
           grep -oE '<loc>[^<]*</loc>|<lastmod>[^<]*</lastmod>' /tmp/sm.xml | paste - - | sed 's/^/   /'
-          echo "== ПРОД robots.txt очима Googlebot: $(curl -sS -A "$GB" -o /dev/null -w '%{http_code} %{content_type}' $P/robots.txt)"; curl -sS -A "$GB" $P/robots.txt | sed 's/^/   /'
-          echo "== HEAD sitemap (Google іноді питає HEAD): $(curl -sSI -A "$GB" -o /dev/null -w '%{http_code}' $P/sitemap.xml) · без www/https: http→ $(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' http://holos.rozum.one/sitemap.xml)"
+          echo "== стара адреса: robots $(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' $O/robots.txt) · llms $(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' $O/llms.txt) · sitemap $(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' $O/sitemap.xml) · / $(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' $O/)"
+          echo "== бета без змін (закрита): robots $(curl -sS https://beta.holos.rozum.one/robots.txt | tr '\n' '|') · x-robots: $(curl -sSI https://beta.holos.rozum.one/robots.txt | tr -d '\r' | grep -i '^x-robots-tag' | cut -d' ' -f2-)"
 
-      - name: beta team migration + prod search bots (server, read-only)
+      - name: prod seo state, IndexNow key file and logs (server, read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -104,19 +132,29 @@ jobs:
           command_timeout: 3m
           script: |
             echo "== HEAD прод: $(git -C /opt/socialio rev-parse --short HEAD) · бета: $(git -C /opt/socialio-beta rev-parse --short HEAD)"
-            cd /opt/socialio-beta/server && docker compose ps --format '{{.Name}} {{.Status}}' 2>/dev/null | sed 's/^/   /'
-            echo "== health 8081: $(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/health)"
+            cd /opt/socialio/server && docker compose ps --format '{{.Name}} {{.Status}}' 2>/dev/null | sed 's/^/   /'
+            echo "== health 8080: $(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/health)"
+            echo "== код у контейнері: seo.js $(docker compose exec -T app sh -c 'ls dist/seo.js 2>/dev/null | wc -l') · llms.txt $(docker compose exec -T app sh -c "grep -c '/llms.txt' dist/server.js") · X-Robots-Tag $(docker compose exec -T app sh -c "grep -c 'X-Robots-Tag' dist/server.js")"
             Q(){ docker compose exec -T db sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -Atc \"$1\"" 2>&1 | sed 's/^/   /'; }
-            echo "== ролі учасників беті (було owner/member):"; Q "select role, count(*) from workspace_member group by role order by role"
-            echo "== типова роль: $(docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select column_default from information_schema.columns where table_name='"'"'workspace_member'"'"' and column_name='"'"'role'"'"'"')"
-            echo "== запрошення (колонок / рядків):"; Q "select (select count(*) from information_schema.columns where table_name='workspace_invite'), (select count(*) from workspace_invite)"
-            echo "== нові колонки post:"; Q "select string_agg(column_name, ',' order by column_name) from information_schema.columns where table_name='post' and column_name in ('created_by','submitted_by','submitted_at','review_note')"
-            echo "== код у контейнері: ролі $(docker compose exec -T app sh -c 'ls dist/roles.js dist/team.js dist/actor.js 2>/dev/null | wc -l') файли · конвеєр з редактора: $(docker compose exec -T app sh -c "grep -c 'steps/:step/run' dist/roles.js") · захист готових постів: $(docker compose exec -T app sh -c "grep -c \"and not (p.stage='final'\" dist/pipeline.js")"
-            echo "== старт застосунку (міграція, помилки):"; docker compose logs --since 30m app 2>&1 | grep -E "migrate|error|Error|warn" | grep -v '"level":30' | tail -8 | cut -c1-220 | sed 's/^/   /'
-            echo "== журнал беті: warn/error за 20 хв:"; Q "select to_char(created_at,'HH24:MI:SS'), level, scope, left(message,160) from app_log where created_at > now() - interval '20 minutes' and level in ('warn','error') order by created_at"
-            echo; echo "== ПРОД: Googlebot/bingbot по robots і карту сайту після подання (07.10):"
-            for f in /var/log/nginx/*holos*access*; do [ -e "$f" ] || continue; echo "-- $f"; zcat -f $f* 2>/dev/null | grep -E 'Googlebot|bingbot|Google-Site-Verification|Google-InspectionTool' | grep -E '07/Oct/2026|08/Oct/2026' | awk '{print $4, $6, $7, $9, $10}' | tail -25 | sed 's/^/   /'; done
-            echo "== усі запити ботів Google за 07.10 (кількість): $(zcat -f /var/log/nginx/*holos*access* 2>/dev/null | grep '07/Oct/2026' | grep -cE 'Googlebot|Google-InspectionTool|GoogleOther')"
+            echo "== seo у базі проду (ключ - лише довжина):"
+            Q "select length(value->>'key'), updated_at from app_setting where name='seo'"
+            echo "   сторінки:"; Q "select p.key, p.value->>'at', (p.value->>'pinged') = (p.value->>'hash') from app_setting s, jsonb_each(s.value->'pages') p where s.name='seo' order by p.key"
+            echo "   остання відповідь IndexNow:"; Q "select value->'ping'->>'at', value->'ping'->>'status', value->'ping'->'urls', coalesce(value->'ping'->>'error','') from app_setting where name='seo'"
+            K=$(docker compose exec -T db sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -Atc \"select value->>'key' from app_setting where name='seo'\"" 2>/dev/null | tr -d '\r\n ')
+            if [ -n "$K" ]; then
+              c=$(curl -sS -o /tmp/k.out -w '%{http_code} %{content_type}' "https://holos.rozum.one/$K.txt")
+              same=no; [ "$(cat /tmp/k.out)" = "$K" ] && same=yes
+              echo "== файл ключа IndexNow ззовні: $c · вміст = ключ: $same · з HEAD: $(curl -sSI -o /dev/null -w '%{http_code}' "https://holos.rozum.one/$K.txt") · на беті: $(curl -sS -o /dev/null -w '%{http_code}' "https://beta.holos.rozum.one/$K.txt")"
+              echo "== хто читав файл ключа (nginx; час, код, агент):"
+              zcat -f /var/log/nginx/*holos*access* 2>/dev/null | grep -F "/$K.txt" | awk -F'"' '{split($1,a," "); split($3,b," "); print a[4], b[1], $6}' | tail -10 | cut -c1-180 | sed 's/^/   /'
+            else
+              echo "== ключа IndexNow у базі нема"
+            fi
+            echo "== боти на holos 07.10 (час, запит, код, агент; ключ приховано):"
+            zcat -f /var/log/nginx/*holos*access* 2>/dev/null | grep '07/Oct/2026' | grep -E 'Googlebot|bingbot|Google-InspectionTool|YandexBot|SeznamBot|Applebot|DuckDuckBot|naver|Yeti|YepBot' | awk -F'"' '{split($1,a," "); split($3,b," "); print a[4], $2, b[1], $6}' | sed "s#/${K:-NOKEY}.txt#/<ключ>.txt#g" | tail -20 | cut -c1-200 | sed 's/^/   /'
+            echo "== журнал проду: seo і warn/error за 40 хв:"
+            Q "select to_char(created_at,'HH24:MI:SS'), level, scope, left(message,180) from app_log where created_at > now() - interval '40 minutes' and (scope='seo' or level in ('warn','error')) order by created_at"
+            docker compose logs --since 40m app 2>/dev/null | grep -E 'initSeo|migrate|\"level\":50' | tail -6 | cut -c1-220 | sed 's/^/   /' || true
             echo "   (кінець)"
 
   drop:
