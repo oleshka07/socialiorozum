@@ -70,6 +70,10 @@ name: beta-check
 # (libx265), і пробне перекодування в те, що Telegram просить для сторіс (720×1280, HEVC, ключовий кадр щосекунди,
 # MPEG4, ≤30 МБ) - у тимчасовій теці контейнера, нічого не пише ні в базу, ні в медіатеку. І чи прочиталися коментарі
 # Threads після повторного входу Олега (картка holos-threads-relogin): журнал inbox/comments, лише рядки.
+# Далі - бета після сторіс у Telegram і WhatsApp та мовних версій субтитрів: версія, здоров'я, код у контейнері,
+# міграція (tg_business, tg_story_brand, whatsapp_publish, media_asset.sub_lang/variant_of, post_published з WhatsApp),
+# спільний бот беті: чи слухає вебхук business_connection і чи ввімкнено Business Mode (getMe can_connect_to_business),
+# підключення Business (кількості), warn/error журналу після рестарту. Нічого не пише.
 
 on:
   push:
@@ -86,7 +90,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: beta ffmpeg HEVC probe for Telegram stories + Threads comments log (server, read-only)
+      - name: beta after TG stories + WhatsApp + subtitle languages (server, read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -96,32 +100,42 @@ jobs:
           script: |
             echo "== HEAD прод: $(git -C /opt/socialio rev-parse --short HEAD) · бета: $(git -C /opt/socialio-beta rev-parse --short HEAD)"
             cd /opt/socialio-beta/server
-            echo "== ffmpeg: $(docker compose exec -T app ffmpeg -hide_banner -version | head -1)"
-            echo "== кодери H.265 / H.264:"
-            docker compose exec -T app sh -c 'ffmpeg -hide_banner -encoders 2>/dev/null | grep -Ei "hevc|265|libx264"' | sed 's/^/   /'
-            echo "== конфігурація (x265?): $(docker compose exec -T app sh -c 'ffmpeg -hide_banner -buildconf 2>/dev/null | grep -c libx265')"
-            echo "== пробне перекодування в тимчасовій теці контейнера (нічого не лишається):"
-            docker compose exec -T app sh -c '
-              T=$(mktemp -d) && cd $T &&
-              ffmpeg -hide_banner -nostdin -loglevel error -f lavfi -i testsrc2=size=1080x1920:rate=30 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 8 -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -shortest src.mp4 &&
-              s=$(date +%s) &&
-              ffmpeg -hide_banner -nostdin -loglevel error -i src.mp4 -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,fps=30,format=yuv420p,setsar=1" -c:v libx265 -preset fast -crf 28 -maxrate 3M -bufsize 6M -x265-params "keyint=30:min-keyint=30:scenecut=0:log-level=error" -tag:v hvc1 -c:a aac -b:a 128k -ar 48000 -ac 2 -movflags +faststart -threads 2 out.mp4 &&
-              echo "   готово за $(( $(date +%s) - s )) с, розмір $(stat -c %s out.mp4) байт" &&
-              ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,codec_tag_string,profile,width,height,r_frame_rate,pix_fmt -of default=nw=1 out.mp4 | sed "s/^/   /" &&
-              echo "   ключові кадри (перші 10 с): $(ffprobe -v error -select_streams v:0 -skip_frame nokey -show_entries frame=pts_time -of csv=p=0 out.mp4 | head -10 | tr "\n" " ")" &&
-              echo "   контейнер: $(ffprobe -v error -show_entries format=format_name,duration -of default=nw=1 out.mp4 | tr "\n" " ")";
-              rc=$?; cd / && rm -rf $T; exit $rc' 2>&1 | sed 's/^/   /'
-            echo "   код виходу: $?"
-            Q(){ docker compose exec -T db sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -Atc \"$1\"" 2>&1 | sed 's/^/   /'; }
-            echo "== бета: журнал inbox/comments/threads за 2 доби (рядки без токенів):"
-            Q "select to_char(created_at,'DD.MM HH24:MI'), level, scope, left(message,170) from app_log where created_at > now() - interval '2 days' and (scope in ('inbox','comments','comment') or message ilike '%read_replies%' or message ilike '%threads%коментар%') order by created_at desc limit 15"
-            echo "== бета: показані коментарі в боті за мережами (comment_notice):"
-            Q "select network, status, count(*) from comment_notice group by 1,2 order by 1,2"
-            cd /opt/socialio/server
-            echo "== прод: журнал inbox/comments за 2 доби:"
-            Q "select to_char(created_at,'DD.MM HH24:MI'), level, scope, left(message,170) from app_log where created_at > now() - interval '2 days' and (scope in ('inbox','comments','comment') or message ilike '%read_replies%') order by created_at desc limit 10"
-            echo "== прод: comment_notice за мережами:"
-            Q "select network, status, count(*) from comment_notice group by 1,2 order by 1,2"
+            docker compose ps --format '{{.Service}} {{.Status}}' | sed 's/^/   /'
+            echo "== health: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/health)"
+            echo "== код у контейнері:"
+            for m in "dist/tgstory.js:postTgStories" "dist/wastatus.js:deliverWhatsApp" "dist/sublang.js:subPicker" "dist/telegram.js:business_connection" "dist/montage.js:translateSubs" "dist/montage.js:startPostSubtitles" "dist/publisher.js:deliverWhatsApp" "public/app.js:tgStoryOff" "public/app.js:mvNetLangs" "public/app.js:data-sublang"; do
+              f=${m%%:*}; k=${m#*:}; echo "   $f $k: $(docker compose exec -T app sh -c "grep -c '$k' $f 2>/dev/null || echo 0")"
+            done
+            docker compose exec -T app node --input-type=module -e "
+            import pg from 'pg';
+            const c = new pg.Client({ connectionString: process.env.DATABASE_URL }); await c.connect();
+            const q = async (s, a) => (await c.query(s, a)).rows;
+            const mask = (s) => String(s ?? '').replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g, '***').replace(/\\d{6,}:[A-Za-z0-9_-]{20,}/g, '<token>');
+            const t = await q(\"select string_agg(n, ',') ok from unnest(\$1::text[]) n where to_regclass(n) is not null\", [['tg_business', 'tg_story_brand', 'whatsapp_publish', 'post_published']]);
+            console.log('таблиці: ' + t[0].ok);
+            const cols = await q(\"select string_agg(table_name || '.' || column_name, ',' order by 1) ok from information_schema.columns where (table_name='media_asset' and column_name in ('sub_lang','variant_of')) or (table_name='telegram_publish' and column_name='story_ids')\");
+            console.log('колонки: ' + cols[0].ok);
+            const v = await q(\"select pg_get_viewdef('post_published'::regclass) ~ 'whatsapp_publish' ok\");
+            console.log('post_published бачить WhatsApp: ' + v[0].ok);
+            const ix = await q(\"select string_agg(indexname, ',' order by indexname) ok from pg_indexes where indexname in ('uq_wapub_post','idx_media_variant','idx_tg_business_user')\");
+            console.log('індекси: ' + ix[0].ok);
+            const tok = (await q(\"select value from app_secret where name='TELEGRAM_BOT_TOKEN'\"))[0]?.value || process.env.TELEGRAM_BOT_TOKEN || '';
+            const me = await fetch('https://api.telegram.org/bot' + tok + '/getMe').then((x) => x.json()).catch(() => ({}));
+            const wh = await fetch('https://api.telegram.org/bot' + tok + '/getWebhookInfo').then((x) => x.json()).catch(() => ({}));
+            let host = '?'; try { host = new URL(wh.result?.url || '').host; } catch { /* */ }
+            console.log('спільний бот беті: @' + (me.result?.username || '?') + ' · Business Mode (can_connect_to_business): ' + (me.result?.can_connect_to_business === true) + ' · вебхук: ' + host + ' · allowed_updates: ' + (wh.result?.allowed_updates || []).join(',') + ' · черга ' + (wh.result?.pending_update_count ?? '?') + (wh.result?.last_error_message ? ' · остання помилка: ' + mask(wh.result.last_error_message).slice(0, 80) : ''));
+            const bz = await q(\"select count(*)::int n, count(*) filter (where can_stories and enabled)::int live from tg_business\");
+            const sb = await q(\"select count(*)::int n from tg_story_brand\");
+            console.log('Telegram Business: підключень ' + bz[0].n + ' (з правом на сторіс ' + bz[0].live + ') · брендів із профілем ' + sb[0].n);
+            const st = await q(\"select count(*)::int n, count(*) filter (where content ~ '\\\"langs\\\"\\\\s*:\\\\s*\\\\{\\\"')::int langs from settings_block where key='montage_style'\");
+            console.log('стилі відео: ' + st[0].n + ' (з мовами мереж ' + st[0].langs + ')');
+            const ow = await q(\"select count(*)::int n, count(*) filter (where user_id is not null)::int linked from tg_owner\");
+            console.log('tg_owner: ' + ow[0].n + ' (з акаунтом ' + ow[0].linked + ')');
+            const lg = await q(\"select level, scope, left(message,170) m, to_char(created_at at time zone 'UTC','HH24:MI') c from app_log where created_at > now() - interval '25 minutes' and level in ('warn','error') order by created_at desc limit 12\");
+            for (const l of lg) console.log('  ' + l.c + ' ' + l.level[0] + ' ' + l.scope + ': ' + mask(l.m));
+            if (!lg.length) console.log('  warn/error за 25 хв: нема');
+            await c.end();
+            " 2>&1 | sed 's/^/   /'
             echo "   (кінець)"
 
   drop:
