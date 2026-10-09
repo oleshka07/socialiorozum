@@ -65,6 +65,11 @@ const PNEWPOST = { id: PNEW, content: "", review: null, channels: {}, format: "p
 const blankDeletes = [];
 // ⏳ TikTok ще обробляє відео: стан публікації спершу «processing», з другого запиту - готово з посиланням
 const P11 = "13131313-1313-1313-1313-131313131313";
+const P12 = "14141414-1414-1414-1414-141414141414";
+const P12POST = { id: P12, content: "Бетон за день", review: "approved", channels: { instagram: { on: true }, telegram: { on: true }, whatsapp: { on: true } }, format: "story", rubric: "", intent: "", sent: [], links: {} };
+CAR.set(P12, [{ id: "m1", filename: "mt-ua.mp4", kind: "video", duration: 9, sub_lang: "uk", variants: { en: { id: "m1en", filename: "mt-en.mp4" }, cs: { id: "m1cs", filename: "mt-cs.mp4" } } }]);
+let TGSTORY = { bot: "holos_rozum_bot", linked: true, brand: { id: "BC1", label: "@oleg_tg", enabled: true, can_stories: true }, mine: [{ id: "BC1", label: "@oleg_tg", here: true, enabled: true, can_stories: true }, { id: "BC9", label: "@oleg_old", here: false, enabled: true, can_stories: false }] };
+const tgStoryCalls = [];
 const P11POST = { id: P11, content: "Our own video", review: "approved", channels: { tiktok: { on: true, mode: "direct", privacy: "SELF_ONLY" } }, format: "post", rubric: "", intent: "", sent: [], links: {} };
 CAR.set(P11, [{ id: "v11", filename: "v11.mp4", kind: "video", duration: 12, width: 1080, height: 1920, size: 8 * 1048576 }]);
 let p11Polls = 0;
@@ -318,7 +323,7 @@ let aiJobPolls = 0;
 const mtCalls = [];
 // 🎬 монтаж v3: стиль відео бренду й обкладинка Reels
 const styleCalls = [], coverCalls = [];
-let MV_STYLE = { subtitle: "classic", color: "#FFD23F", position: "low", hook: true, end: true, endText: "", cut: true };
+let MV_STYLE = { subtitle: "classic", color: "#FFD23F", position: "low", hook: true, end: true, endText: "", cut: true, speech: "", langs: {} };
 const MV_CAPS_EXTRA = {
   templates: [
     { id: "standard", label: "🎬 Стандарт", hint: "кліпи по черзі, найкращі моменти, плавні переходи", mood: null },
@@ -326,6 +331,8 @@ const MV_CAPS_EXTRA = {
     { id: "talking", label: "🗣 Говорю в камеру", hint: "мова цілком, без пауз і «еее»", mood: null },
     { id: "process", label: "⚡ Процес", hint: "короткі прискорені шматки роботи", mood: "energetic" },
   ],
+  subLangs: [["uk", "Українська", "🇺🇦"], ["en", "English", "🇬🇧"], ["cs", "Čeština", "🇨🇿"], ["sk", "Slovenčina", "🇸🇰"], ["pl", "Polski", "🇵🇱"], ["de", "Deutsch", "🇩🇪"]].map(([id, label, flag]) => ({ id, label, flag })),
+  subNets: ["instagram", "facebook", "telegram", "whatsapp", "threads", "linkedin", "youtube", "tiktok"], brandLang: "uk",
   subStyles: [["classic", "Класичні"], ["brand", "Колір бренду"], ["box", "На плашці"], ["big", "Великі слова"], ["minimal", "Мінімальні"]].map(([id, label]) => ({ id, label, hint: "підказка " + id })),
 };
 const MV_END = { title: "Vary Servis & Úklid", sub: "Karlovy Vary · @servisvary" };
@@ -690,13 +697,13 @@ function handleApi(method, path, body) {
   if (method === "DELETE" && path === "/posts/" + PNEW) { blankDeletes.push(PNEW); return { ok: true }; }
   let m = /^\/posts\/([0-9a-f-]+)\/full$/.exec(path);
   if (m) {
-    const p = m[1] === PNEW ? PNEWPOST : m[1] === P11 ? P11POST : m[1] === P4 ? P4POST : m[1] === P5 ? P5POST : m[1] === P7 ? P7POST : m[1] === P8 ? P8POST : m[1] === P9 ? P9POST : m[1] === P10 ? P10POST : (POSTS.find((x) => x.id === m[1]) || POSTS[0]);
+    const p = m[1] === PNEW ? PNEWPOST : m[1] === P11 ? P11POST : m[1] === P4 ? P4POST : m[1] === P5 ? P5POST : m[1] === P7 ? P7POST : m[1] === P12 ? P12POST : m[1] === P8 ? P8POST : m[1] === P9 ? P9POST : m[1] === P10 ? P10POST : (POSTS.find((x) => x.id === m[1]) || POSTS[0]);
     return { ...p, image_prompt: "", headline: "", has_base: false, slides_text: "", cover_filename: p.id === P5 ? "cov0.jpg" : null, media: CAR.get(p.id) || (p.media_filename ? [{ id: "c0", filename: p.media_filename }] : []) };
   }
   m = /^\/posts\/([0-9a-f-]+)\/publish-state$/.exec(path);
   if (m) {
     if (m[1] === P8 && P8STATE) return P8STATE;
-    if (m[1] === P4 || m[1] === P5 || m[1] === P7 || m[1] === P8 || m[1] === P10 || m[1] === PNEW) return { sent: [], links: {}, comments: [] };
+    if (m[1] === P4 || m[1] === P5 || m[1] === P7 || m[1] === P8 || m[1] === P10 || m[1] === P12 || m[1] === PNEW) return { sent: [], links: {}, comments: [] };
     if (m[1] === P11) {
       const done = ++p11Polls > 1, link = "https://www.tiktok.com/@holos_rozum/video/7300000000000000123";
       return { sent: ["tiktok"], links: done ? { tiktok: link } : {}, comments: [], sentTo: [done ? { net: "tiktok", account: "", name: null, link } : { net: "tiktok", account: "", name: null, link: null, state: "processing" }] };
@@ -733,6 +740,9 @@ function handleApi(method, path, body) {
   m = /^\/posts\/([0-9a-f-]+)$/.exec(path);
   if (method === "PUT" && m) { postPuts.push({ id: m[1], body }); return { ok: true }; }
   if (method === "POST" && path === "/ab/generate") return AB_RESULT;
+  if (method === "GET" && path === "/integrations/tgstory") return TGSTORY;
+  if (method === "POST" && path === "/integrations/tgstory/use") { tgStoryCalls.push(["use", body]); TGSTORY = { ...TGSTORY, brand: { id: body.id, label: "@oleg_old", enabled: true, can_stories: false } }; return { ok: true, label: "@oleg_old" }; }
+  if (method === "POST" && path === "/integrations/tgstory/off") { tgStoryCalls.push(["off"]); TGSTORY = { ...TGSTORY, brand: null }; return { ok: true }; }
   if (method === "GET" && path === "/montage/caps") return { tts: true, stt: true, vision: true, music: true, maxClips: 20, ...MV_CAPS_EXTRA, style: MV_STYLE, endPreview: MV_STYLE.end ? (MV_STYLE.endText ? { title: MV_STYLE.endText.split("\n")[0], sub: MV_STYLE.endText.split("\n")[1] || "" } : MV_END) : MV_END };
   if (method === "PUT" && path === "/montage/style") { styleCalls.push(body); MV_STYLE = { ...MV_STYLE, ...body }; return { ...MV_STYLE, endPreview: MV_STYLE.endText ? { title: MV_STYLE.endText.split("\n")[0], sub: MV_STYLE.endText.split("\n")[1] || "" } : MV_END }; }
   const cvm = /^\/posts\/([0-9a-f-]+)\/cover$/.exec(path);
@@ -1502,11 +1512,12 @@ const run = async () => {
     await page.waitForSelector(".cmp-ov .pv-story", { timeout: 6000 });
     const st = await page.evaluate(() => {
       const tg = document.querySelector('.cmp-ov .netchip[data-net="telegram"]');
+      const li = document.querySelector('.cmp-ov .netchip[data-net="linkedin"]');
       return {
-        tgDim: !!tg && tg.disabled && /Instagram і Facebook/.test(tg.title),
+        tgDim: !!tg && !tg.disabled && tg.classList.contains("warn") && /Telegram Business/.test(tg.title) && !!li && li.disabled && /профіль Telegram і WhatsApp-статус/.test(li.title),
         stories: document.querySelectorAll("#cmpPrev .pv-story").length,
-        bars: document.querySelectorAll("#cmpPrev .pv-story")[0].querySelectorAll(".pv-bars i").length,
-        cnt: document.querySelector("#cmpPrev .pv-story .pv-cnt").textContent,
+        bars: document.querySelectorAll("#cmpPrev .pv-story")[1].querySelectorAll(".pv-bars i").length,
+        cnt: document.querySelectorAll("#cmpPrev .pv-story .pv-cnt")[1].textContent,
         carTitle: (document.querySelector("#cmpCarTitle") || {}).textContent, build: (document.querySelector("#cmpCarBuild") || {}).textContent,
         carShown: document.querySelector("#cmpCarWrap").style.display !== "none",
         vidLabel: [...document.querySelectorAll("#cmpMediaWrap .slide-th .sn")].map((x) => x.textContent).join("|"),
@@ -1514,8 +1525,8 @@ const run = async () => {
       };
     });
     await page.evaluate(() => document.querySelector('#cmpPrev [data-snav="instagram"][data-d="1"]').click());
-    const cnt2 = await $t("#cmpPrev .pv-story .pv-cnt");
-    const good = st.tgDim && st.stories === 2 && st.bars === 3 && st.cnt === "1/3" && cnt2 === "2/3" && st.carShown
+    const cnt2 = await page.evaluate(() => document.querySelectorAll("#cmpPrev .pv-story .pv-cnt")[1].textContent);
+    const good = st.tgDim && st.stories === 3 && st.bars === 3 && st.cnt === "1/3" && cnt2 === "2/3" && st.carShown
       && st.carTitle === "⚡ Сценарій кадрів сторіс" && st.build === "🎨 Зібрати кадри" && st.vidLabel === "1|2|▶ 0:06" && st.storyTiles === 3;
     if (!good) console.log("   ↳ storyComposer:", JSON.stringify({ st, cnt2 }));
     await closeComposers();
@@ -1539,6 +1550,77 @@ const run = async () => {
     await page.evaluate(() => { Object.assign(ChanStatus, window.__cs); });
     const good = before === "instagram,telegram" && inStory === "facebook,instagram" && prevOk && after === "instagram,telegram";
     if (!good) console.log("   ↳ storySwitch:", JSON.stringify({ before, inStory, prevOk, after }));
+    return good;
+  });
+
+  await check("storyLangs", async () => {
+    // 📲 сторіс у профіль Telegram і WhatsApp-статус + 🌐 мова субтитрів кожної мережі: прев'ю бере версію мови мережі
+    await closeComposers();
+    await page.evaluate(() => { window.__cs2 = { ...ChanStatus }; ChanStatus.instagram = true; ChanStatus.tgStory = { label: "@oleg_tg" }; ChanStatus.whatsapp = true; ChanStatus.sublangs = { telegram: "en", whatsapp: "cs" }; });
+    await page.evaluate((id) => openComposer(id), P12);
+    await page.waitForSelector(".cmp-ov .pv-story video", { timeout: 6000 });
+    const vids = () => page.evaluate(() => {
+      const out = {};
+      document.querySelectorAll("#cmpPrev .pv-label").forEach((l) => {
+        let el = l.nextElementSibling; while (el && !el.classList.contains("pv-story")) el = el.nextElementSibling;
+        const v = el && el.querySelector("video"); out[l.textContent] = v ? v.getAttribute("src") : null;
+      });
+      return out;
+    });
+    const st = await page.evaluate(() => {
+      const chip = (k) => document.querySelector('.cmp-ov .netchip[data-net="' + k + '"]');
+      return {
+        tg: chip("telegram") && chip("telegram").classList.contains("on") && !chip("telegram").classList.contains("warn"),
+        wa: chip("whatsapp") && chip("whatsapp").classList.contains("on") && !chip("whatsapp").classList.contains("warn"),
+        picks: [...document.querySelectorAll("#cmpPrev [data-sublang]")].map((s) => s.dataset.sublang + ":" + s.options[s.selectedIndex].textContent),
+        tgBox: getComputedStyle(document.querySelector("#cmpTgStory")).display !== "none" && /@oleg_tg/.test(document.querySelector("#cmpTgStory").textContent),
+        waNote: /Мій статус/.test(document.querySelector("#cmpPrev").textContent),
+      };
+    });
+    const v1 = await vids();
+    // Telegram: «як у відео» - піде оригінал, без версії англійською
+    await page.evaluate(() => { const s = document.querySelector('#cmpPrev [data-sublang="telegram"]'); s.value = ""; s.dispatchEvent(new Event("change")); });
+    const v2 = await vids();
+    // Instagram: німецької версії нема - червоне попередження
+    await page.evaluate(() => { const s = document.querySelector('#cmpPrev [data-sublang="instagram"]'); const o = document.createElement("option"); o.value = "de"; s.appendChild(o); s.value = "de"; s.dispatchEvent(new Event("change")); });
+    const miss = await page.evaluate(() => (document.querySelector('#cmpPrev [data-sublang="instagram"]').closest(".pv-sublang") || {}).textContent || "");
+    // години й «лишити» сторіс Telegram потрапляють у пост
+    await page.evaluate(() => { const h = document.querySelector("#cmpTgH"); h.value = "12"; h.dispatchEvent(new Event("change")); const k = document.querySelector("#cmpTgKeep"); k.checked = true; k.dispatchEvent(new Event("change")); });
+    if (process.env.SMOKE_SHOTS) { const el = await page.$(".cmp-ov"); if (el) await el.screenshot({ path: join(HERE, "story-langs.png") }); }
+    await closeComposers();
+    // звичайний пост: чіпа WhatsApp нема
+    await page.evaluate((id) => openComposer(id), P2);
+    await page.waitForSelector(".cmp-ov #cmpChips .netchip", { timeout: 6000 });
+    const waInPost = await page.evaluate(() => document.querySelectorAll('.cmp-ov .netchip[data-net="whatsapp"]').length);
+    await closeComposers();
+    await page.evaluate(() => { Object.keys(ChanStatus).forEach((k) => delete ChanStatus[k]); Object.assign(ChanStatus, window.__cs2); });
+    const key = (o, re) => Object.keys(o).find((k) => re.test(k));
+    const tgK = key(v1, /сторіс у профілі @oleg_tg/), waK = key(v1, /статус \(кадри надішле бот\)/), igK = key(v1, /^Instagram · сторіс$/);
+    const good = st.tg && st.wa && st.tgBox && st.waNote && tgK && waK && igK
+      && /mt-en\.mp4/.test(v1[tgK]) && /mt-cs\.mp4/.test(v1[waK]) && /mt-ua\.mp4/.test(v1[igK])
+      && st.picks.some((p) => /^telegram:як у «Стилі відео» \(англійська\)/.test(p)) && st.picks.some((p) => /^instagram:як у «Стилі відео» \(українська\)/.test(p))
+      && /mt-ua\.mp4/.test(v2[tgK]) && /mt-cs\.mp4/.test(v2[waK]) && /версії німецькою нема - піде українською/.test(miss) && waInPost === 0;
+    if (!good) console.log("   ↳ storyLangs:", JSON.stringify({ st, v1, v2, miss, waInPost }));
+    return good;
+  });
+
+  await check("tgStoryPanel", async () => {
+    // Канали → Telegram → «📲 Сторіс у профілі»: профіль бренду, свій інший профіль «Використати тут», відʼєднати, кроки підключення
+    await page.evaluate(() => { selectView("settings"); setSTab("channels"); });
+    await page.evaluate(() => loadTgStory());
+    await page.waitForFunction(() => /@oleg_tg/.test((document.querySelector("#tgStory") || {}).textContent || ""), undefined, { timeout: 5000 });
+    const a = await page.evaluate(() => ({ t: document.querySelector("#tgStory").textContent, use: document.querySelectorAll("#tgStory [data-tguse]").length, off: !!document.querySelector("#tgStoryOff") }));
+    await page.evaluate(() => document.querySelector('#tgStory [data-tguse="BC9"]').click());
+    await page.waitForFunction(() => /@oleg_old/.test(document.querySelector("#tgStory .acc-row .nm").textContent), undefined, { timeout: 5000 });
+    const b = await page.evaluate(() => document.querySelector("#tgStory").textContent);
+    page.once("dialog", (d) => d.accept());
+    await page.evaluate(() => document.querySelector("#tgStoryOff").click());
+    await page.waitForFunction(() => /Чат-боти/.test(document.querySelector("#tgStory").textContent) && !document.querySelector("#tgStoryOff"), undefined, { timeout: 5000 });
+    const c = await page.evaluate(() => document.querySelector("#tgStory").textContent);
+    const good = /✅ сторіс підуть сюди/.test(a.t) && a.use === 1 && a.off && /без права на сторіс/.test(b)
+      && tgStoryCalls.length === 2 && tgStoryCalls[0][1].id === "BC9" && tgStoryCalls[1][0] === "off"
+      && /Telegram Business/.test(c) && /Керування історіями/.test(c) && /@holos_rozum_bot/.test(c);
+    if (!good) console.log("   ↳ tgStoryPanel:", JSON.stringify({ a, b, c, calls: tgStoryCalls }));
     return good;
   });
 
@@ -1962,8 +2044,10 @@ const run = async () => {
         credits: document.getElementById("admKeys").textContent.includes("кредит"),
       };
     }, SECRET);
-    return before.includes("не заданий") && before.includes("з .env") &&
+    const good = before.includes("не заданий") && before.includes("з .env") &&
       !st.leaked && st.tail && st.cleared && st.credits;
+    if (!good) console.log("   ↳ adminKeys:", JSON.stringify({ before: before.slice(0, 300), st }));
+    return good;
   });
 
   // Спільний бот, чий вебхук веде на інший сервіс (прод ↔ бета): перший запис - 409 з питанням, і лише
@@ -2618,6 +2702,20 @@ const run = async () => {
     return st.video && /Прибрати відео/.test(st.del) && !st.more && st.vid;
   });
 
+  await check("tgappStory", async () => {
+    // 📲 сторіс у Mini App: мережі сторіс (Instagram, Facebook, профіль Telegram, WhatsApp-статус), а не канали
+    const st = await tgPage.evaluate(() => {
+      const keep = { format: cur.format, channels: cur.channels, s: SNETS };
+      SNETS = ["instagram", "telegram", "whatsapp"]; cur.format = "story"; cur.channels = { instagram: { on: true }, whatsapp: { on: true } }; drawEditor();
+      const nets = [...document.querySelectorAll(".sheet button.net")].map((b) => b.dataset.n + (b.classList.contains("on") ? "+" : "") + ":" + b.textContent.trim());
+      cur.format = keep.format; cur.channels = keep.channels; SNETS = keep.s; drawEditor();
+      return nets.join(",");
+    });
+    const good = st === "instagram+:📸 Instagram,telegram:✈️ Telegram,whatsapp+:🟢 WhatsApp";
+    if (!good) console.log("   ↳ tgappStory:", st);
+    return good;
+  });
+
   await check("tgappApprove", async () => {
     const before = await tgPage.$eval("#aAppr", (el) => el.textContent);
     await tgPage.click("#aAppr");
@@ -3226,6 +3324,30 @@ const run = async () => {
       && /box/.test(after.cls) && after.hk === "none" && /255, 47, 120|ff2f78/i.test(after.word)
       && last.subtitle === "box" && last.hook === false && /ff2f78/i.test(last.color);
     if (!good) console.log("   ↳ videoStyle:", JSON.stringify({ init, after, last, calls: styleCalls.length - n0 }));
+    return good;
+  });
+
+  await check("videoLangs", async () => {
+    // 🌐 «Стиль відео»: якою мовою говориш і мова субтитрів кожної мережі; інша мова - ще одна версія ролика
+    const init = await page.evaluate(() => ({ sp: $("mvSpeech").options.length, sp0: $("mvSpeech").options[0].textContent, nets: [...document.querySelectorAll("#mvNetLangs [data-mvl]")].map((s) => s.dataset.mvl).join(","), hint: $("mvLangHint").textContent }));
+    const n0 = styleCalls.length;
+    await page.selectOption('#mvNetLangs [data-mvl="telegram"]', "en");
+    await page.selectOption('#mvNetLangs [data-mvl="whatsapp"]', "cs");
+    for (let i = 0; i < 40 && styleCalls.length <= n0; i++) await page.waitForTimeout(100);
+    await page.waitForTimeout(600);
+    const hint = await page.evaluate(() => $("mvLangHint").textContent);
+    const last = styleCalls[styleCalls.length - 1] || {};
+    // говорю чеською: у списку мережі чеської як «іншої» вже нема, WhatsApp - «як говориш»
+    await page.selectOption("#mvSpeech", "cs");
+    await page.waitForTimeout(700);
+    const cs = await page.evaluate(() => { const s = document.querySelector('#mvNetLangs [data-mvl="whatsapp"]'); return { v: s.value, opts: [...s.options].map((o) => o.value).join(","), first: s.options[0].textContent }; });
+    const last2 = styleCalls[styleCalls.length - 1] || {};
+    await page.selectOption("#mvSpeech", "");
+    await page.waitForTimeout(600);
+    const good = init.sp === 7 && /Українська/.test(init.sp0) && init.nets === "instagram,facebook,telegram,whatsapp,threads,linkedin,youtube,tiktok"
+      && last.langs && last.langs.telegram === "en" && last.langs.whatsapp === "cs" && /ще 2 версії \(English, Čeština\)/.test(hint)
+      && last2.speech === "cs" && cs.v === "" && !cs.opts.split(",").includes("cs") && /як говориш \(Čeština\)/.test(cs.first);
+    if (!good) console.log("   ↳ videoLangs:", JSON.stringify({ init, hint, last, cs, last2 }));
     return good;
   });
 

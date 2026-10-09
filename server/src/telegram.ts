@@ -187,9 +187,26 @@ export async function getFileBuffer(token: string, fileId: string): Promise<{ bu
     return { buffer: Buffer.from(await res.arrayBuffer()), path: f.file_path };
   } finally { clearTimeout(timer); }
 }
-export const getWebhookInfo = (token: string) => tg<{ url?: string; pending_update_count?: number; last_error_message?: string }>(token, "getWebhookInfo");
+export const getWebhookInfo = (token: string) => tg<{ url?: string; pending_update_count?: number; last_error_message?: string; allowed_updates?: string[] }>(token, "getWebhookInfo");
+// business_connection - людина підключила бот у Telegram Business (сторіс у її профіль). business_message
+// свідомо НЕ просимо: бот не читає бізнес-чатів людини.
+export const ALLOWED_UPDATES = ["message", "channel_post", "my_chat_member", "callback_query", "business_connection"];
 export const setWebhook = (token: string, url: string, secretToken?: string) =>
-  tg(token, "setWebhook", { url, allowed_updates: ["message", "channel_post", "my_chat_member", "callback_query"], ...(secretToken ? { secret_token: secretToken } : {}) });
+  tg(token, "setWebhook", { url, allowed_updates: ALLOWED_UPDATES, ...(secretToken ? { secret_token: secretToken } : {}) });
+
+// 📲 Сторіс від імені бізнес-акаунта (Telegram Business, право can_manage_stories). Файл - лише новим
+// завантаженням (attach://story): за адресою Telegram сторіс не бере.
+export async function postStory(token: string, businessConnectionId: string, content: Record<string, unknown>, file: Buffer, name: string,
+  o: { activePeriod: number; keep?: boolean; caption?: string }): Promise<{ id: number; chat?: { id: number; username?: string } }> {
+  const form = new FormData();
+  form.append("business_connection_id", businessConnectionId);
+  form.append("content", JSON.stringify(content));
+  form.append("active_period", String(o.activePeriod));
+  if (o.keep) form.append("post_to_chat_page", "true");
+  if (o.caption) form.append("caption", o.caption);
+  form.append("story", new Blob([new Uint8Array(file)]), name);
+  return tgForm<{ id: number; chat?: { id: number; username?: string } }>(token, "postStory", form, 300000);
+}
 
 // ---- точки входу без слешів: постійна клавіатура, меню команд, кнопка Mini App ----
 // Слеш-команди памʼятають одиниці; кнопка під полем вводу - те, що видно завжди.

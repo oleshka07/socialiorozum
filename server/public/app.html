@@ -18,7 +18,7 @@
     --line:#E8E3DA; --line2:#DCD6CB;
     --brand:#15795A; --brand2:#1C9170; --brand-ink:#FFFFFF; --brand-soft:#E4F0EA; --brand-soft2:#D2E7DD;
     --amber:#B9762A; --amber-soft:#F6EAD7; --danger:#BC4530; --danger-soft:#F7E4DF;
-    --tg:#2AABEE; --ig:#E1306C; --fb:#1877F2; --th:#101010; --li:#0A66C2; --yt:#FF0000; --tt:#FE2C55;
+    --tg:#2AABEE; --ig:#E1306C; --fb:#1877F2; --th:#101010; --li:#0A66C2; --yt:#FF0000; --tt:#FE2C55; --wa:#1DA851;
     --shadow:0 1px 2px rgba(28,40,33,.04), 0 4px 14px rgba(28,40,33,.06);
     --shadow-lg:0 8px 40px rgba(28,40,33,.14); --r:14px;
   }
@@ -28,7 +28,7 @@
     --line:#28302C; --line2:#323B36;
     --brand:#37B488; --brand2:#42C496; --brand-ink:#06120D; --brand-soft:#13251D; --brand-soft2:#173026;
     --amber:#D99B4E; --amber-soft:#241B0F; --danger:#E0654A; --danger-soft:#2A140E;
-    --tg:#2AABEE; --ig:#F25C9A; --fb:#4D90F5; --th:#E8EDE9; --li:#3B82C4; --yt:#FF4E45; --tt:#FE2C55;
+    --tg:#2AABEE; --ig:#F25C9A; --fb:#4D90F5; --th:#E8EDE9; --li:#3B82C4; --yt:#FF4E45; --tt:#FE2C55; --wa:#25D366;
     --shadow:0 1px 2px rgba(0,0,0,.3), 0 6px 22px rgba(0,0,0,.4); --shadow-lg:0 12px 48px rgba(0,0,0,.55);
   }
   *{box-sizing:border-box}
@@ -498,7 +498,11 @@
   .mvSubs.minimal{font-size:10px;font-weight:700}
   .mvSubs.minimal b{color:#fff}
   .mvSubs.mid{bottom:auto;top:46%}
-  @media (max-width:560px){ .mntTpl{grid-template-columns:1fr} .mvGrid{grid-template-columns:1fr} .mvPrev{margin:0 auto} }
+  .mvNetLangs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 12px}
+  .mvNL{display:flex;align-items:center;gap:8px;font-size:13px;min-width:0}
+  .mvNL span{flex:0 0 84px;color:var(--muted)}
+  .mvNL select{flex:1;min-width:0}
+  @media (max-width:560px){ .mntTpl{grid-template-columns:1fr} .mvGrid{grid-template-columns:1fr} .mvPrev{margin:0 auto} .mvNetLangs{grid-template-columns:1fr} }
   .modal-card{width:100%;max-width:560px;background:var(--surface);border:1px solid var(--line);border-radius:22px;box-shadow:var(--shadow-lg);overflow:hidden;animation:pop .35s ease}
   /* ---- мобільна версія (mobile-first: нижня навігація, safe-area, без горизонтального скролу) ---- */
   .bottomnav{display:none}
@@ -1080,6 +1084,14 @@ html.review-on #owl{display:none!important}
               </div>
               <div class="mvPrev" id="mvPrev" aria-hidden="true"><div class="mvHook" id="mvPrevHook">Ріжемо бетон за день</div><div class="mvSubs" id="mvPrevSub">Сьогодні <b>ріжемо</b> бетон</div></div>
             </div>
+            <div class="mvLangs" id="mvLangs">
+              <div class="ph" style="margin:14px 0 6px;font-size:14px">🌐 Мови субтитрів</div>
+              <label class="fl">🎙 Мовою, якою говориш у кліпах</label><select id="mvSpeech"></select>
+              <div class="hint">З неї розшифровується мова, і субтитри «оригіналу» - цією мовою.</div>
+              <label class="fl" style="margin-top:10px">Субтитри в кожній мережі</label>
+              <div class="mvNetLangs" id="mvNetLangs"></div>
+              <div class="hint" id="mvLangHint">Інша мова для мережі - монтаж зробить ще одну версію ролика з перекладеними субтитрами (той самий час кожної фрази; гачок і мітки «до/після» - теж), і в мережу піде саме вона. До 3 додаткових мов.</div>
+            </div>
             <div class="hint">Збереження автоматичне.</div>
           </div>
           <div class="panel proonly" style="display:none">
@@ -1279,6 +1291,12 @@ html.review-on #owl{display:none!important}
             <div class="hint" style="margin-top:4px">Спершу додай бота <b>адміністратором</b> у новий канал (з правом публікувати) - інакше Telegram не пустить його туди писати.</div>
             <div style="border-top:1px solid var(--line);margin:12px 0 2px"></div>
           </div>
+          <div id="tgStoryBox" style="margin:8px 0 4px">
+            <div class="hint" style="margin-bottom:6px">📲 <b>Сторіс у профілі Telegram</b> - бот ставить сторіс від твого імені через Telegram Business (потрібен Telegram Premium). У канал сторіс через бота поставити не можна - лише в профіль.</div>
+            <div id="tgStory"></div>
+            <div style="border-top:1px solid var(--line);margin:12px 0 2px"></div>
+          </div>
+          <div class="hint" style="margin:8px 0 4px">🟢 <b>WhatsApp-статус</b>: офіційного способу публікувати статуси нема, а сторонні сервіси входять з твого номера як «WhatsApp Web» і ризикують блокуванням номера. Тож у пості формату «Сторіс» увімкни WhatsApp: у час публікації бот надішле тобі готові кадри (із субтитрами мовою WhatsApp зі «Стилю відео»), а ти перешлеш їх у «Мій статус» - два дотики на кадр. Потрібно лише «Підключити наш бот».</div>
           <details class="disc" style="margin-top:6px">
             <summary>⚙️ Розширені налаштування (власний бот)</summary>
             <div style="padding:4px 14px 14px">

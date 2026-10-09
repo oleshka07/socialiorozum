@@ -84,7 +84,7 @@ const DRAFT = [
   "POST /api/brand/context-check",
   "POST /api/media", "PUT /api/media/chunk", "PUT /api/media/:id/alt",
   "POST /api/posts/blank", "PUT /api/posts/:postId", "DELETE /api/posts/:postId", "POST /api/posts/:postId/submit",
-  "POST /api/posts/:postId/cover", "POST /api/posts/:postId/media", "POST /api/posts/:postId/slides",
+  "POST /api/posts/:postId/cover", "POST /api/posts/:postId/subtitles", "POST /api/posts/:postId/media", "POST /api/posts/:postId/slides",
   "PUT /api/posts/:postId/slides", "DELETE /api/posts/:postId/slides/:mediaId", "PUT /api/posts/:postId/video",
   "POST /api/posts/:postId/carousel", "POST /api/posts/:postId/channels", "POST /api/posts/:postId/adapt",
   "POST /api/posts/:postId/hashtags", "POST /api/posts/:postId/reel-video", "POST /api/posts/:postId/stock-photos",

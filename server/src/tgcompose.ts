@@ -23,6 +23,8 @@ import { PRIVACY_UA } from "./tiktok.js";
 import { YT_PRIVACY_UA, titleFrom } from "./youtube.js";
 import { ttCreator, canDirect } from "./vidpub.js";
 import { logEvent } from "./log.js";
+import { tgStoryReady, bizLabel, brandBiz } from "./tgstory.js";
+import { waReady } from "./wastatus.js";
 
 const KEY = "tg_compose";
 type Await = null | "text" | "photo" | "when" | "rewrite";
@@ -44,11 +46,19 @@ export const clearCompose = (ws: string) => setSetting(ws, KEY, EMPTY);
 // публікація не виконає
 const NETS: Array<[string, string]> = [
   ["telegram", "✈️ Telegram"], ["instagram", "📸 Instagram"], ["facebook", "📘 Facebook"],
-  ["threads", "🧵 Threads"], ["linkedin", "💼 LinkedIn"], ["youtube", "▶️ YouTube"], ["tiktok", "🎵 TikTok"],
+  ["threads", "🧵 Threads"], ["linkedin", "💼 LinkedIn"], ["youtube", "▶️ YouTube"], ["tiktok", "🎵 TikTok"], ["whatsapp", "🟢 WhatsApp"],
 ];
 // opts.video - пост із відео: тоді й YouTube та TikTok (вони приймають лише відео, тож текстовому
 // посту кнопки цих мереж були б обіцянкою, яку публікація не виконає)
-export async function connectedNets(ws: string, opts: { video?: boolean } = {}): Promise<string[]> {
+// opts.story - мережі сторіс: Instagram і Facebook, Telegram (профіль через Telegram Business, а не канали)
+// і WhatsApp-статус (кадри надсилає бот тому, хто ставить статус)
+export async function connectedNets(ws: string, opts: { video?: boolean; story?: boolean } = {}): Promise<string[]> {
+  if (opts.story) {
+    const [m, tgs, wa] = await Promise.all([
+      one<{ page_id: string | null; ig_user_id: string | null }>(`select page_id, ig_user_id from meta_config where workspace_id=$1`, [ws]),
+      tgStoryReady(ws), waReady(ws)]);
+    return [...(m?.ig_user_id ? ["instagram"] : []), ...(m?.page_id ? ["facebook"] : []), ...(tgs ? ["telegram"] : []), ...(wa ? ["whatsapp"] : [])];
+  }
   const [t, th, m, li, v] = await Promise.all([
     one<{ n: number }>(`select count(*)::int n from telegram_config where workspace_id=$1 and bot_token is not null and (channel_chat_id is not null or group_chat_id is not null)`, [ws]),
     one<{ n: number }>(`select count(*)::int n from threads_config where workspace_id=$1 and access_token is not null`, [ws]),
@@ -135,7 +145,8 @@ export async function composeCard(ws: string, postId: string, brand = ""): Promi
   const frames = list.length, isVideo = list[0]?.kind === "video";
   // YouTube і TikTok - лише для відео-поста (не сторіс); уже обрані показуємо, щоб їх можна було зняти
   const vidPost = isVideo && frames === 1 && p.format !== "story";
-  const nets = await connectedNets(ws, { video: vidPost || VIDEO_NETS.some((k) => ch[k]?.on) });
+  const story = p.format === "story";
+  const nets = await connectedNets(ws, { video: vidPost || VIDEO_NETS.some((k) => ch[k]?.on), story });
   const chosen = nets.filter((k) => ch[k] && ch[k].on);
   const slot = await one<{ scheduled_at: string }>(
     `select scheduled_at from schedule_slot where post_id=$1 and status='planned' order by scheduled_at limit 1`, [postId]);
@@ -146,10 +157,11 @@ export async function composeCard(ws: string, postId: string, brand = ""): Promi
   // розмітка **…** (sendMessage сам перекладає її в HTML і екранує текст): власні <b> і &amp; тут
   // екранувались удруге, і людина бачила буквальні «<b>Чернетка</b>» та «R&amp;D»
   const choices = await accountChoices(ws);
+  const bizName = story && chosen.includes("telegram") ? bizLabel(await brandBiz(ws)) : "";
   const text = `📝 **${p.review === "approved" ? "Затверджено" : "Чернетка"}**${brand ? ` · 🏢 ${brand}` : ""}\n\n${body}\n\n`
     + (isVideo ? `🎬 Відео${list[0].duration ? ` ${Math.floor(Number(list[0].duration) / 60)}:${String(Math.round(Number(list[0].duration)) % 60).padStart(2, "0")}` : ""}\n`
       : `🖼 Фото: ${frames > 1 ? `карусель, ${frames} кадрів` : p.filename ? "є" : "нема"}\n`)
-    + `📢 Куди: ${chosen.length ? chosen.map((k) => niceNet(k) + accountsLabel(k, ch, choices)).join(" · ") : "не обрано"}`
+    + `📢 Куди: ${chosen.length ? chosen.map((k) => niceNet(k) + (story && k === "telegram" ? ` (профіль ${bizName || "не підключено"})` : story && k === "whatsapp" ? " (статус - кадри надішлю тобі)" : accountsLabel(k, ch, choices))).join(" · ") : "не обрано"}`
     + (chosen.includes("youtube") ? `\n▶️ YouTube: ${vidPost ? ytLine(ytOpts(ch.youtube), titleFrom(ch.youtube?.text || p.content)) : "⚠️ лише відео - додай відео або зніми YouTube"}` : "")
     + (chosen.includes("tiktok") ? `\n🎵 TikTok: ${vidPost ? ttLine(ttOpts(ch.tiktok)) : "⚠️ лише відео - додай відео або зніми TikTok"}` : "")
     + (when ? `\n🗓 Заплановано: ${when}` : "");
@@ -163,7 +175,8 @@ export async function composeCard(ws: string, postId: string, brand = ""): Promi
   }
   // 👥 у мережі кілька Сторінок / профілів / каналів - обрати, куди саме (той самий пост у кілька - можна).
   // Telegram - навіть з одним каналом: там же «＋ Додати канал» (без цього вибору в боті не видно взагалі)
-  const multi = chosen.filter((k) => isAccNet(k) && (choices[k].length > 1 || (k === "telegram" && choices[k].length > 0)));
+  // у сторіс Telegram - профіль людини (Telegram Business), а не канали: вибору каналів там нема
+  const multi = chosen.filter((k) => isAccNet(k) && !(story && k === "telegram") && (choices[k].length > 1 || (k === "telegram" && choices[k].length > 0)));
   for (let i = 0; i < multi.length; i += 2)
     rows.push(multi.slice(i, i + 2).map((k) => ({ text: `👥 ${niceNet(k).split(" ")[1]}: ${shortPick(k, ch, choices)} ▸`, data: `cac:${postId}:${k}` })));
   // 🌐 один пост - одразу в усі підключені мережі, що приймають такий формат (відео - і YouTube з TikTok)
@@ -368,15 +381,15 @@ export async function toggleApprove(ws: string, postId: string): Promise<string>
 const niceNet = (k: string) => (NETS.find((n) => n[0] === k) || [k, k])[1];
 
 // ---- дії ----
-/** Мережі, куди цей пост може піти з того, що підключено: сторіс - Instagram і Facebook, відео - усі (з
+/** Мережі, куди цей пост може піти з того, що підключено: сторіс - Instagram, Facebook, профіль Telegram і WhatsApp-статус, відео - усі (з
  * YouTube і TikTok), фото й текст - усі, крім YouTube і TikTok. Уже надіслані не пропонуємо. */
 export async function allNetsFor(ws: string, postId: string): Promise<string[]> {
   const p = await loadPost(ws, postId); if (!p) return [];
   const list = await postMediaList(postId);
   const video = list.length === 1 && list[0].kind === "video";
-  const conn = await connectedNets(ws, { video });
+  const conn = await connectedNets(ws, { video, story: p.format === "story" });
   const sent = new Set(await alreadySentNetworks(postId));
-  return conn.filter((k) => !sent.has(k) && (p.format !== "story" || k === "instagram" || k === "facebook"));
+  return conn.filter((k) => !sent.has(k));
 }
 export async function allNetsOn(ws: string, postId: string): Promise<string[]> {
   const p = await loadPost(ws, postId); if (!p) return [];

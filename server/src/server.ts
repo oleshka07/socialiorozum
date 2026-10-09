@@ -31,13 +31,17 @@ import { logEvent } from "./log.js";
 import { startAutopost } from "./autopost.js";
 import { startRssPoller, pullFeed } from "./rss-poller.js";
 import { resolveSource } from "./rss-resolver.js";
-import { MEDIA_DIR, saveMedia, saveMediaFile, deleteMediaFile, convertAllHeif, fixLegacyVideos, getThumb, sniffKind } from "./media.js";
+import { MEDIA_DIR, saveMedia, saveMediaFile, deleteMediaFile, deleteMediaAsset, convertAllHeif, fixLegacyVideos, getThumb, sniffKind } from "./media.js";
 import { putChunk, ChunkError, CHUNK_MAX, headerFileName } from "./chunks.js";
 import { normalizeMeeting, saveMeeting } from "./meetings.js";
 import { spendStatus, SpendCapError, CAPS } from "./spend.js";
 import { spreadTimes, topicAngles } from "./textkind.js";
 import { startJob, getJob, getJobByKey, jobView, markLostJobs } from "./jobs.js";
-import { startMontage, MONTAGE_MAX_CLIPS, montageStyle, brandEndText, setReelCover, MontageError } from "./montage.js";
+import { startMontage, MONTAGE_MAX_CLIPS, montageStyle, brandEndText, setReelCover, MontageError, startPostSubtitles } from "./montage.js";
+import { normSubLang, SUB_LANG_ORDER, SUB_LANGS, SUB_NETS, langCode } from "./montage-plan.js";
+import { tgStoryView, useBizForBrand, dropBizFromBrand, tgStoryReady, brandBiz, bizLabel } from "./tgstory.js";
+import { waReady } from "./wastatus.js";
+import { styleSubLangs } from "./sublang.js";
 import { spreadText, normTransition, normMood, normTemplate, normSubPreset, normSubPos, normHex, normMontageStyle, TEMPLATES, TEMPLATE_ORDER, templatePlan, SUB_PRESETS, SUB_ORDER } from "./montage-plan.js";
 import { ttsReady, musicReady } from "./tts.js";
 import { readdir, stat } from "node:fs/promises";
@@ -859,6 +863,8 @@ app.post("/api/montage", async (req: any, reply) => {
   if (clips.some((c: any) => !/^[0-9a-f-]{36}$/i.test(c.id))) return reply.code(400).send({ error: "невідомий кліп" });
   let voice = ["none", "clips", "audio", "tts"].includes(b.voice) ? b.voice : "none";
   const format = b.format === "reel" ? "reel" : "story";
+  // WhatsApp-статус у новий пост - лише коли для нього обрано мову субтитрів («Стиль відео»): бот потім пише людині
+  const waLang = format === "story" && !!(await montageStyle(ws)).langs.whatsapp;
   const ai = b.aiText === "captions" || b.aiText === "voiceover" ? { mode: b.aiText as "captions" | "voiceover", hint: String(b.hint || "").slice(0, 500) } : null;
   // свій текст: є AI-голос - він його прочитає, нема - текст стає підписами по кліпах
   const own = String(b.ownText || "").trim().slice(0, 5000);
@@ -883,7 +889,9 @@ app.post("/api/montage", async (req: any, reply) => {
     cutPauses: typeof b.cutPauses === "boolean" ? b.cutPauses : null,
     subStyle: b.subStyle ? normSubPreset(b.subStyle) : null, subPos: b.subPos ? normSubPos(b.subPos) : null, color: normHex(b.color),
     beforeCount: Number.isFinite(bc) && bc > 0 ? bc : null,
-  }, { create: b.create === false ? null : { nets: nets.length ? nets : (await connectedNets(ws)).filter((n) => n === "instagram" || n === "facebook"), text: String(b.text || "").slice(0, 5000) }, aiText: ai });
+    // 🔤 мови: якою говорять (інакше стиль бренду) і версії субтитрів (інакше мови мереж зі стилю)
+    lang: normSubLang(b.speech), subLangs: Array.isArray(b.subLangs) ? b.subLangs.map(String).slice(0, 6) : null,
+  }, { create: b.create === false ? null : { nets: nets.length ? nets : format === "story" ? (await connectedNets(ws, { story: true })).filter((n) => n !== "whatsapp" || waLang) : (await connectedNets(ws)).filter((n) => n === "instagram" || n === "facebook"), text: String(b.text || "").slice(0, 5000) }, aiText: ai });
   return { jobId: job.id };
 });
 
@@ -895,8 +903,25 @@ app.get("/api/montage/caps", async (req: any) => {
   return { tts: ttsReady(), stt: stt.deepgram || stt.whisper, vision: !!(env.openai.apiKey || env.openrouter.apiKey || env.gemini.apiKey), music: musicReady(), maxClips: MONTAGE_MAX_CLIPS,
     templates: TEMPLATE_ORDER.map((id) => ({ id, ...TEMPLATES[id], mood: templatePlan(id).mood })),
     subStyles: SUB_ORDER.map((id) => ({ id, ...SUB_PRESETS[id] })),
-    style, endPreview: await brandEndText(ws, style.endText) };
+    style, endPreview: await brandEndText(ws, style.endText),
+    // 🔤 мови субтитрів: які є і мова контенту бренду (мова мовлення за замовчуванням)
+    subLangs: SUB_LANG_ORDER.map((id) => ({ id, ...SUB_LANGS[id] })), subNets: SUB_NETS, brandLang: langCode(await getSettingText(ws, "output_language")) };
 });
+// 🔤 Субтитри на відео поста (своє відео без тексту): мовою, якою говорять, і версії мовами мереж (фонова робота)
+app.post("/api/posts/:postId/subtitles", async (req: any, reply) => {
+  const ws = req.user.workspace_id;
+  if (!(await postOwned(req.params.postId, ws))) return reply.code(404).send({ error: "пост не знайдено" });
+  const langs = Array.isArray(req.body?.subLangs) ? req.body.subLangs.map(String).slice(0, 6) : null;
+  const job = await startPostSubtitles(ws, req.params.postId, langs);
+  return { jobId: job.id };
+});
+// 📲 Сторіс у профілі Telegram (Telegram Business): стан, «використати мій профіль тут», відключити від бренду
+app.get("/api/integrations/tgstory", async (req: any) => tgStoryView(req.user.workspace_id, req.user.id));
+app.post("/api/integrations/tgstory/use", async (req: any, reply) => {
+  try { const b = await useBizForBrand(req.user.workspace_id, req.user.id, String(req.body?.id || "")); return { ok: true, label: bizLabel(b) }; }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+app.post("/api/integrations/tgstory/off", async (req: any) => { await dropBizFromBrand(req.user.workspace_id); return { ok: true }; });
 // 🎨 Стиль відео бренду: субтитри, колір, гачок, фінальна картка, вирізання пауз - типові для всіх монтажів
 app.get("/api/montage/style", async (req: any) => {
   const ws = req.user.workspace_id, style = await montageStyle(ws);
@@ -1111,7 +1136,7 @@ app.put("/api/media/chunk", async (req: any, reply) => {
 // це кадр змонтованого відео, він живе в композері поста, а не серед фото автора
 app.get("/api/media", async (req: any) =>
   q(`select id, kind, mime, original_name, filename, size, source, created_at, duration, width, height from media_asset
-     where workspace_id=$1 and source not in ('ig-safe','ai-base','slide','cover') order by created_at desc limit 200`, [req.user.workspace_id]));
+     where workspace_id=$1 and source not in ('ig-safe','ai-base','slide','cover','montage-lang') order by created_at desc limit 200`, [req.user.workspace_id]));
 
 // 📸 alt-текст фото (опис для незрячих і пошуку): іде в Instagram (фото й кадри каруселі) і LinkedIn.
 // Порожній рядок прибирає опис.
@@ -1127,8 +1152,7 @@ app.put("/api/media/:id/alt", async (req: any, reply) => {
 app.delete("/api/media/:id", async (req: any, reply) => {
   const m = await one<{ filename: string }>(`select filename from media_asset where id=$1 and workspace_id=$2`, [req.params.id, req.user.workspace_id]);
   if (!m) return reply.code(404).send({ error: "медіа не знайдено" });
-  await q(`delete from media_asset where id=$1`, [req.params.id]);
-  await deleteMediaFile(m.filename);
+  await deleteMediaAsset(req.params.id, m.filename);   // разом із мовними версіями відео
   await healCoverless(req.user.workspace_id); // стерли обкладинку каруселі - наступний кадр стає нею
   return { ok: true };
 });
@@ -1140,10 +1164,7 @@ app.post("/api/media/bulk-delete", async (req: any, reply) => {
   if (!ids.length) return reply.code(400).send({ error: "нема що видаляти" });
   const rows = await q<{ id: string; filename: string }>(
     `select id, filename from media_asset where workspace_id=$1 and id = any($2::uuid[])`, [req.user.workspace_id, ids]);
-  for (const m of rows) {
-    await q(`delete from media_asset where id=$1`, [m.id]);
-    await deleteMediaFile(m.filename);
-  }
+  for (const m of rows) await deleteMediaAsset(m.id, m.filename);
   await healCoverless(req.user.workspace_id);
   return { ok: true, deleted: rows.length };
 });
@@ -1195,6 +1216,11 @@ app.get("/api/channels/status", async (req: any) => {
     linkedin: !!(li && li.access_token),
     youtube: !!(yt && yt.access_token),
     tiktok: !!(tt && tt.access_token),
+    // 📲 мережі сторіс: профіль Telegram (Telegram Business) і WhatsApp-статус (кадри шле бот людині)
+    whatsapp: await waReady(ws),
+    tgStory: await tgStoryReady(ws) ? { label: bizLabel(await brandBiz(ws)) } : null,
+    // 🔤 мова субтитрів кожної мережі зі «Стилю відео» (композер показує, яка версія відео куди піде)
+    sublangs: await styleSubLangs(ws),
     // 🎬 хто публікує в YouTube і TikTok (по одному акаунту на бренд) - для прев'ю й блоків у композері
     video: {
       youtube: yt ? { name: yt.channel_title || "YouTube" } : null,
@@ -1216,15 +1242,25 @@ app.get("/api/posts/:postId/full", async (req: any, reply) => {
      where p.id=$1 and s.workspace_id=$2`, [req.params.postId, req.user.workspace_id, req.user.id]);
   if (!p) return reply.code(404).send({ error: "пост не знайдено" });
   // 🖼 кадри поста (обкладинка першою) - для смужки кадрів і прев'ю каруселі; 🎬 відео - з тривалістю
-  return { ...p, media: (await postMediaList(p.id)).map(mediaOut) };
+  return { ...p, media: await mediaWithVariants(await postMediaList(p.id)) };
 });
 
 // ---- 🖼 КАРУСЕЛЬ: кадри поста ----
 // alt_text - опис фото (композер показує «ALT ✓» на кадрі; без нього після повторного відкриття
 // кадр виглядав би неописаним, хоч опис збережено)
-const mediaOut = (m: { id: string; filename: string; kind: string; duration?: number | null; width?: number | null; height?: number | null; size?: number | null; alt_text?: string | null }) =>
-  ({ id: m.id, filename: m.filename, kind: m.kind, duration: m.duration ?? null, width: m.width ?? null, height: m.height ?? null, size: m.size ?? null, alt_text: m.alt_text ?? null });
-const slidesOut = async (postId: string) => ({ ok: true, media: (await postMediaList(postId)).map(mediaOut) });
+const mediaOut = (m: { id: string; filename: string; kind: string; duration?: number | null; width?: number | null; height?: number | null; size?: number | null; alt_text?: string | null; sub_lang?: string | null }) =>
+  ({ id: m.id, filename: m.filename, kind: m.kind, duration: m.duration ?? null, width: m.width ?? null, height: m.height ?? null, size: m.size ?? null, alt_text: m.alt_text ?? null, sub_lang: m.sub_lang ?? null });
+// 🔤 кадри поста + їхні мовні версії (композер показує в прев'ю мережі саме ту версію, що туди піде)
+async function mediaWithVariants(list: Awaited<ReturnType<typeof postMediaList>>) {
+  const vids = list.filter((m) => m.kind === "video" && m.sub_lang).map((m) => m.id);
+  const vars = vids.length ? await q<{ variant_of: string; sub_lang: string; filename: string; duration: number | null; size: number | null }>(
+    `select variant_of, sub_lang, filename, duration, size from media_asset where variant_of = any($1::uuid[])`, [vids]) : [];
+  return list.map((m) => {
+    const v = vars.filter((x) => x.variant_of === m.id);
+    return { ...mediaOut(m), ...(v.length ? { variants: Object.fromEntries(v.map((x) => [x.sub_lang, { filename: x.filename, duration: x.duration, size: x.size }])) } : {}) };
+  });
+}
+const slidesOut = async (postId: string) => ({ ok: true, media: await mediaWithVariants(await postMediaList(postId)) });
 const slideFail = (reply: any, e: any) => reply.code(e instanceof SlideError ? 400 : 500).send({ error: e?.message || "не вдалося" });
 // додати кадр(и) з медіатеки в кінець (кроп-копія під пропорцію каруселі, оригінал лишається)
 app.post("/api/posts/:postId/slides", async (req: any, reply) => {
@@ -4666,12 +4702,14 @@ app.get("/api/tg/me", async (req: any, reply) => {
   ]);
   // ▶️🎵 YouTube і TikTok - лише для відео-поста, тож окремим списком
   const vnets = (await connectedNets(u.ws, { video: true })).filter((n) => !nets.includes(n));
+  // 📲 сторіс - свої мережі: Instagram, Facebook, профіль Telegram (Telegram Business), WhatsApp-статус
+  const snets = await connectedNets(u.ws, { story: true });
   const tz = await one<{ content: string }>(`select content from settings_block where workspace_id=$1 and key='timezone'`, [u.ws]);
   // таймзона потрібна клієнту, щоб «завтра о 9:00» означало 9:00 у ПОЯСІ ВОРКСПЕЙСУ, а не в
   // тому, який стоїть на телефоні (людина в подорожі планувала б пости не туди)
   // 🏢 кілька брендів - перемикач угорі (той самий вибір, що /brand у боті)
   const b = await botBrands(u.tgId, u.own, u.token).catch(() => null);
-  return { ok: true, drafts: +(drafts?.c || 0), materials: +(mats?.c || 0), nets, vnets, tz: tz?.content || "Europe/Kyiv",
+  return { ok: true, drafts: +(drafts?.c || 0), materials: +(mats?.c || 0), nets, vnets, snets, tz: tz?.content || "Europe/Kyiv",
     brand: u.ws, brands: b && b.linked && b.list.length > 1 ? b.list : [],
     // 👥 що людині тут можна (кнопки, яких роль не дозволяє, застосунок ховає)
     role: u.role, roleLabel: `${ROLE_ICON[u.role]} ${ROLE_LABEL[u.role]}`, canDraft: can(u.role, "draft"), canPublish: can(u.role, "publish") };

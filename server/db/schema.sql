@@ -1199,6 +1199,49 @@ alter table post add column if not exists submitted_by uuid references app_user(
 alter table post add column if not exists submitted_at timestamptz;
 alter table post add column if not exists review_note text;
 
+-- 🔤 Мовні версії відео (09.10): монтаж робить ту саму сторіс чи рілс ще раз із субтитрами іншою мовою.
+-- sub_lang - мова тексту на відео (null - тексту нема), variant_of - оригінал, версією якого є файл;
+-- прибрали оригінал - версії йдуть разом із ним. Публікація бере версію мови, яку хоче мережа.
+alter table media_asset add column if not exists sub_lang text;
+alter table media_asset add column if not exists variant_of uuid references media_asset(id) on delete cascade;
+create index if not exists idx_media_variant on media_asset(variant_of) where variant_of is not null;
+
+-- 📲 Сторіс у профілі Telegram через Telegram Business: людина підключає бот (Telegram → Налаштування →
+-- Telegram Business → Чат-боти), і бот через business_connection_id ставить сторіс від її імені. Рядок -
+-- одне підключення (людина × бот); з яким брендом воно працює - tg_story_brand.
+create table if not exists tg_business (
+  id           text primary key,          -- business_connection_id від Telegram
+  bot_id       text not null,             -- яким ботом підключено (id - перша частина токена)
+  tg_user_id   bigint not null,
+  user_chat_id bigint,
+  username     text,
+  name         text,
+  can_stories  boolean not null default false,
+  enabled      boolean not null default true,
+  updated_at   timestamptz not null default now()
+);
+create index if not exists idx_tg_business_user on tg_business(tg_user_id);
+-- кадри сторіс Telegram (id по порядку): у telegram_publish один рядок на сторіс-пост, message_id - перший
+alter table telegram_publish add column if not exists story_ids text;
+create table if not exists tg_story_brand (
+  workspace_id uuid primary key references workspace(id) on delete cascade,
+  conn_id      text not null references tg_business(id) on delete cascade,
+  updated_at   timestamptz not null default now()
+);
+
+-- 📲 WhatsApp-статус: офіційного API статусів нема, тож у час публікації бот надсилає людині готові кадри
+-- (з субтитрами мовою WhatsApp) - вона пересилає їх у «Мій статус». Рядок - «доставлено людині», раз на пост.
+create table if not exists whatsapp_publish (
+  id          uuid primary key default gen_random_uuid(),
+  post_id     uuid references post(id) on delete cascade,
+  user_id     uuid references app_user(id) on delete set null,
+  chat_id     text,
+  message_ids text,
+  status      text not null,              -- sending|sent
+  created_at  timestamptz not null default now()
+);
+create unique index if not exists uq_wapub_post on whatsapp_publish(post_id);
+
 -- 📤 Усі публікації поста одним списком: мережа, акаунт (id; '' - мережа з одним акаунтом), посилання, коли.
 -- Нова мережа додається сюди, а не в пʼятнадцять union по коду (так YouTube і TikTok уже були пропущені
 -- в «Сьогодні», банку, аналітиці й розкладі). TikTok, що ще обробляє відео, - теж «уже там»: повтор
@@ -1209,4 +1252,5 @@ create view post_published as
   union all select post_id, channel, coalesce(account_id, ''), permalink, created_at from meta_publish where status='sent'
   union all select post_id, 'linkedin', '', permalink, created_at from linkedin_publish where status='sent'
   union all select post_id, 'youtube', '', permalink, created_at from youtube_publish where status='sent'
-  union all select post_id, 'tiktok', '', permalink, created_at from tiktok_publish where status in ('sent', 'processing');
+  union all select post_id, 'tiktok', '', permalink, created_at from tiktok_publish where status in ('sent', 'processing')
+  union all select post_id, 'whatsapp', '', null, created_at from whatsapp_publish where status='sent';

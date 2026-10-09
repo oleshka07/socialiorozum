@@ -55,11 +55,14 @@ import { getThumb } from "./media.js";
 import sharp from "sharp";
 import { accountChoices, matchAccount, postAccount, postAccounts, isAccNet, metaAccountFor, mainAccountIds, MULTI_NETS, ACC_NETS, type AccountChoice } from "./accounts.js";
 import { collectInbox, replyToComment, skipComment, isInboxNet, INBOX_NETS } from "./inbox.js";
-import { startMontage, contactSheet, clipSpeech, MONTAGE_MAX_CLIPS, setReelCover, MontageError, type MontageResult } from "./montage.js";
+import { startMontage, contactSheet, clipSpeech, MONTAGE_MAX_CLIPS, setReelCover, MontageError, startPostSubtitles, type MontageResult } from "./montage.js";
+import { brandBiz, bizLabel } from "./tgstory.js";
+import { waReady } from "./wastatus.js";
+import { styleSubLangs } from "./sublang.js";
 import { ttsReady, musicReady } from "./tts.js";
 import { mergeTt, mergeYt, ttOpts, ytOpts, ttLine, ytLine, VIDEO_NETS } from "./vidnets.js";
 import { titleFrom } from "./youtube.js";
-import { normTransition, normMood, TRANSITIONS, normTemplate, normSubPreset, normSubPos, normHex, TEMPLATES } from "./montage-plan.js";
+import { normTransition, normMood, TRANSITIONS, normTemplate, normSubPreset, normSubPos, normHex, TEMPLATES, normSubLang, SUB_NETS, SUB_LANGS } from "./montage-plan.js";
 
 // ============================================================================
 // 1. ПРОТОКОЛ (чисті функції - саме вони під юнітами в test/mcp.test.mjs)
@@ -101,9 +104,9 @@ class ToolError extends Error {}
 // 2. АРГУМЕНТИ (модель може прислати що завгодно - нормалізуємо, а не падаємо)
 // ============================================================================
 
-export const NETS = ["telegram", "instagram", "facebook", "threads", "linkedin", "youtube", "tiktok"];
+export const NETS = ["telegram", "instagram", "facebook", "threads", "linkedin", "youtube", "tiktok", "whatsapp"];
 const NET_LABEL: Record<string, string> = {
-  telegram: "Telegram", instagram: "Instagram", facebook: "Facebook", threads: "Threads", linkedin: "LinkedIn", youtube: "YouTube", tiktok: "TikTok",
+  telegram: "Telegram", instagram: "Instagram", facebook: "Facebook", threads: "Threads", linkedin: "LinkedIn", youtube: "YouTube", tiktok: "TikTok", whatsapp: "WhatsApp",
 };
 
 const str = (v: unknown, max = 8000): string => String(v ?? "").trim().slice(0, max);
@@ -846,6 +849,12 @@ function egState(v: EgView, tz: string): string {
 async function montageReport(ws: string, j: { status: string; result: any; error: string | null }): Promise<ToolOut> {
   if (j.status === "idle") return { text: "⚠️ Сервер перезапустився посеред монтажу - запусти montage_video ще раз." };
   if (j.status === "error" || !j.result) throw new ToolError(j.error || "Монтаж не вдався.");
+  // 🔤 субтитри на відео поста (update_post з add_subtitles) - інший підсумок
+  const sr = j.result as { postId?: string; frames?: number; lang?: string; variants?: string[]; warnings?: string[]; videos?: unknown };
+  if (!Array.isArray(sr.videos) && sr.frames) {
+    const ln = (l?: string) => SUB_LANGS[l || ""]?.label || l || "";
+    return { text: `🔤 Субтитри накладено на ${sr.frames} відео поста ${short(sr.postId || "")}: ${ln(sr.lang)}${sr.variants?.length ? ` + версії ${sr.variants.map(ln).join(", ")}` : ""}.${sr.warnings?.length ? ` ⚠️ ${sr.warnings.join("; ")}.` : ""} Далі: schedule_post чи publish_post.` };
+  }
   const r = j.result as MontageResult;
   const vids = r.videos || [];
   const images: ToolImage[] = [];
@@ -864,6 +873,7 @@ async function montageReport(ws: string, j: { status: string; result: any; error
       [r.hook ? `🪝 гачок: «${r.hook}»` : "", r.cut ? `✂️ вирізано паузи й «еее»: -${r.cut.saved} с у ${r.cut.clips} кліп(ах)` : "", r.endCard ? "🏁 фінальна картка бренду" : "",
         r.cover ? `🖼 обкладинка Reels - кадр із гачком ${short(r.cover.id)} (інший кадр: update_post з cover_at)` : ""].filter(Boolean).join(" · "),
       r.transcript ? `Текст: «${oneLine(r.transcript, 400)}»` : "",
+      r.variants?.length ? `🌐 Субтитри: ${SUB_LANGS[r.lang || ""]?.label || r.lang} + версії ${r.variants.map((v) => SUB_LANGS[v.lang]?.label || v.lang).join(", ")} (той самий ролик, перекладені субтитри в тих самих місцях) - у кожну мережу піде версія її мови.` : "",
       r.warnings?.length ? `⚠️ ${r.warnings.join("; ")}.` : "",
       r.postId ? `Уже в пості ${short(r.postId)}${post?.format === "story" ? " (сторіс - кожна частина окремим кадром)" : ""}${post && enabledNets(post.channels).length ? ` → ${netList(enabledNets(post.channels))}` : ""}. Далі: schedule_post чи publish_post.`
         : "Відео в медіатеці: прикріпи attach_media (id поста + id відео) або створи пост create_draft і attach_media.",
@@ -958,8 +968,12 @@ export const TOOLS: ToolDef[] = [
                               where jsonb_typeof(e.value)='object' and e.value->>'on'='true'
                                 and e.key in ('telegram','threads','facebook','instagram','linkedin','youtube','tiktok')))::int as planned`, [ws]),
       ]);
-      const off = NETS.filter((n) => !nets.includes(n));
+      const off = NETS.filter((n) => n !== "whatsapp" && !nets.includes(n));
       const acc = await accountNames(ws);
+      // 📱 мережі сторіс: профіль Telegram (Telegram Business) і WhatsApp-статус (кадри шле бот людині)
+      const [biz, wa, sl] = await Promise.all([brandBiz(ws), waReady(ws), styleSubLangs(ws)]);
+      const storyLine = `📱 Сторіс: Instagram і Facebook${biz ? `, профіль Telegram ${bizLabel(biz)}${biz.enabled && biz.can_stories ? "" : " (⚠ без права на сторіс)"}` : ", профіль Telegram - не підключено (Telegram Business: Канали → Telegram → «📲 Сторіс у профілі»)"}, WhatsApp-статус - ${wa ? "бот надішле кадри людині, вона перешле їх у статус" : "потрібен Telegram-бот людини («Підключити наш бот»)"}.`;
+      const slKeys = Object.keys(sl);
       return [
         "КАБІНЕТ Holos",
         // 👥 що людині тут можна - щоб модель не пропонувала публікацію автору чи правки «Перегляду»
@@ -970,6 +984,8 @@ export const TOOLS: ToolDef[] = [
         `Мова контенту: ${s.output_language || "Українська"} · Часовий пояс: ${s.timezone || "Europe/Kyiv"}`,
         `Підключені мережі: ${nets.length ? nets.map((n) => `${NET_LABEL[n]}${acc[n] ? ` (${acc[n]})` : ""}`).join(", ") : "жодної"}${off.length ? ` · не підключені: ${netList(off)}` : ""}`,
         MULTI_NETS.some((n) => /основн/.test(acc[n] || "")) ? "👥 У мережі кілька акаунтів: пост іде основним, інший - параметр accounts у create_draft / update_post (назва Сторінки чи @нік)." : "",
+        storyLine,
+        slKeys.length ? `🌐 Мови субтитрів монтажу (Стиль відео): ${slKeys.map((n) => `${NET_LABEL[n] || n} - ${SUB_LANGS[sl[n]]?.label || sl[n]}`).join(", ")}; решта - мовою, якою говорять.` : "",
         `Чернеток: ${counts?.drafts ?? 0} (затверджених ${counts?.approved ?? 0}) · Матеріалів: ${counts?.materials ?? 0} · Ідей у банку: ${counts?.ideas ?? 0} · Заплановано: ${counts?.planned ?? 0}`,
       ].filter(Boolean).join("\n");
     },
@@ -1200,9 +1216,10 @@ export const TOOLS: ToolDef[] = [
       const text = str(a.text, 20000);
       if (text.length < 10) throw new ToolError("Замало тексту для поста (мінімум 10 символів).");
       let nets = pickNets(a.channels);
-      const connected = await connectedNets(ws, { video: true });
+      const story = normFormat(a.format) === "story";
+      const connected = await connectedNets(ws, { video: true, story });
       const notConnected = nets.filter((n) => !connected.includes(n));
-      if (!nets.length && connected.includes("telegram")) nets = ["telegram"];
+      if (!nets.length && connected.includes("telegram") && !story) nets = ["telegram"];
       const src = await one<{ id: string }>(
         `insert into source(workspace_id, origin, title, transcript) values($1,'mcp',$2,$3) returning id`,
         [ws, oneLine(text, 90), text]);
@@ -1227,14 +1244,16 @@ export const TOOLS: ToolDef[] = [
       const fcPlan = fc ? commentPlanLines({ first_comment: typeof a.first_comment === "string" ? a.first_comment : null, channels: fc.channels, format: normFormat(a.format) },
         nets, [], [], await metaGranted(ws)) : [];
       const twin = (await scheduleConflicts(ws, post!.id, null, NETS)).filter((c) => c.kind === "text");
-      const storyOff = normFormat(a.format) === "story" ? nets.filter((n) => n !== "instagram" && n !== "facebook") : [];
+      const storyOff = normFormat(a.format) === "story" ? nets.filter((n) => !STORY_NETS.includes(n)) : [];
       return [
         `Пост збережено: ${short(post!.id)}${a.approve === true ? " (затверджено)" : " (чернетка)"}.`,
         nets.length ? `Мережі: ${netList(nets)}.` : "Мережі не обрані - вкажи їх у publish_post або схвали в кабінеті.",
         accLine ? `👥 ${accLine[0].toUpperCase()}${accLine.slice(1)}.` : "",
-        normFormat(a.format) === "story" ? "📱 Сторіс: кожен кадр - окрема сторіс в Instagram і Facebook; підпису немає, тож думка має бути на кадрах - додай фото/відео (attach_media, типово 9:16) або намалюй кадри з тексту render_carousel." : "",
-        storyOff.length ? `⚠️ Сторіс через API приймають лише Instagram і Facebook - у ${netList(storyOff)} цей пост не піде.` : "",
+        normFormat(a.format) === "story" ? "📱 Сторіс: кожен кадр - окрема сторіс в Instagram, Facebook і профілі Telegram (WhatsApp-статус - кадри надішле бот людині, вона перешле їх у статус); підпису немає, тож думка має бути на кадрах - додай фото/відео (attach_media, типово 9:16) або намалюй кадри з тексту render_carousel." : "",
+        storyOff.length ? `⚠️ Сторіс приймають Instagram, Facebook, профіль Telegram і WhatsApp-статус - у ${netList(storyOff)} цей пост не піде.` : "",
         notConnected.length ? `⚠️ Не підключені в кабінеті: ${netList(notConnected)} - туди публікація не піде.` : "",
+        // сторіс у Telegram - не канал, а профіль людини: підключається окремо, через Telegram Business
+        normFormat(a.format) === "story" && notConnected.includes("telegram") ? "📲 Сторіс у Telegram ідуть в особистий профіль через Telegram Business: людина підключає бота в Telegram → Налаштування → Telegram Business → Чат-боти (право «Керування історіями»); у кабінеті - Канали → Telegram → «📲 Сторіс у профілі»." : "",
         vidOnly.length ? `🎬 ${netList(vidOnly)} приймає лише відео: прикріпи його (list_media kind: "video" → attach_media).${vidOnly.includes("tiktok") && !(a.tiktok && a.tiktok.privacy) ? " У TikTok без privacy відео піде в чернетки - щоб одразу, спитай людину, хто бачитиме відео, і передай tiktok.privacy." : ""}` : "",
         ...vid.notes.map((x) => x + "."),
         twin.length ? `⚠️ Такий самий текст уже є: ${twin.map((c) => `${short(c.postId)} (${c.state === "sent" ? "опубліковано" : "заплановано"})`).join(", ")} - можливо, це дубль (delete_post, якщо так).` : "",
@@ -1262,12 +1281,34 @@ export const TOOLS: ToolDef[] = [
       approve: { type: "boolean", description: "true - затвердити, false - зняти затвердження." },
       evergreen: { type: "boolean", description: "true - додати опублікований пост у вічнозелену чергу (повертатиметься через тижні зі свіжим першим рядком), false - прибрати звідти." },
       cover_at: { type: "number", description: "Обкладинка Reels (відео-пост): кадр на цій секунді відео. Instagram покаже його в сітці профілю (обрізає 9:16 до 3:4 - головне тримай по центру)." },
+      subtitle_langs: { type: "object", additionalProperties: { type: "string" }, description: "Мова субтитрів відео в мережах цього поста: {\"telegram\": \"en\", \"whatsapp\": \"cs\"}; \"\" - як у відео (оригінал). Береться версія, яку зробив монтаж; нема - піде оригінал." },
+      add_subtitles: { type: "boolean", description: "true - на своє відео поста без тексту накласти субтитри (розшифровка мови) і версії мовами мереж зі «Стилю відео». Фонова робота 1-3 хв; оригінал лишається в медіатеці." },
       cover_media: S("Обкладинка Reels з фото медіатеки (list_media): ріжеться 9:16 туди, де цікаве. Порожній рядок - прибрати обкладинку (Instagram візьме кадр сам)."),
     },
     required: ["id"],
     run: async (ws, a) => {
       const p = await findPost(ws, a.id);
       const done: string[] = [];
+      // 🔤 мова субтитрів мережі ("" - оригінал); публікація бере версію, яку зробив монтаж
+      if (a.subtitle_langs && typeof a.subtitle_langs === "object" && !Array.isArray(a.subtitle_langs)) {
+        const ch = { ...(p.channels || {}) };
+        const set: string[] = [];
+        for (const [n, v] of Object.entries(a.subtitle_langs)) {
+          if (!SUB_NETS.includes(n)) continue;
+          const l = normSubLang(v) || "";
+          ch[n] = { ...(ch[n] && typeof ch[n] === "object" ? ch[n] : { on: false }), sub_lang: l };
+          set.push(`${NET_LABEL[n] || n} - ${l ? SUB_LANGS[l].label : "як у відео"}`);
+        }
+        await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(ch)]);
+        p.channels = ch;
+        if (set.length) done.push(`мови субтитрів: ${set.join(", ")}`);
+      }
+      if (a.add_subtitles === true) {
+        try {
+          const job = await startPostSubtitles(ws, p.id);
+          done.push(`субтитри накладаються у фоні (job ${job.id}) - стан: montage_status з цим job, відео саме стане в пост`);
+        } catch (e: any) { if (e instanceof MontageError) throw new ToolError(e.message); throw e; }
+      }
       if (a.cover_at !== undefined || a.cover_media !== undefined) {
         try {
           const media = a.cover_media ? (await libraryMediaId(ws, a.cover_media)).id : null;
@@ -1286,7 +1327,7 @@ export const TOOLS: ToolDef[] = [
       if (a.format !== undefined) {
         const f = normFormat(a.format);
         await q(`update post set format=$2 where id=$1`, [p.id, f]);
-        done.push(`формат: ${f}` + (f === "story" ? " (сторіс ідуть лише в Instagram і Facebook, кожен кадр - окремо)" : ""));
+        done.push(`формат: ${f}` + (f === "story" ? " (сторіс ідуть в Instagram, Facebook, профіль Telegram і WhatsApp-статус, кожен кадр - окремо)" : ""));
       }
       const text = str(a.text, 20000);
       if (text) {
@@ -1579,10 +1620,10 @@ export const TOOLS: ToolDef[] = [
       voice_id: S("Голос ElevenLabs (Voice ID), якщо не типовий кабінету."),
       subtitles: { type: "string", enum: ["karaoke", "lines", "none"], description: "karaoke (типово з голосом) - слово, що звучить, кольором; lines - картки тексту; none - без тексту." },
       keep_sound: { type: "boolean", description: "Під озвучкою тихо лишати звук кліпів (типово так)." },
-      format: { type: "string", enum: ["story", "reel"], description: "story (типово) - сторіс Instagram/Facebook; reel - Reels і відео-пост. З post формат береться з поста." },
+      format: { type: "string", enum: ["story", "reel"], description: "story (типово) - сторіс: Instagram, Facebook, профіль Telegram (Telegram Business), WhatsApp-статус (кадри надішле бот людині); reel - Reels і відео-пост. З post формат береться з поста." },
       post: S("Прикріпити результат до цього поста (замість його медіа)."),
-      channels: { ...NETS_ARG, description: "Створити НОВИЙ пост із результатом у цих мережах (сторіс - instagram і facebook; рілс - будь-які, і youtube та tiktok)." },
-      all_networks: { type: "boolean", description: "Новий пост одразу в УСІ підключені мережі, що приймають цей формат: рілс - Telegram, Instagram, Facebook, Threads, LinkedIn, YouTube і TikTok (що підключено); сторіс - Instagram і Facebook. Замість channels." },
+      channels: { ...NETS_ARG, description: "Створити НОВИЙ пост із результатом у цих мережах (сторіс - instagram, facebook, telegram (профіль), whatsapp (статус); рілс - будь-які, і youtube та tiktok)." },
+      all_networks: { type: "boolean", description: "Новий пост одразу в УСІ підключені мережі, що приймають цей формат: рілс - Telegram, Instagram, Facebook, Threads, LinkedIn, YouTube і TikTok (що підключено); сторіс - Instagram, Facebook, профіль Telegram (Telegram Business) і WhatsApp-статус (кадри надішле бот). Замість channels." },
       text: S("Текст нового поста (підпис рілса); для сторіс не публікується."),
       transition: { type: "string", enum: ["fade", "slide", "zoom", "flash", "mix", "none"], description: "Переходи між кліпами: fade - плавне перетікання, slide - зсув, zoom - наближення, flash - спалах, mix - щоразу інший, none - різкий стик. Не задано - як у шаблоні (standard - fade)." },
       music: S("Фонова музика - id треку з медіатеки (list_media kind: \"audio\"), на весь ролик, під голосом притихає. Права на трек - за автором."),
@@ -1596,6 +1637,8 @@ export const TOOLS: ToolDef[] = [
       subtitle_position: { type: "string", enum: ["low", "middle"], description: "Де субтитри: low (типово) - над полем відповіді сторіс і підписом рілса; middle - посередині." },
       color: S("Колір бренду #RRGGBB: плашка гачка, мітка «після», слово в субтитрах «brand»/«big»."),
       before_count: { type: "number", description: "before_after: скільки перших кліпів - «до» (типово половина)." },
+      speech: S("Мова, якою говорять у кліпах: uk, en, cs, sk, pl, de (типово - зі стилю відео бренду, інакше мова бренду)."),
+      subtitle_langs: { type: "object", additionalProperties: { type: "string" }, description: "Мова субтитрів у мережах: {\"telegram\": \"en\", \"whatsapp\": \"cs\"} - монтаж зробить версії ролика з перекладеними субтитрами (до 3 мов), і в кожну мережу піде її версія. Не задано - як у «Стилі відео» бренду; {} - без версій." },
     },
     required: ["clips"],
     run: async (ws, a) => {
@@ -1626,11 +1669,11 @@ export const TOOLS: ToolDef[] = [
         format = p.format === "story" ? "story" : "reel";
       }
       const nets = a.all_networks === true
-        ? (await connectedNets(ws, { video: format === "reel" })).filter((n) => format !== "story" || STORY_NETS.includes(n))
+        ? await connectedNets(ws, { video: format === "reel", story: format === "story" })
         : pickNets(a.channels);
-      if (!postId && a.all_networks === true && !nets.length) throw new ToolError(format === "story" ? "Для сторіс потрібні підключені Instagram чи Facebook (Налаштування → Канали)." : "У кабінеті ще не підключено жодної мережі (Налаштування → Канали).");
+      if (!postId && a.all_networks === true && !nets.length) throw new ToolError(format === "story" ? "Для сторіс потрібні підключені Instagram, Facebook, профіль Telegram (Telegram Business) чи Telegram-бот людини для WhatsApp-статусу (Налаштування → Канали)." : "У кабінеті ще не підключено жодної мережі (Налаштування → Канали).");
       if (!postId && format === "story" && nets.some((n) => !STORY_NETS.includes(n)))
-        throw new ToolError("Сторіс через API приймають лише Instagram і Facebook - прибери інші мережі або зроби format: reel.");
+        throw new ToolError("Сторіс приймають Instagram, Facebook, профіль Telegram (через Telegram Business) і WhatsApp-статус - прибери інші мережі або зроби format: reel.");
       let music: string | null = null;
       if (a.music) {
         const m = await libraryMediaId(ws, a.music);
@@ -1639,6 +1682,9 @@ export const TOOLS: ToolDef[] = [
         music = m.id;
       }
       const musicMood = music ? null : normMood(a.music_mood);
+      // 🔤 мови субтитрів по мережах (свої для цього монтажу)
+      const subLangMap: Record<string, string> | null = a.subtitle_langs && typeof a.subtitle_langs === "object" && !Array.isArray(a.subtitle_langs)
+        ? Object.fromEntries(Object.entries(a.subtitle_langs).map(([k, v]) => [k, normSubLang(v) || ""]).filter(([k]) => SUB_NETS.includes(k))) : null;
       if (musicMood && !musicReady()) throw new ToolError("AI-музику не підключено: адмін додає ключ ElevenLabs (з правом Music Generation). Поки що - music: id свого треку з медіатеки.");
       const opts = { clips, voice, audio, script: str(a.script, 5000) || null, voiceId: str(a.voice_id, 60) || null,
         subtitles: ["karaoke", "lines", "none"].includes(String(a.subtitles)) ? String(a.subtitles) as "karaoke" : null,
@@ -1649,9 +1695,10 @@ export const TOOLS: ToolDef[] = [
         endCard: onOff(a.end_card, 200),
         cutPauses: typeof a.cut_pauses === "boolean" ? a.cut_pauses : null,
         subStyle: a.subtitle_style ? normSubPreset(a.subtitle_style) : null, subPos: a.subtitle_position ? normSubPos(a.subtitle_position) : null,
-        color: normHex(a.color), beforeCount: num(a.before_count) };
+        color: normHex(a.color), beforeCount: num(a.before_count),
+        lang: normSubLang(a.speech), subLangs: subLangMap ? Object.values(subLangMap) : null };
       if (opts.template === "before_after" && clips.length < 2) throw new ToolError("Для before_after потрібно щонайменше 2 кліпи: спершу «до», потім «після».");
-      const job = await startMontage(ws, opts, { postId, create: !postId && nets.length ? { nets, text: str(a.text, 5000) } : null });
+      const job = await startMontage(ws, opts, { postId, create: !postId && nets.length ? { nets, text: str(a.text, 5000), subLangs: subLangMap || {} } : null });
       const waitMs = Number(process.env.MCP_MONTAGE_WAIT_MS) || 45_000;
       let j = await getJob(job.id);
       for (const t0 = Date.now(); j && j.status === "running" && Date.now() - t0 < waitMs;) { await sleep(700); j = await getJob(job.id); }
@@ -2439,7 +2486,8 @@ export const SERVER_INSTRUCTIONS = [
   `Карусель: кілька фото в одному пості (до ${MAX_SLIDES}) - attach_media масивом id або append: true у attach_media / attach_stock_photo / generate_image; кадри-картинки зі сценарію «Слайд 1: …» малює render_carousel (безкоштовно), і тоді текст поста - це короткий підпис під каруселлю, не сценарій.`,
   "Відео: власні відео автора - list_media з kind: \"video\" → attach_media з одним id; публікується як Reels в Instagram, відео у Facebook, Threads, Telegram (до 50 МБ), LinkedIn, YouTube (вертикальне до 3 хв - Shorts) і TikTok, а текст поста - підпис. Відео з комп'ютера заливає та сама media_upload_link (великі файли - частинами).",
   "YouTube і TikTok - лише для поста з відео (channels з youtube/tiktok). YouTube: назва (youtube.title, інакше перший рядок), хто бачить, «для дітей» і позначка AI. TikTok: перед прямою публікацією СПИТАЙ людину, хто бачитиме відео (tiktok.privacy: public / friends / followers / private) - TikTok забороняє обирати це за неї; коментарі, Duet і Stitch вимкнені, поки людина не дозволить; реклама власного бренду чи оплачена співпраця - your_brand / branded_content; AI-голос чи згенеровані кадри - ai_generated. Без privacy (чи з mode: draft) відео піде в чернетки TikTok, і людина опублікує його в застосунку. Публікуючи в TikTok, людина погоджується з Music Usage Confirmation TikTok - скажи їй про це. Після монтажу рілса одразу в усі мережі - montage_video з all_networks: true.",
-  "Сторіс: create_draft з format: \"story\" і мережами instagram/facebook (інші сторіс через API не приймають) → кадри через attach_media (фото й відео разом, фото ріжуться 9:16) або render_carousel з рядками «Кадр 1: …»; кожен кадр - окрема сторіс, підпису немає.",
+  "Сторіс: create_draft з format: \"story\" і мережами instagram/facebook/telegram/whatsapp (telegram - профіль людини через Telegram Business; whatsapp - бот надішле людині кадри, вона поставить їх у статус сама; інші сторіс через API не приймають) → кадри через attach_media (фото й відео разом, фото ріжуться 9:16) або render_carousel з рядками «Кадр 1: …»; кожен кадр - окрема сторіс, підпису немає.",
+  "Мови субтитрів: у montage_video speech - якою говорять, subtitle_langs - мова субтитрів у мережах ({telegram: \"en\", whatsapp: \"cs\"}): монтаж зробить версії з перекладеними субтитрами, і в кожну мережу піде її. Своє відео без тексту - update_post з add_subtitles: true. Мову мережі в готовому пості - update_post з subtitle_langs.",
   "Монтаж: кілька кліпів автора → одна сторіс чи рілс 9:16 із субтитрами. list_media kind: \"video\" → video_frames (аркуш кадрів, speech: true - що говорять) → напиши текст під кадри → montage_video: text до кліпів (підписи), voice: \"clips\" (субтитри зі звуку кліпів), voice: \"audio\" + id голосового автора (list_media kind: \"audio\"), або voice: \"tts\" (AI-голос ElevenLabs). З channels чи post результат одразу стає постом. Кліпи автор найзручніше шле Telegram-боту командою /montage (там же голосове).",
   "Якщо кабінетів кілька (list_workspaces), спершу переконайся, що активний саме той бренд: перемкни switch_workspace або передай workspace у виклику. Кожна відповідь називає кабінет у першому рядку - звіряйся з ним перед публікацією.",
   "У бренді буває кілька акаунтів однієї мережі (особистий і компанії) і кілька каналів Telegram - workspace_info їх перелічує: пост без вибору йде основним, інший чи кілька одразу - accounts у create_draft / update_post (назва Сторінки чи каналу, @нік; масивом - той самий пост у кожен). Пиши текст голосом того акаунта, яким він піде.",

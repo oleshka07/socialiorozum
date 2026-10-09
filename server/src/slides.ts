@@ -6,13 +6,14 @@
 // Змінювати список кадрів - лише через setPostMediaOrder: вона тримає обидві половини узгодженими
 // (немає «обкладинки нема, а кадри є») і прибирає похідні файли, які більше ніде не стоять.
 import { q, one } from "./db.js";
-import { deleteMediaFile } from "./media.js";
+import { deleteMediaAsset } from "./media.js";
 
 // Instagram і Telegram більше за 10 кадрів не приймають (Threads і LinkedIn - до 20, але пост іде
 // в усі мережі одразу, тож межа - найвужча)
 export const MAX_SLIDES = 10;
 
-export type PostMedia = { id: string; filename: string; kind: string; source: string; size?: number | null; duration?: number | null; width?: number | null; height?: number | null; alt_text?: string | null };
+export type PostMedia = { id: string; filename: string; kind: string; source: string; size?: number | null; duration?: number | null; width?: number | null; height?: number | null; alt_text?: string | null;
+  sub_lang?: string | null };   // 🔤 мова субтитрів на відео (монтаж); у версії іншою мовою - її мова
 
 /**
  * Опис, даний кадру (кроп-копії), зберігаємо й на оригіналі в медіатеці, якщо там опису ще нема: те
@@ -27,7 +28,7 @@ export async function altToOriginal(mediaId: string, alt: string): Promise<void>
 /** Кадри поста по порядку: обкладинка першою, далі post_slide. */
 export async function postMediaList(postId: string): Promise<PostMedia[]> {
   return q<PostMedia>(
-    `select m.id, m.filename, m.kind, m.source, m.size, m.duration, m.width, m.height, m.alt_text from (
+    `select m.id, m.filename, m.kind, m.source, m.size, m.duration, m.width, m.height, m.alt_text, m.sub_lang from (
         select media_id, 0 as pos from post where id=$1 and media_id is not null
         union all select media_id, pos from post_slide where post_id=$1
      ) x join media_asset m on m.id = x.media_id
@@ -69,8 +70,7 @@ export async function dropUnusedDerived(ws: string, candidates: Array<{ id?: str
         : null;
     if (!m || !DERIVED_MEDIA.includes(m.source)) continue;
     if (await mediaInUse(m.id, m.filename)) continue;
-    await q(`delete from media_asset where id=$1`, [m.id]);
-    await deleteMediaFile(m.filename);
+    await deleteMediaAsset(m.id, m.filename);
     n++;
   }
   return n;

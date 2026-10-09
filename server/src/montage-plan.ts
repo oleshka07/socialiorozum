@@ -865,7 +865,11 @@ export function transitionFor(mode: TransitionMode, k: number, shotDur: number, 
 }
 
 // ---------------- 🎨 стиль відео бренду (налаштування montage_style) ----------------
-export type MontageStyle = { subtitle: SubPreset; color: string; position: SubPos; hook: boolean; end: boolean; endText: string; cut: boolean };
+// speech - мова, якою людина говорить у кліпах ("" - мова контенту бренду): з неї розшифровка й субтитри
+// оригіналу. langs - мова субтитрів у кожній мережі ({telegram: "en", whatsapp: "cs"}); мережі без запису
+// (і "" ) отримують оригінал - субтитри тією мовою, якою говорять.
+export type MontageStyle = { subtitle: SubPreset; color: string; position: SubPos; hook: boolean; end: boolean; endText: string; cut: boolean;
+  speech: string; langs: Record<string, string> };
 /** Збережене в налаштуваннях → повний стиль із типовими значеннями (гачок, фінальна картка й вирізання пауз - увімкнено). */
 export function normMontageStyle(raw: unknown): MontageStyle {
   const o: any = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
@@ -877,5 +881,116 @@ export function normMontageStyle(raw: unknown): MontageStyle {
     end: o.end !== false,
     endText: String(o.endText ?? o.end_text ?? "").replace(/\r/g, "").trim().slice(0, 200),
     cut: o.cut !== false,
+    speech: normSubLang(o.speech) || "",
+    langs: normSubLangs(o.langs),
   };
+}
+
+// =====================================================================================================
+// 🔤 Мовні версії субтитрів (09.10, запит Олега: «говорю українською, а субтитри в Telegram - англійською,
+// у WhatsApp - чеською; або вибір українська, англійська, чеська»). Монтаж робить той самий ролик ще раз
+// із перекладеними субтитрами (і гачком, і мітками «до/після»): той самий час кожної картки, ті самі
+// частини сторіс. Публікація бере версію тієї мови, яку хоче мережа.
+// =====================================================================================================
+// by - «якою мовою» для речень людині («субтитри чеською»)
+export const SUB_LANGS: Record<string, { label: string; short: string; flag: string; by: string }> = {
+  uk: { label: "Українська", short: "UA", flag: "🇺🇦", by: "українською" },
+  en: { label: "English", short: "EN", flag: "🇬🇧", by: "англійською" },
+  cs: { label: "Čeština", short: "CZ", flag: "🇨🇿", by: "чеською" },
+  sk: { label: "Slovenčina", short: "SK", flag: "🇸🇰", by: "словацькою" },
+  pl: { label: "Polski", short: "PL", flag: "🇵🇱", by: "польською" },
+  de: { label: "Deutsch", short: "DE", flag: "🇩🇪", by: "німецькою" },
+};
+export const SUB_LANG_ORDER = ["uk", "en", "cs", "sk", "pl", "de"];
+// мережі, куди йде відео (сторіс, рілс, відео-пост) - і де мова субтитрів має сенс
+export const SUB_NETS = ["instagram", "facebook", "telegram", "whatsapp", "threads", "linkedin", "youtube", "tiktok"];
+// версій на один ролик - не більше (кожна - ще одне кодування відео на спільному сервері)
+export const MAX_SUB_VARIANTS = 3;
+/** "en", "EN", "English", "чеська" → код мови зі списку, інакше null. */
+export function normSubLang(x: unknown): string | null {
+  const s = String(x ?? "").trim();
+  if (!s) return null;
+  const low = s.toLowerCase();
+  if (SUB_LANGS[low]) return low;
+  if (low === "ua") return "uk";
+  if (low === "cz") return "cs";
+  const code = langCode(s);
+  return code !== "uk" || /укр|ukrain|^uk$/i.test(s) ? (SUB_LANGS[code] ? code : null) : null;
+}
+/** Мова субтитрів по мережах: лише відомі мережі й мови. */
+export function normSubLangs(raw: unknown): Record<string, string> {
+  const o: any = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const out: Record<string, string> = {};
+  for (const n of SUB_NETS) { const l = normSubLang(o[n]); if (l) out[n] = l; }
+  return out;
+}
+/** Які версії робити: бажані мови без мови оригіналу, без повторів, по порядку, до MAX_SUB_VARIANTS. */
+export function variantLangs(main: string, wanted: Iterable<unknown>): string[] {
+  const out: string[] = [];
+  for (const w of wanted) {
+    const l = normSubLang(w);
+    if (l && l !== main && !out.includes(l)) out.push(l);
+  }
+  return out.slice(0, MAX_SUB_VARIANTS);
+}
+/**
+ * Якою мовою субтитри хоче мережа поста: свій вибір поста (channels.<мережа>.sub_lang; "" - як говорять,
+ * тобто оригінал), інакше стиль відео бренду. null - оригінал.
+ */
+export function subLangFor(ch: any, styleLangs: Record<string, string>, net: string): string | null {
+  const own = ch && ch[net] && typeof ch[net] === "object" && "sub_lang" in ch[net] ? ch[net].sub_lang : undefined;
+  if (own !== undefined && own !== null) return normSubLang(own);
+  return normSubLang(styleLangs?.[net]);
+}
+
+/** Рядки картки: як було (1-2 рядки), а довший переклад - до 3 рядків по lineChars (WrapStyle 2 сам не переносить). */
+export function cueLines(tokens: string[], lineChars: number): Array<[number, number]> {
+  const n = tokens.length;
+  if (n <= 1 || tokens.join(" ").length <= lineChars * 2) return splitLines(tokens, lineChars);
+  const lines: Array<[number, number]> = [];
+  let a = 0, len = 0;
+  for (let i = 0; i < n; i++) {
+    const add = (len ? 1 : 0) + tokens[i].length;
+    if (len && len + add > lineChars && lines.length < 2) { lines.push([a, i]); a = i; len = tokens[i].length; }
+    else len += add;
+  }
+  lines.push([a, n]);
+  return lines;
+}
+/**
+ * Ті самі картки субтитрів (той самий час), але з перекладеним текстом: слова розкладаються по часу
+ * картки рівномірно (підсвічувати «поточне слово» в перекладі нема сенсу - порядок слів інший), рядки - наново.
+ * Порожній переклад - картка лишається як була.
+ */
+export function retextCues(cues: Cue[], texts: string[], lineChars = 18): Cue[] {
+  return cues.map((c, i) => {
+    const t = String(texts[i] ?? "").replace(/\s+/g, " ").trim();
+    const ws = t ? wordsEvenly(t, c.start, c.end) : [];
+    if (!ws.length) return c;
+    return { start: c.start, end: c.end, words: ws, lines: cueLines(ws.map((w) => w.w), lineChars) };
+  });
+}
+/**
+ * Запасний шлях перекладу (модель не повернула рядок на кожну картку): увесь перекладений текст ділимо
+ * на n шматків підряд, пропорційно довжині оригінальних карток, і в кожному - хоча б слово, поки слів вистачає.
+ */
+export function spreadByWeights(text: string, weights: number[]): string[] {
+  const toks = String(text || "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  const n = weights.length;
+  if (!n) return [];
+  if (!toks.length) return weights.map(() => "");
+  const w = weights.map((x) => Math.max(1, Number(x) || 1));
+  const tot = w.reduce((a, b) => a + b, 0);
+  const out: string[] = [];
+  let at = 0, acc = 0;
+  for (let i = 0; i < n; i++) {
+    acc += w[i];
+    const left = n - i - 1;
+    let end = i === n - 1 ? toks.length : Math.round(toks.length * acc / tot);
+    end = Math.max(end, Math.min(at + 1, toks.length));          // хоча б слово
+    end = Math.min(end, Math.max(at, toks.length - left));         // і лишити по слову наступним
+    out.push(toks.slice(at, end).join(" "));
+    at = end;
+  }
+  return out;
 }

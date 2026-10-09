@@ -102,12 +102,20 @@ export async function moveMedia(ids: string[], from: string, to: string, keep: s
         where s.workspace_id=$1 and p.id is distinct from $3::uuid
           and (p.media_id=$2 or p.image_base=$4 or p.reel_video=$4
                or exists (select 1 from post_slide ps where ps.post_id=p.id and ps.media_id=$2)) limit 1`, [from, id, keep, m.filename]);
-    if (!used) { await q(`update media_asset set workspace_id=$2 where id=$1`, [id, to]); map.set(id, id); continue; }
+    // 🔤 мовні версії відео (субтитри іншою мовою) їдуть разом з оригіналом
+    if (!used) { await q(`update media_asset set workspace_id=$2 where id=$1 or variant_of=$1`, [id, to]); map.set(id, id); continue; }
     const fname = await linkCopy(m.filename);
     const n = await one<{ id: string }>(
-      `insert into media_asset(workspace_id, kind, mime, original_name, filename, size, source, external_id, duration, width, height, alt_text)
-       select $2, kind, mime, original_name, $3, size, source, external_id, duration, width, height, alt_text from media_asset where id=$1 returning id`, [id, to, fname]);
-    if (n) map.set(id, n.id);
+      `insert into media_asset(workspace_id, kind, mime, original_name, filename, size, source, external_id, duration, width, height, alt_text, sub_lang)
+       select $2, kind, mime, original_name, $3, size, source, external_id, duration, width, height, alt_text, sub_lang from media_asset where id=$1 returning id`, [id, to, fname]);
+    if (n) {
+      map.set(id, n.id);
+      for (const v of await q<{ id: string; filename: string }>(`select id, filename from media_asset where variant_of=$1`, [id])) {
+        const vf = await linkCopy(v.filename);
+        await q(`insert into media_asset(workspace_id, kind, mime, original_name, filename, size, source, external_id, duration, width, height, sub_lang, variant_of)
+                 select $2, kind, mime, original_name, $3, size, source, external_id, duration, width, height, sub_lang, $4 from media_asset where id=$1`, [v.id, to, vf, n.id]);
+      }
+    }
   }
   return map;
 }

@@ -309,6 +309,12 @@ export async function fixLegacyVideos(): Promise<number> {
 export async function deleteMediaFile(filename: string): Promise<void> {
   try { await unlink(join(MEDIA_DIR, filename)); } catch { /* файл міг бути вже видалений */ }
 }
+/** Прибрати медіа: рядок (його мовні версії - каскадом) і файли - і свій, і версій (інакше лишились би на диску). */
+export async function deleteMediaAsset(id: string, filename: string): Promise<void> {
+  const vars = await q<{ filename: string }>(`select filename from media_asset where variant_of=$1`, [id]);
+  await q(`delete from media_asset where id=$1`, [id]);
+  for (const f of [filename, ...vars.map((v) => v.filename)]) await deleteMediaFile(f);
+}
 
 // Одноразова конвертація залишкових HEIC/HEIF -> JPEG (ідемпотентно: після неї HEIF не лишається).
 export async function convertAllHeif(): Promise<number> {

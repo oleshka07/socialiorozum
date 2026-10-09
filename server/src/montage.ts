@@ -17,13 +17,13 @@ import { join } from "node:path";
 import sharp from "sharp";
 import { q, one } from "./db.js";
 import { env } from "./env.js";
-import { MEDIA_DIR, probeVideo, probeAudio, saveMediaFile, saveMedia } from "./media.js";
+import { MEDIA_DIR, probeVideo, probeAudio, saveMediaFile, saveMedia, deleteMediaAsset } from "./media.js";
 import { transcribeWords } from "./stt.js";
 import { synthesizeAll, composeMusic } from "./tts.js";
 import { chat, extractJsonObject } from "./openrouter.js";
 import { getSettingText } from "./settings.js";
 import { startJob, type JobRow } from "./jobs.js";
-import { setPostMediaOrder, setPostVideo, dropUnusedDerived } from "./slides.js";
+import { setPostMediaOrder, setPostVideo, dropUnusedDerived, postMediaList } from "./slides.js";
 import { logEvent } from "./log.js";
 import * as P from "./montage-plan.js";
 
@@ -56,8 +56,12 @@ export type MontageOpts = {
   subPos?: P.SubPos | null;              // низ | центр
   color?: string | null;                 // колір бренду (#RRGGBB) - плашка гачка, «після», слово в субтитрах
   beforeCount?: number | null;           // ↔️ скільки перших кліпів - «до» (типово половина)
+  // 🔤 мовні версії: мови субтитрів, яких треба ще (крім мови, якою говорять). Не задано - мови мереж зі
+  // «Стилю відео» бренду; [] - без версій
+  subLangs?: string[] | null;
 };
 export type MontageVideo = { id: string; filename: string; duration: number };
+export type MontageVariant = { lang: string; videos: MontageVideo[] };
 export type MontageResult = {
   videos: MontageVideo[]; duration: number; transcript: string; subtitles: SubMode; voice: VoiceMode;
   provider?: string; warnings: string[]; clips: number; postId?: string | null;
@@ -65,6 +69,8 @@ export type MontageResult = {
   template?: P.TemplateId; hook?: string; endCard?: boolean; style?: P.SubPreset;
   cut?: { clips: number; saved: number };              // ✂️ з кількох кліпів вирізано паузи і скільки секунд
   cover?: { id: string; filename: string } | null;     // 🖼 обкладинка рілса (кадр із гачком)
+  lang?: string | null;                                // 🔤 мова субтитрів оригіналу (null - тексту на відео нема)
+  variants?: MontageVariant[];                         // 🔤 ті самі відео з субтитрами іншими мовами
 };
 export class MontageError extends Error {}
 
@@ -316,7 +322,8 @@ export async function clipSpeech(ws: string, file: string): Promise<{ lines: str
   try {
     const buf = await extractSpeech(dir, file).catch(() => null);
     if (!buf) return { lines: [], text: "" };
-    const lang = P.langCode(await getSettingText(ws, "output_language"));
+    // мова, якою говорять у кліпах (стиль відео бренду), інакше мова контенту бренду
+    const lang = (await montageStyle(ws)).speech || P.langCode(await getSettingText(ws, "output_language"));
     const r = await transcribeWords(buf, "speech.m4a", ws, lang);
     if (!r) return null;
     const words = r.provider === "whisper" ? P.restorePunct(r.words, r.text) : r.words;
@@ -408,6 +415,50 @@ async function autoHook(ws: string, text: string, lang: string): Promise<string>
   return P.hookFallback(src);
 }
 
+// ---- 🔤 переклад субтитрів для мовної версії ----
+/**
+ * Рядки субтитрів (картки по черзі, речення може тягнутись через кілька карток) і гачок - іншою мовою,
+ * рядок у рядок. Дешева модель, один виклик на мову. Модель повернула не стільки рядків - перекладаємо
+ * текст цілим і ділимо пропорційно довжині карток (P.spreadByWeights): гірше, але жодна картка не лишається
+ * мовою оригіналу.
+ */
+export async function translateSubs(ws: string, texts: string[], from: string, to: string): Promise<string[]> {
+  const idx = texts.map((t, i) => (String(t || "").trim() ? i : -1)).filter((i) => i >= 0);
+  const out = texts.map(() => "");
+  if (!idx.length) return out;
+  const items = idx.map((i) => String(texts[i]).replace(/\s+/g, " ").trim());
+  const name = (l: string) => P.SUB_LANGS[l]?.label || l;
+  const model = env.cheapModel.startsWith("claude-cli/") ? "openai/gpt-4o-mini" : env.cheapModel;
+  const chars = items.reduce((a, t) => a + t.length, 0);
+  const system = `Ти перекладаєш субтитри короткого вертикального відео (сторіс, рілс) з мови «${name(from)}» на «${name(to)}». ` +
+    "Рядки - шматки мовлення по черзі (речення може тягнутись через кілька рядків), останній рядок може бути гачком-заголовком. " +
+    `Переклади так, щоб разом вони читались природно мовою «${name(to)}», а кожен рядок передавав ту саму частину змісту, що й оригінал, ` +
+    "і був не довшим за нього більш ніж на третину - субтитри треба встигнути прочитати. Розмовно, як людина говорить; не додавай і не " +
+    "пропускай змісту, не обʼєднуй і не розбивай рядки. Імена, назви брендів, ніки (@…), адреси й цифри - як є. Без лапок навколо рядків. " +
+    `Поверни JSON {"items": ["…"]} - рівно ${items.length} рядків по порядку.`;
+  const user = items.map((t, k) => `${k + 1}. ${t}`).join("\n");
+  const call = async (): Promise<string[] | null> => {
+    const raw = await chat(model, system, user, { workspaceId: ws, step: "montage_translate", json: true, maxTokens: Math.min(6000, 200 + Math.ceil(chars * 1.4)) });
+    try {
+      const j = extractJsonObject<{ items?: unknown }>(raw);
+      const arr = Array.isArray(j.items) ? j.items.map((x) => String(x ?? "").replace(/^\s*\d+[.)]\s*/, "").trim()) : [];
+      return arr.length === items.length && arr.filter(Boolean).length >= Math.ceil(items.length * 0.8) ? arr : null;
+    } catch { return null; }
+  };
+  let tr = await call();
+  if (!tr) tr = await call();
+  if (!tr) {
+    // запасний шлях: цілим текстом і ділимо пропорційно довжині рядків
+    const whole = await chat(model, `Переклади текст субтитрів відео з мови «${name(from)}» на «${name(to)}» розмовно, без пояснень, лапок і нумерації. Імена, назви, ніки й цифри - як є.`,
+      items.join(" "), { workspaceId: ws, step: "montage_translate", maxTokens: Math.min(6000, 200 + Math.ceil(chars * 1.4)) });
+    const t = String(whole || "").replace(/\s+/g, " ").trim();
+    if (!t) throw new MontageError("модель не повернула перекладу");
+    tr = P.spreadByWeights(t, items.map((x) => x.length));
+  }
+  idx.forEach((i, k) => { out[i] = tr![k] || items[k]; });
+  return out;
+}
+
 // ---- 6. повний монтаж ----
 export async function buildMontage(ws: string, o: MontageOpts): Promise<MontageResult> {
   if (!o.clips?.length) throw new MontageError("Дай хоча б один кліп.");
@@ -418,7 +469,7 @@ export async function buildMontage(ws: string, o: MontageOpts): Promise<MontageR
   const preset = o.subStyle ? P.normSubPreset(o.subStyle, bs.subtitle) : bs.subtitle;
   const look = P.subLook(preset, P.normHex(o.color) || bs.color, o.subPos ? P.normSubPos(o.subPos) : bs.position);
   const srcs = await loadSources(ws, o.clips.map((c) => c.id));
-  const lang = o.lang || P.langCode(await getSettingText(ws, "output_language"));
+  const lang = o.lang || bs.speech || P.langCode(await getSettingText(ws, "output_language"));
   const warnings: string[] = [];
   const n = srcs.length;
   if (tid === "before_after" && n < 2) throw new MontageError("Для «до / після» потрібно щонайменше 2 кліпи: спершу «до», потім «після».");
@@ -602,18 +653,18 @@ export async function buildMontage(ws: string, o: MontageOpts): Promise<MontageR
       return { start: plan.shots[a].start, end: plan.shots[b].start + plan.shots[b].dur };
     });
     const bounds = plan.shots.slice(1).map((x) => x.start);
-    const over: string[] = [];   // гачок, мітки, фінальна картка - поверх відео тим самим фільтром ass, що й субтитри
+    // поверх відео тим самим фільтром ass, що й субтитри: мітки «до/після» (текст - мовою версії), фінальна
+    // картка (назва й нік - однакові в усіх версіях) і гачок
+    const labels: Array<{ before: boolean; start: number; end: number; y?: number }> = [];
+    const endEv: string[] = [];
 
     // ↔️ мітки «до»/«після» і кадр порівняння
     let full = total;
     if (baN && tp.labels) {
-      const bw = P.baWords(lang);
       const bS = plan.shots.filter((s) => s.clip < baN), aS = plan.shots.filter((s) => s.clip >= baN);
       const endOf = (s: P.Shot) => s.start + s.dur;
-      over.push(...P.labelEvents([
-        { text: bw.before, start: bS[0].start + 0.1, end: endOf(bS[bS.length - 1]) },
-        { text: bw.after, start: aS[0].start + bIn + 0.05, end: endOf(aS[aS.length - 1]), after: true },
-      ]));
+      labels.push({ before: true, start: bS[0].start + 0.1, end: endOf(bS[bS.length - 1]) },
+        { before: false, start: aS[0].start + bIn + 0.05, end: endOf(aS[aS.length - 1]) });
     }
     if (baN && tp.compare) {
       try {
@@ -621,11 +672,8 @@ export async function buildMontage(ws: string, o: MontageOpts): Promise<MontageR
         const fb = await lastFrame(dir, segs[lastB], "B"), fa = await lastFrame(dir, segs[segs.length - 1], "A");
         const img = await compareImage(dir, fb, fa);
         segs.push(await stillSegment(dir, "compare", img, COMPARE_SEC, false, { name: "fade", d: 0.3, frame: fa }));
-        const bw = P.baWords(lang);
-        over.push(...P.labelEvents([
-          { text: bw.before, start: full + 0.3, end: full + COMPARE_SEC, y: 300 },
-          { text: bw.after, start: full + 0.3, end: full + COMPARE_SEC, after: true, y: H / 2 + 60 },
-        ]));
+        labels.push({ before: true, start: full + 0.3, end: full + COMPARE_SEC, y: 300 },
+          { before: false, start: full + 0.3, end: full + COMPARE_SEC, y: H / 2 + 60 });
         bounds.push(full);
         full += COMPARE_SEC;
       } catch (e: any) { warnings.push("кадр порівняння не вийшов: " + String(e.message).slice(0, 100)); }
@@ -637,7 +685,7 @@ export async function buildMontage(ws: string, o: MontageOpts): Promise<MontageR
       try {
         const fr = await lastFrame(dir, segs[segs.length - 1], "E");
         segs.push(await stillSegment(dir, "endcard", fr, P.END_SEC, true, { name: "fade", d: 0.35, frame: fr }));
-        over.push(...P.endEvents(endText, full + 0.2, full + P.END_SEC, look.style.accent));
+        endEv.push(...P.endEvents(endText, full + 0.2, full + P.END_SEC, look.style.accent));
         bounds.push(full);
         full += P.END_SEC;
       } catch (e: any) { warnings.push("фінальна картка не вийшла: " + String(e.message).slice(0, 100)); }
@@ -674,6 +722,10 @@ export async function buildMontage(ws: string, o: MontageOpts): Promise<MontageR
     const cues = words.length ? P.groupCues(words, look.cue) : [];
     const subEv = sub === "none" ? [] : words.length ? P.karaokeEvents(cues, look.style, sub === "karaoke" && look.highlight) : P.captionEvents(captions, look.style);
     if (sub === "karaoke" && !words.length) sub = "lines";
+    const labelEv = (L: string) => {
+      const bw = P.baWords(L);
+      return P.labelEvents(labels.map((x) => ({ text: x.before ? bw.before : bw.after, start: x.start, end: x.end, after: !x.before, y: x.y })));
+    };
 
     // 🪝 гачок: свій текст, інакше AI з того, що звучить чи написано на відео (у «до / після» без тексту - «До і після»)
     // o.hook: false - без; true чи "auto" - AI; свій рядок - він; порожньо чи не задано - як у стилі бренду
@@ -685,9 +737,33 @@ export async function buildMontage(ws: string, o: MontageOpts): Promise<MontageR
       hookText = basis ? await autoHook(ws, basis, lang) : baN ? P.baWords(lang).hook : "";
     }
     const hookEnd = P.hookSpan(total);
-    if (hookText) over.push(...P.hookEvents(hookText, 0.05, hookEnd));
-    const allEv = [...subEv, ...over];
+    const hookEv = (h: string) => (h ? P.hookEvents(h, 0.05, hookEnd) : []);
+    const allEv = [...subEv, ...labelEv(lang), ...endEv, ...hookEv(hookText)];
     if (allEv.length) await writeFile(join(dir, "subs.ass"), P.assDoc(look.style, allEv));
+
+    // 🔤 мовні версії: той самий текст іншою мовою - картки субтитрів у той самий час, гачок, мітки «до/після»
+    const subTexts = sub === "none" ? [] : cues.length ? cues.map((c) => P.wordsText(c.words)) : captions.map((c) => c.text);
+    const hasText = subTexts.some(Boolean) || !!hookText || labels.length > 0;
+    const wanted = Array.isArray(o.subLangs) ? o.subLangs : Object.values(bs.langs);
+    const vLangs = hasText ? P.variantLangs(lang, wanted) : [];
+    const variantAss: Array<{ lang: string; file: string }> = [];
+    for (const L of vLangs) {
+      try {
+        const baHook = !!baN && hookText === P.baWords(lang).hook;
+        const tr = await translateSubs(ws, [...subTexts, baHook ? "" : hookText], lang, L);
+        const tSubs = tr.slice(0, subTexts.length);
+        const tHook = baHook ? P.baWords(L).hook : P.cleanHook(tr[subTexts.length] || "") || "";
+        const se = sub === "none" ? [] : cues.length
+          ? P.karaokeEvents(P.retextCues(cues, tSubs, look.cue.lineChars ?? 18), look.style, false)
+          : P.captionEvents(captions.map((c, i) => ({ ...c, text: tSubs[i] || c.text })), look.style);
+        const ev = [...se, ...labelEv(L), ...endEv, ...hookEv(hookText ? tHook || hookText : "")];
+        const file = `subs_${L}.ass`;
+        await writeFile(join(dir, file), P.assDoc(look.style, ev));
+        variantAss.push({ lang: L, file });
+      } catch (e: any) {
+        warnings.push(`субтитри мовою ${P.SUB_LANGS[L]?.label || L} не вийшли: ${String(e?.message || e).slice(0, 140)}`);
+      }
+    }
 
     // голосова доріжка
     let voiceFile = "";
@@ -723,15 +799,16 @@ export async function buildMontage(ws: string, o: MontageOpts): Promise<MontageR
     // (або зовсім без, якщо так попросили). Музика притихає під голосом і під МОВОЮ в кліпах (voice: clips), а
     // під шумом кліпів (вітер, вулиця) - ні: інакше вона б не звучала зовсім
     const keep = o.keepSound === false ? 0 : withVoice ? 0.18 : musicFile && o.voice !== "clips" ? 0.5 : 1;
-    const vChain = allEv.length ? "[0:v]ass=subs.ass[v]" : "[0:v]null[v]";
     const aChain = P.audioGraph({ total: full, voice: withVoice ? 1 : null, music: musicFile ? (withVoice ? 2 : 1) : null, keep,
       duckOnClips: !withVoice && o.voice === "clips" && keep > 0 && srcs.some((s) => s.audio) });
-    await ff([...CAT, ...(withVoice ? ["-i", voiceFile] : []), ...(musicFile ? ["-stream_loop", "-1", "-i", musicFile] : []),
-      "-filter_complex", `${vChain};${aChain}`, "-map", "[v]", "-map", "[a]",
+    // те саме кодування для оригіналу й кожної мовної версії - різниться лише файл субтитрів
+    const encodeFinal = (ass: string | null, out: string) => ff([...CAT, ...(withVoice ? ["-i", voiceFile] : []), ...(musicFile ? ["-stream_loop", "-1", "-i", musicFile] : []),
+      "-filter_complex", `${ass ? `[0:v]ass=${ass}[v]` : "[0:v]null[v]"};${aChain}`, "-map", "[v]", "-map", "[a]",
       "-t", full.toFixed(3), "-r", String(FPS), "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-maxrate", "6M", "-bufsize", "12M",
       "-profile:v", "high", "-pix_fmt", "yuv420p", "-g", String(FPS * 2),
       ...(cuts.length ? ["-force_key_frames", cuts.map((c) => c.toFixed(2)).join(",")] : []),
-      "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", "-threads", "2", "out.mp4"], dir, 900000);
+      "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", "-threads", "2", out], dir, 900000);
+    await encodeFinal(allEv.length ? "subs.ass" : null, "out.mp4");
 
     // 🖼 обкладинка рілса: кадр, де вже стоїть гачок (його ж і видно в сітці профілю), інакше - кадр на початку
     let cover: { id: string; filename: string } | null = null;
@@ -744,26 +821,49 @@ export async function buildMontage(ws: string, o: MontageOpts): Promise<MontageR
       } catch (e: any) { warnings.push("обкладинку не зроблено: " + String(e.message).slice(0, 100)); }
     }
 
-    let files = ["out.mp4"];
-    if (cuts.length) {
+    // довга сторіс - частинами в тих самих місцях (і в оригіналі, і в кожній мовній версії)
+    const splitParts = async (src: string, prefix: string): Promise<string[]> => {
+      if (!cuts.length) return [src];
       // ключовий кадр стає на найближчий кадр - буває й на кадр РАНІШЕ за момент різу (43,97 замість 44), і
       // без запасу сегментатор різав би аж на наступному ключовому, через 2 с
-      await ff(["-i", "out.mp4", "-map", "0", "-c", "copy", "-f", "segment", "-segment_times", cuts.map((c) => c.toFixed(2)).join(","),
-        "-segment_time_delta", "0.05", "-reset_timestamps", "1", "-segment_format_options", "movflags=+faststart", "part%02d.mp4"], dir);
-      files = Array.from({ length: cuts.length + 1 }, (_, k) => `part${String(k).padStart(2, "0")}.mp4`);
-    }
-    const videos: MontageVideo[] = [];
-    for (let k = 0; k < files.length; k++) {
-      const name = files.length > 1 ? `montage-${k + 1}-of-${files.length}.mp4` : "montage.mp4";
-      const m = await saveMediaFile(ws, join(dir, files[k]), { name, source: "montage" });
-      const d = (await one<{ duration: number | null }>(`select duration from media_asset where id=$1`, [m.id]))?.duration || 0;
-      videos.push({ id: m.id, filename: m.filename, duration: Math.round(Number(d) * 10) / 10 });
+      await ff(["-i", src, "-map", "0", "-c", "copy", "-f", "segment", "-segment_times", cuts.map((c) => c.toFixed(2)).join(","),
+        "-segment_time_delta", "0.05", "-reset_timestamps", "1", "-segment_format_options", "movflags=+faststart", `${prefix}%02d.mp4`], dir);
+      return Array.from({ length: cuts.length + 1 }, (_, k) => `${prefix}${String(k).padStart(2, "0")}.mp4`);
+    };
+    const files = await splitParts("out.mp4", "part");
+    const saveParts = async (list: string[], source: string, tag: string): Promise<MontageVideo[]> => {
+      const out: MontageVideo[] = [];
+      for (let k = 0; k < list.length; k++) {
+        const name = list.length > 1 ? `montage${tag}-${k + 1}-of-${list.length}.mp4` : `montage${tag}.mp4`;
+        const m = await saveMediaFile(ws, join(dir, list[k]), { name, source });
+        const d = (await one<{ duration: number | null }>(`select duration from media_asset where id=$1`, [m.id]))?.duration || 0;
+        out.push({ id: m.id, filename: m.filename, duration: Math.round(Number(d) * 10) / 10 });
+      }
+      return out;
+    };
+    const videos = await saveParts(files, "montage", "");
+    // 🔤 мова субтитрів оригіналу (публікація порівнює її з мовою, яку хоче мережа)
+    if (hasText) await q(`update media_asset set sub_lang=$2 where id = any($1::uuid[])`, [videos.map((v) => v.id), lang]);
+    const variants: MontageVariant[] = [];
+    for (const va of variantAss) {
+      try {
+        await encodeFinal(va.file, `out_${va.lang}.mp4`);
+        const parts = await splitParts(`out_${va.lang}.mp4`, `v${va.lang}_`);
+        if (parts.length !== files.length) throw new Error("частин вийшло інакше, ніж в оригіналі");
+        const vids = await saveParts(parts, "montage-lang", `-${va.lang}`);
+        // версія живе разом із частиною оригіналу: прибрали оригінал - зникає й вона (каскадом)
+        for (let k = 0; k < vids.length; k++)
+          await q(`update media_asset set variant_of=$2, sub_lang=$3 where id=$1`, [vids[k].id, videos[k].id, va.lang]);
+        variants.push({ lang: va.lang, videos: vids });
+      } catch (e: any) {
+        warnings.push(`версія з субтитрами мовою ${P.SUB_LANGS[va.lang]?.label || va.lang} не вийшла: ${String(e?.message || e).slice(0, 140)}`);
+      }
     }
     const transcript = words.length ? P.wordsText(words) : clipTexts.filter(Boolean).join(" ");
     const cut = cutClips ? { clips: cutClips, saved: Math.round(cutSaved * 10) / 10 } : undefined;
-    await logEvent("info", "montage", `змонтовано ${srcs.length} кліпів → ${videos.length} відео, ${Math.round(full)} с (${P.TEMPLATES[tid].label.replace(/^\S+\s/, "")}, ${o.voice}, ${sub} ${preset}, переходи ${trMode}${smart ? `, найкращі моменти ${smart}` : ""}${cut ? `, паузи -${cut.saved} с у ${cut.clips}` : ""}${hookText ? ", гачок" : ""}${endText ? ", фінальна картка" : ""}${musicNote ? `, ${musicNote}` : ""})`, { ws });
+    await logEvent("info", "montage", `змонтовано ${srcs.length} кліпів → ${videos.length} відео, ${Math.round(full)} с (${P.TEMPLATES[tid].label.replace(/^\S+\s/, "")}, ${o.voice}, ${sub} ${preset}, переходи ${trMode}${smart ? `, найкращі моменти ${smart}` : ""}${cut ? `, паузи -${cut.saved} с у ${cut.clips}` : ""}${hookText ? ", гачок" : ""}${endText ? ", фінальна картка" : ""}${musicNote ? `, ${musicNote}` : ""}${variants.length ? `, мовою ${lang} + версії ${variants.map((v) => v.lang).join(", ")}` : ""})`, { ws });
     return { videos, duration: full, transcript, subtitles: sub, voice: o.voice, provider, warnings, clips: srcs.length, transition: trMode, music: musicNote || undefined, smart,
-      template: tid, hook: hookText || undefined, endCard: !!endText, style: preset, cut, cover };
+      template: tid, hook: hookText || undefined, endCard: !!endText, style: preset, cut, cover, lang: hasText ? lang : null, variants };
   } finally {
     // MONTAGE_KEEP_TMP=1 - лишити робочу теку (налагодження: сегменти, субтитри, проміжні файли)
     if (process.env.MONTAGE_KEEP_TMP === "1") console.log("[montage] робоча тека:", dir);
@@ -783,12 +883,14 @@ export async function attachMontage(ws: string, postId: string, format: MontageF
 }
 
 /** Новий пост під змонтоване відео (затверджений - лишається обрати час). */
-export async function montagePost(ws: string, format: MontageFormat, nets: string[], text: string, videoIds: string[], coverId?: string | null, aiVoice = false): Promise<string> {
+export async function montagePost(ws: string, format: MontageFormat, nets: string[], text: string, videoIds: string[], coverId?: string | null, aiVoice = false,
+  subLangs: Record<string, string> = {}): Promise<string> {
   const body = text.trim() || (format === "story" ? "🎬 Змонтована сторіс" : "🎬 Змонтований рілс");
   const src = await one<{ id: string }>(`insert into source(workspace_id, origin, title, transcript) values($1,'montage',$2,$3) returning id`, [ws, body.slice(0, 90), body]);
   const run = await one<{ id: string }>(`insert into pipeline_run(source_id) values($1) returning id`, [src!.id]);
   const ch: Record<string, any> = {};
-  for (const n of nets) ch[n] = { on: true };
+  // 🔤 мова субтитрів мережі, обрана для цього монтажу ("" - як говорять), - на пості: публікація візьме версію цією мовою
+  for (const n of nets) ch[n] = { on: true, ...(n in subLangs ? { sub_lang: P.normSubLang(subLangs[n]) || "" } : {}) };
   // одна мережа - текст іде дослівно (як і в create_draft конектора)
   if (nets.length === 1) Object.assign(ch, { manual_adapt: true, native: nets[0] });
   // 🗣 AI-голос - позначка «створено з AI» для YouTube і TikTok одразу (людина може зняти). Ставимо й
@@ -804,7 +906,7 @@ export async function montagePost(ws: string, format: MontageFormat, nets: strin
 
 export type MontageTarget = {
   postId?: string | null;
-  create?: { nets: string[]; text: string } | null;
+  create?: { nets: string[]; text: string; subLangs?: Record<string, string> } | null;
   // бот: сповістити людину, коли готово чи впало (помилку - людським текстом)
   notify?: (r: MontageResult | null, error?: string) => Promise<void>;
   // бот і кабінет: текст із кадрів AI дописує в роботі (а не до старту, щоб відповідь була миттєвою)
@@ -829,7 +931,7 @@ export function startMontage(ws: string, o: MontageOpts, target: MontageTarget =
       if (postId) await attachMontage(ws, postId, o.format, ids, r.cover?.id);
       // текст нового поста - свій, інакше те, що звучить чи написано на відео (у сторіс його не видно,
       // але в кабінеті й Студії він каже, що це за ролик; для рілса - готовий підпис)
-      else if (target.create) postId = await montagePost(ws, o.format, target.create.nets, target.create.text || r.transcript || "", ids, r.cover?.id, o.voice === "tts");
+      else if (target.create) postId = await montagePost(ws, o.format, target.create.nets, target.create.text || r.transcript || "", ids, r.cover?.id, o.voice === "tts", target.create.subLangs || {});
       // обкладинка потрібна лише посту: монтаж «лише в медіатеку» сироти не лишає (свою поставить update_post)
       if (!postId && r.cover) { await dropUnusedDerived(ws, [{ id: r.cover.id }]).catch(() => {}); r.cover = null; }
       const out = { ...r, postId };
@@ -845,6 +947,47 @@ export function startMontage(ws: string, o: MontageOpts, target: MontageTarget =
       if (target.notify) await target.notify(null, msg).catch(() => {});
       throw new Error(msg);
     }
+  });
+}
+
+// ---- 🔤 субтитри на готове відео поста (без монтажу) ----
+/**
+ * Відео поста ще без тексту (своє, зняте й залите як є): розшифровуємо мову й накладаємо субтитри - мовою,
+ * якою говорять, і версіями мовами мереж зі «Стилю відео». Кожен відео-кадр - окремо, тим самим рушієм
+ * монтажу, але без нічого зайвого (без гачка, картки, переходів, вирізання пауз - відео лишається як є).
+ * Довгий кадр сторіс ділиться на частини до 60 с. Оригінал лишається в медіатеці.
+ */
+export function startPostSubtitles(ws: string, postId: string, subLangs?: string[] | null): Promise<JobRow> {
+  return startJob("montage", `subs:${postId}`, ws, async () => {
+    const p = await one<{ format: string | null }>(
+      `select p.format from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
+    if (!p) throw new MontageError("пост не знайдено");
+    const frames = await postMediaList(postId);
+    const todo = frames.filter((f) => f.kind === "video" && !f.sub_lang);
+    if (!todo.length) throw new MontageError(frames.some((f) => f.kind === "video")
+      ? "Відео цього поста вже з субтитрами. Інші мови - змонтуй ще раз (мови мереж - у Бренд → Візуал → «🎬 Стиль відео»)."
+      : "У пості нема відео.");
+    const format: MontageFormat = p.format === "story" ? "story" : "reel";
+    const repl = new Map<string, string[]>();
+    const warnings: string[] = [];
+    let langs: string[] = [];
+    let mainLang: string | null = null;
+    for (const f of todo) {
+      const r = await withSlot(() => buildMontage(ws, { clips: [{ id: f.id, seconds: Number(f.duration) || null }], voice: "clips", format,
+        template: "talking", transition: "none", smart: false, hook: false, endCard: false, cutPauses: false, subLangs: subLangs ?? null }));
+      warnings.push(...r.warnings);
+      // тексту не вийшло (мови не почули) - готове відео без субтитрів нікому не потрібне: геть
+      if (!r.lang) { for (const v of r.videos) await deleteMediaAsset(v.id, v.filename).catch(() => {}); continue; }
+      repl.set(f.id, r.videos.map((v) => v.id));
+      mainLang = r.lang;
+      langs = [...new Set([...langs, ...(r.variants || []).map((v) => v.lang)])];
+    }
+    if (!repl.size) throw new MontageError(`Мови у відео не почуто - субтитрів не буде.${warnings.length ? " " + warnings.slice(0, 2).join("; ") : ""}`);
+    const ids = frames.flatMap((f) => repl.get(f.id) || [f.id]);
+    if (ids.length > 10) throw new MontageError("Після поділу довгого відео на частини кадрів вийшло більше 10 - вріж відео коротше.");
+    await setPostMediaOrder(ws, postId, ids);
+    await logEvent("info", "montage", `субтитри на відео поста: ${repl.size} ${repl.size === 1 ? "кадр" : "кадрів"}, мова ${mainLang}${langs.length ? `, версії ${langs.join(", ")}` : ""}`, { ws, postId });
+    return { postId, frames: repl.size, lang: mainLang, variants: langs, warnings };
   });
 }
 

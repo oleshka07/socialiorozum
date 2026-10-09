@@ -18,10 +18,12 @@ import { liveSend } from "./tgbot.js";
 import { startMontage, MONTAGE_MAX_CLIPS, montageStyle, brandEndText, type MontageOpts, type MontageResult } from "./montage.js";
 import { ttsReady } from "./tts.js";
 import { getJob } from "./jobs.js";
-import { spreadText, MAX_SLOW, TRANSITIONS, MUSIC_MOODS, TEMPLATES, TEMPLATE_ORDER, SUB_PRESETS, SUB_ORDER, templatePlan, baSplit, cleanHook, type TransitionMode, type MusicMood, type TemplateId, type SubPreset, type EndText } from "./montage-plan.js";
+import { spreadText, MAX_SLOW, TRANSITIONS, MUSIC_MOODS, TEMPLATES, TEMPLATE_ORDER, SUB_PRESETS, SUB_ORDER, templatePlan, baSplit, cleanHook, SUB_LANGS, SUB_LANG_ORDER, variantLangs, type TransitionMode, type MusicMood, type TemplateId, type SubPreset, type EndText } from "./montage-plan.js";
 import { musicReady } from "./tts.js";
 import { plural } from "./analytics.js";
 import { brandLabel, moveMedia } from "./tgbrand.js";
+import { getSettingText } from "./settings.js";
+import { langCode } from "./montage-plan.js";
 
 export type MtMode = "auto" | "captions" | "ai-voice";
 export type MtState = {
@@ -47,6 +49,12 @@ export type MtState = {
   cut?: boolean;              // ✂️ вирізати паузи й «еее» (коли текст - зі звуку кліпів)
   sub?: SubPreset;            // 🔤 стиль субтитрів
   before?: number | null;     // ↔️ скільки перших кліпів - «до»
+  // 🔤 мови субтитрів (початково - зі «Стилю відео» бренду): speech - якою говорять ("" - мова бренду),
+  // langs - мова субтитрів у мережі ("" - як говорять); view: "langs" - картка вибору мов
+  speech?: string;
+  langs?: Record<string, string>;
+  brandLang?: string;
+  view?: "langs" | null;
 };
 const TTL = 3 * 3600_000;
 const TEXT_WINDOW = 30 * 60_000;
@@ -116,13 +124,50 @@ function hookLabel(st: MtState): string {
   return h === "off" ? "без" : h === "auto" ? "AI з тексту ролика" : `«${h.slice(0, 40)}»`;
 }
 
+// ---- 🔤 мови субтитрів ----
+const NET_ICON: Record<string, string> = { instagram: "📸 Instagram", facebook: "📘 Facebook", telegram: "✈️ Telegram", whatsapp: "🟢 WhatsApp",
+  youtube: "▶️ YouTube", tiktok: "🎵 TikTok", threads: "🧵 Threads", linkedin: "💼 LinkedIn" };
+/** Мережі, для яких є сенс обирати мову: сторіс - мережі сторіс, рілс - мережі відео. */
+export const langNets = (st: Pick<MtState, "format">): string[] =>
+  st.format === "story" ? ["instagram", "facebook", "telegram", "whatsapp"] : ["instagram", "facebook", "youtube", "tiktok", "telegram", "threads", "linkedin"];
+const short = (l: string) => SUB_LANGS[l]?.short || l.toUpperCase();
+/** Якою мовою говорять у кліпах: обрано в сесії, інакше мова контенту бренду. */
+export const speechOf = (st: Pick<MtState, "speech" | "brandLang">): string => st.speech || st.brandLang || "uk";
+/** Версії, які зробить монтаж: мови мереж, відмінні від мови мовлення. */
+export function mtSubLangs(st: MtState): string[] {
+  return variantLangs(speechOf(st), langNets(st).map((n) => st.langs?.[n] || ""));
+}
+export function langsLine(st: MtState): string {
+  const sp = speechOf(st);
+  const own = langNets(st).filter((n) => st.langs?.[n] && st.langs[n] !== sp);
+  return `🌐 Говориш: ${short(sp)} · субтитри ${own.length ? `${own.map((n) => `${NET_ICON[n].split(" ")[1]} - ${short(st.langs![n])}`).join(", ")}, решта - ${short(sp)}` : `усюди ${short(sp)}`}` +
+    (own.length ? ` (ще ${mtSubLangs(st).length} ${plural(mtSubLangs(st).length, "версія", "версії", "версій")} ролика)` : "");
+}
+const LANG_CYCLE = ["", ...SUB_LANG_ORDER];
+function langsCard(st: MtState, brand = ""): { text: string; buttons: tg.TgButton[][] } {
+  const sp = speechOf(st);
+  const text = [
+    `🌐 **Мови субтитрів**${brand ? ` · 🏢 ${brand}` : ""}`,
+    "",
+    `🎙 Говориш: ${SUB_LANGS[sp]?.label || sp}${st.speech ? "" : " (мова бренду)"} - з цього розшифровую мову, і субтитри оригіналу - цією мовою.`,
+    "Для мережі можна обрати іншу мову: монтаж зробить ще одну версію ролика з перекладеними субтитрами (той самий час кожної фрази), і в мережу піде саме вона.",
+    `До ${3} додаткових мов на ролик. Назавжди для бренду - у кабінеті: Бренд → Візуал → «🎬 Стиль відео».`,
+  ].join("\n");
+  const rows: tg.TgButton[][] = [[{ text: `🎙 Говорю: ${SUB_LANGS[sp]?.short || sp}${st.speech ? "" : " (бренд)"} ▸`, data: "mt:sp" }]];
+  const nets = langNets(st);
+  for (let i = 0; i < nets.length; i += 2)
+    rows.push(nets.slice(i, i + 2).map((n) => ({ text: `${NET_ICON[n]}: ${st.langs?.[n] ? short(st.langs[n]) : `як говорю`} ▸`, data: `mt:sl:${n}` })));
+  rows.push([{ text: "← Готово", data: "mt:card" }]);
+  return { text, buttons: rows };
+}
+
 function mtCard(st: MtState, brand = "", endPreview: EndText | null = null): { text: string; buttons: tg.TgButton[][] } {
   const tts = ttsReady();
   const tpl = st.template || "standard";
   const total = st.clips.reduce((a, c) => a + (c.kind === "image" ? 3 : c.dur), 0);
   const list = st.clips.map((c, i) => `${i + 1}. ${c.kind === "image" ? "фото" : `відео ${dur(c.dur)}`}`).join(" · ");
   const text = [
-    `🎬 **Монтаж** · ${st.format === "story" ? "⚡ сторіс (Instagram і Facebook, частини до 60 с)" : "🎞 рілс"}`,
+    `🎬 **Монтаж** · ${st.format === "story" ? "⚡ сторіс (частини до 60 с)" : "🎞 рілс"}`,
     ...(brand ? [`🏢 Бренд: ${brand} (інший - /brand, сесія переїде разом)`] : []),
     st.clips.length ? `Кліпи (${st.clips.length}, ≈${dur(total)}): ${list}` : "Кліпів ще нема.",
     mtTextPlan(st, tts),
@@ -130,6 +175,7 @@ function mtCard(st: MtState, brand = "", endPreview: EndText | null = null): { t
     `🧩 Шаблон: ${TEMPLATES[tpl].label.replace(/^\S+\s/, "")} - ${TEMPLATES[tpl].hint}`,
     ...(tpl === "before_after" ? [baLine(st)] : []),
     `🪝 Гачок: ${hookLabel(st)} · 🔤 Субтитри: ${SUB_PRESETS[st.sub || "classic"].label.toLowerCase()}`,
+    langsLine(st),
     `🏁 Фінальна картка: ${st.end === false ? "без" : endPreview ? [endPreview.title, endPreview.sub].filter(Boolean).join(" · ") : "нема що показати (назва й нік бренду - у Бренд → Візуал)"}`,
     ...(clipsVoice(st) && tpl !== "process" ? [`✂️ Паузи й «еее» в кліпах, де говорять: ${st.cut === false ? "лишаю" : "вирізаю"}`] : []),
     `✨ Переходи: ${tpl === "talking" && !st.transition ? "без (шаблон)" : TRANSITIONS[st.transition || templatePlan(tpl).transition]} · 🎵 Музика: ${musicLabel(st)}${!st.music && !st.mood && templatePlan(tpl).mood && musicReady() ? ` (до шаблону пасує ${MUSIC_MOODS[templatePlan(tpl).mood!].label.split(" ").slice(1).join(" ").toLowerCase()})` : ""}`,
@@ -155,7 +201,7 @@ function mtCard(st: MtState, brand = "", endPreview: EndText | null = null): { t
   if (clipsVoice(st) && tpl !== "process") row.push({ text: st.cut === false ? "✂️ Паузи: лишаю ▸" : "✂️ Паузи: вирізаю ▸", data: "mt:cut" });
   row.push({ text: `✨ ${tpl === "talking" && !st.transition ? "без переходів" : TRANSITIONS[st.transition || templatePlan(tpl).transition]} ▸`, data: "mt:tr" });
   buttons.push(row);
-  buttons.push([{ text: `🎵 ${musicLabel(st)} ▸`, data: "mt:mus" }]);
+  buttons.push([{ text: `🎵 ${musicLabel(st)} ▸`, data: "mt:mus" }, { text: "🌐 Мови субтитрів ▸", data: "mt:langs" }]);
   // аудіофайл розпізнано не так - одна кнопка міняє роль
   if (st.music) buttons.push([{ text: "🔁 Це голос, а не музика", data: "mt:swap" }]);
   else if (st.voice?.file) buttons.push([{ text: "🔁 Це музика, а не голос", data: "mt:swap" }]);
@@ -184,7 +230,9 @@ const TR_ORDER: TransitionMode[] = ["fade", "slide", "zoom", "flash", "mix", "no
 
 async function showCard(ws: string, chatId: string, st: MtState, note = ""): Promise<void> {
   const style = await montageStyle(ws).catch(() => null);
-  const c = mtCard(st, await brandLabel(ws, chatId).catch(() => ""), await brandEndText(ws, style?.endText).catch(() => null));
+  const brand = await brandLabel(ws, chatId).catch(() => "");
+  if (!st.brandLang) st.brandLang = langCode(await getSettingText(ws, "output_language").catch(() => ""));
+  const c = st.view === "langs" ? langsCard(st, brand) : mtCard(st, brand, await brandEndText(ws, style?.endText).catch(() => null));
   await liveSend(ws, chatId, "montage", (note ? note + "\n\n" : "") + c.text, c.buttons);
 }
 
@@ -221,7 +269,8 @@ export function startMt(ws: string, chatId: string): Promise<void> {
     // 🎨 гачок, фінальна картка, паузи й субтитри - як у стилі відео бренду (картка каже, що саме буде)
     const style = await montageStyle(ws);
     const st: MtState = { chat: chatId, clips: [], voice: null, script: null, mode: "auto", format: "story", at: Date.now(),
-      template: "standard", hook: style.hook ? "auto" : "off", end: style.end, cut: style.cut, sub: style.subtitle, before: null };
+      template: "standard", hook: style.hook ? "auto" : "off", end: style.end, cut: style.cut, sub: style.subtitle, before: null,
+      speech: style.speech || "", langs: { ...style.langs } };
     await saveMt(ws, st);
     await showCard(ws, chatId, st);
   });
@@ -311,8 +360,11 @@ export async function montageMessage(ws: string, chatId: string, msg: any, _st: 
   });
 }
 
-/** Вибір мереж для нового поста: сторіс - Instagram і Facebook; рілс - вони ж (решту людина вмикає в картці). */
-async function netsFor(ws: string): Promise<string[]> {
+/** Вибір мереж для нового поста: сторіс - усі мережі сторіс (Instagram, Facebook, профіль Telegram, WhatsApp-статус);
+ *  рілс - Instagram і Facebook (решту людина вмикає в картці). */
+async function netsFor(ws: string, format: "story" | "reel" = "reel", langs: Record<string, string> = {}): Promise<string[]> {
+  // WhatsApp-статус - лише коли для нього обрано мову субтитрів (це й є «я туди ставлю»): бот потім пише людині
+  if (format === "story") return (await connectedNets(ws, { story: true })).filter((n) => n !== "whatsapp" || !!langs.whatsapp);
   return (await connectedNets(ws)).filter((n) => n === "instagram" || n === "facebook");
 }
 
@@ -321,7 +373,8 @@ export function mtOpts(st: MtState, tts: boolean): { opts: MontageOpts; aiText: 
   const h = st.hook || "auto";
   const base = { clips, format: st.format, transition: st.transition || null, music: st.music?.id || null, musicMood: st.music ? null : st.mood || null,
     template: st.template || "standard", hook: h === "off" ? false : h === "auto" ? true : h, endCard: st.end !== false,
-    cutPauses: st.cut !== false, subStyle: st.sub || null, beforeCount: st.before ?? null } as const;
+    cutPauses: st.cut !== false, subStyle: st.sub || null, beforeCount: st.before ?? null,
+    lang: st.speech || null, subLangs: mtSubLangs(st) } as const;
   if (st.voice) return { opts: { ...base, voice: "audio", audio: st.voice.id }, aiText: null };
   if (st.script) {
     if (tts) return { opts: { ...base, voice: "tts", script: st.script }, aiText: null };
@@ -344,6 +397,23 @@ async function montageTap(ws: string, chatId: string, data: string, cbq: any, to
   const [, cmd, arg] = data.split(":");
   if (cmd === "cancel") { await clearMt(ws); await tg.answerCallbackQuery(token, cbq.id, "Скасовано"); await liveSend(ws, chatId, "montage", "🎬 Монтаж скасовано. Кліпи лишились у медіатеці. /montage - почати знову."); return true; }
   if (cmd === "fmt") { st.format = arg === "reel" ? "reel" : "story"; await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id); await showCard(ws, chatId, st); return true; }
+  // 🌐 мови субтитрів: окрема картка; мова мережі й мова мовлення - по колу
+  if (cmd === "langs" || cmd === "card") { st.view = cmd === "langs" ? "langs" : null; await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id); await showCard(ws, chatId, st); return true; }
+  if (cmd === "sl" && arg && langNets(st).includes(arg)) {
+    const cur = st.langs?.[arg] || "";
+    let next = LANG_CYCLE[(LANG_CYCLE.indexOf(cur) + 1) % LANG_CYCLE.length];
+    if (next && next === speechOf(st)) next = LANG_CYCLE[(LANG_CYCLE.indexOf(next) + 1) % LANG_CYCLE.length];   // «як говорю» і так це
+    st.langs = { ...(st.langs || {}), [arg]: next };
+    // більше 3 версій не робимо - кажемо, а не мовчки ріжемо
+    if (next && !mtSubLangs(st).includes(next)) { st.langs[arg] = ""; await tg.answerCallbackQuery(token, cbq.id, "Більше 3 мов на один ролик не роблю - зніми іншу мову"); }
+    else await tg.answerCallbackQuery(token, cbq.id, `${NET_ICON[arg]}: ${next ? SUB_LANGS[next].label : "як говорю"}`);
+    await saveMt(ws, st); await showCard(ws, chatId, st); return true;
+  }
+  if (cmd === "sp") {
+    const cur = st.speech || "";
+    st.speech = LANG_CYCLE[(LANG_CYCLE.indexOf(cur) + 1) % LANG_CYCLE.length];
+    await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id, `Говорю: ${st.speech ? SUB_LANGS[st.speech].label : "мовою бренду"}`); await showCard(ws, chatId, st); return true;
+  }
   if (cmd === "mode") { st.mode = arg === "ai-voice" ? "ai-voice" : arg === "captions" ? "captions" : "auto"; st.voice = null; st.script = null; await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id); await showCard(ws, chatId, st); return true; }
   if (cmd === "clear") { st.voice = null; st.script = null; st.mode = "auto"; await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id); await showCard(ws, chatId, st); return true; }
   if (cmd === "undo") { st.clips.pop(); await saveMt(ws, st); await tg.answerCallbackQuery(token, cbq.id, "Прибрав останній кліп"); await showCard(ws, chatId, st); return true; }
@@ -399,10 +469,10 @@ async function montageTap(ws: string, chatId: string, data: string, cbq: any, to
   }
   const tts = ttsReady();
   const { opts, aiText } = mtOpts(st, tts);
-  const nets = await netsFor(ws);
+  const nets = await netsFor(ws, st.format, st.langs || {});
   await tg.answerCallbackQuery(token, cbq.id, "Монтую…");
   const job = await startMontage(ws, opts, {
-    create: { nets, text: "" },
+    create: { nets, text: "", subLangs: st.langs || {} },
     aiText,
     notify: async (r: MontageResult | null, err?: string) => {
       if (!r) { await tg.sendMessage(token, chatId, `⚠️ ${err || "Монтаж не вдався"}\n\nКліпи на місці - можна змінити й натиснути «✂️ Змонтувати» ще раз.`).catch(() => {}); return; }
@@ -423,7 +493,8 @@ async function sendResult(ws: string, chatId: string, r: MontageResult, token: s
     r.hook ? `🪝 «${r.hook}»` : "", r.cut ? `✂️ паузи -${String(r.cut.saved).replace(".", ",")} с` : "", r.endCard ? "🏁 фінальна картка" : "",
     r.cover ? "🖼 обкладинка Reels - кадр із гачком (інший кадр - у кабінеті)" : "",
     r.transition && r.transition !== "none" ? `✨ ${TRANSITIONS[r.transition]}` : "", r.music ? `🎵 ${r.music}` : "",
-    r.smart ? `🎯 найкращі моменти: ${r.smart} ${plural(r.smart, "кліп", "кліпи", "кліпів")}` : ""].filter(Boolean).join(" · ");
+    r.smart ? `🎯 найкращі моменти: ${r.smart} ${plural(r.smart, "кліп", "кліпи", "кліпів")}` : "",
+    r.variants?.length ? `🌐 субтитри ${short(r.lang || "")} + версії ${r.variants.map((v) => short(v.lang)).join(", ")}` : ""].filter(Boolean).join(" · ");
   const many = r.videos.length > 1;
   for (let k = 0; k < r.videos.length; k++) {
     const v = r.videos[k];

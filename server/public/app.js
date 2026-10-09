@@ -21,17 +21,17 @@ let UI_LANG=(()=>{ const q=new URLSearchParams(location.search), r=q.get('review
   try{ if(r==='tiktok'||l==='en') localStorage.setItem('kg_lang','en'); if(r==='off'||l==='uk') localStorage.removeItem('kg_lang'); return localStorage.getItem('kg_lang')==='en'?'en':'uk'; }
   catch(e){ return (r==='tiktok'||l==='en')?'en':'uk'; } })();
 function L(ua,en){ return UI_LANG==='en'?en:ua; }
-const NETS=[['telegram','Telegram'],['instagram','Instagram'],['facebook','Facebook'],['threads','Threads'],['linkedin','LinkedIn'],['youtube','YouTube'],['tiktok','TikTok']];
+const NETS=[['telegram','Telegram'],['instagram','Instagram'],['facebook','Facebook'],['threads','Threads'],['linkedin','LinkedIn'],['youtube','YouTube'],['tiktok','TikTok'],['whatsapp','WhatsApp']];
 // 🎬 мережі лише для відео: текстовому чи фото-посту їх не пропонуємо (публікація все одно відмовила б)
 const VIDEO_NETS=['youtube','tiktok'];
 // 🎨 формат контент-одиниці: третій вимір поруч із рубрикою (про що) і каналом (куди)
 const FMT_META={post:['📝','Пост','звичайний текстовий пост'],carousel:['🖼','Карусель','кілька слайдів, які читач перегортає - найкраще збирає збереження'],reel:['🎬','Рілс','короткий вертикальний відео-сценарій - найкраще охоплення'],story:['⚡','Сторіс','ефемерний кадр на 24 години']};
 const FMT_KEYS=['post','carousel','reel','story'];
-const NETVAR={telegram:'--tg',instagram:'--ig',facebook:'--fb',threads:'--th',linkedin:'--li',youtube:'--yt',tiktok:'--tt'};
+const NETVAR={telegram:'--tg',instagram:'--ig',facebook:'--fb',threads:'--th',linkedin:'--li',youtube:'--yt',tiktok:'--tt',whatsapp:'--wa'};
 // 💬 перший коментар: куди він іде і межа довжини в мережі (відповідь у Threads - такий самий пост на 500)
 const FC_NETS=['instagram','facebook','linkedin','threads'];
 const FC_MAX={instagram:2200,facebook:8000,linkedin:1250,threads:500};
-const NETICON={telegram:'M22 4L2 11l6 2 2 6 3-4 5 4 4-15z',instagram:'M7 3h10a4 4 0 014 4v10a4 4 0 01-4 4H7a4 4 0 01-4-4V7a4 4 0 014-4zm5 5a4 4 0 100 8 4 4 0 000-8z',facebook:'M14 9V7c0-1 .5-1.5 1.5-1.5H17V2h-3c-2.5 0-4 1.5-4 4v3H7v3h3v9h4v-9h3l.5-3H14z',threads:'M12 3c5 0 8 3 8 9s-3 9-8 9-8-3-8-9c0-2 .5-3.5 1.5-4.5',linkedin:'M4 4h4v16H4V4zm2-1a2 2 0 110-4 2 2 0 010 4zm5 5h4v2c.8-1.3 2.2-2.3 4-2.3 3 0 5 2 5 5.3V20h-4v-8c0-1.5-.8-2.5-2-2.5s-2 1-2 2.5v8h-5V8z',youtube:'M12 4c7 0 9 1 9 8s-2 8-9 8-9-1-9-8 2-8 9-8zm-2 4.5v7l6-3.5-6-3.5z',tiktok:'M16 3c.4 2.6 2 4.2 4.6 4.5v3c-1.8 0-3.4-.6-4.6-1.5v6.8c0 3.9-2.8 6.2-6.1 6.2A5.9 5.9 0 013 16.2c0-3.5 2.7-6 6.4-5.8v3.1c-1.8-.3-3.3.8-3.3 2.6 0 1.7 1.3 2.9 2.9 2.9 1.8 0 3-1.3 3-3.3V3h4z'};
+const NETICON={whatsapp:'M12 3a9 9 0 00-7.8 13.5L3 21l4.6-1.2A9 9 0 1012 3zm-3 5c.3 0 .6 0 .8.5l.9 2c.1.3 0 .5-.2.7l-.5.6c.6 1.2 1.6 2.2 2.8 2.8l.6-.5c.2-.2.4-.3.7-.2l2 .9c.4.2.5.5.5.8 0 1-.9 2-2 2-3.9 0-7-3.1-7-7 0-1.1 1-2 2-2z',telegram:'M22 4L2 11l6 2 2 6 3-4 5 4 4-15z',instagram:'M7 3h10a4 4 0 014 4v10a4 4 0 01-4 4H7a4 4 0 01-4-4V7a4 4 0 014-4zm5 5a4 4 0 100 8 4 4 0 000-8z',facebook:'M14 9V7c0-1 .5-1.5 1.5-1.5H17V2h-3c-2.5 0-4 1.5-4 4v3H7v3h3v9h4v-9h3l.5-3H14z',threads:'M12 3c5 0 8 3 8 9s-3 9-8 9-8-3-8-9c0-2 .5-3.5 1.5-4.5',linkedin:'M4 4h4v16H4V4zm2-1a2 2 0 110-4 2 2 0 010 4zm5 5h4v2c.8-1.3 2.2-2.3 4-2.3 3 0 5 2 5 5.3V20h-4v-8c0-1.5-.8-2.5-2-2.5s-2 1-2 2.5v8h-5V8z',youtube:'M12 4c7 0 9 1 9 8s-2 8-9 8-9-1-9-8 2-8 9-8zm-2 4.5v7l6-3.5-6-3.5z',tiktok:'M16 3c.4 2.6 2 4.2 4.6 4.5v3c-1.8 0-3.4-.6-4.6-1.5v6.8c0 3.9-2.8 6.2-6.1 6.2A5.9 5.9 0 013 16.2c0-3.5 2.7-6 6.4-5.8v3.1c-1.8-.3-3.3.8-3.3 2.6 0 1.7 1.3 2.9 2.9 2.9 1.8 0 3-1.3 3-3.3V3h4z'};
 const CP_LABEL={telegram:'Telegram',instagram:'Instagram',threads:'Threads',facebook:'Facebook'};
 const STEP  = {1:'extract_ideas',3:'drafts',4:'tone',5:'format',6:'deai',7:'strategy'};
 const ORDER = [1,3,4,5,6,7];
@@ -719,7 +719,7 @@ async function renderRhythm(){
   if(!Object.keys(ChanStatus||{}).length){ try{ await loadChanStatus(); }catch(e){} }
   let rh={}; try{ const rows=await api('/settings'); const m=Object.fromEntries(rows.map(r=>[r.key,r.content])); rh=JSON.parse(m.channel_rhythm||'{}')||{}; }catch(e){ rh={}; }
   let bt=null; try{ bt=await loadBestTimes(); }catch(e){ bt=null; }
-  const nets=NETS.filter(n=>ChanStatus[n[0]]);
+  const nets=CONN_NETS().filter(n=>ChanStatus[n[0]]);
   if(!nets.length){ box.innerHTML='<div style="font-size:12.5px;color:var(--faint)">Спершу підключи мережі в Налаштування → Канали.</div>'; return; }
   // компактні рядки; кілька часів на мережу (Threads 2-3 рази/день): часи ротуються між постами
   // ⏰ зверху - чи ставить AI-розподіл пости в найкращий час з власної статистики (типово так)
@@ -936,7 +936,7 @@ async function loadToday(){
   const cmOn=!!(th||chStatus.instagram||chStatus.facebook||chStatus.threads); // 💬 є де читати коментарі
   const chanHtml='<div class="panel" style="margin-top:16px"><div style="font-weight:700;font-size:14.5px;margin-bottom:10px">📡 Канали публікації</div>'
     +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
-    +NETS.map(([k,label])=>{ const on=!!chStatus[k]; const n=netT[k]||0;
+    +CONN_NETS().map(([k,label])=>{ const on=!!chStatus[k]; const n=netT[k]||0;
       return '<div class="tdChan" data-net="'+k+'" style="flex:1;min-width:130px;border:1px solid var(--line);border-radius:var(--r);padding:12px;cursor:pointer'+(on?'':';opacity:.75')+'">'
         +'<div style="display:flex;align-items:center;gap:8px"><span style="width:26px;height:26px;border-radius:50%;flex:none;display:grid;place-items:center;background:'+(on?'var('+NETVAR[k]+')':'var(--line2)')+'"><svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="'+NETICON[k]+'"></path></svg></span><b style="font-size:13.5px">'+label+'</b></div>'
         +(on?'<div style="font-size:12px;color:var(--muted);margin-top:6px">'+n+' сьогодні · <span style="color:var(--brand)">✓ підключено</span></div>'
@@ -1739,7 +1739,7 @@ function renderGoal(){ const box=$('goalChips'); if(!box) return;
   box.innerHTML=GOALS.map(g=>'<div class="cchip'+(CurGoal===g[0]?' on':'')+'" data-g="'+g[0]+'">'+g[1]+'</div>').join('');
   box.querySelectorAll('[data-g]').forEach(c=>c.onclick=async()=>{ CurGoal=CurGoal===c.dataset.g?'':c.dataset.g; await saveSetting('primary_goal',CurGoal); renderGoal(); }); }
 function renderCta(){ const box=$('ctaRows'); if(!box) return;
-  box.innerHTML=NETS.map(n=>{ const k=n[0],c=CtaCfg[k]||{};
+  box.innerHTML=CONN_NETS().map(n=>{ const k=n[0],c=CtaCfg[k]||{};
     return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap"><span style="min-width:88px;font-size:13px;font-weight:600">'+n[1]+'</span>'
       +'<select class="txt ctaType" data-net="'+k+'" style="width:auto;padding:7px 9px;display:inline-block">'+CTA_TYPES.map(t=>'<option value="'+t[0]+'"'+((c.type||'link')===t[0]?' selected':'')+'>'+t[1]+'</option>').join('')+'</select>'
       +'<input class="txt ctaVal" data-net="'+k+'" placeholder="https://… / слово ГАЙД / дія" value="'+esc(c.value||'')+'" style="flex:1;min-width:180px;display:inline-block;padding:7px 9px">'
@@ -1751,7 +1751,7 @@ if($('ctaSave')) $('ctaSave').onclick=async()=>{ const cfg={};
 let FmtCfg={};
 const FMT_LENS=[['','Стандарт (плейбук мережі)'],['short','Короткий (50-150 симв, 1-2 речення)'],['long','Довгий (ближче до ліміту)']];
 function renderFmt(){ const box=$('fmtRows'); if(!box) return;
-  box.innerHTML=NETS.map(n=>{ const k=n[0],c=FmtCfg[k]||{};
+  box.innerHTML=CONN_NETS().map(n=>{ const k=n[0],c=FmtCfg[k]||{};
     return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap"><span style="min-width:88px;font-size:13px;font-weight:600">'+n[1]+'</span>'
       +'<select class="txt fmtLen" data-net="'+k+'" style="width:auto;padding:7px 9px;display:inline-block">'+FMT_LENS.map(t=>'<option value="'+t[0]+'"'+((c.len||'')===t[0]?' selected':'')+'>'+t[1]+'</option>').join('')+'</select>'
       +'<input class="txt fmtNote" data-net="'+k+'" placeholder="стиль для цієї мережі (напр.: одне речення, під тренд, питання в кінці)" value="'+esc(c.note||'')+'" style="flex:1;min-width:180px;display:inline-block;padding:7px 9px">'
@@ -2228,11 +2228,26 @@ async function loadMontageStyle(){
   $('mvColor').value=st.color||'#FFD23F'; $('mvColorHex').value=st.color||'#FFD23F';
   $('mvHook').checked=st.hook!==false; $('mvCut').checked=st.cut!==false; $('mvEnd').checked=st.end!==false;
   $('mvEndText').value=st.endText||'';
-  mvPreview(caps.endPreview||null);
   let tm=null;
   const save=()=>{ clearTimeout(tm); tm=setTimeout(async()=>{
-    try{ const r=await api('/montage/style',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({subtitle:$('mvSub').value,position:$('mvPos').value,color:$('mvColorHex').value,hook:$('mvHook').checked,cut:$('mvCut').checked,end:$('mvEnd').checked,endText:$('mvEndText').value})});
-      if(r&&r.color){ $('mvColor').value=r.color; $('mvColorHex').value=r.color; } mvPreview(r&&r.endPreview||null); flashSaved(); }catch(e){ flash('⚠ '+e.message); } },400); };
+    try{ const r=await api('/montage/style',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({subtitle:$('mvSub').value,position:$('mvPos').value,color:$('mvColorHex').value,hook:$('mvHook').checked,cut:$('mvCut').checked,end:$('mvEnd').checked,endText:$('mvEndText').value,speech:$('mvSpeech').value,langs:st.langs||{}})});
+      if(r&&r.color){ $('mvColor').value=r.color; $('mvColorHex').value=r.color; } if(r&&r.langs) st.langs=r.langs; mvPreview(r&&r.endPreview||null); flashSaved(); }catch(e){ flash('⚠ '+e.message); } },400); };
+  // 🌐 мови: якою говориш (типово - мова бренду) і мова субтитрів кожної мережі (типово - як говориш)
+  const langs=caps.subLangs||[], bl=caps.brandLang||'uk', lname=(id)=>{ const x=langs.find(l=>l.id===id); return x?x.label:id; };
+  $('mvSpeech').innerHTML='<option value="">як мова бренду ('+esc(lname(bl))+')</option>'+langs.map(l=>'<option value="'+l.id+'">'+esc(l.flag+' '+l.label)+'</option>').join('');
+  $('mvSpeech').value=st.speech||'';
+  const NETUA={instagram:'Instagram',facebook:'Facebook',telegram:'Telegram',whatsapp:'WhatsApp',threads:'Threads',linkedin:'LinkedIn',youtube:'YouTube',tiktok:'TikTok'};
+  const sp=()=>$('mvSpeech').value||bl;
+  const mvLangHint=()=>{ const ex=[...new Set(Object.values(st.langs||{}).filter(x=>x&&x!==sp()))];
+    $('mvLangHint').textContent=ex.length>3?'⚠ Більше 3 додаткових мов на ролик не робимо - зайві мережі отримають оригінал.'
+      :ex.length?'Кожен монтаж зробить ще '+ex.length+' '+(ex.length===1?'версію':'версії')+' ('+ex.map(lname).join(', ')+') з перекладеними субтитрами - той самий час кожної фрази, гачок і мітки «до/після» теж. У мережу піде версія її мови.'
+      :'Інша мова для мережі - монтаж зробить ще одну версію ролика з перекладеними субтитрами (той самий час кожної фрази; гачок і мітки «до/після» - теж), і в мережу піде саме вона. До 3 додаткових мов.'; };
+  const netRows=()=>{ $('mvNetLangs').innerHTML=(caps.subNets||[]).map(n=>'<label class="mvNL"><span>'+esc(NETUA[n]||n)+'</span><select data-mvl="'+n+'"><option value="">як говориш ('+esc(lname(sp()))+')</option>'
+      +langs.filter(l=>l.id!==sp()).map(l=>'<option value="'+l.id+'">'+esc(l.flag+' '+l.label)+'</option>').join('')+'</select></label>').join('');
+    $('mvNetLangs').querySelectorAll('[data-mvl]').forEach(s=>{ const v=(st.langs||{})[s.dataset.mvl]||''; s.value=v===sp()?'':v; s.onchange=()=>{ st.langs=Object.assign({},st.langs||{}); if(s.value) st.langs[s.dataset.mvl]=s.value; else delete st.langs[s.dataset.mvl]; mvLangHint(); save(); }; }); };
+  netRows(); mvLangHint();
+  mvPreview(caps.endPreview||null);
+  $('mvSpeech').onchange=()=>{ netRows(); mvLangHint(); save(); };
   ['mvSub','mvPos','mvHook','mvCut','mvEnd'].forEach(id=>{ $(id).onchange=()=>{ mvPreview(); save(); }; });
   $('mvColor').oninput=()=>{ $('mvColorHex').value=$('mvColor').value.toUpperCase(); mvPreview(); save(); };
   $('mvColorHex').oninput=()=>{ const v=$('mvColorHex').value.trim(); if(/^#?[0-9a-f]{6}$/i.test(v)){ $('mvColor').value=(v[0]==='#'?v:'#'+v); mvPreview(); save(); } };
@@ -2512,7 +2527,16 @@ function ytPrivName(k){ return L(YT_PRIV[k]||k, YT_PRIV_EN[k]||k); }
 // назва відео YouTube з тексту: перший змістовний рядок без хештегів і посилань (як робить сервер)
 function ytTitleFrom(t){ for(const line of String(t||'').split('\n')){ const x=line.replace(/https?:\/\/\S+/g,'').replace(/(^|\s)#[^\s#]+/g,' ').replace(/[<>]/g,'').replace(/\s+/g,' ').trim(); if(x.replace(/[^\p{L}\p{N}]/gu,'').length>=2) return x.length>100?x.slice(0,99).replace(/\s+\S*$/,'')+'…':x; } return ''; }
 // ⚡ мережі, що приймають сторіс через API (решта для формату «Сторіс» вимикаються)
-const STORY_NETS=['instagram','facebook'];
+// 📱 мережі сторіс: Instagram і Facebook, профіль Telegram (через Telegram Business) і WhatsApp-статус (кадри шле бот)
+const STORY_NETS=['instagram','facebook','telegram','whatsapp'];
+// чи готова мережа: у сторіс Telegram - це профіль людини (Telegram Business), а не канали
+const netConn=(k,story)=> story&&k==='telegram' ? !!ChanStatus.tgStory : !!ChanStatus[k];
+// мережі зі своїм підключенням, ритмом, закликом і форматом тексту (WhatsApp-статус - лише доставка сторіс ботом)
+function CONN_NETS(){ return NETS.filter(n=>n[0]!=='whatsapp'); }
+// 🔤 мови субтитрів (версії відео з монтажу)
+const LANGN={uk:'українська',en:'англійська',cs:'чеська',sk:'словацька',pl:'польська',de:'німецька'};
+const LANGBY={uk:'українською',en:'англійською',cs:'чеською',sk:'словацькою',pl:'польською',de:'німецькою'};
+const LANGS=['uk','en','cs','sk','pl','de'];
 // скільки символів мережа показує ДО «… ще»/«показати повністю» (візуальний згин, як у застосунках); telegram - без згину
 const NETFOLD={instagram:125,facebook:280,threads:320,linkedin:210,tiktok:90,youtube:100};
 const NETMORE={instagram:'… ще',facebook:'… ще',threads:'Показати повністю',linkedin:'…more',tiktok:'більше',youtube:'…більше'};
@@ -2582,7 +2606,7 @@ async function openComposer(postId, opts){
   const C=JSON.parse(JSON.stringify(full.channels||{}));
   // якщо жодна мережа не обрана - вмикаємо всі підключені й ще не надіслані (YouTube і TikTok - лише для відео)
   const vid0=(full.media||[]).length===1&&full.media[0]&&full.media[0].kind==='video'&&full.format!=='story';
-  if(!opts.blank&&!Object.keys(C).some(k=>C[k]&&C[k].on)) NETS.forEach(n=>{ if(ChanStatus[n[0]]&&!sentSet.has(n[0])&&(vid0||!VIDEO_NETS.includes(n[0]))){ C[n[0]]=C[n[0]]||{text:''}; C[n[0]].on=true; } });
+  if(!opts.blank&&!Object.keys(C).some(k=>C[k]&&C[k].on)) NETS.forEach(n=>{ if(n[0]!=='whatsapp'&&ChanStatus[n[0]]&&!sentSet.has(n[0])&&(vid0||!VIDEO_NETS.includes(n[0]))){ C[n[0]]=C[n[0]]||{text:''}; C[n[0]].on=true; } });
   // надіслані мережі завжди позначені як обрані (щоб було видно в прев'ю)
   sentSet.forEach(k=>{ C[k]=C[k]||{text:''}; C[k].on=true; });
   let master=full.content||''; let mediaFilename=full.media_filename||null; let rubric=full.rubric||'';
@@ -2603,6 +2627,7 @@ async function openComposer(postId, opts){
       +'<div class="cmp-left">'
         +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Канали</div><div id="cmpChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>'
         +'<div id="cmpAccs"></div>'
+        +'<div id="cmpTgStory" style="display:none;margin:0 0 12px;padding:9px 11px;border:1px dashed var(--line);border-radius:10px;font-size:12.5px"></div>'
         +'<div id="cmpThreadWrap" style="display:none;margin:0 0 12px;padding:9px 11px;border:1px dashed var(--line);border-radius:10px">'
           +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
             +'<button class="netchip" id="cmpThread" title="Опублікувати серією повʼязаних постів: перший = гачок, далі відповіді автора">🧵 Гілкою</button>'
@@ -2743,7 +2768,7 @@ async function openComposer(postId, opts){
   const sentAcc=(k,id)=>sentTo.find(x=>x.net===k&&x.account===id)||null;
   const accName=(k,id)=>{ const a=accList(k).find(x=>x.id===id); if(a) return a.name; const x=sentAcc(k,id); return (x&&x.name)||((k==='telegram'?'канал …':'акаунт …')+String(id).slice(-4)); };
   // мережа вся надіслана: кожен акаунт, куди пост має піти, його отримав (мережа з одним акаунтом - як і було)
-  function netDone(k){ if(!ACC_NETS.includes(k)||!accList(k).length) return sentSet.has(k); const ids=tgtIds(k); return ids.length?ids.every(id=>sentAcc(k,id)):sentSet.has(k); }
+  function netDone(k){ if(!ACC_NETS.includes(k)||!accList(k).length||(k==='telegram'&&isStory())) return sentSet.has(k); const ids=tgtIds(k); return ids.length?ids.every(id=>sentAcc(k,id)):sentSet.has(k); }
   // вибір акаунтів показуємо, коли є з чого вибирати (2+), або обраний акаунт уже прибрано з бренду
   const multi=(k)=>ACC_NETS.includes(k)&&(accList(k).length>1||selIds(k).some(id=>!accList(k).some(a=>a.id===id)));
   // яким акаунтом підписати прев'ю (як у самих мережах - без @): перший, куди пост піде
@@ -2754,7 +2779,8 @@ async function openComposer(postId, opts){
   function setAccs(k,ids){ C[k]=C[k]||{text:''}; delete C[k].account; const d=defIds(k);
     if(ids.length===d.length&&ids.every(x=>d.includes(x))) delete C[k].accounts; else C[k].accounts=ids; }
   function renderAccs(){ const box=ov.querySelector('#cmpAccs'); if(!box) return;
-    const nets=ACC_NETS.filter(k=>C[k]&&C[k].on&&multi(k)&&!(isStory()&&!STORY_NETS.includes(k)));
+    // у сторіс Telegram - це профіль людини, а не канали: вибору каналів там нема
+    const nets=ACC_NETS.filter(k=>C[k]&&C[k].on&&multi(k)&&!(isStory()&&(!STORY_NETS.includes(k)||k==='telegram')));
     box.style.display=nets.length?'':'none';
     box.innerHTML=nets.map(k=>{ const sel=tgtIds(k), list=accList(k);
       // усі варіанти: акаунти бренду, обрані, яких уже нема (червоним), і ті, куди пост уже вийшов
@@ -2776,10 +2802,12 @@ async function openComposer(postId, opts){
       else cur=[...cur,id];
       setAccs(k,cur); renderChips(); renderPrev(); }); }
   function renderChips(){ const box=ov.querySelector('#cmpChips'); const thOn=!!(C.threads&&C.threads.on&&C.threads.thread);
-    box.innerHTML=NETS.map(n=>{ const k=n[0]; const on=C[k]&&C[k].on; const conn=ChanStatus[k];
+    box.innerHTML=NETS.map(n=>{ const k=n[0]; const on=C[k]&&C[k].on; const conn=netConn(k,isStory());
       // sent - пост уже вийшов у мережу хоч одним акаунтом (мережу вже не зняти); done - усіма обраними
       const sent=sentSet.has(k), done=netDone(k);
-      const storyOff=isStory()&&!STORY_NETS.includes(k); // сторіс - лише Instagram і Facebook
+      // 📲 WhatsApp - лише статус (сторіс): у звичайному пості чіпа не показуємо зовсім (хіба вже обраний)
+      if(k==='whatsapp'&&!isStory()&&!on&&!sent) return '';
+      const storyOff=isStory()&&!STORY_NETS.includes(k); // сторіс - Instagram, Facebook, профіль Telegram і WhatsApp-статус
       // 🎬 YouTube і TikTok - лише відео: без відео в пості мережу не обрати (а обрану - можна зняти)
       const vidOff=VIDEO_NETS.includes(k)&&!isVideo()&&!sent;
       const dimmed=(thOn&&k!=='threads')||storyOff||(vidOff&&!on); // режим гілки: серія їде ЛИШЕ в Threads, решта мереж затінені
@@ -2795,7 +2823,14 @@ async function openComposer(postId, opts){
       // клікабельним, щоб її можна було ЗНЯТИ - інакше «не можу зняти Telegram» (фідбек тестера).
       const lockOff=sent||dimmed||(!conn&&!on);
       const warn=on&&(!conn||vidOff);
-      const chip='<button class="netchip'+(on&&!dimmed?' on':'')+(warn?' warn':'')+'" data-net="'+k+'"'+(lockOff?' disabled':'')+' style="'+(dimmed?'opacity:.35':'')+'" title="'+(sent?(done?'вже опубліковано':'опубліковано не в усі обрані акаунти - решту можна опублікувати'):(storyOff?'сторіс через API приймають лише Instagram і Facebook':(vidOff?(on?n[1]+' приймає лише відео - прикріпи відео («🎬 Відео») або клікни, щоб зняти':'лише для відео-поста: прикріпи відео («🎬 Відео»)'):(dimmed?'у режимі гілки пост їде лише в Threads (вимкни 🧵, щоб обрати інші мережі)':(conn?'':(on?'мережа не підключена - клік, щоб зняти її з поста':'не підключено'))))))+'">'+(sent?(done?'✓ ':'◐ '):'')+(warn?'⚠ ':'')+n[1]+'</button>';
+      const why=sent?(done?'вже опубліковано':'опубліковано не в усі обрані акаунти - решту можна опублікувати')
+        :storyOff?'сторіс приймають Instagram, Facebook, профіль Telegram і WhatsApp-статус'
+        :(isStory()&&k==='telegram'&&!conn)?'сторіс у Telegram ідуть у твій профіль через Telegram Business - підключи: Налаштування → Канали → Telegram → «📲 Сторіс у профілі»'
+        :(isStory()&&k==='whatsapp'&&!conn)?'WhatsApp-статус: кадри надішле тобі бот - спершу «Підключити наш бот» (Налаштування → Канали)'
+        :vidOff?(on?n[1]+' приймає лише відео - прикріпи відео («🎬 Відео») або клікни, щоб зняти':'лише для відео-поста: прикріпи відео («🎬 Відео»)')
+        :dimmed?'у режимі гілки пост їде лише в Threads (вимкни 🧵, щоб обрати інші мережі)'
+        :conn?'':(on?'мережа не підключена - клік, щоб зняти її з поста':'не підключено');
+      const chip='<button class="netchip'+(on&&!dimmed?' on':'')+(warn?' warn':'')+'" data-net="'+k+'"'+(lockOff?' disabled':'')+' style="'+(dimmed?'opacity:.35':'')+'" title="'+esc(why)+'">'+(sent?(done?'✓ ':'◐ '):'')+(warn?'⚠ ':'')+n[1]+'</button>';
       return '<span class="netgrp">'+chip+seg+rev+'</span>'; }).join('');
     box.querySelectorAll('.netchip').forEach(b=>{ if(b.disabled) return; b.onclick=()=>{ const k=b.dataset.net; C[k]=C[k]||{text:''}; C[k].on=!C[k].on; renderChips(); renderPrev(); if(isVideo()) renderMedia(); }; });
     box.querySelectorAll('[data-adapt]').forEach(b=>{ if(b.disabled) return; b.onclick=()=>adaptOne(b.dataset.adapt,b); });
@@ -2812,7 +2847,18 @@ async function openComposer(postId, opts){
         else if(thSnap){ thSnap.forEach(k=>{ if(C[k]&&!sentSet.has(k)) C[k].on=true; }); thSnap=null; }
         renderChips(); renderPrev(); };
       nb.onclick=()=>{ C.threads.number=C.threads.number===false?true:false; renderChips(); renderPrev(); }; }
-    renderAccs(); renderVid(); }
+    renderAccs(); renderVid(); renderTgSt(); }
+  // ✈️ сторіс у профілі Telegram: скільки живе, чи лишати в профілі, підпис (лише перший кадр)
+  function renderTgSt(){ const box=ov.querySelector('#cmpTgStory'); if(!box) return;
+    const show=isStory()&&C.telegram&&C.telegram.on&&!netDone('telegram'); box.style.display=show?'':'none'; if(!show) return;
+    const t=C.telegram, h=[6,12,24,48].includes(Number(t.story_hours))?Number(t.story_hours):24;
+    box.innerHTML='<b>✈️ Сторіс у Telegram</b> '+(ChanStatus.tgStory?'<span style="color:var(--muted)">у профіль '+esc(ChanStatus.tgStory.label)+'</span>':'<span style="color:var(--danger)">⚠ профіль не підключено (Канали → Telegram → «📲 Сторіс у профілі»)</span>')
+      +'<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px"><label>живе <select id="cmpTgH" class="txt" style="width:auto;padding:4px 8px;display:inline-block">'+[6,12,24,48].map(x=>'<option value="'+x+'"'+(x===h?' selected':'')+'>'+x+' год</option>').join('')+'</select></label>'
+      +'<label style="display:flex;gap:5px;align-items:center"><input type="checkbox" id="cmpTgKeep"'+(t.story_keep===true?' checked':'')+'> лишити в профілі після цього</label></div>'
+      +'<input id="cmpTgCap" class="txt" maxlength="2048" style="margin-top:6px;font-size:12.5px" placeholder="Підпис під сторіс у Telegram (необовʼязково)" value="'+esc(t.story_caption||'')+'">';
+    box.querySelector('#cmpTgH').onchange=(e)=>{ C.telegram.story_hours=Number(e.target.value); };
+    box.querySelector('#cmpTgKeep').onchange=(e)=>{ C.telegram.story_keep=e.target.checked; };
+    box.querySelector('#cmpTgCap').oninput=(e)=>{ C.telegram.story_caption=e.target.value; }; }
   // ----- медіа (ліва панель) -----
   // 🖼 смужка кадрів: обкладинка першою, ✕ прибрати, ‹ › переставити, «＋» додати ще
   function setMedia(list){ media=(list||[]).filter(m=>m&&m.filename); mediaFilename=media.length?media[0].filename:null; }
@@ -2830,13 +2876,31 @@ async function openComposer(postId, opts){
     if(on('linkedin')&&d&&(d<3||d>1800)) w.push('LinkedIn - від 3 с до 30 хв');
     if(on('instagram')&&v.width&&v.height&&v.width>v.height) w.push('горизонтальне відео в Reels покажеться з полями - найкраще 9:16');
     return w.join(' · '); }
+  // 🔤 своє відео без тексту - «Додати субтитри»: розшифрую мову й накладу субтитри (і версії мовами мереж зі «Стилю відео»)
+  function subsBtn(){ const raw=media.filter(m=>m.kind==='video'&&!m.sub_lang); if(!raw.length) return '';
+    return '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="dashbtn" id="cmpSubs" title="Розшифрую, що говорять у відео, і накладу субтитри. Мови мереж (напр. Telegram - англійська, WhatsApp - чеська) - з Бренд → Візуал → «🎬 Стиль відео»">🔤 Додати субтитри</button>'
+      +'<span style="font-size:11.5px;color:var(--muted)">'+(raw.length>1?raw.length+' відео без тексту · ':'відео без тексту · ')+'мовою, якою говориш, і версії для мереж</span></div>'; }
+  function bindSubs(box){ const b=box.querySelector('#cmpSubs'); if(!b) return;
+    b.onclick=async()=>{ b.disabled=true; setMsg('🔤 розшифровую мову й накладаю субтитри… 1-3 хв');
+      try{ await saveDraft();
+        const r=await api('/posts/'+postId+'/subtitles',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+        const t0=Date.now(); let res=null;
+        for(;;){ await new Promise(x=>setTimeout(x,2000)); let j=null; try{ j=await api('/jobs/'+r.jobId); }catch(e){}
+          if(j&&j.status==='done'){ res=j.result; break; } if(j&&j.status==='error') throw new Error(j.error||'не вдалося');
+          if(j&&j.status==='idle'&&Date.now()-t0>4000) throw new Error('стан втрачено - спробуй ще раз');
+          if(Date.now()-t0>15*60*1000) throw new Error('надто довго - відео лишилось як було, спробуй пізніше');
+          setMsg('🔤 накладаю субтитри… '+Math.round((Date.now()-t0)/1000)+' с'); }
+        const full2=await api('/posts/'+postId+'/full'); setMedia(full2.media||[]); renderMedia(); renderPrev();
+        setMsg('🔤 субтитри ✓'+(res&&res.variants&&res.variants.length?' + версії: '+res.variants.map(l=>LANGN[l]||l).join(', '):'')+(res&&res.warnings&&res.warnings.length?' · ⚠ '+res.warnings.slice(0,2).join('; '):''),'var(--brand)'); }
+      catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); b.disabled=false; } }; }
   function renderMedia(){ const box=ov.querySelector('#cmpMediaWrap'); const n=media.length;
     if(!n){ box.innerHTML='<div style="font-size:12px;color:var(--muted)">Медіа ще нема - «🎨 Обкладинка», «＋ Кадри каруселі» або «🎬 Відео».</div>'; renderCarBlock(); renderVid(); return; }
     if(isVideo()){ const v=media[0], warn=videoWarn(v);
       box.innerHTML='<div class="slides-strip"><div class="slide-th"><img src="/thumb/'+esc(v.filename)+'" onerror="this.style.opacity=.25"><span class="sn">▶ '+(fmtDur(v.duration)||'відео')+'</span><button class="sx" id="cmpVidRm" title="Прибрати відео">✕</button></div></div>'
         +'<div style="font-size:11.5px;color:var(--muted);margin-top:6px">'+L('🎬 Відео','🎬 Video')+(v.size?' · '+Math.round(v.size/1048576)+L(' МБ',' MB'):'')+(v.width&&v.height?' · '+v.width+'×'+v.height:'')+L('. Instagram - Reels, Facebook - відео Сторінки, Threads, Telegram, LinkedIn, YouTube (вертикальне до 3 хв - Shorts), TikTok; текст поста - підпис.','. Instagram - Reels, Facebook - Page video, Threads, Telegram, LinkedIn, YouTube (vertical up to 3 min - Shorts), TikTok; the post text is the caption.')+'</div>'
-        +(()=>{ const off=NETS.map(n=>n[0]).filter(k=>ChanStatus[k]&&!(C[k]&&C[k].on)&&!sentSet.has(k)); return off.length?'<div style="font-size:11.5px;margin-top:4px">'+L('Це відео приймають і ','This video can also go to ')+off.map(netName).join(', ')+': <button class="dashbtn" id="cmpVidNets">'+L('🌐 В усі мережі','🌐 To all networks')+'</button></div>':''; })()
+        +(()=>{ const off=NETS.map(n=>n[0]).filter(k=>k!=='whatsapp'&&ChanStatus[k]&&!(C[k]&&C[k].on)&&!sentSet.has(k)); return off.length?'<div style="font-size:11.5px;margin-top:4px">'+L('Це відео приймають і ','This video can also go to ')+off.map(netName).join(', ')+': <button class="dashbtn" id="cmpVidNets">'+L('🌐 В усі мережі','🌐 To all networks')+'</button></div>':''; })()
         +(warn?'<div id="cmpVidWarn" style="font-size:11.5px;color:var(--danger);margin-top:4px">⚠ '+esc(warn)+'</div>':'')
+        +subsBtn()
         +'<div class="cmpCover" id="cmpCover"><div class="cmpCoverTh">'+(coverFile?'<img src="/thumb/'+esc(coverFile)+'" onerror="this.onerror=null;this.src=\'/media/'+esc(coverFile)+'\'">':L('<span>кадр<br>вибере<br>Instagram</span>','<span>Instagram<br>picks<br>a frame</span>'))+'</div>'
         +'<div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600">🖼 Обкладинка Reels</div><div style="font-size:11.5px;color:var(--muted);margin:2px 0 6px">Її видно в сітці профілю Instagram (там кадр 3:4 - головне тримай посередині).</div>'
         +'<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="dashbtn" id="cmpCovFrame">🎞 Кадр із відео</button><button class="dashbtn" id="cmpCovPhoto">🖼 Фото з медіатеки</button>'+(coverFile?'<button class="dashbtn" id="cmpCovClear" title="Instagram візьме кадр сам">✕</button>':'')+'</div>'
@@ -2849,7 +2913,8 @@ async function openComposer(postId, opts){
         rg.oninput=seek; vid.onloadedmetadata=seek; box.querySelector('#cmpCovOk').onclick=(e)=>covSet({at:Number(rg.value)},e.target); };
       box.querySelector('#cmpCovPhoto').onclick=async()=>{ const pick=await chooseMedia(); if(pick&&pick.id) covSet({media:pick.id}); };
       const cc=box.querySelector('#cmpCovClear'); if(cc) cc.onclick=(e)=>covSet({clear:true},e.target);
-      const vn=box.querySelector('#cmpVidNets'); if(vn) vn.onclick=()=>{ NETS.map(n=>n[0]).forEach(k=>{ if(ChanStatus[k]&&!sentSet.has(k)){ C[k]=C[k]||{text:''}; C[k].on=true; } }); renderChips(); renderMedia(); renderPrev(); setMsg('🌐 увімкнено всі підключені мережі - збережи чи запланувай'); };
+      const vn=box.querySelector('#cmpVidNets'); if(vn) vn.onclick=()=>{ NETS.map(n=>n[0]).forEach(k=>{ if(k!=='whatsapp'&&ChanStatus[k]&&!sentSet.has(k)){ C[k]=C[k]||{text:''}; C[k].on=true; } }); renderChips(); renderMedia(); renderPrev(); setMsg('🌐 увімкнено всі підключені мережі - збережи чи запланувай'); };
+      bindSubs(box);
       box.querySelector('#cmpVidRm').onclick=async(e)=>{ e.target.disabled=true; try{ const r=await api('/posts/'+postId+'/video',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({mediaId:null})}); setMedia(r.media); renderChips(); renderMedia(); renderPrev(); setMsg('відео прибрано'); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); e.target.disabled=false; } };
       renderCarBlock(); renderVid(); return; }
     const st=isStory();
@@ -2857,11 +2922,12 @@ async function openComposer(postId, opts){
         +((m.kind!=='video'&&!st)?'<button class="sa'+(m.alt_text?' on':'')+'" data-alt="'+m.id+'" title="'+(m.alt_text?'Опис фото: '+esc(m.alt_text):'Додати опис фото (alt-текст) для незрячих і пошуку - іде в Instagram і LinkedIn')+'">ALT'+(m.alt_text?' ✓':'')+'</button>':'')
         +(n>1?'<div class="sm"><button data-mv="'+i+'" data-d="-1"'+(i===0?' disabled':'')+' title="Раніше">‹</button><button data-mv="'+i+'" data-d="1"'+(i===n-1?' disabled':'')+' title="Пізніше">›</button></div>':'')+'</div>').join('')
       +(n<10?'<button class="slide-add" id="cmpAddMore" title="Додати кадри">＋<br>кадр</button>':'')+'</div>'
-      +(st?'<div style="font-size:11.5px;color:var(--muted);margin-top:6px">⚡ Сторіс: '+n+' '+(n===1?'кадр':'кадрів')+' (до 10) - кожен піде окремою сторіс в Instagram і Facebook. Фото ріжуться 9:16, відео можна ставити поруч (в Instagram - до 60 с).</div>'
+      +(st?'<div style="font-size:11.5px;color:var(--muted);margin-top:6px">⚡ Сторіс: '+n+' '+(n===1?'кадр':'кадрів')+' (до 10) - кожен піде окремою сторіс в Instagram, Facebook, профіль Telegram і WhatsApp-статус. Фото ріжуться 9:16, відео можна ставити поруч (до 60 с).</div>'+subsBtn()
         :n>1?'<div style="font-size:11.5px;color:var(--muted);margin-top:6px">🖼 Карусель: '+n+' кадрів (до 10). Instagram і Threads - карусель, Facebook - галерея, Telegram - альбом, LinkedIn - кілька фото. Перший кадр - обкладинка.</div>':'');
     box.querySelectorAll('[data-rm]').forEach(b=>b.onclick=async()=>{ b.disabled=true; try{ const r=await api('/posts/'+postId+'/slides/'+b.dataset.rm,{method:'DELETE'}); setMedia(r.media); renderMedia(); renderPrev(); }catch(err){ setMsg('⚠ '+err.message,'var(--danger)'); b.disabled=false; } });
     box.querySelectorAll('[data-mv]').forEach(b=>b.onclick=()=>{ const i=+b.dataset.mv, j=i+(+b.dataset.d); const ids=media.map(m=>m.id); [ids[i],ids[j]]=[ids[j],ids[i]]; reorderMedia(ids); });
     const more=box.querySelector('#cmpAddMore'); if(more) more.onclick=addSlides;
+    bindSubs(box);
     // 📸 alt-текст: живе на самому фото (те саме фото в іншому пості описане так само)
     box.querySelectorAll('[data-alt]').forEach(b=>b.onclick=async()=>{ const m=media.find(x=>x.id===b.dataset.alt); if(!m) return;
       const v=prompt('Опис фото (alt-текст): що на ньому, 1-2 речення. Його читають екранні читалки незрячих людей і пошук Instagram. Іде в Instagram і LinkedIn. Порожньо - прибрати.', m.alt_text||''); if(v===null) return;
@@ -2894,10 +2960,11 @@ async function openComposer(postId, opts){
   function pvMedia(k){ const files=media.map(m=>m.filename); const n=files.length;
     if(!n) return '';
     // 🎬 відео так, як його покаже мережа: Instagram - вертикальний Reels, решта - плеєр у стрічці
-    if(isVideo()){ const v=media[0]||{}, vert=!(v.width&&v.height)||v.height>=v.width, sh=vert&&Number(v.duration)>0&&Number(v.duration)<=180;
+    if(isVideo()){ const v=frameFor(media[0]||{},k), vert=!(v.width&&v.height)||v.height>=v.width, sh=vert&&Number(v.duration)>0&&Number(v.duration)<=180;
       const reel=k==='instagram'||k==='tiktok'||(k==='youtube'&&vert);
       const tag=k==='instagram'?'Reels':k==='youtube'?(sh?'Shorts':'YouTube'):k==='tiktok'?'TikTok':'';
-      return '<div class="pv-video'+(reel?' reel':'')+'"><video src="/media/'+esc(files[0])+'" poster="/thumb/'+esc(files[0])+'" controls muted playsinline preload="none"></video>'+(tag?'<span class="pv-cnt">'+tag+'</span>':'')+'</div>'; } if(n===1) return '<img src="/media/'+esc(files[0])+'" style="width:100%;display:block">';
+      // 🔤 відео в мову субтитрів цієї мережі (версія монтажу)
+      return '<div class="pv-video'+(reel?' reel':'')+'"><video src="/media/'+esc(v.filename)+'" poster="/thumb/'+esc(v.filename)+'" controls muted playsinline preload="none"></video>'+(tag?'<span class="pv-cnt">'+tag+'</span>':'')+'</div>'; } if(n===1) return '<img src="/media/'+esc(files[0])+'" style="width:100%;display:block">';
     if(k==='instagram'){ const i=Math.min(pvIdx.instagram||0,n-1);
       return '<div class="pv-car"><img src="/media/'+esc(files[i])+'"><span class="pv-cnt">'+(i+1)+'/'+n+'</span>'+(i>0?'<button class="pv-nav pv-prev" data-nav="-1">‹</button>':'')+(i<n-1?'<button class="pv-nav pv-next" data-nav="1">›</button>':'')+'</div>'
         +'<div class="pv-dots">'+files.map((_,j)=>'<i'+(j===i?' class="on"':'')+'></i>').join('')+'</div>'; }
@@ -2905,9 +2972,23 @@ async function openComposer(postId, opts){
     const show=files.slice(0,4), rest=n-4;
     return '<div class="pv-grid">'+show.map((f,j)=>(j===3&&rest>0)?'<div class="more"><img src="/thumb/'+esc(f)+'"><span>+'+rest+'</span></div>':'<div'+(n===3&&j===0?' class="wide"':'')+'><img src="/thumb/'+esc(f)+'"></div>').join('')+'</div>'; }
   // ⚡ сторіс так, як її покаже Instagram/Facebook: кадр на весь екран, смужки прогресу згори, тап - наступний
+  // 🔤 мова субтитрів мережі: свій вибір поста (C[k].sub_lang; "" - як у відео), інакше «Стиль відео» бренду
+  function subLangFor(k){ if(C[k]&&Object.prototype.hasOwnProperty.call(C[k],'sub_lang')&&C[k].sub_lang!==null&&C[k].sub_lang!==undefined) return C[k].sub_lang||'';
+    return ((ChanStatus.sublangs||{})[k])||''; }
+  // кадр так, як він піде в мережу: відео з субтитрами - у версії її мови (якщо монтаж її зробив)
+  function frameFor(m,k){ const l=subLangFor(k); if(m&&m.kind==='video'&&m.sub_lang&&l&&l!==m.sub_lang&&m.variants&&m.variants[l]) return Object.assign({},m,m.variants[l],{sub_lang:l}); return m; }
+  // вибір мови субтитрів під прев'ю мережі - лише коли на відео є текст (монтаж)
+  function subPick(k){ const vids=media.filter(m=>m.kind==='video'&&m.sub_lang); if(!vids.length) return '';
+    const orig=vids[0].sub_lang, have=new Set(vids.flatMap(m=>Object.keys(m.variants||{}))), own=C[k]&&Object.prototype.hasOwnProperty.call(C[k],'sub_lang');
+    const cur=subLangFor(k), style=((ChanStatus.sublangs||{})[k])||'';
+    const miss=cur&&cur!==orig&&vids.some(m=>!(m.variants&&m.variants[cur]));
+    return '<div class="pv-sublang">🌐 Субтитри: <select data-sublang="'+k+'"><option value="__"'+(own?'':' selected')+'>як у «Стилі відео» ('+esc(LANGN[style||orig]||style||orig)+')</option>'
+      +'<option value=""'+(own&&!cur?' selected':'')+'>як у відео ('+esc(LANGN[orig]||orig)+')</option>'
+      +LANGS.filter(l=>l!==orig&&have.has(l)).map(l=>'<option value="'+l+'"'+(own&&cur===l?' selected':'')+'>'+esc(LANGN[l])+'</option>').join('')+'</select>'
+      +(miss?' <span style="color:var(--danger)">⚠ версії '+esc(LANGBY[cur]||cur)+' нема - піде '+esc(LANGBY[orig]||orig)+'</span>':'')+'</div>'; }
   function pvStory(k){ const n=media.length;
     if(!n) return '<div class="pv-story empty">немає кадрів - «＋ Кадри» або «🎨 Зібрати кадри»</div>';
-    const i=Math.min(pvIdx['st_'+k]||0,n-1), m=media[i];
+    const i=Math.min(pvIdx['st_'+k]||0,n-1), m=frameFor(media[i],k);
     const bars='<div class="pv-bars">'+media.map((_,j)=>'<i'+(j<=i?' class="on"':'')+'></i>').join('')+'</div>';
     const body=m.kind==='video'?'<video src="/media/'+esc(m.filename)+'" poster="/thumb/'+esc(m.filename)+'" controls muted playsinline preload="none"></video>':'<img src="/media/'+esc(m.filename)+'">';
     return '<div class="pv-story">'+bars+body+(i>0?'<button class="pv-nav pv-prev" data-snav="'+k+'" data-d="-1">‹</button>':'')+(i<n-1?'<button class="pv-nav pv-next" data-snav="'+k+'" data-d="1">›</button>':'')+'<span class="pv-cnt">'+(i+1)+'/'+n+'</span></div>'; }
@@ -2921,13 +3002,19 @@ async function openComposer(postId, opts){
   const ttCanDirect=()=>!!(ttInfo&&ttInfo.direct)&&!ttInfoErr;
   function ttMode(){ const t=C.tiktok||{}; if(!ttCanDirect()||t.mode==='draft') return 'draft'; return (t.mode==='direct'||t.privacy)?'direct':'draft'; }
   const ttUser=()=>(ttInfo&&(ttInfo.username||ttInfo.nickname))||(ChanStatus.video&&ChanStatus.video.tiktok&&(ChanStatus.video.tiktok.username||ChanStatus.video.tiktok.name))||'ваш_профіль';
+  function bindSubPick(box){ box.querySelectorAll('[data-sublang]').forEach(sl=>sl.onchange=()=>{ const k=sl.dataset.sublang; C[k]=C[k]||{text:''};
+    if(sl.value==='__') delete C[k].sub_lang; else C[k].sub_lang=sl.value; renderPrev(); }); }
   function renderPrev(){ const box=ov.querySelector('#cmpPrev'); const sel=NETS.filter(n=>C[n[0]]&&C[n[0]].on);
     if(isStory()){
       const ss=sel.filter(n=>STORY_NETS.includes(n[0]));
-      box.innerHTML=ss.length?ss.map(n=>'<div class="pv-label" style="background:var('+NETVAR[n[0]]+')">'+n[1]+' · сторіс</div>'+(sentLinks[n[0]]?'<a href="'+esc(sentLinks[n[0]])+'" target="_blank" rel="noopener" class="pv-open">↗ Відкрити</a>':'')+pvStory(n[0])).join('')
+      const stLabel=(k,name)=>k==='telegram'?name+' · сторіс у профілі'+(ChanStatus.tgStory?' '+ChanStatus.tgStory.label:''):k==='whatsapp'?name+' · статус (кадри надішле бот)':name+' · сторіс';
+      const stNote=(k)=>k==='whatsapp'?'<div class="pv-note">📲 У час публікації бот надішле тобі ці кадри в Telegram - відкрий кожен → «Поділитись» → WhatsApp → «Мій статус».</div>'
+        :k==='telegram'?'<div class="pv-note">✈️ Сторіс піде у твій профіль Telegram (Telegram Business), відео - 720×1280, до 60 с.</div>':'';
+      box.innerHTML=ss.length?ss.map(n=>'<div class="pv-label" style="background:var('+NETVAR[n[0]]+')">'+esc(stLabel(n[0],n[1]))+'</div>'+subPick(n[0])+(sentLinks[n[0]]?'<a href="'+esc(sentLinks[n[0]])+'" target="_blank" rel="noopener" class="pv-open">↗ Відкрити</a>':'')+pvStory(n[0])+stNote(n[0])).join('')
         +'<div class="pv-note">⚡ у сторіс підпису немає - думка має бути на кадрах; кожен кадр піде окремою сторіс і зникне через 24 год</div>'
-        :'<div style="font-size:12px;color:var(--muted);text-align:center">Сторіс ідуть лише в Instagram і Facebook - увімкни їх ліворуч.</div>';
+        :'<div style="font-size:12px;color:var(--muted);text-align:center">Сторіс ідуть в Instagram, Facebook, профіль Telegram і WhatsApp-статус - увімкни їх ліворуч.</div>';
       box.querySelectorAll('[data-snav]').forEach(b=>b.onclick=()=>{ const k='st_'+b.dataset.snav; pvIdx[k]=Math.max(0,Math.min(media.length-1,(pvIdx[k]||0)+(+b.dataset.d))); renderPrev(); });
+      bindSubPick(box);
       renderFc(); return; }
     if(!sel.length){ box.innerHTML='<div style="font-size:12px;color:var(--muted);text-align:center">Обери канал ліворуч.</div>'; renderFc(); return; }
     const av=(($('avatar')&&$('avatar').textContent)||'В').slice(0,2);
@@ -2978,7 +3065,8 @@ async function openComposer(postId, opts){
       const vNote=vst?'<div class="pv-note" style="color:'+(vst.note?'var(--amber)':'var(--muted)')+'">'+(vst.state==='processing'?L('⏳ TikTok ще обробляє відео - посилання зʼявиться, щойно він закінчить','⏳ TikTok is processing the video - it may take a few minutes to appear on your profile; the link appears here when it is ready'):vst.state==='draft'?L('📥 відео в чернетках TikTok - відкрий TikTok і опублікуй','📥 The video is in your TikTok inbox - open TikTok to finish posting'):'')+(vst.note?(vst.state?' · ':'')+'⚠ '+esc(vst.note):'')+'</div>':'';
       // 🔗 щойно мережа опублікована - поруч із її плашкою зʼявляється лінк на живий пост
       const open=(!accLine&&sentLinks[k])?'<a href="'+esc(sentLinks[k])+'" target="_blank" rel="noopener" class="pv-open" title="Відкрити пост у '+esc(n[1])+'">↗ Відкрити пост</a>':'';
-      return '<div class="pv-label" style="background:var('+NETVAR[k]+')">'+n[1]+'</div>'+open+accLine+vNote+'<div class="phone">'+body+pvFc(k,av)+'</div>'+auto+ownMark; }).join('');
+      return '<div class="pv-label" style="background:var('+NETVAR[k]+')">'+n[1]+'</div>'+(isVideo()?subPick(k):'')+open+accLine+vNote+'<div class="phone">'+body+pvFc(k,av)+'</div>'+auto+ownMark; }).join('');
+    bindSubPick(box);
     box.querySelectorAll('[data-more]').forEach(el=>el.onclick=()=>{ _pvExp.add(el.dataset.more); renderPrev(); });
     // 💬 свій текст коментаря / без коментаря в цій мережі / назад до спільного
     box.querySelectorAll('[data-fcedit]').forEach(a=>a.onclick=()=>{ const k=a.dataset.fcedit; const v=prompt('Перший коментар для '+netName(k)+' (порожньо = без коментаря в цій мережі):', fcOf(k)||fcMaster.trim()); if(v===null) return; C[k]=C[k]||{text:''}; C[k].first_comment=v.trim(); renderPrev(); });
@@ -3220,7 +3308,8 @@ async function openComposer(postId, opts){
   if(fmtSel) fmtSel.addEventListener('change',()=>{
     // знімок УСІХ мереж: повернення формату вертає рівно той вибір, що був до сторіс
     if(isStory()&&!storySnap){ storySnap={}; NETS.forEach(n=>{ storySnap[n[0]]=!!(C[n[0]]&&C[n[0]].on); });
-      NETS.forEach(n=>{ const k=n[0]; if(sentSet.has(k)) return; if(STORY_NETS.includes(k)){ if(ChanStatus[k]){ C[k]=C[k]||{text:''}; C[k].on=true; } } else if(C[k]) C[k].on=false; }); }
+      // WhatsApp сам не вмикаємо: у час публікації бот пише людині - це її свідомий вибір
+      NETS.forEach(n=>{ const k=n[0]; if(sentSet.has(k)) return; if(STORY_NETS.includes(k)){ if(k!=='whatsapp'&&netConn(k,true)){ C[k]=C[k]||{text:''}; C[k].on=true; } else if(C[k]&&!netConn(k,true)) C[k].on=false; } else if(C[k]) C[k].on=false; }); }
     else if(!isStory()&&storySnap){ NETS.forEach(n=>{ const k=n[0]; if(sentSet.has(k)) return; if(storySnap[k]){ C[k]=C[k]||{text:''}; C[k].on=true; } else if(C[k]) C[k].on=false; }); storySnap=null; }
     renderChips(); renderMedia(); renderPrev(); renderCarBlock(); });
   ov.querySelector('#cmpCarBuild').onclick=async(e)=>{ const b=e.target; b.disabled=true; setMsg('🎨 збираю слайди…');
@@ -3856,7 +3945,25 @@ function renderTgSharedOff(c,off){ const box=$('tgSharedOff'); if(!box) return; 
   box.innerHTML=why+fix;
   const k=$('tgOpenKeys'); if(k) k.onclick=()=>{ selectView('settings','profile'); setTimeout(()=>{ const p=$('admKeysPanel'); if(p) p.scrollIntoView({behavior:'smooth',block:'start'}); },250); };
 }
-async function loadTelegram(){ try{ const c=await api('/integrations/telegram'); renderTgChats(c); $('tgChannel').value=c.channelChatId||''; $('tgGroup').value=c.groupChatId||''; if(c.hasToken) $('tgToken').placeholder='•••••••• (токен збережено - лиши порожнім, щоб не міняти)'; if($('tgSharedBox')) $('tgSharedBox').style.display=c.sharedBot?'block':'none';
+// 📲 Сторіс у профілі Telegram (Telegram Business): з яким профілем працює бренд і як підключити
+async function loadTgStory(){ const box=$('tgStory'); if(!box) return; let v=null; try{ v=await api('/integrations/tgstory'); }catch(e){ box.innerHTML=''; return; }
+  const b=v.brand, bot=v.bot?'@'+v.bot:'наш бот';
+  const steps='<ol style="margin:6px 0 0 18px;padding:0;font-size:13px;line-height:1.7">'
+    +(v.linked?'':'<li>Спершу «🤖 Підключити наш бот» вище й Start - так бот знає, що це ти.</li>')
+    +'<li>Telegram на телефоні → Налаштування → <b>Telegram Business</b> → <b>Чат-боти</b>.</li>'
+    +'<li>Впиши <b>'+esc(bot)+'</b>. Доступ до чатів - «Лише обрані» і нічого не обирай: бот не читає твоїх чатів.</li>'
+    +'<li>Увімкни право <b>«Керування історіями»</b> (Manage stories) → «Додати».</li>'
+    +'<li>Бот напише тобі «📲 Telegram Business підключено» - і сторіс цього бренду підуть у твій профіль.</li></ol>';
+  let html='';
+  if(b) html+='<div class="acc-row"><span class="nm">'+esc(b.label)+'</span><span class="sub">'+(b.enabled?(b.can_stories?'✅ сторіс підуть сюди':'⚠ без права на сторіс - Telegram Business → Чат-боти → бот → «Керування історіями»'):'⚠ бот відключено від Telegram Business')+'</span><button class="ghost" id="tgStoryOff" style="margin-left:auto">Відʼєднати від бренду</button></div>';
+  const other=(v.mine||[]).filter(m=>!m.here&&m.enabled);
+  if(other.length) html+=other.map(m=>'<div class="acc-row"><span class="nm">'+esc(m.label)+'</span><span class="sub">твій профіль'+(m.can_stories?'':' · ⚠ без права на сторіс')+'</span><button class="ghost" data-tguse="'+esc(m.id)+'" style="margin-left:auto">Використати тут</button></div>').join('');
+  if(!b) html+=(other.length?'':'<div class="hint">Ще не підключено. Як:</div>')+steps;
+  else html+='<details class="disc" style="margin-top:6px"><summary>Як підключити інший профіль</summary><div style="padding:0 12px 10px">'+steps+'</div></details>';
+  box.innerHTML=html;
+  const off=$('tgStoryOff'); if(off) off.onclick=async()=>{ if(!confirm('Сторіс бренду більше не йтимуть у цей профіль Telegram. Відʼєднати?')) return; try{ await api('/integrations/tgstory/off',{method:'POST'}); loadTgStory(); flash('відʼєднано'); }catch(e){ flash('⚠ '+e.message); } };
+  box.querySelectorAll('[data-tguse]').forEach(x=>x.onclick=async()=>{ x.disabled=true; try{ const r=await api('/integrations/tgstory/use',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:x.dataset.tguse})}); flash('📲 сторіс бренду підуть у '+r.label); loadTgStory(); }catch(e){ flash('⚠ '+e.message); x.disabled=false; } }); }
+async function loadTelegram(){ loadTgStory(); try{ const c=await api('/integrations/telegram'); renderTgChats(c); $('tgChannel').value=c.channelChatId||''; $('tgGroup').value=c.groupChatId||''; if(c.hasToken) $('tgToken').placeholder='•••••••• (токен збережено - лиши порожнім, щоб не міняти)'; if($('tgSharedBox')) $('tgSharedBox').style.display=c.sharedBot?'block':'none';
   // спільний бот є, але його DM мертві на цьому інстансі (бета) - кажемо це ДО кліку, а кнопку
   // підключення глушимо: інакше вона видає посилання, яке нікуди не веде
   // (бренд із власним живим ботом від цього не залежить - у нього «Підключити наш бот» веде у свого бота)
@@ -4255,7 +4362,7 @@ async function openMontage(ids, lib){
     +'<div style="display:flex;gap:8px;overflow-x:auto;margin-bottom:12px">'+items.map((x,i)=>'<div style="position:relative;flex:none"><img src="/thumb/'+esc(x.filename)+'" style="height:70px;border-radius:6px"><span style="position:absolute;top:3px;left:3px;background:rgba(0,0,0,.6);color:#fff;border-radius:5px;font-size:11px;padding:0 4px">'+(i+1)+'</span></div>').join('')+'</div>'
     +(tpls.length?'<label style="font-size:13px">🧩 Шаблон</label><div id="mntTpl" class="mntTpl">'+tpls.map((x,i)=>'<button type="button" class="mntTplBtn'+(i===0?' on':'')+'" data-t="'+esc(x.id)+'"'+(x.id==='before_after'&&items.length<2?' disabled title="потрібно щонайменше 2 кліпи"':'')+'><b>'+esc(x.label)+'</b><span>'+esc(x.hint)+'</span></button>').join('')+'</div>':'')
     +'<div id="mntBaRow" style="display:none;font-size:13px;margin:0 0 10px">↔️ Скільки перших кліпів - «до»: <input type="number" class="txt" id="mntBa" min="1" max="'+Math.max(1,items.length-1)+'" value="'+Math.max(1,Math.ceil(items.length/2))+'" style="width:72px;padding:6px 10px;display:inline-block"> <span id="mntBaHint" style="color:var(--muted)"></span></div>'
-    +'<label style="font-size:13px">Формат</label><div class="btnrow" style="margin:4px 0 10px;justify-content:flex-start"><label><input type="radio" name="mntFmt" value="story" checked> ⚡ Сторіс (Instagram, Facebook)</label><label><input type="radio" name="mntFmt" value="reel"> 🎞 Рілс</label></div>'
+    +'<label style="font-size:13px">Формат</label><div class="btnrow" style="margin:4px 0 10px;justify-content:flex-start"><label><input type="radio" name="mntFmt" value="story" checked> ⚡ Сторіс (Instagram, Facebook, Telegram, WhatsApp)</label><label><input type="radio" name="mntFmt" value="reel"> 🎞 Рілс</label></div>'
     +'<label style="font-size:13px" for="mntSrc">Текст на відео</label>'
     +'<select id="mntSrc" style="width:100%;margin:4px 0 8px">'
     +opt('auto','🔊 Субтитри з того, що говорять у кліпах (мовчать - AI підпише кадри)',!caps.stt&&!caps.vision,'не підключено розшифровку')
@@ -4273,6 +4380,13 @@ async function openMontage(ids, lib){
     +'<input id="mntHookText" class="txt" maxlength="60" placeholder="3-7 слів, напр.: Ріжемо бетон за один день" style="width:100%;margin-top:4px;display:none"></label>'
     +'<label style="font-size:13px;flex:1;min-width:180px">🔤 Субтитри<select id="mntSub" style="width:100%;margin-top:4px">'+subs.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===(bst.subtitle||'classic')?' selected':'')+' title="'+esc(x.hint)+'">'+esc(x.label)+'</option>').join('')+'</select></label></div>'
     +'<label style="font-size:13px;display:flex;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" id="mntEnd"'+(endP&&bst.end!==false?' checked':'')+(endP?'':' disabled')+'> 🏁 Фінальна картка: '+(endP?'«'+esc([endP.title,endP.sub].filter(Boolean).join(' · '))+'»':'<span style="color:var(--muted)">нема що показати - назва й нік бренду в Бренд → Візуал → «🎬 Стиль відео»</span>')+'</label>'
+    // 🌐 мови субтитрів зі «Стилю відео»: які версії зробить монтаж
+    +(()=>{ const sp=bst.speech||caps.brandLang||'uk', lg=bst.langs||{}, ex=Object.keys(lg).filter(n=>lg[n]&&lg[n]!==sp);
+      const NU={instagram:'Instagram',facebook:'Facebook',telegram:'Telegram',whatsapp:'WhatsApp',threads:'Threads',linkedin:'LinkedIn',youtube:'YouTube',tiktok:'TikTok'};
+      const vers=[...new Set(ex.map(n=>lg[n]))];
+      return '<div id="mntLangs" style="font-size:12.5px;color:var(--muted);margin-top:8px">🌐 Субтитри мовою, якою говориш ('+esc(LANGN[sp]||sp)+')'
+        +(ex.length?'; '+ex.map(n=>esc(NU[n]||n)+' - '+esc(LANGN[lg[n]]||lg[n])).join(', ')+' - ще '+vers.length+' '+(vers.length===1?'версія':'версії')+' ролика':'')
+        +'. Змінити - Бренд → Візуал → «🎬 Стиль відео».</div>'; })()
     +'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">'
     +'<label style="font-size:13px;flex:1;min-width:180px">✨ Переходи між кліпами<select id="mntTr" style="width:100%;margin-top:4px"><option value="">Як у шаблоні</option>'
     +[['fade','Плавні (перетікання)'],['slide','Зсув'],['zoom','Наближення'],['flash','Спалах'],['mix','Мікс - щоразу інший'],['none','Без переходів (різкий стик)']].map(([v,l])=>'<option value="'+v+'">'+l+'</option>').join('')+'</select></label>'

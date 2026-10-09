@@ -24,6 +24,7 @@ import { can, botCap, deniedText, normRole, type Role, type Cap } from "./roles.
 import { runAs, setActor, actorRole, actorId } from "./actor.js";
 import { workspaceTitle } from "./workspaces.js";
 import { authorEditBlock, submitForReview } from "./team.js";
+import { onBusinessConnection } from "./tgstory.js";
 const postDeepLink = (postId: string) => cabinetPostLink(env.appBaseUrl, postId);
 
 let BOT_ID = 0;
@@ -257,7 +258,11 @@ export async function refreshOwnBotWebhooks(): Promise<void> {
       // поки ми питали Telegram, цей самий токен міг стати спільним (перевипущений бот, узятий з кабінету) -
       // тоді його вебхук уже спільний, і переводити його на адресу власного бота не можна
       if (token === env.telegram.botToken) continue;
-      if (info.url && info.url !== want && isOurHookUrl(info.url, env.appBaseUrl, legacy)) {
+      // 📲 давній вебхук із явним списком апдейтів без business_connection (Telegram Business для сторіс) -
+      // теж перереєструвати. Списку нема - типові «усі, крім реакцій і chat_member», business_connection там є.
+      const au = info.allowed_updates || [];
+      const stale = info.url === want && au.length > 0 && tg.ALLOWED_UPDATES.some((u) => !au.includes(u));
+      if ((info.url && info.url !== want && isOurHookUrl(info.url, env.appBaseUrl, legacy)) || stale) {
         await tg.setWebhook(token, want, hookSecret(`bot:${me.id}`));
         await registerMenu(token);
         console.log(`[tgbot] власний бот @${me.username || me.id}: вебхук переведено на ${env.appBaseUrl}`);
@@ -722,6 +727,8 @@ async function movedNotice(token: string, chatId: string, fromId: number, msg: a
 
 async function handleUpdateIn(update: any, token: string): Promise<void> {
   try {
+    // 📲 людина підключила бот у Telegram Business (сторіс у її профіль)
+    if (update?.business_connection) { await onBusinessConnection(update.business_connection, token); return; }
     if (update?.callback_query) { await handleCallback(update.callback_query, token); return; }
     const msg = update?.message; if (!msg || !msg.from) return;
     // бот говорить лише в особистих повідомленнях. У групі, куди він публікує, Telegram надсилає йому

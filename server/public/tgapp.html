@@ -127,11 +127,11 @@ async function runJob(path, body, onTick) {
   }
 }
 
-let NETS = [], VNETS = [], TZ = 'Europe/Kyiv', tab = 'new', draftFilter = 'active';
+let NETS = [], VNETS = [], SNETS = [], TZ = 'Europe/Kyiv', tab = 'new', draftFilter = 'active';
 let draft = { text: '', nets: [] };          // «Новий»: чернетка, якої ще нема в базі
 // 👥 роль у бренді (сервер перевіряє кожну дію сам - тут лише не показуємо кнопок, які він відхилить)
 let ME = { role: 'owner', roleLabel: '', canDraft: true, canPublish: true };
-const NETNAME = { telegram:'✈️ Telegram', instagram:'📸 Instagram', facebook:'📘 Facebook', threads:'🧵 Threads', linkedin:'💼 LinkedIn', youtube:'▶️ YouTube', tiktok:'🎵 TikTok' };
+const NETNAME = { telegram:'✈️ Telegram', instagram:'📸 Instagram', facebook:'📘 Facebook', threads:'🧵 Threads', linkedin:'💼 LinkedIn', youtube:'▶️ YouTube', tiktok:'🎵 TikTok', whatsapp:'🟢 WhatsApp' };
 const TT_PRIV = { PUBLIC_TO_EVERYONE:'усі', MUTUAL_FOLLOW_FRIENDS:'друзі', FOLLOWER_OF_CREATOR:'підписники', SELF_ONLY:'лише я' };
 const ORIGIN = { diary:'📔 щоденник', rss:'📡 RSS', bot:'🤖 з бота', manual:'✍️ нотатка', idea:'💡 ідея', plan:'📅 план',
                  instagram:'📸 Instagram', fireflies:'🎙 транскрипт', gdrive:'📁 Drive', brand:'✨ бренд', takes:'🧵 тейк', topic:'🎯 тема', meeting:'🎤 зустріч' };
@@ -319,7 +319,10 @@ function drawEditor() {
   p._ro = !editable;
   // відео-пост (не сторіс) - ще YouTube і TikTok; вже обрані показуємо завжди, щоб їх можна було зняти
   const vidPost = isVid(p) && p.format !== 'story';
-  const allNets = NETS.concat(VNETS.filter((k) => vidPost || (ch[k] && ch[k].on)));
+  // 📲 сторіс - Instagram, Facebook, профіль Telegram, WhatsApp-статус (і те, що вже обрано, - щоб зняти)
+  const allNets = p.format === 'story'
+    ? [...new Set(SNETS.concat(Object.keys(ch).filter((k) => ch[k] && ch[k].on && NETNAME[k])))]
+    : NETS.concat(VNETS.filter((k) => vidPost || (ch[k] && ch[k].on)));
   const tt = ch.tiktok && ch.tiktok.on ? ch.tiktok : null;
   const ttNote = tt ? '<div class="meta" style="font-size:12px">🎵 TikTok: ' + (tt.mode === 'direct' && tt.privacy ? 'одразу · бачать: ' + (TT_PRIV[tt.privacy] || tt.privacy)
       : tt.mode === 'direct' ? '⚠️ не обрано, хто бачить - обери в боті (картка поста → 🎵 TikTok) чи в кабінеті'
@@ -676,6 +679,7 @@ async function doPublish() {
     }
     NETS = me.nets || [];
     VNETS = me.vnets || [];
+    SNETS = me.snets || [];
     TZ = me.tz || TZ;
     draft.nets = NETS.includes('telegram') ? ['telegram'] : [];
     render();

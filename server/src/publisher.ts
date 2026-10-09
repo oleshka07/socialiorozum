@@ -17,12 +17,15 @@ import { tgLink, fbLink, fbVideoLink, liLink } from "./permalink.js";
 import { logEvent } from "./log.js";
 import { startJob } from "./jobs.js";
 import { ensurePostDigest } from "./memory.js";
-import { postMediaList } from "./slides.js";
+import { postMediaList, type PostMedia } from "./slides.js";
 import { commentAfterPublish, commentFor } from "./comments.js";
 import { normCollaborators, cleanAlt } from "./igextras.js";
 import { threadsToken, threadsAccountFor, metaAccountFor, postAccount, postAccounts, telegramTargets, accountChoices, threadsAccounts,
   mainAccountIds, isAccNet, type MetaPage, type ThreadsLogin, type TgTarget } from "./accounts.js";
 import { linkifySafe } from "./links.js";
+import { subPicker } from "./sublang.js";
+import { storyTarget, postTgStories } from "./tgstory.js";
+import { deliverWhatsApp } from "./wastatus.js";
 
 // 👥 Акаунтів Threads у бренді може бути кілька (accounts.ts). Без userId - основний, як і раніше.
 export async function thValidToken(ws: string, userId?: string | null): Promise<{ token: string; userId: string } | null> {
@@ -41,7 +44,7 @@ export const pubLabel = (r: Pick<PubResult, "channel" | "accountName">, names: R
 // Мережі, у які сервіс реально публікує. У `post.channels` бувають службові ключі (manual_adapt,
 // reel_caption) і сміття на кшталт «all» із майстер-плану: без цього фільтра такий ключ пролітав
 // повз усі гілки й звітував «опубліковано», хоча не пішло нікуди.
-export const PUB_NETS = ["telegram", "threads", "facebook", "instagram", "linkedin", "youtube", "tiktok"];
+export const PUB_NETS = ["telegram", "threads", "facebook", "instagram", "linkedin", "youtube", "tiktok", "whatsapp"];
 export const enabledNets = (ch: any): string[] => PUB_NETS.filter((k) => ch && ch[k] && ch[k].on === true);
 
 // Резервація «раз на мережу» ПЕРЕД викликом мережі. Повертає рядок, "sent" (уже надіслано) або "busy"
@@ -49,7 +52,7 @@ export const enabledNets = (ch: any): string[] => PUB_NETS.filter((k) => ch && c
 // перезапуск сервера (деплой, OOM): жоден живий процес її вже не веде, тож його переймаємо. Раніше він
 // блокував мережу для поста назавжди, а автопостер ще й звітував «↩ вже», хоча пост міг не вийти.
 const STALE_SENDING = "20 minutes";
-type PubTable = "telegram_publish" | "threads_publish" | "meta_publish" | "linkedin_publish" | "youtube_publish" | "tiktok_publish";
+type PubTable = "telegram_publish" | "threads_publish" | "meta_publish" | "linkedin_publish" | "youtube_publish" | "tiktok_publish" | "whatsapp_publish";
 async function reservePub(table: PubTable, key: Record<string, string>, extra: Record<string, string | null> = {}): Promise<{ id: string } | "sent" | "busy"> {
   const kc = Object.keys(key), kv = Object.values(key);
   const cond = kc.map((c, i) => `${c}=$${i + 1}`).join(" and ");
@@ -85,12 +88,12 @@ const BUSY = "у цю мережу пост саме зараз публікує
  * не має тихо скасовувати завтрашню публікацію.
  */
 export async function closeSlotsIfDone(postId: string, reason: string): Promise<boolean> {
-  const post = await one<{ channels: any; ws: string }>(
-    `select p.channels, s.workspace_id as ws from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where p.id=$1`, [postId]);
+  const post = await one<{ channels: any; ws: string; format: string | null }>(
+    `select p.channels, p.format, s.workspace_id as ws from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id where p.id=$1`, [postId]);
   const enabled = enabledNets(post?.channels);
   if (!post || !enabled.length) return false;
   // «усі обрані» - кожен обраний акаунт кожної мережі (дві Сторінки - обидві мають отримати пост)
-  const [keys, sent] = await Promise.all([targetKeys(post.ws, post.channels, enabled), sentAccountKeys(post.ws, postId)]);
+  const [keys, sent] = await Promise.all([targetKeys(post.ws, post.channels, enabled, post.format), sentAccountKeys(post.ws, postId)]);
   if (keys.some((k) => !sent.has(k))) return false;
   await q(`update schedule_slot set status='posted', result=$2, updated_at=now() where post_id=$1 and status='planned'`, [postId, reason]);
   await q(`update plan_slot set status='published' where post_id=$1 and status in ('drafted','approved','scheduled')`, [postId]);
@@ -146,10 +149,15 @@ async function publishUnits(ws: string, ch: any, nets: string[]): Promise<Unit[]
 }
 
 /** Ключі «мережа|акаунт», куди пост має піти (без токенів) - щоб знати, чи вже все надіслано. */
-export async function targetKeys(ws: string, ch: any, nets: string[]): Promise<string[]> {
+export async function targetKeys(ws: string, ch: any, nets: string[], format?: string | null): Promise<string[]> {
   const choices = await accountChoices(ws);
   const out: string[] = [];
   for (const k of nets) {
+    // 📲 сторіс у Telegram іде в профіль людини (Telegram Business), а не в канали бренду
+    if (format === "story" && k === "telegram") {
+      const b = await one<{ tg_user_id: string }>(`select b.tg_user_id::text from tg_story_brand sb join tg_business b on b.id=sb.conn_id where sb.workspace_id=$1`, [ws]);
+      out.push(`telegram|story:${b?.tg_user_id || ""}`); continue;
+    }
     if (!isAccNet(k)) { out.push(`${k}|`); continue; }
     const ids = postAccounts(ch, k);
     if (ids.length) { out.push(...ids.map((id) => `${k}|${id}`)); continue; }
@@ -209,7 +217,8 @@ async function videoSentNets(postId: string): Promise<string[]> {
   const r = await one<{ yt: number; tt: number }>(
     `select (select count(*)::int from youtube_publish where post_id=$1 and status='sent') as yt,
             (select count(*)::int from tiktok_publish where post_id=$1 and status in ('sent','processing')) as tt`, [postId]);
-  return [...((r?.yt || 0) > 0 ? ["youtube"] : []), ...((r?.tt || 0) > 0 ? ["tiktok"] : [])];
+  const wa = await one<{ n: number }>(`select count(*)::int n from whatsapp_publish where post_id=$1 and status='sent'`, [postId]);
+  return [...((r?.yt || 0) > 0 ? ["youtube"] : []), ...((r?.tt || 0) > 0 ? ["tiktok"] : []), ...((wa?.n || 0) > 0 ? ["whatsapp"] : [])];
 }
 
 // Публікує пост у кожну ввімкнену в post.channels мережу (своїм текстом + медіа).
@@ -245,7 +254,8 @@ export async function publishingNow(postId: string): Promise<{ net: string; sinc
      union all select channel, created_at from meta_publish where post_id=$1 and status='sending'
      union all select 'linkedin', created_at from linkedin_publish where post_id=$1 and status='sending'
      union all select 'youtube', created_at from youtube_publish where post_id=$1 and status='sending'
-     union all select 'tiktok', created_at from tiktok_publish where post_id=$1 and status in ('sending','processing')`, [postId]);
+     union all select 'tiktok', created_at from tiktok_publish where post_id=$1 and status in ('sending','processing')
+     union all select 'whatsapp', created_at from whatsapp_publish where post_id=$1 and status='sending'`, [postId]);
 }
 
 /**
@@ -330,27 +340,40 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
   const images = video ? [] : mediaList.filter((m) => m.kind === "image").map((m) => m.filename);
   const imageUrls = images.map((f) => `${env.appBaseUrl}/media/${f}`);
   const carousel = images.length >= 2;
-  const videoUrl = video ? `${env.appBaseUrl}/media/${video.filename}` : "";
   // 🖼 обкладинка Reels (Instagram cover_url): кадр змонтованого відео з гачком або обраний людиною
   const coverUrl = video && post.cover_file ? `${env.appBaseUrl}/media/${post.cover_file}` : null;
-  const videoPath = video ? join(MEDIA_DIR, video.filename) : "";
-  let videoSize = video ? Number(video.size) || 0 : 0;
-  if (video && !videoSize) { try { videoSize = (await stat(videoPath)).size; } catch { /* файлу нема - впаде нижче людською помилкою */ } }
-  const vDur = video ? Number(video.duration) || 0 : 0;
-  // межі мереж для відео - перевіряємо ДО виклику мережі: інакше людина бачить сиру помилку API
-  // через кілька хвилин обробки, а не зрозумілу причину одразу
-  const videoLimit = (net: string): string | null => {
-    if (!video) return null;
-    if (!videoSize) return "файл відео не знайдено на сервері - прикріпи відео заново";
-    const mb = Math.round(videoSize / 1024 / 1024);
-    if (net === "telegram" && videoSize > tg.TG_VIDEO_MAX) return `Telegram приймає від ботів відео до 50 МБ, а це ${mb} МБ - стисни відео або зніми Telegram із цього поста`;
-    if (!vDur) return null; // тривалість не виміряли - хай вирішує сама мережа
-    if (net === "instagram" && (vDur < 3 || vDur > 900)) return "Instagram Reels приймає відео від 3 с до 15 хв";
-    if (net === "threads" && vDur > 300) return "Threads приймає відео до 5 хв - вріж відео або зніми Threads із цього поста";
-    if (net === "linkedin" && (vDur < 3 || vDur > 1800)) return "LinkedIn приймає відео від 3 с до 30 хв";
-    return null;
-  };
   const ch = post.channels || {};
+  // 🔤 відео для мережі: версія з субтитрами мовою, яку хоче мережа (якщо монтаж її зробив), інакше оригінал.
+  // Розмір і межі мереж - уже цього файлу.
+  const picker = video ? await subPicker(ws, ch) : null;
+  type VidFor = { video: PostMedia | null; videoUrl: string; videoPath: string; videoSize: number; vDur: number; subNote: string; videoLimit: (net: string) => string | null };
+  const vidMemo = new Map<string, VidFor>();
+  const vidFor = async (net: string): Promise<VidFor> => {
+    const pick = picker ? await picker.frames([video!], net) : { frames: [] as PostMedia[], note: "", lang: null };
+    const v = pick.frames[0] || null;
+    const hit = vidMemo.get(v?.id || "");
+    if (hit) return { ...hit, subNote: pick.note };
+    const videoPath = v ? join(MEDIA_DIR, v.filename) : "";
+    let videoSize = v ? Number(v.size) || 0 : 0;
+    if (v && !videoSize) { try { videoSize = (await stat(videoPath)).size; } catch { /* файлу нема - впаде нижче людською помилкою */ } }
+    const vDur = v ? Number(v.duration) || 0 : 0;
+    // межі мереж для відео - перевіряємо ДО виклику мережі: інакше людина бачить сиру помилку API
+    // через кілька хвилин обробки, а не зрозумілу причину одразу
+    const videoLimit = (n: string): string | null => {
+      if (!v) return null;
+      if (!videoSize) return "файл відео не знайдено на сервері - прикріпи відео заново";
+      const mb = Math.round(videoSize / 1024 / 1024);
+      if (n === "telegram" && videoSize > tg.TG_VIDEO_MAX) return `Telegram приймає від ботів відео до 50 МБ, а це ${mb} МБ - стисни відео або зніми Telegram із цього поста`;
+      if (!vDur) return null; // тривалість не виміряли - хай вирішує сама мережа
+      if (n === "instagram" && (vDur < 3 || vDur > 900)) return "Instagram Reels приймає відео від 3 с до 15 хв";
+      if (n === "threads" && vDur > 300) return "Threads приймає відео до 5 хв - вріж відео або зніми Threads із цього поста";
+      if (n === "linkedin" && (vDur < 3 || vDur > 1800)) return "LinkedIn приймає відео від 3 с до 30 хв";
+      return null;
+    };
+    const out: VidFor = { video: v, videoUrl: v ? `${env.appBaseUrl}/media/${v.filename}` : "", videoPath, videoSize, vDur, subNote: pick.note, videoLimit };
+    vidMemo.set(v?.id || "", out);
+    return out;
+  };
   const enabled = enabledNets(ch).filter((k) => !onlyNets || onlyNets.includes(k));
   // 👥 куди саме: пара «мережа + акаунт» на кожну обрану галочкою Сторінку, профіль чи канал (без
   // вибору - акаунт за замовчуванням, у Telegram - основні канал і група, як і було). Публікація -
@@ -369,7 +392,7 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
   // 🎵 TikTok - виняток: підпис іде рівно той, що людина бачила й затвердила в композері (TikTok вимагає,
   // щоб людина бачила й могла поправити підпис до публікації; переписаний моделлю в мить публікації -
   // уже не той). Свою версію під TikTok людина робить кнопкою ✨ і бачить її в прев'ю.
-  const missing = manual ? [] : pendingNets.filter((k) => k !== "tiktok" && !(ch[k] && String(ch[k].text || "").trim()) && (video || !VIDEO_NETS.includes(k)));
+  const missing = manual ? [] : pendingNets.filter((k) => k !== "tiktok" && k !== "whatsapp" && !(ch[k] && String(ch[k].text || "").trim()) && (video || !VIDEO_NETS.includes(k)));
   if (missing.length) {
     try {
       const variants = await adaptForChannels(ws, post.content, missing, (post as any).intent || undefined);
@@ -407,6 +430,8 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
     // id щойно опублікованого поста в мережі - під ним піде перший коментар (Telegram коментарів не має)
     let target = "";
     let note = "";   // пост вийшов, але щось із доповнень ні (співавтори, alt-текст) - людина має знати
+    // 🔤 відео цієї мережі (версія потрібною мовою субтитрів) - тіні загальних змінних поста
+    const { video, videoUrl, videoPath, videoSize, vDur, videoLimit, subNote } = await vidFor(k);
     try {
       if (u.error) throw new Error(u.error);
       if (k === "telegram") {
@@ -628,6 +653,10 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
         const r = k === "youtube" ? await sendYouTube(ws, postId, vf, textOf(k), ch) : await sendTikTok(ws, postId, vf, textOf(k), ch);
         if (r.skipped) { results.push({ channel: k, ...who, status: "skipped" }); continue; }
         note = r.note;
+      } else if (k === "whatsapp") {
+        throw new Error("WhatsApp - лише для сторіс: бот надсилає тобі готові кадри, і ти ставиш їх у статус. Постав формат «Сторіс» або зніми WhatsApp із цього поста");
+      } else {
+        throw new Error(`невідома мережа: ${k}`);
       }
       // 💬 перший коментар: пост уже в мережі, тож збій коментаря НЕ робить публікацію помилковою -
       // він окремим станом поруч (повтор - воркер або кнопка «Надіслати коментар»). Під кожною
@@ -641,6 +670,7 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
           await logEvent("warn", "comment", `перший коментар не поставлено в чергу: ${e.message}`, { ws, postId });
         }
       }
+      if (subNote) note = note ? `${note}; ${subNote}` : subNote;
       results.push({ channel: k, ...who, status: "sent", ...(cm ? { comment: cm } : {}), ...(note ? { note } : {}) });
     } catch (e: any) { results.push({ channel: k, ...who, status: "error", error: e.message }); }
   }
@@ -655,19 +685,25 @@ async function publishPostToChannelsNow(ws: string, postId: string, onlyNets?: s
 }
 
 // ===================== 📱 СТОРІС =====================
-// Сторіс є в API лише в Instagram (контейнер STORIES) і Facebook-Сторінки (photo_stories /
-// video_stories). Кожен кадр - окрема сторіс, підпису немає (текст має бути на кадрі), живе 24 год.
-// Telegram, Threads і LinkedIn сторіс через API не приймають - для них чесна відмова, а не тихий
-// звичайний пост замість сторіс.
-export const STORY_NETS = ["instagram", "facebook"];
-const NET_UA: Record<string, string> = { telegram: "Telegram", threads: "Threads", linkedin: "LinkedIn", instagram: "Instagram", facebook: "Facebook", youtube: "YouTube", tiktok: "TikTok" };
+// Сторіс є в API Instagram (контейнер STORIES) і Facebook-Сторінки (photo_stories / video_stories), а
+// з 09.10 - ще й у профілі Telegram через Telegram Business (postStory від імені людини, tgstory.ts) і
+// WhatsApp-статус як «ручна мережа» (бот надсилає людині готові кадри, вона ставить їх сама, wastatus.ts).
+// Кожен кадр - окрема сторіс, підпису немає (текст має бути на кадрі), живе 24 год. Threads, LinkedIn,
+// YouTube і TikTok сторіс через API не приймають - для них чесна відмова, а не тихий звичайний пост.
+// 🔤 Кожна мережа отримує кадри з субтитрами своєю мовою (версії монтажу, sublang.ts).
+export const STORY_NETS = ["instagram", "facebook", "telegram", "whatsapp"];
+const NET_UA: Record<string, string> = { telegram: "Telegram", threads: "Threads", linkedin: "LinkedIn", instagram: "Instagram", facebook: "Facebook", youtube: "YouTube", tiktok: "TikTok", whatsapp: "WhatsApp" };
 async function publishStoryToChannels(ws: string, postId: string, ch: any, onlyNets?: string[]): Promise<PubResult[]> {
   const enabled = enabledNets(ch).filter((k) => !onlyNets || onlyNets.includes(k));
   const frames = await postMediaList(postId);
+  const picker = await subPicker(ws, ch);
   // 👥 сторіс - з кожного обраного акаунта (або основного), як і звичайний пост
-  const [units, sentKeys] = await Promise.all([publishUnits(ws, ch, enabled.filter((k) => STORY_NETS.includes(k))), sentAccountKeys(ws, postId)]);
+  const [units, sentKeys] = await Promise.all([publishUnits(ws, ch, enabled.filter((k) => k === "instagram" || k === "facebook")), sentAccountKeys(ws, postId)]);
   // мережі без сторіс - одна чесна відмова на мережу, без жодного запиту
-  for (const k of enabled) if (!STORY_NETS.includes(k)) units.push({ k, id: null, name: null, error: `сторіс публікуються лише в Instagram і Facebook - ${NET_UA[k]} їх через API не приймає; зніми ${NET_UA[k]} із цього поста` });
+  for (const k of enabled) if (!STORY_NETS.includes(k)) units.push({ k, id: null, name: null, error: `сторіс публікуються в Instagram, Facebook, Telegram (профіль) і WhatsApp (статус) - ${NET_UA[k]} їх через API не приймає; зніми ${NET_UA[k]} із цього поста` });
+  // 📲 Telegram (профіль через Telegram Business) і WhatsApp (статус руками людини) - по одній «одиниці»
+  if (enabled.includes("telegram")) units.push({ k: "telegram", id: null, name: null });
+  if (enabled.includes("whatsapp")) units.push({ k: "whatsapp", id: null, name: null });
   const perNet = new Map<string, number>();
   for (const u of units) perNet.set(u.k, (perNet.get(u.k) || 0) + 1);
   const url = (f: string) => `${env.appBaseUrl}/media/${f}`;
@@ -679,9 +715,45 @@ async function publishStoryToChannels(ws: string, postId: string, ch: any, onlyN
     try {
       if (u.error) throw new Error(u.error);
       if (!frames.length) throw new Error("у сторіс немає жодного кадру - додай фото чи відео");
+      // 🔤 кадри з субтитрами мовою цієї мережі (якщо монтаж зробив таку версію)
+      const pick = await picker.frames(frames, k);
+      const fr = pick.frames;
+      if (k === "telegram") {
+        const tgt = await storyTarget(ws);
+        if ("error" in tgt) throw new Error(tgt.error);
+        const key = `story:${tgt.biz.tg_user_id}`;
+        if (sentKeys.has(`telegram|${key}`)) { results.push({ channel: k, status: "skipped" }); continue; }
+        const rv = await reservePub("telegram_publish", { post_id: postId, target: key }, { chat_id: key });
+        if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
+        if (rv === "busy") throw new Error(BUSY);
+        try {
+          const r = await postTgStories(tgt.token, tgt.biz, fr, ch);
+          await q(`update telegram_publish set message_id=$2, story_ids=$3, status='sent', permalink=nullif($4,'') where id=$1`, [rv.id, r.ids[0] || null, r.ids.join(","), r.permalink]);
+          results.push({ channel: k, status: "sent", ...(pick.note ? { note: pick.note } : {}) });
+        } catch (e: any) {
+          const posted: number[] = e?.posted || [];
+          if (!posted.length) { await q(`delete from telegram_publish where id=$1`, [rv.id]); throw e; }
+          // частина кадрів уже в профілі: фіксуємо «надіслано», щоб повтор не задублював їх
+          await q(`update telegram_publish set message_id=$2, story_ids=$3, status='sent' where id=$1`, [rv.id, posted[0], posted.join(",")]);
+          await logEvent("warn", "story", `Telegram: опубліковано ${posted.length} з ${fr.length} кадрів сторіс, далі збій: ${e.message}`, { ws, postId });
+          results.push({ channel: k, status: "error", error: `опубліковано ${posted.length} з ${fr.length} кадрів, далі збій: ${e.message}` });
+        }
+        continue;
+      }
+      if (k === "whatsapp") {
+        const rv = await reservePub("whatsapp_publish", { post_id: postId });
+        if (rv === "sent") { results.push({ channel: k, status: "skipped" }); continue; }
+        if (rv === "busy") throw new Error(BUSY);
+        try {
+          const r = await deliverWhatsApp(ws, postId, fr, pick.lang);
+          await q(`update whatsapp_publish set user_id=$2, chat_id=$3, message_ids=$4, status='sent' where id=$1`, [rv.id, r.who.user_id, r.who.chat_id, r.ids.join(",")]);
+          results.push({ channel: k, status: "sent", note: ["кадри надіслано тобі в Telegram-бот - перешли їх у WhatsApp → «Мій статус»", pick.note].filter(Boolean).join("; ") });
+        } catch (e: any) { await q(`delete from whatsapp_publish where id=$1`, [rv.id]); throw e; }
+        continue;
+      }
       const mt = u.meta!;
       // межі - ДО виклику: відео в сторіс Instagram - до 60 с (а мережа сказала б це через хвилину обробки)
-      const longVid = frames.find((m) => m.kind === "video" && Number(m.duration) > 60);
+      const longVid = fr.find((m) => m.kind === "video" && Number(m.duration) > 60);
       if (k === "instagram" && longVid) throw new Error(`відео в сторіс Instagram - до 60 с, а тут ${Math.round(Number(longVid.duration))} с - вріж його`);
       const rv = await reservePub("meta_publish", { post_id: postId, channel: k, account_id: (k === "instagram" ? mt.igUserId : mt.pageId)! },
         { account_name: k === "instagram" ? (mt.igUsername ? "@" + mt.igUsername : null) : mt.pageName });
@@ -690,7 +762,7 @@ async function publishStoryToChannels(ws: string, postId: string, ch: any, onlyN
       const reserved = rv;
       const ids: string[] = [];
       try {
-        for (const m of frames) {
+        for (const m of fr) {
           if (k === "instagram") {
             const r = m.kind === "video"
               ? await meta.publishStoryToInstagram(mt.igUserId!, mt.pageToken, { videoUrl: url(m.filename) })
@@ -708,12 +780,12 @@ async function publishStoryToChannels(ws: string, postId: string, ch: any, onlyN
         // частина кадрів уже в мережі: фіксуємо «надіслано», щоб повтор НЕ задублював їх, і кажемо прямо,
         // скільки вийшло - решту кадрів людина додасть окремою сторіс
         await q(`update meta_publish set external_id=$2, status='sent' where id=$1`, [reserved.id, ids.join(",")]);
-        await logEvent("warn", "story", `${NET_UA[k]}: опубліковано ${ids.length} з ${frames.length} кадрів сторіс, далі збій: ${e.message}`, { ws, postId });
-        results.push({ channel: k, ...who, status: "error", error: `опубліковано ${ids.length} з ${frames.length} кадрів, далі збій: ${e.message}` });
+        await logEvent("warn", "story", `${NET_UA[k]}: опубліковано ${ids.length} з ${fr.length} кадрів сторіс, далі збій: ${e.message}`, { ws, postId });
+        results.push({ channel: k, ...who, status: "error", error: `опубліковано ${ids.length} з ${fr.length} кадрів, далі збій: ${e.message}` });
         continue;
       }
       await q(`update meta_publish set external_id=$2, status='sent' where id=$1`, [reserved.id, ids.join(",")]);
-      results.push({ channel: k, ...who, status: "sent" });
+      results.push({ channel: k, ...who, status: "sent", ...(pick.note ? { note: pick.note } : {}) });
     } catch (e: any) { results.push({ channel: k, ...who, status: "error", error: e.message }); }
   }
   if (results.some((r) => r.status === "sent")) void ensurePostDigest(ws, postId).catch(() => {});
@@ -738,8 +810,9 @@ export function publishReelToChannels(ws: string, postId: string, nets: string[]
   return tracked(postId, () => publishReelToChannelsNow(ws, postId, nets));
 }
 async function publishReelToChannelsNow(ws: string, postId: string, nets: string[]): Promise<PubResult[]> {
-  const post = await one<{ content: string; channels: any; reel_video: string | null; own_video: string | null; cover_file: string | null }>(
+  const post = await one<{ content: string; channels: any; reel_video: string | null; own_video: string | null; own_id: string | null; cover_file: string | null }>(
     `select p.content, p.channels, p.reel_video, (select m.filename from media_asset m where m.id=p.media_id and m.kind='video') as own_video,
+            (select m.id from media_asset m where m.id=p.media_id and m.kind='video') as own_id,
             (select m.filename from media_asset m where m.id=p.reel_cover and m.kind='image') as cover_file
        from post p join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where p.id=$1 and s.workspace_id=$2`, [postId, ws]);
@@ -759,19 +832,26 @@ async function publishReelToChannelsNow(ws: string, postId: string, nets: string
       await q(`update post set channels=$2 where id=$1`, [postId, JSON.stringify(ch)]);
     } catch { caption = (post.content.split("\n").find((l) => /^ХУК/i.test(l.trim())) || post.content.split("\n")[0] || "").replace(/^ХУК[^:]*:\s*/i, "").slice(0, 500); }
   }
-  const videoUrl = `${env.appBaseUrl}/media/${post.reel_video}`;
   const sentSet = new Set(await reelSentNetworks(postId));
   const results: PubResult[] = [];
-  // YouTube і TikTok вантажать файл частинами з диска; розмір і кадр міряємо один раз
-  let vf: vp.VidFile | null = null;
-  const reelFile = async (): Promise<vp.VidFile> => {
-    if (vf) return vf;
-    const path = join(MEDIA_DIR, post.reel_video!);
-    const [st, info] = await Promise.all([stat(path), probeVideo(path)]);
-    return (vf = { path, filename: post.reel_video!, size: st.size, width: info?.width || 0, height: info?.height || 0, duration: info?.duration || 0 });
-  };
+  // 🔤 власне відео поста - у версії з субтитрами мовою мережі (якщо монтаж її зробив)
+  const own = ownVideo && post.own_id ? (await postMediaList(postId)).find((m) => m.id === post.own_id) || null : null;
+  const picker = own ? await subPicker(ws, ch) : null;
+  // YouTube і TikTok вантажать файл частинами з диска; розмір і кадр міряємо один раз на файл
+  const vfs = new Map<string, vp.VidFile>();
   for (const k of nets) {
     if (sentSet.has(k)) { results.push({ channel: k, status: "skipped" }); continue; }
+    const pick = own && picker ? await picker.frames([own], k) : null;
+    const fname = pick?.frames[0]?.filename || post.reel_video!;
+    const videoUrl = `${env.appBaseUrl}/media/${fname}`;
+    const reelFile = async (): Promise<vp.VidFile> => {
+      const had = vfs.get(fname); if (had) return had;
+      const path = join(MEDIA_DIR, fname);
+      const [st, info] = await Promise.all([stat(path), probeVideo(path)]);
+      const v = { path, filename: fname, size: st.size, width: info?.width || 0, height: info?.height || 0, duration: info?.duration || 0 };
+      vfs.set(fname, v);
+      return v;
+    };
     try {
       if (k === "instagram") {
         const acc = await metaAccountFor(ws, "instagram", postAccount(ch, "instagram"));
