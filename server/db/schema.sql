@@ -1268,6 +1268,10 @@ create table if not exists tg_chat_note (
   created_at   timestamptz not null default now()
 );
 create index if not exists idx_tg_chat_note_ws on tg_chat_note(workspace_id, msg_at);
+-- 👥 і питання клієнтів (рішення Олега 10.10): окрема галочка, типово вимкнена. Текст клієнта ще до збереження
+-- знеособлюється (телефони, пошти, посилання, ніки, номери), у ідеї йдуть лише теми без цитат; стирається так само
+alter table tg_relay add column if not exists client_ideas boolean not null default false;
+alter table tg_chat_note add column if not exists who text not null default 'own'; -- own | client
 
 -- 📤 Усі публікації поста одним списком: мережа, акаунт (id; '' - мережа з одним акаунтом), посилання, коли.
 -- Нова мережа додається сюди, а не в пʼятнадцять union по коду (так YouTube і TikTok уже були пропущені

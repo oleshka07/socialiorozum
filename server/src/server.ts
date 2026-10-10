@@ -931,9 +931,14 @@ app.post("/api/integrations/tgrelay", async (req: any, reply) => {
   try { const r = await addRelay(req.user.workspace_id, req.user.id, String(req.body?.token || "")); return { ok: true, ...r, relay: await relayView(req.user.workspace_id, true) }; }
   catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
+// on - «з моїх повідомлень», clients - «і питання клієнтів» (окремо; вимкнене стирає свою чергу)
 app.post("/api/integrations/tgrelay/ideas", async (req: any) => {
-  await setRelayIdeas(req.user.workspace_id, req.body?.on === true);
-  await logEvent("info", "tgrelay", `ідеї з власних повідомлень: ${req.body?.on === true ? "увімкнено" : "вимкнено"}`, null, req.user.id);
+  const b = req.body || {};
+  const opts = { own: typeof b.on === "boolean" ? b.on : undefined, clients: typeof b.clients === "boolean" ? b.clients : undefined };
+  await setRelayIdeas(req.user.workspace_id, opts);
+  const said = [opts.own === undefined ? "" : `з власних повідомлень ${opts.own ? "увімкнено" : "вимкнено"}`,
+    opts.clients === undefined ? "" : `з питань клієнтів ${opts.clients ? "увімкнено" : "вимкнено"}`].filter(Boolean).join(", ");
+  if (said) await logEvent("info", "tgrelay", `ідеї: ${said}`, null, req.user.id);
   return { ok: true, relay: await relayView(req.user.workspace_id, true) };
 });
 app.post("/api/integrations/tgrelay/off", async (req: any) => { await dropRelay(req.user.workspace_id); return { ok: true }; });
@@ -4138,7 +4143,7 @@ app.post("/api/webhooks/telegram/relay/:botId", async (req: any, reply) => {
   const botId = String(req.params.botId || "");
   if (!/^\d{3,20}$/.test(botId)) return reply.code(404).send({ error: "not found" });
   if (!sameSecret(req.headers["x-telegram-bot-api-secret-token"], relaySecret(botId))) return reply.code(401).send({ error: "bad secret" });
-  try { const r = await onRelayUpdate(botId, req.body || {}); return { ok: true, received: 1, handled: 0, did: r.did }; }
+  try { const r = await onRelayUpdate(botId, req.body || {}); return { ok: true, received: 1, handled: 0, did: r.did, clients: r.clients }; }
   catch (e: any) { await logEvent("warn", "tgrelay", "апдейт від свого бота не оброблено: " + String(e.message).slice(0, 160)); return reply.code(500).send({ ok: false }); }
 });
 app.post("/api/webhooks/telegram/bot/:botId", async (req: any, reply) => {

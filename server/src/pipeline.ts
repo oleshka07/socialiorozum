@@ -1753,7 +1753,10 @@ export async function topPatterns(workspaceId: string): Promise<{ patterns: { pa
 // що з написаного людям за добу варто розгорнути в пост для бренду - спостереження, принцип, відповідь на
 // питання, яке клієнти ставлять знову і знову, історія. Не ідея: логістика, ціни й домовленості з конкретною
 // людиною, побутове, ввічливості. У тексті ідеї - жодних імен, телефонів, адрес і сум конкретних клієнтів.
-export type ChatIdea = { idea: string; angle: string; rubric: string; quote: string };
+// З галочкою «👥 і питання клієнтів» сюди йдуть і знеособлені повідомлення клієнтів ([клієнт]): з них - лише
+// теми, про які питають знову й знову, узагальнено; цитата (quote) - тільки слова самого автора.
+export type ChatIdea = { idea: string; angle: string; rubric: string; quote: string; from: "author" | "clients" };
+export type ChatNote = string | { who: "own" | "client"; text: string };
 export function parseChatIdeas(raw: string, rubrics: string[] = []): ChatIdea[] {
   // просили {"ideas":[…]}, але модель буває відповідає й голим масивом - тоді обʼєкт у масиві не «відповідь»
   let arr: any[] = [];
@@ -1768,29 +1771,38 @@ export function parseChatIdeas(raw: string, rubrics: string[] = []): ChatIdea[] 
     const k = idea.toLowerCase();
     if (seen.has(k)) continue;
     seen.add(k);
+    const from = String(x?.from || "").toLowerCase().startsWith("client") ? "clients" : "author";
     out.push({
       idea,
       angle: String(x?.angle || "").trim().slice(0, 60),
       rubric: rub.get(String(x?.rubric || "").trim().toLowerCase()) || "",
-      quote: String(x?.quote || "").replace(/\s+/g, " ").trim().slice(0, 200),
+      // ідея з питань клієнтів - без цитати: цитувати клієнтів не можна
+      quote: from === "clients" ? "" : String(x?.quote || "").replace(/\s+/g, " ").trim().slice(0, 200),
+      from,
     });
     if (out.length >= 3) break;
   }
   return out;
 }
-export async function chatIdeasFromNotes(workspaceId: string, notes: string[]): Promise<ChatIdea[]> {
+export async function chatIdeasFromNotes(workspaceId: string, input: ChatNote[]): Promise<ChatIdea[]> {
+  const notes = input.map((n) => (typeof n === "string" ? { who: "own" as const, text: n } : n)).filter((n) => n.text);
   if (!notes.length) return [];
+  const withClients = notes.some((n) => n.who === "client");
   const s = await loadSettings(workspaceId);
   const rubrics = (await q<{ name: string }>(`select name from rubric where workspace_id=$1 order by idx`, [workspaceId])).map((r) => r.name);
-  const system = "Нижче - повідомлення, які автор бренду САМ написав людям у Telegram за добу (клієнтам, партнерам, знайомим). " +
+  const system = (withClients
+    ? "Нижче - переписки автора бренду в Telegram за добу: [автор] - що він САМ написав людям, [клієнт] - знеособлені повідомлення його клієнтів (телефони, пошти, посилання й номери вже прибрано). " +
+      "З рядків [клієнт] бери ЛИШЕ теми: про що клієнти питають, у чому сумніваються, чого бояться - найкраще те, що повторюється, або одне питання, відповідь на яке пост дав би всім. Узагальнюй своїми словами; НІКОЛИ не цитуй клієнтів і не переказуй історію конкретної людини. "
+    : "Нижче - повідомлення, які автор бренду САМ написав людям у Telegram за добу (клієнтам, партнерам, знайомим). ") +
     "Знайди 0-3 думки, з яких вийде сильний пост для бренду: спостереження з практики, принцип, яким автор керується, відповідь на питання, яке клієнти ставлять знову і знову, коротка історія, незгода з поширеною думкою. " +
     "НЕ ідея: логістика й домовленості (час, адреса, оплата), ціни чи умови для конкретної людини, побутове, ввічливості, жарти без думки. Нема що взяти - поверни порожній список, це нормально." +
-    "\nКожна ідея - тема поста одним реченням, своїми словами, БЕЗ імен, телефонів, адрес, сум і назв компаній клієнтів. quote - коротко (до 160 символів) суть думки автора його ж словами, теж без імен і цифр конкретних людей." +
+    "\nКожна ідея - тема поста одним реченням, своїми словами, БЕЗ імен, телефонів, адрес, сум і назв компаній клієнтів. quote - коротко (до 160 символів) суть думки автора його ж словами, теж без імен і цифр конкретних людей" +
+    (withClients ? "; quote береться ЛИШЕ з рядків [автор], для ідеї з питань клієнтів quote порожній. from - \"author\" (думка автора) чи \"clients\" (тема з питань клієнтів)." : ".") +
     (s.marketing_context ? `\nНіша й аудиторія бренду: ${s.marketing_context.slice(0, 500)}` : "") +
     (rubrics.length ? `\nРубрики бренду (rubric - одна з них або порожньо): ${rubrics.join(", ")}` : "") +
     goalRule(s) +
-    '\n\nПоверни ЛИШЕ JSON: {"ideas":[{"idea":"…","angle":"кут 2-3 словами","rubric":"…","quote":"…"}]}. Мова: Українська.';
-  const user = notes.map((n, i) => `${i + 1}. ${n.replace(/\s+/g, " ").slice(0, 400)}`).join("\n");
+    '\n\nПоверни ЛИШЕ JSON: {"ideas":[{"idea":"…","angle":"кут 2-3 словами","rubric":"…","quote":"…","from":"author"}]}. Мова: Українська.';
+  const user = notes.map((n, i) => `${i + 1}. ${withClients ? (n.who === "client" ? "[клієнт] " : "[автор] ") : ""}${n.text.replace(/\s+/g, " ").slice(0, 400)}`).join("\n");
   const raw = await chat(mainModel(s), system, user.slice(0, 14000), { workspaceId, step: "chat_ideas", json: true });
   return parseChatIdeas(raw, rubrics);
 }

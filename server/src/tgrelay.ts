@@ -7,9 +7,12 @@
 // X-Telegram-Bot-Api-Secret-Token (так само, як Telegram шле вебхуки):
 //  - business_connection - підключення до Telegram Business (для сторіс у профіль); правду про нього беремо
 //    у Telegram (getBusinessConnection), а не з тіла запиту;
-//  - business_message, написані САМОЮ людиною, - лише якщо вона ввімкнула «💡 Ідеї з моїх повідомлень».
-//    Повідомлень клієнтів бот не пересилає, а якщо перешле - відкидаємо (відправник ≠ людина з підключення).
-// Токен бота Holos тримає лише для postStory і getBusinessConnection. Сирий текст власних повідомлень живе
+//  - business_message, написані САМОЮ людиною, - лише якщо вона ввімкнула «💡 Ідеї з моїх повідомлень»;
+//  - повідомлення КЛІЄНТІВ - лише з окремою галочкою «👥 і питання клієнтів» (рішення Олега 10.10, типово
+//    вимкнено). Без неї відкидаємо (відправник ≠ людина з підключення), з нею - знеособлюємо ДО збереження
+//    (телефони, пошти, посилання, ніки, номери) і беремо в ідеї лише теми, про які питають, без цитат клієнтів.
+//    Бот дізнається про галочку з відповіді на кожне переслане (поле clients) і без неї клієнтів не шле.
+// Токен бота Holos тримає лише для postStory і getBusinessConnection. Сирий текст повідомлень живе
 // до вечірнього проходу (не довше 48 год) і стирається; у ньому нема, кому й куди людина писала.
 import { createHash } from "node:crypto";
 import { q, one } from "./db.js";
@@ -25,26 +28,62 @@ export const relayUrl = (botId: string): string => `${env.appBaseUrl}/api/webhoo
 export const relaySecret = (botId: string): string => hookSecret(`relay:${botId}`);
 
 export const NOTE_MIN = 30;           // коротше - «ок», «дякую», «буду о 5»: думки там нема
+export const CLIENT_MIN = 20;         // питання клієнта буває коротким: «А вікна теж миєте?»
+export const CLIENT_MAX = 600;
 export const NOTE_MAX = 1500;         // довше обрізаємо: для ідеї вистачає
 export const NOTES_PER_PASS = 80;     // вечірній прохід бере найсвіжіші
 export const NOTES_TTL_H = 48;        // сирий текст довше не живе за жодних умов
 export const IDEAS_HOUR = Number(process.env.CHAT_IDEAS_HOUR ?? 21); // вечір за поясом бренду: день переписок уже позаду
 export const IDEAS_PER_DAY = 3;
 
-type RelayRow = { bot_id: string; workspace_id: string; token: string; username: string | null; ideas: boolean; added_by: string | null; last_seen_at: string | null };
+type RelayRow = { bot_id: string; workspace_id: string; token: string; username: string | null; ideas: boolean; client_ideas: boolean; added_by: string | null; last_seen_at: string | null };
+const RELAY_COLS = `bot_id, workspace_id, token, username, ideas, client_ideas, added_by, last_seen_at`;
 
 export async function relayOf(ws: string): Promise<RelayRow | null> {
-  return one<RelayRow>(`select bot_id, workspace_id, token, username, ideas, added_by, last_seen_at from tg_relay where workspace_id=$1 order by updated_at desc limit 1`, [ws]);
+  return one<RelayRow>(`select ${RELAY_COLS} from tg_relay where workspace_id=$1 order by updated_at desc limit 1`, [ws]);
 }
 
 /** Чи текст власного повідомлення варто тримати до вечора (тут же - що саме зберегти). */
+const VOICE_RX = /^\s*\[голосове(?: повідомлення)?\]\s*/i; // «[голосове повідомлення]» без розшифровки - порожньо
 export function noteText(raw: unknown): string {
-  const t = String(raw ?? "").replace(/^\s*\[голосове\]\s*/i, "").replace(/\s+/g, " ").trim();
+  const t = String(raw ?? "").replace(VOICE_RX, "").replace(/\s+/g, " ").trim();
   if (t.length < NOTE_MIN) return "";
   // самі посилання й емодзі - не думка
   const meat = t.replace(/https?:\/\/\S+/g, "").replace(/[\p{Extended_Pictographic}\s]/gu, "");
   if (meat.length < NOTE_MIN / 2) return "";
   return t.slice(0, NOTE_MAX);
+}
+/**
+ * Знеособити текст клієнта ДО збереження: пошти, посилання, @ніки, телефони, рахунки (IBAN) і довгі номери
+ * (картки, замовлення, документи) - на мітки. Імена так не прибрати - їх модель не бере в ідеї за промтом.
+ */
+export function scrubPersonal(raw: unknown): string {
+  return String(raw ?? "")
+    .replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, "[пошта]")
+    .replace(/(?:https?:\/\/|www\.)\S+|\b(?:t\.me|wa\.me|instagram\.com|facebook\.com)\/\S+/gi, "[посилання]")
+    .replace(/(^|[^\w])@[A-Za-z0-9_]{3,}/g, "$1[нік]")
+    .replace(/\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}(?:[ ]?[A-Z0-9]{1,4})?\b/g, "[рахунок]")
+    .replace(/\+?\d[\d ().\/-]{6,}\d/g, (m) => (m.replace(/\D/g, "").length >= 7 ? "[номер]" : m));
+}
+/** Що з повідомлення клієнта тримати до вечора: знеособлене питання, а не «дякую» чи «ок». */
+export function clientNoteText(raw: unknown): string {
+  const t = scrubPersonal(String(raw ?? "").replace(VOICE_RX, "")).replace(/\s+/g, " ").trim();
+  if (t.length < CLIENT_MIN) return "";
+  const meat = t.replace(/\[(?:пошта|посилання|нік|рахунок|номер)\]/g, "").replace(/[\p{Extended_Pictographic}\s\p{P}]/gu, "");
+  if (meat.length < CLIENT_MIN / 2) return "";
+  return t.slice(0, CLIENT_MAX);
+}
+/**
+ * Цитата в ідеї - лише слова самої людини: щоб модель не підсунула туди слова клієнта. Порівнюємо за початком
+ * слова (4 літери): модель переказує думку автора, і «просить» стає «просять», «страх» - «страху».
+ */
+export function quoteFromOwn(quote: string, own: string[]): string {
+  const words = (x: string) => (x.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || []).map((w) => w.slice(0, 4));
+  const q = words(quote);
+  if (!q.length || !own.length) return "";
+  const have = new Set(own.flatMap(words));
+  const hit = q.filter((w) => have.has(w)).length;
+  return hit / q.length >= 0.6 ? quote : "";
 }
 /** Ключ запису: відбиток (підключення, чат, повідомлення) - сам чат не зберігаємо. */
 export const noteKey = (connId: string, chatId: unknown, messageId: unknown): string =>
@@ -81,24 +120,31 @@ export async function dropRelay(ws: string): Promise<void> {
   await logEvent("info", "tgrelay", `свій бот @${r.username || r.bot_id} відʼєднано`);
 }
 
-export async function setRelayIdeas(ws: string, on: boolean): Promise<void> {
-  await q(`update tg_relay set ideas=$2, updated_at=now() where workspace_id=$1`, [ws, on]);
-  if (!on) await q(`delete from tg_chat_note where workspace_id=$1`, [ws]);
+/** Галочки: own - власні повідомлення, clients - і питання клієнтів. Вимкнене - його черга стирається одразу. */
+export async function setRelayIdeas(ws: string, opts: { own?: boolean; clients?: boolean }): Promise<void> {
+  if (typeof opts.own === "boolean") {
+    await q(`update tg_relay set ideas=$2, updated_at=now() where workspace_id=$1`, [ws, opts.own]);
+    if (!opts.own) await q(`delete from tg_chat_note where workspace_id=$1 and who='own'`, [ws]);
+  }
+  if (typeof opts.clients === "boolean") {
+    await q(`update tg_relay set client_ideas=$2, updated_at=now() where workspace_id=$1`, [ws, opts.clients]);
+    if (!opts.clients) await q(`delete from tg_chat_note where workspace_id=$1 and who='client'`, [ws]);
+  }
 }
 
 /** Що бачить людина в Каналах. Адресу з секретом - лише той, хто керує каналами (manage). */
 export async function relayView(ws: string, mayManage: boolean): Promise<{
-  bot: string; url?: string; secret?: string; ideas: boolean; lastSeen: string | null; notes: number;
+  bot: string; url?: string; secret?: string; ideas: boolean; clients: boolean; lastSeen: string | null; notes: number; clientNotes: number;
   conn: (Pick<TgBiz, "id" | "can_stories" | "enabled"> & { label: string }) | null;
 } | null> {
   const r = await relayOf(ws);
   if (!r) return null;
   const c = await one<TgBiz>(`select id, bot_id, tg_user_id::text, user_chat_id::text, username, name, can_stories, enabled from tg_business where bot_id=$1 order by updated_at desc limit 1`, [r.bot_id]);
-  const notes = await one<{ n: number }>(`select count(*)::int n from tg_chat_note where workspace_id=$1`, [ws]);
+  const notes = await one<{ n: number; c: number }>(`select count(*) filter (where who='own')::int n, count(*) filter (where who='client')::int c from tg_chat_note where workspace_id=$1`, [ws]);
   return {
     bot: r.username || r.bot_id,
     ...(mayManage ? { url: relayUrl(r.bot_id), secret: relaySecret(r.bot_id) } : {}),
-    ideas: r.ideas, lastSeen: r.last_seen_at, notes: notes?.n || 0,
+    ideas: r.ideas, clients: r.client_ideas, lastSeen: r.last_seen_at, notes: notes?.n || 0, clientNotes: notes?.c || 0,
     conn: c ? { id: c.id, can_stories: c.can_stories, enabled: c.enabled, label: bizLabel(c) } : null,
   };
 }
@@ -112,39 +158,48 @@ async function syncConnection(r: RelayRow, connId: string): Promise<TgBiz | null
 
 /**
  * Апдейт, який переслав бот людини. Повертає, що з ним зроблено (для журналу бота й тестів):
- * connection - підключення оновлено; note - думку збережено до вечора; skip:<чому> - пропущено.
+ * connection - підключення оновлено; note - думку збережено до вечора; client - знеособлене питання клієнта;
+ * skip:<чому> - пропущено. clients - чи хоче Holos повідомлення клієнтів (бот без цього їх не шле).
  */
-export async function onRelayUpdate(botId: string, update: any): Promise<{ ok: true; did: string }> {
-  const r = await one<RelayRow>(`select bot_id, workspace_id, token, username, ideas, added_by, last_seen_at from tg_relay where bot_id=$1`, [botId]);
-  if (!r) return { ok: true, did: "skip:no-relay" };
+export async function onRelayUpdate(botId: string, update: any): Promise<{ ok: true; did: string; clients: boolean }> {
+  const r = await one<RelayRow>(`select ${RELAY_COLS} from tg_relay where bot_id=$1`, [botId]);
+  if (!r) return { ok: true, did: "skip:no-relay", clients: false };
+  const res = await relayUpdate(r, botId, update);
+  return { ok: true, did: res, clients: r.client_ideas };
+}
+async function relayUpdate(r: RelayRow, botId: string, update: any): Promise<string> {
   await q(`update tg_relay set last_seen_at=now() where bot_id=$1`, [botId]);
   if (update?.business_connection?.id) {
-    try { await syncConnection(r, String(update.business_connection.id)); return { ok: true, did: "connection" }; }
+    try { await syncConnection(r, String(update.business_connection.id)); return "connection"; }
     catch (e: any) {
       await logEvent("warn", "tgrelay", `підключення Business не звірилось у Telegram: ${String(e.message).slice(0, 160)}`);
-      return { ok: true, did: "skip:telegram" };
+      return "skip:telegram";
     }
   }
   const m = update?.business_message;
-  if (!m) return { ok: true, did: "skip:kind" };
+  if (!m) return "skip:kind";
   const connId = String(m.business_connection_id || "");
-  if (!connId) return { ok: true, did: "skip:no-connection" };
+  if (!connId) return "skip:no-connection";
   // підключення ще не знаємо (бот переслав повідомлення раніше за підключення) - спитати Telegram
   let biz = await one<TgBiz>(`select id, bot_id, tg_user_id::text, user_chat_id::text, username, name, can_stories, enabled from tg_business where id=$1 and bot_id=$2`, [connId, botId]);
   if (!biz) {
     try { biz = await syncConnection(r, connId); }
-    catch { return { ok: true, did: "skip:telegram" }; }
-    if (!biz) return { ok: true, did: "skip:telegram" };
+    catch { return "skip:telegram"; }
+    if (!biz) return "skip:telegram";
   }
-  if (!r.ideas) return { ok: true, did: "skip:ideas-off" };
-  // лише те, що написала САМА людина: повідомлення її співрозмовників не беремо, навіть якщо бот переслав
-  if (String(m.from?.id ?? "") !== String(biz.tg_user_id)) return { ok: true, did: "skip:not-owner" };
-  const text = noteText(m.text ?? m.caption);
-  if (!text) return { ok: true, did: "skip:short" };
+  const from = String(m.from?.id ?? "");
+  if (!from) return "skip:no-from";
+  const own = from === String(biz.tg_user_id);
+  // свої - з галочкою «з моїх повідомлень»; співрозмовників - лише з окремою «і питання клієнтів»,
+  // інакше відкидаємо, навіть якщо бот переслав
+  if (own && !r.ideas) return "skip:ideas-off";
+  if (!own && !r.client_ideas) return "skip:not-owner";
+  const text = own ? noteText(m.text ?? m.caption) : clientNoteText(m.text ?? m.caption);
+  if (!text) return "skip:short";
   const at = Number(m.date) > 0 ? new Date(Number(m.date) * 1000) : new Date();
-  await q(`insert into tg_chat_note(workspace_id, key, text, msg_at) values($1,$2,$3,$4) on conflict (key) do nothing`,
-    [r.workspace_id, noteKey(connId, m.chat?.id, m.message_id), text, at]);
-  return { ok: true, did: "note" };
+  await q(`insert into tg_chat_note(workspace_id, key, text, msg_at, who) values($1,$2,$3,$4,$5) on conflict (key) do nothing`,
+    [r.workspace_id, noteKey(connId, m.chat?.id, m.message_id), text, at, own ? "own" : "client"]);
+  return own ? "note" : "client";
 }
 
 // ---- вечірній прохід «💡 ідеї з переписок» ----
@@ -155,18 +210,21 @@ function localParts(tz: string): { hour: number; date: string } {
   return { hour: Number(p.hour) % 24, date: `${p.year}-${p.month}-${p.day}` };
 }
 
-/** Один прохід для бренду: з власних повідомлень за добу - до 3 ідей у Банк ідей; сирий текст стирається. */
+/** Один прохід для бренду: з повідомлень за добу - до 3 ідей у Банк ідей; сирий текст стирається. */
 export async function chatIdeasPass(ws: string): Promise<{ ideas: Array<{ id: string; text: string }>; notes: number }> {
-  const notes = await q<{ id: string; text: string }>(
-    `select id::text, text from tg_chat_note where workspace_id=$1 order by msg_at desc limit ${NOTES_PER_PASS}`, [ws]);
+  const notes = await q<{ id: string; text: string; who: string }>(
+    `select id::text, text, who from tg_chat_note where workspace_id=$1 order by msg_at desc limit ${NOTES_PER_PASS}`, [ws]);
   if (!notes.length) return { ideas: [], notes: 0 };
-  const found = await chatIdeasFromNotes(ws, notes.map((n) => n.text).reverse());
+  const chrono = notes.slice().reverse();
+  const found = await chatIdeasFromNotes(ws, chrono.map((n) => ({ who: n.who === "client" ? "client" as const : "own" as const, text: n.text })));
+  const ownTexts = chrono.filter((n) => n.who !== "client").map((n) => n.text);
   // що вже є в Банку - не дублюємо
   const have = new Set((await q<{ text: string }>(`select lower(text) as text from idea_bank where workspace_id=$1 order by created_at desc limit 300`, [ws])).map((x) => x.text));
   const ideas: Array<{ id: string; text: string }> = [];
   for (const f of found.slice(0, IDEAS_PER_DAY)) {
     if (have.has(f.idea.toLowerCase())) continue;
-    const text = f.quote ? `${f.idea}\n«${f.quote}»` : f.idea;
+    const quote = quoteFromOwn(f.quote, ownTexts); // цитата - лише слова самої людини, не клієнта
+    const text = quote ? `${f.idea}\n«${quote}»` : f.idea;
     const row = await one<{ id: string }>(`insert into idea_bank(workspace_id, text, angle, rubric, origin) values($1,$2,$3,$4,'chat') returning id`,
       [ws, text.slice(0, 3000), f.angle || null, f.rubric || null]);
     if (row) ideas.push({ id: row.id, text: f.idea });
@@ -204,7 +262,7 @@ export async function chatIdeasTick(now: Date = new Date()): Promise<void> {
   const rows = await q<{ workspace_id: string; added_by: string | null; tz: string | null; last: string | null }>(
     `select r.workspace_id, r.added_by, (select content from settings_block where workspace_id=r.workspace_id and key='timezone') as tz,
             (select content from settings_block where workspace_id=r.workspace_id and key='chat_ideas_last') as last
-       from tg_relay r where r.ideas and exists (select 1 from tg_chat_note n where n.workspace_id=r.workspace_id)`);
+       from tg_relay r where (r.ideas or r.client_ideas) and exists (select 1 from tg_chat_note n where n.workspace_id=r.workspace_id)`);
   for (const r of rows) {
     const { hour, date } = localParts(r.tz || "Europe/Kyiv");
     if (hour < IDEAS_HOUR || r.last === date || ran.get(r.workspace_id) === date) continue;

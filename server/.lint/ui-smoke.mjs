@@ -747,8 +747,13 @@ function handleApi(method, path, body) {
   if (method === "POST" && path === "/integrations/tgstory/use") { tgStoryCalls.push(["use", body]); TGSTORY = { ...TGSTORY, brand: { id: body.id, label: "@oleg_old", enabled: true, can_stories: false } }; return { ok: true, label: "@oleg_old" }; }
   if (method === "GET" && path === "/integrations/tgrelay") return { relay: TGRELAY };
   if (method === "POST" && path === "/integrations/tgrelay") { tgRelayCalls.push(["add", body]); TGRELAY = { bot: "oleg_personal_bot", url: "https://beta.holos.rozum.one/api/webhooks/telegram/relay/5555555", secret: "s3cr3t48hex", ideas: false, lastSeen: null, notes: 0, conn: null }; return { ok: true, bot: "oleg_personal_bot", canBusiness: false, relay: TGRELAY }; }
-  if (method === "POST" && path === "/integrations/tgrelay/ideas") { tgRelayCalls.push(["ideas", body]); TGRELAY = { ...TGRELAY, ideas: !!body.on, notes: body.on ? 3 : 0, lastSeen: new Date().toISOString(), conn: { id: "BC-O", can_stories: true, enabled: true, label: "@oleg_tg" } }; return { ok: true, relay: TGRELAY }; }
-  if (method === "POST" && path === "/integrations/tgrelay/ideas-now") { tgRelayCalls.push(["now"]); TGRELAY = { ...TGRELAY, notes: 0 }; return { ok: true, notes: 3, ideas: [{ id: "i1", text: "Чому клієнт просить знижку" }, { id: "i2", text: "Фото до роботи" }] }; }
+  if (method === "POST" && path === "/integrations/tgrelay/ideas") {
+    tgRelayCalls.push(["ideas", body]);
+    if ("on" in body) TGRELAY = { ...TGRELAY, ideas: !!body.on, notes: body.on ? 3 : 0, lastSeen: new Date().toISOString(), conn: { id: "BC-O", can_stories: true, enabled: true, label: "@oleg_tg" } };
+    if ("clients" in body) TGRELAY = { ...TGRELAY, clients: !!body.clients, clientNotes: body.clients ? 2 : 0 };
+    return { ok: true, relay: TGRELAY };
+  }
+  if (method === "POST" && path === "/integrations/tgrelay/ideas-now") { tgRelayCalls.push(["now"]); TGRELAY = { ...TGRELAY, notes: 0, clientNotes: 0 }; return { ok: true, notes: 3, ideas: [{ id: "i1", text: "Чому клієнт просить знижку" }, { id: "i2", text: "Фото до роботи" }] }; }
   if (method === "POST" && path === "/integrations/tgrelay/off") { tgRelayCalls.push(["off"]); TGRELAY = null; return { ok: true }; }
   if (method === "POST" && path === "/integrations/tgstory/off") { tgStoryCalls.push(["off"]); TGSTORY = { ...TGSTORY, brand: null }; return { ok: true }; }
   if (method === "GET" && path === "/montage/caps") return { tts: true, stt: true, vision: true, music: true, maxClips: 20, ...MV_CAPS_EXTRA, style: MV_STYLE, endPreview: MV_STYLE.end ? (MV_STYLE.endText ? { title: MV_STYLE.endText.split("\n")[0], sub: MV_STYLE.endText.split("\n")[1] || "" } : MV_END) : MV_END };
@@ -1647,6 +1652,11 @@ const run = async () => {
     await page.evaluate(() => { const c = document.querySelector("#relayIdeas"); c.checked = true; c.dispatchEvent(new Event("change")); });
     await page.waitForFunction(() => !!document.querySelector("#relayNow"), undefined, { timeout: 5000 });
     const c = await page.evaluate(() => document.querySelector("#tgRelay").textContent);
+    // «👥 і питання клієнтів» - окрема галочка з підтвердженням
+    page.once("dialog", (d) => d.accept());
+    await page.evaluate(() => { const x = document.querySelector("#relayClients"); x.checked = true; x.dispatchEvent(new Event("change")); });
+    await page.waitForFunction(() => /Питань у черзі: 2/.test(document.querySelector("#tgRelay").textContent), undefined, { timeout: 5000 });
+    const d = await page.evaluate(() => ({ t: document.querySelector("#tgRelay").textContent, on: document.querySelector("#relayClients").checked, own: document.querySelector("#relayIdeas").checked }));
     await page.evaluate(() => document.querySelector("#relayNow").click());
     await page.waitForFunction(() => !document.querySelector("#relayNow"), undefined, { timeout: 5000 });
     page.once("dialog", (d) => d.accept());
@@ -1656,9 +1666,10 @@ const run = async () => {
       && tgRelayCalls[0][0] === "add" && /^5555555:/.test(tgRelayCalls[0][1].token)
       && /HOLOS_RELAY_URL=https:\/\/beta\.holos\.rozum\.one\/api\/webhooks\/telegram\/relay\/5555555/.test(b.env) && /HOLOS_RELAY_SECRET=s3cr3t48hex/.test(b.env)
       && /бот ще нічого не пересилав/.test(b.t) && !b.ideasOn && !b.dis && !b.now
-      && tgRelayCalls[1][0] === "ideas" && tgRelayCalls[1][1].on === true && /✅ Telegram Business: @oleg_tg/.test(c) && /У черзі до вечора: 3/.test(c) && /не клієнтів/.test(c)
-      && tgRelayCalls[2][0] === "now" && tgRelayCalls[3][0] === "off" && !/—/.test(a.t + b.t + c);
-    if (!good) console.log("   ↳ tgRelayPanel:", JSON.stringify({ a, b, c, calls: tgRelayCalls }));
+      && tgRelayCalls[1][0] === "ideas" && tgRelayCalls[1][1].on === true && /✅ Telegram Business: @oleg_tg/.test(c) && /У черзі до вечора: 3/.test(c) && /І питання клієнтів \(знеособлено\)/.test(c)
+      && tgRelayCalls[2][0] === "ideas" && tgRelayCalls[2][1].clients === true && !("on" in tgRelayCalls[2][1]) && d.on && d.own && /вирізає з них телефони/.test(d.t)
+      && tgRelayCalls[3][0] === "now" && tgRelayCalls[4][0] === "off" && !/—/.test(a.t + b.t + c + d.t);
+    if (!good) console.log("   ↳ tgRelayPanel:", JSON.stringify({ a, b, c, d, calls: tgRelayCalls }));
     return good;
   });
 
