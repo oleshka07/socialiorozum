@@ -79,6 +79,11 @@ name: beta-check
 # секрет і кривий id (401/404 - нічого не пише), рядки tg_relay (кількість), журнал. І бот Олега (networking-ai на
 # цьому ж боксі): де він, на якому коміті, чи задано HOLOS_RELAY_URL (лише так/ні) і чи достукується його контейнер
 # до beta.holos (POST з чужим секретом - очікуємо 401). Нічого не пише й не перезапускає.
+# Другий прохід - після деплою бота Олега (3847624, «так, бот»): чи бот уже стукає в Holos (nginx беті: запити на
+# /api/webhooks/telegram/relay/ - час і код відповіді), рядки tg_relay (нік, чи ідеї, коли писав), підключення Business
+# цього бота і профіль бренду, черга думок, журнал tgrelay за 3 год. Нічого не пише.
+# Третій - бета після a68af00 (👥 питання клієнтів, окрема галочка): версія, здоров'я, код у контейнері, міграція
+# (tg_relay.client_ideas, tg_chat_note.who), стан свого бота (галочки, коли писав), черга за видом, журнал. Нічого не пише.
 
 on:
   push:
@@ -108,7 +113,7 @@ jobs:
             docker compose ps --format '{{.Service}} {{.Status}}' | sed 's/^/   /'
             echo "== health: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/health)"
             echo "== код у контейнері:"
-            for m in "dist/tgrelay.js:onRelayUpdate" "dist/tgrelay.js:chatIdeasPass" "dist/server.js:telegram/relay" "dist/server.js:startChatIdeas" "dist/tgstory.js:onRelayConnection" "dist/pipeline.js:chatIdeasFromNotes" "public/app.js:loadTgRelay" "public/privacy.html:3b. Telegram"; do
+            for m in "dist/tgrelay.js:scrubPersonal" "dist/tgrelay.js:quoteFromOwn" "dist/tgrelay.js:client_ideas" "dist/server.js:clients: r.clients" "dist/pipeline.js:withClients" "public/app.js:relayClients" "public/privacy.html:client questions"; do
               f=${m%%:*}; k=${m#*:}; echo "   $f $k: $(docker compose exec -T app sh -c "grep -c '$k' $f 2>/dev/null || echo 0")"
             done
             echo "== вхід для бота (чужий секрет / кривий id / без секрету):"
@@ -124,6 +129,8 @@ jobs:
             console.log('таблиці: ' + t[0].ok);
             const cols = await q(\"select string_agg(column_name, ',' order by ordinal_position) ok from information_schema.columns where table_name='tg_chat_note'\");
             console.log('tg_chat_note: ' + cols[0].ok);
+            const rc = await q(\"select string_agg(column_name, ',' order by ordinal_position) ok from information_schema.columns where table_name='tg_relay'\");
+            console.log('tg_relay: ' + rc[0].ok);
             const r = await q(\"select count(*)::int n, count(*) filter (where ideas)::int ideas, count(*) filter (where last_seen_at is not null)::int seen from tg_relay\");
             const n = await q(\"select count(*)::int n from tg_chat_note\");
             const ib = await q(\"select count(*)::int n from idea_bank where origin='chat'\");
@@ -137,17 +144,25 @@ jobs:
             for (const l of st) console.log('  ' + l.c + ' ' + mask(l.m));
             await c.end();
             " 2>&1 | sed 's/^/   /'
-            echo "== бот Олега (networking-ai), лише читання:"
-            docker ps --format '{{.Names}} {{.Image}} {{.Status}}' | grep -i -E 'network|alisio_ai|ai_net' | sed 's/^/   /' || echo "   контейнерів із такою назвою нема"
-            for d in /opt/networking-ai /opt/ai_networking /opt/AI_Networking /opt/networking; do
-              [ -d "$d/.git" ] && echo "   $d: гілка $(git -C $d rev-parse --abbrev-ref HEAD) · $(git -C $d log -1 --format='%h %cs %s' | cut -c1-90)"
-              if [ -f "$d/.env" ]; then echo "   $d/.env: HOLOS_RELAY_URL задано: $(grep -q '^HOLOS_RELAY_URL=..*' $d/.env && echo так || echo ні) · HOLOS_RELAY_SECRET задано: $(grep -q '^HOLOS_RELAY_SECRET=..*' $d/.env && echo так || echo ні)"; fi
-            done
-            BOT=$(docker ps --format '{{.Names}}' | grep -i -E 'network' | grep -i -E 'bot|poll|tg|telegram' | head -1)
-            [ -z "$BOT" ] && BOT=$(docker ps --format '{{.Names}}' | grep -i -E 'network' | head -1)
-            if [ -n "$BOT" ]; then
-              echo "   контейнер $BOT → beta.holos (чужий секрет, очікуємо 401): $(docker exec "$BOT" python -c "import httpx;print(httpx.post('https://beta.holos.rozum.one/api/webhooks/telegram/relay/1234567',json={},headers={'X-Telegram-Bot-Api-Secret-Token':'wrong'},timeout=10).status_code)" 2>&1 | tail -1)"
-            fi
+            echo "== nginx беті: запити бота на relay (останні 15, лише час/метод/код):"
+            for f in /var/log/nginx/*access*.log; do grep -h "/api/webhooks/telegram/relay/" "$f" 2>/dev/null; done | tail -15 | awk '{print "   " $4 " " $6 " " $7 " -> " $9}' | sed 's/"//g'
+            docker compose exec -T app node --input-type=module -e "
+            import pg from 'pg';
+            const c = new pg.Client({ connectionString: process.env.DATABASE_URL }); await c.connect();
+            const q = async (s, a) => (await c.query(s, a)).rows;
+            const rl = await q(\"select r.bot_id, r.username, r.ideas, r.client_ideas, to_char(r.last_seen_at at time zone 'UTC','DD.MM HH24:MI') seen, to_char(r.created_at at time zone 'UTC','DD.MM HH24:MI') added, w.title from tg_relay r join workspace w on w.id=r.workspace_id\");
+            for (const r of rl) console.log('свій бот @' + r.username + ' (' + r.bot_id + ') у бренді «' + r.title + '» · додано ' + r.added + ' UTC · ідеї ' + (r.ideas ? 'так' : 'ні') + ' · клієнти ' + (r.client_ideas ? 'так' : 'ні') + ' · писав ' + (r.seen || 'ще ні'));
+            if (!rl.length) console.log('своїх ботів у Holos беті ще нема (токен у «Telegram Business уже зайнятий твоїм ботом?» не вставлено)');
+            const bz = await q(\"select b.bot_id, b.username, b.can_stories, b.enabled, (select count(*)::int from tg_story_brand s where s.conn_id=b.id) brands from tg_business b where b.bot_id in (select bot_id from tg_relay)\");
+            for (const b of bz) console.log('  Business: @' + (b.username || '?') + ' · сторіс ' + (b.can_stories ? 'так' : 'НІ') + ' · ' + (b.enabled ? 'увімкнено' : 'вимкнено') + ' · брендів із цим профілем ' + b.brands);
+            const n = await q(\"select count(*) filter (where who='own')::int o, count(*) filter (where who='client')::int c from tg_chat_note\");
+            const ib = await q(\"select count(*)::int n from idea_bank where origin='chat'\");
+            console.log('черга: власних ' + n[0].o + ', клієнтів ' + n[0].c + ' · ідей із переписок ' + ib[0].n);
+            const lg = await q(\"select level, left(message,170) m, to_char(created_at at time zone 'UTC','HH24:MI') c from app_log where scope='tgrelay' and created_at > now() - interval '3 hours' order by created_at desc limit 10\");
+            for (const l of lg) console.log('  ' + l.c + ' ' + l.level + ': ' + l.m.replace(/\\d{6,}:[A-Za-z0-9_-]{20,}/g, '<token>'));
+            if (!lg.length) console.log('  журнал tgrelay за 3 год: порожньо');
+            await c.end();
+            " 2>&1 | sed 's/^/   /'
             echo "   (кінець)"
 
   drop:
