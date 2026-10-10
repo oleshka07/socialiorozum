@@ -84,6 +84,10 @@ name: beta-check
 # цього бота і профіль бренду, черга думок, журнал tgrelay за 3 год. Нічого не пише.
 # Третій - бета після a68af00 (👥 питання клієнтів, окрема галочка): версія, здоров'я, код у контейнері, міграція
 # (tg_relay.client_ideas, tg_chat_note.who), стан свого бота (галочки, коли писав), черга за видом, журнал. Нічого не пише.
+# 10.10 вечір - ПРОД після промоушну 45c126e (команда бренду, сторіс Telegram/WhatsApp і мови субтитрів, свій бот без
+# перехоплення й ідеї, питання клієнтів, конектор не затирає мережі поста): версія, health, сторінки, стара адреса, код у
+# контейнері, міграція (ролі учасників, нові таблиці й колонки, post_published з WhatsApp), вхід relay (401/404), бот
+# (getMe can_connect_to_business, вебхук і allowed_updates), дані й warn/error журналу. Нічого не пише.
 
 on:
   push:
@@ -100,70 +104,62 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: beta after own-bot relay + chat ideas (server, read-only)
+      - name: prod after promotion 45c126e (server, read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 6m
+          command_timeout: 8m
           script: |
-            echo "== HEAD прод: $(git -C /opt/socialio rev-parse --short HEAD) · бета: $(git -C /opt/socialio-beta rev-parse --short HEAD)"
-            cd /opt/socialio-beta/server
-            docker compose ps --format '{{.Service}} {{.Status}}' | sed 's/^/   /'
-            echo "== health: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/health)"
-            echo "== код у контейнері:"
-            for m in "dist/tgrelay.js:scrubPersonal" "dist/tgrelay.js:quoteFromOwn" "dist/tgrelay.js:client_ideas" "dist/server.js:clients: r.clients" "dist/pipeline.js:withClients" "public/app.js:relayClients" "public/privacy.html:client questions"; do
-              f=${m%%:*}; k=${m#*:}; echo "   $f $k: $(docker compose exec -T app sh -c "grep -c '$k' $f 2>/dev/null || echo 0")"
+            cd "${{ secrets.APP_DIR }}/server"
+            for i in $(seq 1 36); do
+              up=$(( $(date +%s) - $(date -d "$(docker inspect -f '{{.State.StartedAt}}' $(docker compose ps -q app))" +%s) ))
+              [ "$up" -ge 120 ] && break; sleep 5
             done
-            echo "== вхід для бота (чужий секрет / кривий id / без секрету):"
-            echo "   локально 8081, id 1234567, чужий секрет: $(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -H 'x-telegram-bot-api-secret-token: wrong' -d '{}' http://127.0.0.1:8081/api/webhooks/telegram/relay/1234567)"
-            echo "   кривий id abc: $(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{}' http://127.0.0.1:8081/api/webhooks/telegram/relay/abc)"
-            echo "   ззовні https://beta.holos.rozum.one (минаючи PIN), чужий секрет: $(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -H 'x-telegram-bot-api-secret-token: wrong' -d '{}' https://beta.holos.rozum.one/api/webhooks/telegram/relay/1234567)"
-            docker compose exec -T app node --input-type=module -e "
-            import pg from 'pg';
-            const c = new pg.Client({ connectionString: process.env.DATABASE_URL }); await c.connect();
-            const q = async (s, a) => (await c.query(s, a)).rows;
-            const mask = (s) => String(s ?? '').replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g, '***').replace(/\\d{6,}:[A-Za-z0-9_-]{20,}/g, '<token>');
-            const t = await q(\"select string_agg(n, ',') ok from unnest(\$1::text[]) n where to_regclass(n) is not null\", [['tg_relay', 'tg_chat_note']]);
-            console.log('таблиці: ' + t[0].ok);
-            const cols = await q(\"select string_agg(column_name, ',' order by ordinal_position) ok from information_schema.columns where table_name='tg_chat_note'\");
-            console.log('tg_chat_note: ' + cols[0].ok);
-            const rc = await q(\"select string_agg(column_name, ',' order by ordinal_position) ok from information_schema.columns where table_name='tg_relay'\");
-            console.log('tg_relay: ' + rc[0].ok);
-            const r = await q(\"select count(*)::int n, count(*) filter (where ideas)::int ideas, count(*) filter (where last_seen_at is not null)::int seen from tg_relay\");
-            const n = await q(\"select count(*)::int n from tg_chat_note\");
-            const ib = await q(\"select count(*)::int n from idea_bank where origin='chat'\");
-            console.log('свої боти: ' + r[0].n + ' (ідеї ввімкнено ' + r[0].ideas + ', уже пересилали ' + r[0].seen + ') · у черзі думок ' + n[0].n + ' · ідей із переписок ' + ib[0].n);
-            const bz = await q(\"select count(*)::int n, count(*) filter (where can_stories and enabled)::int live from tg_business\");
-            console.log('Telegram Business: підключень ' + bz[0].n + ' (з правом на сторіс ' + bz[0].live + ')');
-            const lg = await q(\"select level, scope, left(message,170) m, to_char(created_at at time zone 'UTC','HH24:MI') c from app_log where created_at > now() - interval '25 minutes' and level in ('warn','error') order by created_at desc limit 12\");
+            echo "зараз $(date -u +%d.%m\ %H:%M) UTC · контейнер живе ${up} с"
+            echo "HEAD прод $(git -C .. rev-parse --short HEAD) · бета $(git -C /opt/socialio-beta rev-parse --short HEAD)"
+            docker compose ps --format '{{.Name}} {{.Status}}'
+            curl -s -o /dev/null -w "health %{http_code}\n" http://127.0.0.1:8080/health
+            for u in / /app /login /register /privacy /terms /data-deletion /tgapp /robots.txt /llms.txt /sitemap.xml; do curl -s -o /dev/null -w "$u %{http_code}\n" "https://holos.rozum.one$u"; done
+            curl -s -o /dev/null -w "стара адреса / → %{http_code} %{redirect_url}\n" https://socialio.rozum.one/
+            curl -s -o /dev/null -w "beta health %{http_code}\n" https://beta.holos.rozum.one/health
+            echo "privacy: розділ 3b $(curl -s https://holos.rozum.one/privacy | grep -c '3b. Telegram')"
+            echo "вхід relay: чужий секрет $(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -H 'x-telegram-bot-api-secret-token: wrong' -d '{}' http://127.0.0.1:8080/api/webhooks/telegram/relay/1234567) · кривий id $(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{}' http://127.0.0.1:8080/api/webhooks/telegram/relay/abc) · ззовні чужий секрет $(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -H 'x-telegram-bot-api-secret-token: wrong' -d '{}' https://holos.rozum.one/api/webhooks/telegram/relay/1234567)"
+            echo "команда без входу: $(curl -s -o /dev/null -w '%{http_code}' https://holos.rozum.one/api/workspaces/members)"
+            docker compose exec -T app sh -c 'for m in dist/roles.js:routeCap dist/team.js:addToTeam dist/actor.js:runAs dist/tgstory.js:postTgStories dist/wastatus.js:deliverWhatsApp dist/sublang.js:subPicker dist/tgrelay.js:scrubPersonal dist/tgrelay.js:quoteFromOwn dist/mcp.js:slotPlan dist/mcp.js:channels_add dist/publisher.js:pruneSlots public/app.js:relayClients public/app.js:teamTab; do f=${m%%:*}; k=${m#*:}; echo "   $f $k: $(grep -c "$k" $f 2>/dev/null || echo 0)"; done; echo "   libx265: $(ffmpeg -hide_banner -encoders 2>/dev/null | grep -c libx265)"'
+            JS=$(cat <<'EOF'
+            const { q } = await import('/app/dist/db.js');
+            const mask = (s) => String(s ?? '').replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g, '***').replace(/\d{6,}:[A-Za-z0-9_-]{20,}/g, '<token>');
+            const t = await q("select string_agg(n, ',') ok from unnest($1::text[]) n where to_regclass(n) is not null", [["workspace_invite", "tg_business", "tg_story_brand", "whatsapp_publish", "tg_relay", "tg_chat_note", "post_published"]]);
+            console.log('таблиці й view: ' + t[0].ok);
+            const roles = await q("select role, count(*)::int n from workspace_member group by 1 order by 1");
+            console.log('ролі учасників: ' + roles.map((r) => r.role + ' ' + r.n).join(' · '));
+            const def = await q("select column_default d from information_schema.columns where table_name='workspace_member' and column_name='role'");
+            console.log('типова роль: ' + def[0]?.d);
+            const cols = await q("select count(*)::int n from information_schema.columns where (table_name='post' and column_name in ('created_by','submitted_by','submitted_at','review_note')) or (table_name='media_asset' and column_name in ('sub_lang','variant_of')) or (table_name='telegram_publish' and column_name='story_ids') or (table_name='tg_relay' and column_name='client_ideas') or (table_name='tg_chat_note' and column_name='who') or (table_name='workspace_member' and column_name='added_by')");
+            console.log('нові колонки: ' + cols[0].n + ' з 11');
+            const vw = await q("select position('whatsapp_publish' in pg_get_viewdef('post_published'::regclass))>0 ok");
+            console.log('post_published бачить WhatsApp: ' + vw[0].ok);
+            const pp = await q("select net, count(*)::int n from post_published group by 1 order by 1");
+            console.log('post_published: ' + pp.map((x) => x.net + ' ' + x.n).join(' · '));
+            const tok = (await q("select value from app_secret where name='TELEGRAM_BOT_TOKEN'"))[0]?.value || process.env.TELEGRAM_BOT_TOKEN || '';
+            const me = await fetch('https://api.telegram.org/bot' + tok + '/getMe').then((x) => x.json()).catch(() => ({}));
+            const wh = await fetch('https://api.telegram.org/bot' + tok + '/getWebhookInfo').then((x) => x.json()).catch(() => ({}));
+            let host = '?'; try { host = new URL(wh.result?.url || '').host; } catch { /* */ }
+            console.log('бот: @' + (me.result?.username || '?') + ' · Business Mode ' + (me.result?.can_connect_to_business ? 'так' : 'ні') + ' · вебхук: ' + host + ', черга ' + (wh.result?.pending_update_count ?? '?') + ' · business_connection у вебхуку: ' + ((wh.result?.allowed_updates || []).includes('business_connection') || !wh.result?.allowed_updates ? 'так' : 'ні') + (wh.result?.last_error_message ? ' · остання помилка: ' + mask(wh.result.last_error_message).slice(0, 80) : ''));
+            const bz = await q("select (select count(*)::int from tg_business) b, (select count(*)::int from tg_relay) r, (select count(*)::int from workspace_invite) i, (select count(*)::int from whatsapp_publish) w");
+            console.log('Business ' + bz[0].b + ' · свої боти ' + bz[0].r + ' · запрошень ' + bz[0].i + ' · WhatsApp ' + bz[0].w);
+            const d = await q("select (select count(*) from post)::int p, (select count(*) from workspace)::int w, (select count(*) from app_user)::int u, (select count(*) from schedule_slot where status='planned')::int s");
+            console.log('дані: ' + JSON.stringify(d[0]));
+            const lg = await q("select level, scope, left(message,170) m, to_char(created_at at time zone 'UTC','HH24:MI') c from app_log where created_at > now() - interval '25 minutes' and level in ('warn','error') order by created_at desc limit 12");
             for (const l of lg) console.log('  ' + l.c + ' ' + l.level[0] + ' ' + l.scope + ': ' + mask(l.m));
-            if (!lg.length) console.log('  warn/error за 25 хв: нема');
-            const st = await q(\"select left(message,160) m, to_char(created_at at time zone 'UTC','HH24:MI') c from app_log where scope in ('tgrelay','server') and created_at > now() - interval '25 minutes' order by created_at desc limit 6\");
-            for (const l of st) console.log('  ' + l.c + ' ' + mask(l.m));
-            await c.end();
-            " 2>&1 | sed 's/^/   /'
-            echo "== nginx беті: запити бота на relay (останні 15, лише час/метод/код):"
-            for f in /var/log/nginx/*access*.log; do grep -h "/api/webhooks/telegram/relay/" "$f" 2>/dev/null; done | tail -15 | awk '{print "   " $4 " " $6 " " $7 " -> " $9}' | sed 's/"//g'
-            docker compose exec -T app node --input-type=module -e "
-            import pg from 'pg';
-            const c = new pg.Client({ connectionString: process.env.DATABASE_URL }); await c.connect();
-            const q = async (s, a) => (await c.query(s, a)).rows;
-            const rl = await q(\"select r.bot_id, r.username, r.ideas, r.client_ideas, to_char(r.last_seen_at at time zone 'UTC','DD.MM HH24:MI') seen, to_char(r.created_at at time zone 'UTC','DD.MM HH24:MI') added, w.title from tg_relay r join workspace w on w.id=r.workspace_id\");
-            for (const r of rl) console.log('свій бот @' + r.username + ' (' + r.bot_id + ') у бренді «' + r.title + '» · додано ' + r.added + ' UTC · ідеї ' + (r.ideas ? 'так' : 'ні') + ' · клієнти ' + (r.client_ideas ? 'так' : 'ні') + ' · писав ' + (r.seen || 'ще ні'));
-            if (!rl.length) console.log('своїх ботів у Holos беті ще нема (токен у «Telegram Business уже зайнятий твоїм ботом?» не вставлено)');
-            const bz = await q(\"select b.bot_id, b.username, b.can_stories, b.enabled, (select count(*)::int from tg_story_brand s where s.conn_id=b.id) brands from tg_business b where b.bot_id in (select bot_id from tg_relay)\");
-            for (const b of bz) console.log('  Business: @' + (b.username || '?') + ' · сторіс ' + (b.can_stories ? 'так' : 'НІ') + ' · ' + (b.enabled ? 'увімкнено' : 'вимкнено') + ' · брендів із цим профілем ' + b.brands);
-            const n = await q(\"select count(*) filter (where who='own')::int o, count(*) filter (where who='client')::int c from tg_chat_note\");
-            const ib = await q(\"select count(*)::int n from idea_bank where origin='chat'\");
-            console.log('черга: власних ' + n[0].o + ', клієнтів ' + n[0].c + ' · ідей із переписок ' + ib[0].n);
-            const lg = await q(\"select level, left(message,170) m, to_char(created_at at time zone 'UTC','HH24:MI') c from app_log where scope='tgrelay' and created_at > now() - interval '3 hours' order by created_at desc limit 10\");
-            for (const l of lg) console.log('  ' + l.c + ' ' + l.level + ': ' + l.m.replace(/\\d{6,}:[A-Za-z0-9_-]{20,}/g, '<token>'));
-            if (!lg.length) console.log('  журнал tgrelay за 3 год: порожньо');
-            await c.end();
-            " 2>&1 | sed 's/^/   /'
-            echo "   (кінець)"
+            if (!lg.length) console.log('warn/error за 25 хв: нічого');
+            process.exit(0);
+            EOF
+            )
+            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -40
+            docker compose logs --since 15m app 2>&1 | grep -aE "TypeError|ReferenceError|Unhandled|migrate|міграц|tgbot|initTelegram" | grep -avE "DeprecationWarning" | sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/***/g; s/[0-9]{6,}:[A-Za-z0-9_-]{20,}/<token>/g' | tail -12 || true
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
