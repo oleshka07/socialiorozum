@@ -2036,7 +2036,8 @@ export const TOOLS: ToolDef[] = [
     required: ["id"],
     run: async (ws, a) => {
       const p = await findPost(ws, a.id);
-      const connected = await connectedNets(ws, { video: true });
+      // сторіс - свої «підключені»: профіль Telegram (Business) і WhatsApp-статус, а не канали бренду
+      const connected = await connectedNets(ws, { video: true, story: p.format === "story" });
       const picked = pickNets(a.channels);
       const before = enabledNets(p.channels);
       const nets = picked.length ? picked : before;
