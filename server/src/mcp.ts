@@ -30,7 +30,7 @@ import { getSettingText } from "./settings.js";
 import { listWorkspaces, isMember, workspaceTitle } from "./workspaces.js";
 import { issueUploadLink, uploadCommands, uploadUrl, clampMinutes, UPLOAD_MAX_FILES } from "./uploadlink.js";
 import { connectedNets, parseWhen, zonedToUtc } from "./tgcompose.js";
-import { publishPostToChannels, alreadySentNetworks, reelSentNetworks, closeSlotsIfDone, publishingNow, isPublishingNow, unschedulePost, pubLabel, STORY_NETS, type PubResult } from "./publisher.js";
+import { publishPostToChannels, alreadySentNetworks, reelSentNetworks, closeSlotsIfDone, publishingNow, isPublishingNow, unschedulePost, pruneSlots, pubLabel, STORY_NETS, type PubResult } from "./publisher.js";
 import { scheduleConflicts, describeConflicts, schedulable } from "./schedule.js";
 import { startJob, getJob } from "./jobs.js";
 import { analyticsFor, bestTimesFor } from "./metrics.js";
@@ -333,6 +333,66 @@ export function authoredChannels(channels: any, nets: string[], authoredNow: boo
   return cur;
 }
 
+// Мережі разом із доданими, порядок - як був (нові в кінці).
+export const withNets = (cur: string[], add: string[]): string[] => [...cur, ...add.filter((n) => !cur.includes(n))];
+const netsObj = (nets: string[]): Record<string, { on: true }> => Object.fromEntries(nets.map((n) => [n, { on: true as const }]));
+const sameNets = (a: string[], b: string[]) => a.length === b.length && a.every((n) => b.includes(n));
+
+/**
+ * ➕ Додати мережі до поста, НЕ знімаючи вже обраних. Саме так мають поводитись publish_post і
+ * schedule_post з channels: 10.10 сесія Claude «надіслала сторіс ще й у WhatsApp» через publish_post
+ * channels: ["whatsapp"], а той ЗАМІНИВ мережі поста - Instagram, Facebook і Telegram вимкнулись, і
+ * слот на 19:00 погасився як виконаний (уся «решта» вже надіслана).
+ *
+ * Текст, який Claude писав під одну мережу (native), для неї і лишається дослівним: копіюємо його у
+ * власну версію цієї мережі. Інакше з другою мережею позначка «дослівно» зникла б (кілька мереж -
+ * майстер-текст, див. authoredChannels), і модель кабінету переписала б текст, написаний саме під неї.
+ */
+export function addNets(channels: any, content: string, add: string[]): Record<string, any> {
+  const before = enabledNets(channels);
+  const fresh = add.filter((n) => !before.includes(n));
+  if (!fresh.length) return { ...(channels || {}) };
+  const nat = typeof channels?.native === "string" ? channels.native : null;
+  const cur = authoredChannels(channels, withNets(before, fresh), false);
+  if (nat && cur[nat] && typeof cur[nat] === "object" && !String(cur[nat].text || "").trim() && String(content || "").trim())
+    cur[nat] = { ...cur[nat], text: content };
+  return cur;
+}
+
+/**
+ * 🗓 Слоти розкладу, коли пост ставлять не цілим, а лише в частину його мереж (schedule_post з
+ * channels: «WhatsApp - завтра о 8:00», а Instagram, Facebook і Telegram стоять на 19:00). Слот без
+ * channels іде в усі мережі поста - тож обрані мережі з нього (і з інших слотів) виймаємо, щоб вони
+ * не вийшли раніше в чужому слоті. Слот рівно з цими мережами - переносимо, інакше - новий.
+ * Чиста функція: що зробити зі слотами, а саме виконання - у schedule_post.
+ */
+export type SlotRow = { id: string; channels: any };
+export function slotPlan(slots: SlotRow[], cur: string[], picked: string[]): {
+  whole: boolean; target: string | null; channels: Record<string, any> | null;
+  updates: { id: string; channels: Record<string, any> }[]; deletes: string[];
+} {
+  const all = withNets(cur, picked);
+  const own = (s: SlotRow): string[] | null => (s.channels ? NETS.filter((n) => s.channels[n] && s.channels[n].on) : null);
+  // увесь пост на цей час - одним слотом: переносимо слот без своїх мереж (інакше перший), а окремі
+  // слоти частини мереж прибираємо - вони вийшли б раніше за обраний час і всупереч йому
+  if (!picked.length || all.every((n) => picked.includes(n))) {
+    const t = slots.find((s) => !s.channels) || slots[0] || null;
+    return { whole: true, target: t ? t.id : null, channels: null, updates: [], deletes: slots.filter((s) => s !== t).map((s) => s.id) };
+  }
+  let target: string | null = null;
+  const updates: { id: string; channels: Record<string, any> }[] = [], deletes: string[] = [];
+  for (const s of slots) {
+    const mine = own(s);
+    if (!target && mine && sameNets(mine, picked)) { target = s.id; continue; }
+    const covers = mine ?? all;            // слот без своїх мереж іде в усі мережі поста, з доданими теж
+    const keep = covers.filter((n) => !picked.includes(n));
+    if (mine && keep.length === mine.length) continue;   // з обраними мережами не перетинається
+    if (!keep.length) deletes.push(s.id);
+    else updates.push({ id: s.id, channels: netsObj(keep) });
+  }
+  return { whole: false, target, channels: netsObj(picked), updates, deletes };
+}
+
 /**
  * 💬 Записати перший коментар у пост. Спільний текст - post.first_comment, свій для мережі -
  * channels.<мережа>.first_comment (порожній рядок = у цій мережі без коментаря), як і в композері.
@@ -524,6 +584,8 @@ async function sentMap(ids: string[]): Promise<Map<string, { net: string; link: 
         union all select post_id, 'linkedin', permalink, created_at, null from linkedin_publish where status='sent' and post_id=any($1)
         union all select post_id, 'youtube', permalink, created_at, null from youtube_publish where status='sent' and post_id=any($1)
         union all select post_id, 'tiktok', permalink, created_at, null from tiktok_publish where status in ('sent','processing') and post_id=any($1)
+        -- 📲 WhatsApp-статус: кадри людині в бот надіслано (посилання нема - статус ставить вона сама)
+        union all select post_id, 'whatsapp', null, created_at, null from whatsapp_publish where status='sent' and post_id=any($1)
       ) x order by created_at`, [ids]);
   for (const r of rows) {
     const a = out.get(r.post_id) || [];
@@ -1169,7 +1231,12 @@ export const TOOLS: ToolDef[] = [
       const sent = (await sentMap([p.id])).get(p.id) || [];
       const slot = await one<{ scheduled_at: string; status: string }>(
         `select scheduled_at, status from schedule_slot where post_id=$1 order by (status='planned') desc, scheduled_at limit 1`, [p.id]);
+      // слоти лише на частину мереж (schedule_post з channels, ритм каналів) - кожен своїм рядком із мережами
+      const planned = await q<{ scheduled_at: string; channels: any }>(`select scheduled_at, channels from schedule_slot where post_id=$1 and status='planned' order by scheduled_at`, [p.id]);
       const tz = await wsTz(ws);
+      const slotLines = planned.some((x) => x.channels)
+        ? planned.map((x) => `заплановано: ${fmtWhen(x.scheduled_at, tz)} (${SLOT_STATE.planned}) - ${netList(x.channels ? enabledNets(p.channels).filter((n) => x.channels[n] && x.channels[n].on) : enabledNets(p.channels)) || "мереж уже нема"}`)
+        : null;
       const busy = await publishingNow(p.id);
       const live = isPublishingNow(p.id);
       const variants = NETS.filter((n) => p.channels?.[n]?.text).map((n) => `— ${NET_LABEL[n]}: ${oneLine(p.channels[n].text, 300)}`);
@@ -1177,7 +1244,7 @@ export const TOOLS: ToolDef[] = [
         `${short(p.id)} · створено ${fmtWhen(p.created_at, tz)} · ${reviewLabel(p.review, (p as any).review_note)}${mediaLine(await postMediaList(p.id), p.format)}`,
         `мережі: ${enabledNets(p.channels).length ? netList(enabledNets(p.channels)) : "не обрані"}${p.rubric ? ` · рубрика: ${p.rubric}` : ""}${p.format && p.format !== "post" ? ` · формат: ${p.format}` : ""}`,
         await accountsLine(ws, p.channels, enabledNets(p.channels).filter((n) => !sent.some((x) => x.net === n))),
-        slot?.scheduled_at ? `заплановано: ${fmtWhen(slot.scheduled_at, tz)} (${SLOT_STATE[slot.status] || slot.status})` : "",
+        ...(slotLines || [slot?.scheduled_at ? `заплановано: ${fmtWhen(slot.scheduled_at, tz)} (${SLOT_STATE[slot.status] || slot.status})` : ""]),
         busy.length ? (live
           ? `⏳ публікується просто зараз: ${busy.map((b) => `${NET_LABEL[b.net] || b.net} (з ${fmtWhen(b.since, tz)})`).join(", ")} - дочекайся результату`
           : `⚠️ публікацію в ${netList(busy.map((b) => b.net))} обірвано посеред роботи - наступний publish_post перейме її одразу`) : "",
@@ -1264,11 +1331,13 @@ export const TOOLS: ToolDef[] = [
   {
     name: "update_post",
     title: "Змінити пост",
-    description: "Поправити текст поста, обрані мережі, рубрику чи затвердити його. Текст замінюється на твій дослівно, без переписування.",
+    description: "Поправити текст поста, обрані мережі, рубрику чи затвердити його. Текст замінюється на твій дослівно, без переписування. Мережі: channels ЗАМІНЮЄ весь набір (чого нема в списку - знімається); додати мережу, не чіпаючи решти, - channels_add, прибрати одну - channels_remove.",
     properties: {
       id: S("Id поста."),
       text: S("Новий текст (необовʼязково)."),
-      channels: NETS_ARG,
+      channels: { ...NETS_ARG, description: "ВЕСЬ набір мереж поста - те, чого нема в списку, буде знято. Щоб лише додати мережу (напр. WhatsApp до сторіс), бери channels_add." },
+      channels_add: { ...NETS_ARG, description: "Додати мережі до поста, вже обрані лишаються (напр. [\"whatsapp\"] до сторіс з Instagram і Facebook)." },
+      channels_remove: { ...NETS_ARG, description: "Зняти ці мережі з поста, решта лишається." },
       rubric: S("Рубрика (необовʼязково)."),
       format: S("Формат (необовʼязково): post, carousel, reel, story.", { enum: ["post", "carousel", "reel", "story"] }),
       first_comment: FC_ARG,
@@ -1330,20 +1399,44 @@ export const TOOLS: ToolDef[] = [
         done.push(`формат: ${f}` + (f === "story" ? " (сторіс ідуть в Instagram, Facebook, профіль Telegram і WhatsApp-статус, кожен кадр - окремо)" : ""));
       }
       const text = str(a.text, 20000);
+      const netArgs = a.channels !== undefined || a.channels_add !== undefined || a.channels_remove !== undefined;
       if (text) {
         await q(`update post set content=$2 where id=$1`, [p.id, text]);
         done.push("текст оновлено");
+        // Власна версія мережі, що дослівно дорівнює старому тексту, - це копія (addNets так зберігає
+        // текст, написаний під одну мережу), а не адаптація: нехай іде разом із новим текстом.
+        const ch = { ...(p.channels || {}) };
+        for (const n of NETS) if (ch[n] && typeof ch[n] === "object" && String(ch[n].text || "").trim() && String(ch[n].text).trim() === String(p.content || "").trim()) ch[n] = { ...ch[n], text };
+        p.channels = ch;
         // Текст щойно написав Claude: якщо мережа одна, він має піти дослівно (див. authoredChannels).
         // Це ж і доліковує чернетки, збережені до появи позначки, - досить переслати їхній текст.
-        if (a.channels === undefined)
-          await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(authoredChannels(p.channels, enabledNets(p.channels), true))]);
+        await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(netArgs ? ch : authoredChannels(ch, enabledNets(ch), true))]);
       }
-      if (a.channels !== undefined) {
-        const nets = pickNets(a.channels);
-        await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(authoredChannels(p.channels, nets, !!text))]);
+      if (netArgs) {
+        // channels ЗАМІНЮЄ весь набір, channels_add / channels_remove - додають і знімають, решти не чіпаючи
+        const before = enabledNets(p.channels);
+        const add = pickNets(a.channels_add), rem = pickNets(a.channels_remove);
+        let nets: string[], ch: any;
+        if (a.channels !== undefined) {
+          nets = withNets(pickNets(a.channels), add).filter((n) => !rem.includes(n));
+          ch = authoredChannels(p.channels, nets, !!text);
+        } else {
+          const fresh = add.filter((n) => !before.includes(n) && !rem.includes(n));
+          nets = withNets(before, fresh).filter((n) => !rem.includes(n));
+          ch = authoredChannels(addNets(p.channels, text || p.content, fresh), nets, !!text);
+        }
+        await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(ch)]);
+        const added = nets.filter((n) => !before.includes(n)), removed = before.filter((n) => !nets.includes(n));
         done.push(nets.length ? `мережі: ${netList(nets)}` : "мережі знято");
+        if (added.length && before.length) done.push(`додано: ${netList(added)}`);
+        // зняте мовчки й було пасткою: «мережі: WhatsApp» не казало, що Instagram, Facebook і Telegram пропали
+        if (removed.length && nets.length) {
+          const planned = (await one<{ n: number }>(`select count(*)::int as n from schedule_slot where post_id=$1 and status='planned'`, [p.id]))?.n || 0;
+          done.push(`⚠️ знято: ${netList(removed)}${planned ? " - за розкладом туди вже не вийде" : ""} (повернути - channels_add)`);
+        }
         // без жодної мережі пост нікуди не вийде - у календарі він лише висів би порожнім
         if (!nets.length) { const n = await unschedulePost(p.id); if (n) done.push(`знято з розкладу (${n})`); }
+        else { const n = await pruneSlots(p.id); if (n) done.push(`слоти лише для знятих мереж прибрано з розкладу (${n})`); }
       }
       const rubric = str(a.rubric, 60);
       if (rubric) { await q(`update post set rubric=$2 where id=$1`, [p.id, rubric]); done.push(`рубрика: ${rubric}`); }
@@ -1385,7 +1478,7 @@ export const TOOLS: ToolDef[] = [
         // незатверджений текст не має лишатись у календарі: автопостер відправив би його в мережу
         if (!a.approve) { const n = await unschedulePost(p.id); if (n) done.push(`знято з розкладу (${n})`); }
       }
-      if (!done.length) throw new ToolError("Нічого не змінено - передай text, channels, rubric, format, first_comment, instagram_collaborators, accounts, alt_texts, approve, evergreen або cover_at / cover_media.");
+      if (!done.length) throw new ToolError("Нічого не змінено - передай text, channels (чи channels_add / channels_remove), rubric, format, first_comment, instagram_collaborators, accounts, alt_texts, approve, evergreen або cover_at / cover_media.");
       return `${short(p.id)}: ${done.join(", ")}.`;
     },
   },
@@ -1937,7 +2030,7 @@ export const TOOLS: ToolDef[] = [
     description: "Опублікувати пост у соцмережі ПРЯМО ЗАРАЗ. Публікація йде тим самим шляхом, що й з кабінету: дедуп «раз на мережу», авто-упаковка під формат мережі, посилання після відправки. Якщо мережі обробляють медіа довше за ~40 с, відповідь скаже «триває у фоні» - тоді результат і посилання дивись у get_post, повторно не клич. Такий самий текст, уже опублікований у цю мережу, відхиляється як дубль (свідомо повторити - force: true).",
     properties: {
       id: S("Id поста."),
-      channels: { ...NETS_ARG, description: "Мережі (необовʼязково - інакше беруться вже обрані на пості)." },
+      channels: { ...NETS_ARG, description: "Куди опублікувати САМЕ ЗАРАЗ (необовʼязково - інакше в усі обрані на пості). Решта мереж поста лишається обраною і виходить за своїм розкладом; мережу, якої ще нема в пості, буде додано." },
       force: { type: "boolean", description: "true - опублікувати, навіть якщо такий самий текст уже виходив у цю мережу." },
     },
     required: ["id"],
@@ -1945,10 +2038,16 @@ export const TOOLS: ToolDef[] = [
       const p = await findPost(ws, a.id);
       const connected = await connectedNets(ws, { video: true });
       const picked = pickNets(a.channels);
-      const nets = picked.length ? picked : enabledNets(p.channels);
+      const before = enabledNets(p.channels);
+      const nets = picked.length ? picked : before;
+      // channels - куди САМЕ ЗАРАЗ, а не «що лишити на пості»: раніше вони заміняли мережі поста, і
+      // «сторіс ще й у WhatsApp» вимикала Instagram, Facebook і Telegram разом зі слотом на вечір
+      const all = withNets(before, picked);
+      let ch = addNets(p.channels, p.content, picked);
       // текст від Claude (origin 'mcp') під одну мережу - дослівно, як і при плануванні
-      if (nets.length && (picked.length || p.origin === "mcp"))
-        await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(authoredChannels(p.channels, nets, p.origin === "mcp"))]);
+      if (p.origin === "mcp" && all.length) ch = authoredChannels(ch, all, true);
+      if (JSON.stringify(ch) !== JSON.stringify(p.channels || {}))
+        await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(ch)]);
       if (!nets.length)
         throw new ToolError(`Не обрано жодної мережі. Підключені в кабінеті: ${connected.length ? netList(connected) : "жодної - спершу підключи канал у Налаштуваннях"}.`);
       const offline = nets.filter((n) => !connected.includes(n));
@@ -1961,7 +2060,7 @@ export const TOOLS: ToolDef[] = [
       // обробляють медіа до хвилини, і один довгий запит упирався в 60-секундну межу проксі - конектор
       // бачив 502, хоча публікація тривала, а повтор натикався на «пост саме зараз публікується».
       const job = await startJob("publish", p.id, ws, async () => {
-        const results = await publishPostToChannels(ws, p.id);
+        const results = await publishPostToChannels(ws, p.id, picked.length ? picked : undefined);
         // погасити запланований слот (інакше автопостер відправив би той самий пост удруге) - лише коли
         // вийшло в усі обрані мережі: збій «зараз» не має тихо скасовувати заплановану публікацію
         if (results.some((r) => r.status === "sent")) await closeSlotsIfDone(p.id, "опубліковано з Claude (MCP)");
@@ -1971,8 +2070,22 @@ export const TOOLS: ToolDef[] = [
       // ~40 с - із запасом до 60-секундної межі проксі (у тестах коротше: MCP_PUBLISH_WAIT_MS)
       const waitMs = Number(process.env.MCP_PUBLISH_WAIT_MS) || 40_000;
       for (const t0 = Date.now(); j && j.status === "running" && Date.now() - t0 < waitMs;) { await sleep(500); j = await getJob(job.id); }
+      const added = picked.filter((n) => !before.includes(n));
+      const restLine = async () => {
+        const rest = all.filter((n) => !nets.includes(n));
+        const sentNets = await alreadySentNetworks(p.id);
+        const wait = rest.filter((n) => !sentNets.includes(n));
+        const out = [added.length && before.length ? `➕ До мереж поста додано: ${netList(added)}.` : ""];
+        if (wait.length) {
+          const tz1 = await wsTz(ws);
+          const slots = await q<{ scheduled_at: string; channels: any }>(`select scheduled_at, channels from schedule_slot where post_id=$1 and status='planned' order by scheduled_at`, [p.id]);
+          const when = slots.filter((s) => !s.channels || wait.some((n) => s.channels[n] && s.channels[n].on)).map((s) => fmtWhen(s.scheduled_at, tz1));
+          out.push(`ℹ️ Решта мереж поста лишається: ${netList(wait)} - ${when.length ? `вийде за розкладом (${when.join(", ")})` : "у розкладі не стоїть (schedule_post чи publish_post)"}. Зняти мережу з поста - update_post з channels_remove.`);
+        }
+        return out.filter(Boolean).join("\n");
+      };
       if (!j || j.status === "running")
-        return `⏳ Публікація в ${netList(nets)} триває у фоні: мережі ще обробляють медіа. Результат і посилання - у get_post ${short(p.id)} за хвилину. Повторно publish_post не клич: дубля не буде, але й швидше не стане.`;
+        return [`⏳ Публікація в ${netList(nets)} триває у фоні: мережі ще обробляють медіа. Результат і посилання - у get_post ${short(p.id)} за хвилину. Повторно publish_post не клич: дубля не буде, але й швидше не стане.`, await restLine()].filter(Boolean).join("\n");
       if (j.status !== "done") throw new ToolError(`⚠️ Не опубліковано: ${j.error || "публікацію обірвано - спробуй ще раз"}`);
       const res: PubResult[] = (j.result && j.result.results) || [];
       const cms = res.filter((r) => r.status === "sent" && r.comment)
@@ -1994,6 +2107,7 @@ export const TOOLS: ToolDef[] = [
         cms.length ? `💬 Перший коментар: ${cms.join("; ")}` : "",
         notes.length ? `⚠️ ${notes.join("; ")}` : "",
         links.filter((x) => x.link).map((x) => `${sentLabel(links, x)}: ${x.link}`).join("\n"),
+        await restLine(),
       ].filter(Boolean).join("\n") || "Нічого не відправлено.";
     },
   },
@@ -2004,7 +2118,7 @@ export const TOOLS: ToolDef[] = [
     properties: {
       id: S("Id поста."),
       at: S("Коли: «2026-09-14 09:00», «завтра 18:30», «14.09 09:00», ISO з Z або «best» - найближчий найкращий час зі статистики кабінету (Threads, Instagram, Facebook)."),
-      channels: { ...NETS_ARG, description: "Мережі (необовʼязково - інакше вже обрані на пості)." },
+      channels: { ...NETS_ARG, description: "Які мережі поставити на цей час (необовʼязково - інакше весь пост). Решта мереж поста лишається на своєму часі; мережу, якої ще нема в пості, буде додано. Напр. сторіс в Instagram і Facebook о 19:00, а WhatsApp - channels: [\"whatsapp\"] на 20:00." },
       force: { type: "boolean", description: "true - поставити попри збіг часу чи тексту з іншим постом." },
     },
     required: ["id", "at"],
@@ -2013,7 +2127,8 @@ export const TOOLS: ToolDef[] = [
       const tz = await wsTz(ws);
       const raw = str(a.at, 60);
       const nets = pickNets(a.channels);
-      const on = nets.length ? nets : enabledNets(p.channels);
+      const before = enabledNets(p.channels);
+      const on = nets.length ? nets : before;
       let bestNote = "";
       let at: Date | null;
       if (/^\s*(best|найкращ)/i.test(raw)) {
@@ -2033,19 +2148,37 @@ export const TOOLS: ToolDef[] = [
       // Текст, який Claude написав сам (create_draft → origin 'mcp'), під одну мережу йде ДОСЛІВНО.
       // Це ж доліковує чернетки, збережені до появи позначки: досить їх (пере)запланувати. Пост,
       // зроблений у кабінеті, як і раніше не позначаємо - його майстер-текст має спакуватись.
-      let chNow = p.channels;
-      if (nets.length || p.origin === "mcp") {
-        chNow = authoredChannels(p.channels, on, p.origin === "mcp");
+      // channels - які мережі на ЦЕЙ час, а не «що лишити на пості»: решта мереж лишається на своєму
+      // часі (раніше вони знімались з поста, а наявний слот із ними переїжджав на новий час)
+      const all = withNets(before, nets);
+      let chNow = addNets(p.channels, p.content, nets);
+      if (p.origin === "mcp") chNow = authoredChannels(chNow, all, true);
+      if (JSON.stringify(chNow) !== JSON.stringify(p.channels || {}))
         await q(`update post set channels=$2 where id=$1`, [p.id, JSON.stringify(chNow)]);
-      }
       // переносимо наявний слот замість другого INSERT - інакше пост вийшов би двічі
-      const ex = await one<{ id: string }>(`select id from schedule_slot where post_id=$1 and status='planned' limit 1`, [p.id]);
-      if (ex) await q(`update schedule_slot set scheduled_at=$2, retry_at=null, attempts=0, updated_at=now() where id=$1`, [ex.id, at.toISOString()]);
-      else await q(`insert into schedule_slot(post_id, scheduled_at, status) values($1,$2,'planned')`, [p.id, at.toISOString()]);
+      const slots = await q<SlotRow>(`select id, channels from schedule_slot where post_id=$1 and status='planned' order by scheduled_at`, [p.id]);
+      const plan = slotPlan(slots, before, nets);
+      // що саме прибираємо - сказати людині (час і мережі), а не лише «N слотів»
+      const gone = slots.filter((s) => plan.deletes.includes(s.id));
+      const goneTimes = gone.length ? (await q<{ scheduled_at: string; channels: any }>(`select scheduled_at, channels from schedule_slot where id = any($1)`, [plan.deletes]))
+        .map((s) => `${fmtWhen(s.scheduled_at, tz)}${s.channels ? ` (${netList(NETS.filter((n) => s.channels[n] && s.channels[n].on))})` : ""}`) : [];
+      for (const u of plan.updates) await q(`update schedule_slot set channels=$2, updated_at=now() where id=$1`, [u.id, JSON.stringify(u.channels)]);
+      if (plan.deletes.length) await q(`delete from schedule_slot where id = any($1) and status='planned'`, [plan.deletes]);
+      const slotCh = plan.channels ? JSON.stringify(plan.channels) : null;
+      let slotId = plan.target;
+      if (slotId) await q(`update schedule_slot set scheduled_at=$2, channels=$3, retry_at=null, attempts=0, updated_at=now() where id=$1`, [slotId, at.toISOString(), slotCh]);
+      else slotId = (await one<{ id: string }>(`insert into schedule_slot(post_id, scheduled_at, status, channels) values($1,$2,'planned',$3) returning id`, [p.id, at.toISOString(), slotCh]))!.id;
       await q(`update post set review='approved' where id=$1`, [p.id]);   // запланований = затверджений
       approvedNotice(ws, p.id, p.review, actorId()).catch(() => {});
       const fcPlan = commentPlanLines({ ...p, channels: chNow }, on, await commentStates(p.id), await alreadySentNetworks(p.id), await metaGranted(ws));
-      return `🗓 ${short(p.id)} заплановано на ${fmtWhen(at, tz)}: ${planLineFor(chNow, p.content, p.format)}.${ex ? " Наявний слот перенесено." : ""}`
+      // інші слоти цього поста - щоб було видно, що решта мереж нікуди не ділась
+      const others = (await q<{ scheduled_at: string; channels: any }>(`select scheduled_at, channels from schedule_slot where post_id=$1 and status='planned' and id <> $2 order by scheduled_at`, [p.id, slotId]))
+        .map((s) => { const sn = s.channels ? enabledNets(chNow).filter((n) => s.channels[n] && s.channels[n].on) : enabledNets(chNow); return sn.length ? `${fmtWhen(s.scheduled_at, tz)} - ${netList(sn)}` : ""; }).filter(Boolean);
+      const added = nets.filter((n) => !before.includes(n));
+      return `🗓 ${short(p.id)} заплановано на ${fmtWhen(at, tz)}: ${planLineFor(mergeNets(chNow, on), p.content, p.format)}.${plan.target ? " Наявний слот перенесено." : ""}`
+        + (added.length && before.length ? `\n➕ До мереж поста додано: ${netList(added)}.` : "")
+        + (goneTimes.length ? `\n↪️ ${plan.whole ? "Увесь пост тепер іде на цей час - окремі слоти прибрано" : "Ці мережі стояли окремим слотом - прибрано"}: ${goneTimes.join("; ")}.` : "")
+        + (others.length ? `\nℹ️ Решта мереж поста - на своєму часі: ${others.join("; ")}.` : "")
         + bestNote + (fcPlan.length ? "\n" + fcPlan.join("\n") : "");
     },
   },
@@ -2487,6 +2620,7 @@ export const SERVER_INSTRUCTIONS = [
   "Відео: власні відео автора - list_media з kind: \"video\" → attach_media з одним id; публікується як Reels в Instagram, відео у Facebook, Threads, Telegram (до 50 МБ), LinkedIn, YouTube (вертикальне до 3 хв - Shorts) і TikTok, а текст поста - підпис. Відео з комп'ютера заливає та сама media_upload_link (великі файли - частинами).",
   "YouTube і TikTok - лише для поста з відео (channels з youtube/tiktok). YouTube: назва (youtube.title, інакше перший рядок), хто бачить, «для дітей» і позначка AI. TikTok: перед прямою публікацією СПИТАЙ людину, хто бачитиме відео (tiktok.privacy: public / friends / followers / private) - TikTok забороняє обирати це за неї; коментарі, Duet і Stitch вимкнені, поки людина не дозволить; реклама власного бренду чи оплачена співпраця - your_brand / branded_content; AI-голос чи згенеровані кадри - ai_generated. Без privacy (чи з mode: draft) відео піде в чернетки TikTok, і людина опублікує його в застосунку. Публікуючи в TikTok, людина погоджується з Music Usage Confirmation TikTok - скажи їй про це. Після монтажу рілса одразу в усі мережі - montage_video з all_networks: true.",
   "Сторіс: create_draft з format: \"story\" і мережами instagram/facebook/telegram/whatsapp (telegram - профіль людини через Telegram Business; whatsapp - бот надішле людині кадри, вона поставить їх у статус сама; інші сторіс через API не приймають) → кадри через attach_media (фото й відео разом, фото ріжуться 9:16) або render_carousel з рядками «Кадр 1: …»; кожен кадр - окрема сторіс, підпису немає.",
+  "Мережі поста: update_post channels ЗАМІНЮЄ весь набір; додати мережу, не чіпаючи решти, - channels_add, зняти - channels_remove. channels у publish_post і schedule_post - лише куди саме зараз чи на цей час: решта мереж поста лишається на своєму часі (окрема чернетка під WhatsApp не потрібна).",
   "Мови субтитрів: у montage_video speech - якою говорять, subtitle_langs - мова субтитрів у мережах ({telegram: \"en\", whatsapp: \"cs\"}): монтаж зробить версії з перекладеними субтитрами, і в кожну мережу піде її. Своє відео без тексту - update_post з add_subtitles: true. Мову мережі в готовому пості - update_post з subtitle_langs.",
   "Монтаж: кілька кліпів автора → одна сторіс чи рілс 9:16 із субтитрами. list_media kind: \"video\" → video_frames (аркуш кадрів, speech: true - що говорять) → напиши текст під кадри → montage_video: text до кліпів (підписи), voice: \"clips\" (субтитри зі звуку кліпів), voice: \"audio\" + id голосового автора (list_media kind: \"audio\"), або voice: \"tts\" (AI-голос ElevenLabs). З channels чи post результат одразу стає постом. Кліпи автор найзручніше шле Telegram-боту командою /montage (там же голосове).",
   "Якщо кабінетів кілька (list_workspaces), спершу переконайся, що активний саме той бренд: перемкни switch_workspace або передай workspace у виклику. Кожна відповідь називає кабінет у першому рядку - звіряйся з ним перед публікацією.",

@@ -198,6 +198,89 @@ test("authoredChannels: стара чернетка без позначки до
   assert.equal(authoredChannels({ threads: { on: true } }, ["threads"], true).manual_adapt, true);
 });
 
+// ---- 10.10: «сторіс ще й у WhatsApp» вимкнула Instagram, Facebook і Telegram ----
+// publish_post / schedule_post з channels ЗАМІНЮВАЛИ мережі поста. Тепер channels там - «куди саме
+// зараз / на цей час», а решта мереж поста лишається; update_post має channels_add / channels_remove.
+import { addNets, withNets, slotPlan } from "../dist/mcp.js";
+
+const STORY = { instagram: { on: true }, facebook: { on: true }, telegram: { on: true, story_hours: 24 } };
+
+test("addNets: додати WhatsApp до сторіс - Instagram, Facebook і Telegram лишаються", () => {
+  const c = addNets(STORY, "", ["whatsapp"]);
+  assert.deepEqual(["instagram", "facebook", "telegram", "whatsapp"].filter((n) => c[n] && c[n].on), ["instagram", "facebook", "telegram", "whatsapp"]);
+  assert.equal(c.telegram.story_hours, 24);          // налаштування мережі не губляться
+  assert.equal(STORY.whatsapp, undefined);           // вхід не мутується
+});
+
+test("addNets: мережа вже обрана - нічого не міняється", () => {
+  assert.deepEqual(addNets(STORY, "", ["instagram"]), STORY);
+});
+
+test("addNets: текст, писаний під одну мережу, для неї лишається дослівним (своя версія), нова - пакується", () => {
+  const c = addNets({ threads: { on: true }, manual_adapt: true, native: "threads" }, "тейк на 480 знаків", ["telegram"]);
+  assert.equal(c.threads.text, "тейк на 480 знаків");
+  assert.equal(c.native, undefined);
+  assert.equal(c.manual_adapt, undefined);
+  assert.equal(c.telegram.on, true);
+  assert.equal(c.telegram.text, undefined);
+});
+
+test("addNets: уже адаптована версія мережі не затирається", () => {
+  const c = addNets({ threads: { on: true, text: "своя" }, manual_adapt: true, native: "threads" }, "майстер", ["telegram"]);
+  assert.equal(c.threads.text, "своя");
+});
+
+test("withNets: порядок як був, нові в кінці, без дублів", () => {
+  assert.deepEqual(withNets(["instagram", "facebook"], ["whatsapp", "instagram"]), ["instagram", "facebook", "whatsapp"]);
+});
+
+const IGFBTG = ["instagram", "facebook", "telegram"];
+
+test("slotPlan: увесь пост - переносимо слот без своїх мереж, окремі слоти прибираємо (вийшли б раніше)", () => {
+  const r = slotPlan([{ id: "wa", channels: { whatsapp: { on: true } } }, { id: "all", channels: null }], IGFBTG, []);
+  assert.deepEqual(r, { whole: true, target: "all", channels: null, updates: [], deletes: ["wa"] });
+});
+
+test("slotPlan: увесь пост без слотів - новий слот", () => {
+  assert.deepEqual(slotPlan([], IGFBTG, []), { whole: true, target: null, channels: null, updates: [], deletes: [] });
+});
+
+test("slotPlan: увесь пост, єдиний слот із підмножиною - його й переносимо (на всі мережі)", () => {
+  const r = slotPlan([{ id: "s1", channels: { threads: { on: true } } }], ["threads", "telegram"], []);
+  assert.equal(r.target, "s1");
+  assert.equal(r.channels, null);
+});
+
+test("slotPlan: WhatsApp окремо - слот 19:00 на весь пост стає Instagram+Facebook+Telegram, WhatsApp - новий слот", () => {
+  const r = slotPlan([{ id: "s19", channels: null }], IGFBTG, ["whatsapp"]);
+  assert.equal(r.whole, false);
+  assert.equal(r.target, null);
+  assert.deepEqual(r.channels, { whatsapp: { on: true } });
+  assert.deepEqual(r.updates, [{ id: "s19", channels: { instagram: { on: true }, facebook: { on: true }, telegram: { on: true } } }]);
+  assert.deepEqual(r.deletes, []);
+});
+
+test("slotPlan: WhatsApp уже на пості - вийнятий зі спільного слота, щоб не вийшов раніше", () => {
+  const r = slotPlan([{ id: "s19", channels: null }], [...IGFBTG, "whatsapp"], ["whatsapp"]);
+  assert.deepEqual(Object.keys(r.updates[0].channels), IGFBTG);
+});
+
+test("slotPlan: слот рівно з цими мережами - переносимо його; слот лише з обраних - прибираємо; чужий - не чіпаємо", () => {
+  const r = slotPlan([
+    { id: "same", channels: { whatsapp: { on: true }, telegram: { on: true } } },
+    { id: "part", channels: { whatsapp: { on: true } } },
+    { id: "ig", channels: { instagram: { on: true } } },
+    { id: "mix", channels: { telegram: { on: true }, facebook: { on: true } } },
+  ], [...IGFBTG, "whatsapp"], ["telegram", "whatsapp"]);
+  assert.equal(r.target, "same");
+  assert.deepEqual(r.deletes, ["part"]);
+  assert.deepEqual(r.updates, [{ id: "mix", channels: { facebook: { on: true } } }]);
+});
+
+test("slotPlan: обрані покривають усі мережі поста - це «весь пост»", () => {
+  assert.equal(slotPlan([{ id: "s", channels: null }], ["instagram"], ["instagram", "whatsapp"]).whole, true);
+});
+
 // ---- картинки у відповіді інструмента ----
 // Мініатюри стоку й згенерованого зображення йдуть окремими блоками MCP, щоб модель обирала
 // очима. Тиха помилка тут - зламати текстовий блок (тоді всі інструменти відповідатимуть порожньо)

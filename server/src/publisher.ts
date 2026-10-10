@@ -94,7 +94,19 @@ export async function closeSlotsIfDone(postId: string, reason: string): Promise<
   if (!post || !enabled.length) return false;
   // «усі обрані» - кожен обраний акаунт кожної мережі (дві Сторінки - обидві мають отримати пост)
   const [keys, sent] = await Promise.all([targetKeys(post.ws, post.channels, enabled, post.format), sentAccountKeys(post.ws, postId)]);
-  if (keys.some((k) => !sent.has(k))) return false;
+  if (keys.some((k) => !sent.has(k))) {
+    // Пост вийшов не всюди, але слот лише на частину мереж (ритм каналів, schedule_post з channels)
+    // уже повністю надіслано - гасимо САМЕ його, інакше в календарі висить «чекає» на те, що вже вийшло.
+    const subs = await q<{ id: string; channels: any }>(`select id, channels from schedule_slot where post_id=$1 and status='planned' and channels is not null`, [postId]);
+    for (const s of subs) {
+      const nets = enabled.filter((n) => s.channels[n] && s.channels[n].on);
+      if (!nets.length) continue;
+      const own = await targetKeys(post.ws, post.channels, nets, post.format);
+      if (own.length && own.every((k) => sent.has(k)))
+        await q(`update schedule_slot set status='posted', result=$2, updated_at=now() where id=$1 and status='planned'`, [s.id, reason]);
+    }
+    return false;
+  }
   await q(`update schedule_slot set status='posted', result=$2, updated_at=now() where post_id=$1 and status='planned'`, [postId, reason]);
   await q(`update plan_slot set status='published' where post_id=$1 and status in ('drafted','approved','scheduled')`, [postId]);
   return true;
@@ -263,6 +275,19 @@ export async function publishingNow(postId: string): Promise<{ net: string; sinc
  * Кличеться, коли з поста знімають затвердження або прибирають усі мережі: інакше він лишався в
  * календарі як «заплановано» (автопостер відправив би незатверджений текст) чи висів там порожнім.
  */
+/**
+ * Слоти лише на частину мереж (channels у слоті), з яких після зміни мереж поста не лишилось жодної
+ * обраної: автопостер у свій час «опублікував» би порожнечу й позначив слот збоєм. Прибираємо.
+ */
+export async function pruneSlots(postId: string): Promise<number> {
+  const p = await one<{ channels: any }>(`select channels from post where id=$1`, [postId]);
+  const on = enabledNets(p?.channels);
+  const subs = await q<{ id: string; channels: any }>(`select id, channels from schedule_slot where post_id=$1 and status in ('planned','failed') and channels is not null`, [postId]);
+  const dead = subs.filter((s) => !Object.keys(s.channels).some((k) => s.channels[k] && s.channels[k].on && on.includes(k))).map((s) => s.id);
+  if (dead.length) await q(`delete from schedule_slot where id = any($1)`, [dead]);
+  return dead.length;
+}
+
 export async function unschedulePost(postId: string): Promise<number> {
   const gone = await q<{ id: string }>(`delete from schedule_slot where post_id=$1 and status in ('planned','failed') returning id`, [postId]);
   await q(`update plan_slot ps set status = case when p.review='approved' then 'approved' else 'drafted' end
