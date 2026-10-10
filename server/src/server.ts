@@ -2170,7 +2170,7 @@ app.get("/api/analytics/threads", async (req: any, reply) => {
      order by tp.created_at desc limit 10`, [ws]);
   // інтервал постингу за 7 днів + к-сть постів
   const pubs = await q<{ created_at: string }>(
-    `select created_at from threads_publish tp join post p on p.id=tp.post_id
+    `select tp.created_at from threads_publish tp join post p on p.id=tp.post_id
        join pipeline_run r on r.id=p.run_id join source s on s.id=r.source_id
      where s.workspace_id=$1 and tp.status='sent' and tp.created_at > now() - interval '7 days'
      order by tp.created_at`, [ws]);
