@@ -35,9 +35,12 @@ export type TgBiz = { id: string; bot_id: string; tg_user_id: string; user_chat_
 export const bizLabel = (b: Pick<TgBiz, "username" | "name"> | null | undefined): string =>
   b ? (b.username ? "@" + b.username : b.name || "профіль Telegram") : "";
 
-/** Токен бота, яким людина підключила Business: спільний, колишній спільний чи власний бот кабінету. */
+/** Токен бота, яким людина підключила Business: спільний, колишній спільний, власний бот кабінету або
+ *  🤖 свій бот людини, що працює деінде (tg_relay: Holos тримає його токен лише для сторіс). */
 async function tokenForBot(botId: string): Promise<string | null> {
   if (env.telegram.botToken && botIdOf(env.telegram.botToken) === botId) return env.telegram.botToken;
+  const relay = await one<{ token: string }>(`select token from tg_relay where bot_id=$1`, [botId]);
+  if (relay?.token) return relay.token;
   const { ownBotToken } = await import("./tgbot.js");
   return ownBotToken(botId);
 }
@@ -88,13 +91,14 @@ export async function dropBizFromBrand(ws: string): Promise<void> {
  * Зберігаємо, привʼязуємо до бренду, з яким людина зараз працює в боті (якщо в нього ще нема свого профілю
  * для сторіс і людина там керує каналами), і кажемо людині, що далі.
  */
-export async function onBusinessConnection(bc: any, token: string): Promise<void> {
+export async function onBusinessConnection(bc: any, token: string, opts: { relayWs?: string } = {}): Promise<void> {
   const id = String(bc?.id || "");
   const uid = Number(bc?.user?.id);
   if (!id || !Number.isFinite(uid)) return;
   const canStories = !!bc?.rights?.can_manage_stories;
   const enabled = bc?.is_enabled !== false;
   const name = [bc?.user?.first_name, bc?.user?.last_name].filter(Boolean).join(" ").slice(0, 120) || null;
+  if (opts.relayWs) return onRelayConnection({ id, uid, canStories, enabled, name, bc, token, ws: opts.relayWs });
   await q(`insert into tg_business(id, bot_id, tg_user_id, user_chat_id, username, name, can_stories, enabled)
            values($1,$2,$3,$4,$5,$6,$7,$8)
            on conflict (id) do update set bot_id=excluded.bot_id, user_chat_id=excluded.user_chat_id, username=excluded.username, name=excluded.name,
@@ -128,6 +132,42 @@ export async function onBusinessConnection(bc: any, token: string): Promise<void
   await say(canStories
     ? `📲 Telegram Business підключено - я можу ставити сторіс у твій профіль.${brandNote}\n\nТвоїх чатів я не читаю: бізнес-повідомлень не отримую взагалі.`
     : `⚠️ Бот підключено, але без права на сторіс. Telegram → Налаштування → Telegram Business → Чат-боти → цей бот → увімкни «Керування історіями» (Manage stories).${brandNote}`);
+}
+
+/**
+ * 🤖 Підключення Business через СВІЙ бот людини (tg_relay): бот переслав нам business_connection (або ми
+ * дізнались id з її власного повідомлення й спитали Telegram). Привʼязуємо до бренду, де стоїть цей бот,
+ * якщо там ще нема живого профілю іншої людини. Боту людини нічого не пишемо (це її бот і її чат із ним);
+ * сповіщаємо, лише коли щось змінилось, і лише ботом Holos, якщо людина його запускала. Бот шле підключення
+ * на кожному своєму старті - без «змінилось» людина отримувала б повідомлення після кожного деплою бота.
+ */
+async function onRelayConnection(c: { id: string; uid: number; canStories: boolean; enabled: boolean; name: string | null; bc: any; token: string; ws: string }): Promise<void> {
+  const prev = await one<{ can_stories: boolean; enabled: boolean }>(`select can_stories, enabled from tg_business where id=$1`, [c.id]);
+  await q(`insert into tg_business(id, bot_id, tg_user_id, user_chat_id, username, name, can_stories, enabled)
+           values($1,$2,$3,$4,$5,$6,$7,$8)
+           on conflict (id) do update set bot_id=excluded.bot_id, user_chat_id=excluded.user_chat_id, username=excluded.username, name=excluded.name,
+             can_stories=excluded.can_stories, enabled=excluded.enabled, updated_at=now()`,
+    [c.id, botIdOf(c.token), c.uid, c.bc?.user_chat_id ?? null, c.bc?.user?.username || null, c.name, c.canStories, c.enabled]);
+  const changed = !prev || prev.can_stories !== c.canStories || prev.enabled !== c.enabled;
+  const label = bizLabel({ username: c.bc?.user?.username, name: c.name });
+  const title = (await one<{ title: string | null }>(`select title from workspace where id=$1`, [c.ws]))?.title || "бренд";
+  let text = "";
+  if (!c.enabled) text = `📲 Твій бот відключений від Telegram Business - сторіс бренду «${title}» у профіль більше не підуть.`;
+  else {
+    const cur = await brandBiz(c.ws);
+    if (!cur || cur.id === c.id || !cur.enabled || String(cur.tg_user_id) === String(c.uid)) {
+      await q(`insert into tg_story_brand(workspace_id, conn_id) values($1,$2) on conflict (workspace_id) do update set conn_id=excluded.conn_id, updated_at=now()`, [c.ws, c.id]);
+      text = c.canStories
+        ? `📲 Твій бот підключений до Holos: сторіс бренду «${title}» тепер ідуть у твій профіль (${label}) через нього - у пості формату «Сторіс» увімкни Telegram.`
+        : `⚠️ Твій бот підключений до Holos, але в Telegram Business у нього нема права на сторіс: Telegram → Налаштування → Telegram Business → Чат-боти → твій бот → «Керування історіями».`;
+    } else text = `📲 Твій бот переслав підключення Business, але в бренді «${title}» сторіс уже йдуть у ${bizLabel(cur)}. Щоб у твій профіль: Канали → Telegram → «📲 Сторіс у профілі» → «Використати тут».`;
+  }
+  if (!changed) return;
+  await logEvent("info", "tgrelay", `Telegram Business через свій бот: ${label}, сторіс ${c.canStories ? "так" : "ні"}, ${c.enabled ? "увімкнено" : "вимкнено"}`);
+  const o = await one<{ tg_user_id: string }>(`select tg_user_id::text from tg_owner where tg_user_id=$1`, [c.uid]);
+  if (!o) return;
+  const { liveSend } = await import("./tgbot.js");
+  await liveSend(c.ws, String(c.uid), "tgrelay", text).catch(() => {});
 }
 
 // ---- перекодування під вимоги Telegram ----

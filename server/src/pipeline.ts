@@ -1749,6 +1749,52 @@ export async function topPatterns(workspaceId: string): Promise<{ patterns: { pa
 }
 
 // ---- «Мультиплікатор», режим «Продовження»: пост зайшов → 5 кутів розвитку теми ----
+// 💡 Ідеї з власних повідомлень автора в Telegram (🤖 свій бот пересилає лише ЙОГО повідомлення). Раз на день:
+// що з написаного людям за добу варто розгорнути в пост для бренду - спостереження, принцип, відповідь на
+// питання, яке клієнти ставлять знову і знову, історія. Не ідея: логістика, ціни й домовленості з конкретною
+// людиною, побутове, ввічливості. У тексті ідеї - жодних імен, телефонів, адрес і сум конкретних клієнтів.
+export type ChatIdea = { idea: string; angle: string; rubric: string; quote: string };
+export function parseChatIdeas(raw: string, rubrics: string[] = []): ChatIdea[] {
+  // просили {"ideas":[…]}, але модель буває відповідає й голим масивом - тоді обʼєкт у масиві не «відповідь»
+  let arr: any[] = [];
+  try { const o = extractJsonObject<any>(raw); if (Array.isArray(o?.ideas)) arr = o.ideas; } catch { /* нижче - масив */ }
+  if (!arr.length && /^\s*(```json\s*)?\[/i.test(String(raw || ""))) { try { arr = extractJsonArray<any>(raw); } catch { arr = []; } }
+  const rub = new Map(rubrics.map((r) => [r.toLowerCase(), r]));
+  const seen = new Set<string>();
+  const out: ChatIdea[] = [];
+  for (const x of arr) {
+    const idea = String(x?.idea || "").replace(/\s+/g, " ").trim().slice(0, 300);
+    if (idea.length < 12) continue;
+    const k = idea.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({
+      idea,
+      angle: String(x?.angle || "").trim().slice(0, 60),
+      rubric: rub.get(String(x?.rubric || "").trim().toLowerCase()) || "",
+      quote: String(x?.quote || "").replace(/\s+/g, " ").trim().slice(0, 200),
+    });
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+export async function chatIdeasFromNotes(workspaceId: string, notes: string[]): Promise<ChatIdea[]> {
+  if (!notes.length) return [];
+  const s = await loadSettings(workspaceId);
+  const rubrics = (await q<{ name: string }>(`select name from rubric where workspace_id=$1 order by idx`, [workspaceId])).map((r) => r.name);
+  const system = "Нижче - повідомлення, які автор бренду САМ написав людям у Telegram за добу (клієнтам, партнерам, знайомим). " +
+    "Знайди 0-3 думки, з яких вийде сильний пост для бренду: спостереження з практики, принцип, яким автор керується, відповідь на питання, яке клієнти ставлять знову і знову, коротка історія, незгода з поширеною думкою. " +
+    "НЕ ідея: логістика й домовленості (час, адреса, оплата), ціни чи умови для конкретної людини, побутове, ввічливості, жарти без думки. Нема що взяти - поверни порожній список, це нормально." +
+    "\nКожна ідея - тема поста одним реченням, своїми словами, БЕЗ імен, телефонів, адрес, сум і назв компаній клієнтів. quote - коротко (до 160 символів) суть думки автора його ж словами, теж без імен і цифр конкретних людей." +
+    (s.marketing_context ? `\nНіша й аудиторія бренду: ${s.marketing_context.slice(0, 500)}` : "") +
+    (rubrics.length ? `\nРубрики бренду (rubric - одна з них або порожньо): ${rubrics.join(", ")}` : "") +
+    goalRule(s) +
+    '\n\nПоверни ЛИШЕ JSON: {"ideas":[{"idea":"…","angle":"кут 2-3 словами","rubric":"…","quote":"…"}]}. Мова: Українська.';
+  const user = notes.map((n, i) => `${i + 1}. ${n.replace(/\s+/g, " ").slice(0, 400)}`).join("\n");
+  const raw = await chat(mainModel(s), system, user.slice(0, 14000), { workspaceId, step: "chat_ideas", json: true });
+  return parseChatIdeas(raw, rubrics);
+}
+
 export async function suggestDevelopment(workspaceId: string, content: string): Promise<{ idea: string; angle: string }[]> {
   const s = await loadSettings(workspaceId);
   const system = "Цей пост «вистрілив» - аудиторії зайшло. Запропонуй 5 кутів РОЗВИТКУ теми (серія-продовження, кожен пост стоїть сам по собі): глибше в одну деталь; суміжне питання аудиторії; контр-теза до самого себе; живий кейс/приклад; практичний інструмент/чекліст." +

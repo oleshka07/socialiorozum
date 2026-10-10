@@ -40,6 +40,7 @@ import { startJob, getJob, getJobByKey, jobView, markLostJobs } from "./jobs.js"
 import { startMontage, MONTAGE_MAX_CLIPS, montageStyle, brandEndText, setReelCover, MontageError, startPostSubtitles } from "./montage.js";
 import { normSubLang, SUB_LANG_ORDER, SUB_LANGS, SUB_NETS, langCode } from "./montage-plan.js";
 import { tgStoryView, useBizForBrand, dropBizFromBrand, tgStoryReady, brandBiz, bizLabel } from "./tgstory.js";
+import { relayView, addRelay, dropRelay, setRelayIdeas, onRelayUpdate, relaySecret, startChatIdeas, chatIdeasNow } from "./tgrelay.js";
 import { waReady } from "./wastatus.js";
 import { styleSubLangs } from "./sublang.js";
 import { spreadText, normTransition, normMood, normTemplate, normSubPreset, normSubPos, normHex, normMontageStyle, TEMPLATES, TEMPLATE_ORDER, templatePlan, SUB_PRESETS, SUB_ORDER } from "./montage-plan.js";
@@ -922,6 +923,24 @@ app.post("/api/integrations/tgstory/use", async (req: any, reply) => {
   catch (e: any) { return reply.code(400).send({ error: e.message }); }
 });
 app.post("/api/integrations/tgstory/off", async (req: any) => { await dropBizFromBrand(req.user.workspace_id); return { ok: true }; });
+// 🤖 Свій бот, що вже працює деінде (Telegram Business зайнятий ним): Holos тримає токен лише для сторіс,
+// вебхук бота не чіпає - бот сам пересилає сюди підключення й (за бажанням) власні повідомлення людини.
+// Адресу з секретом (для .env бота) бачить лише той, хто керує каналами.
+app.get("/api/integrations/tgrelay", async (req: any) => ({ relay: await relayView(req.user.workspace_id, can(req.user.role, "manage")) }));
+app.post("/api/integrations/tgrelay", async (req: any, reply) => {
+  try { const r = await addRelay(req.user.workspace_id, req.user.id, String(req.body?.token || "")); return { ok: true, ...r, relay: await relayView(req.user.workspace_id, true) }; }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
+app.post("/api/integrations/tgrelay/ideas", async (req: any) => {
+  await setRelayIdeas(req.user.workspace_id, req.body?.on === true);
+  await logEvent("info", "tgrelay", `ідеї з власних повідомлень: ${req.body?.on === true ? "увімкнено" : "вимкнено"}`, null, req.user.id);
+  return { ok: true, relay: await relayView(req.user.workspace_id, true) };
+});
+app.post("/api/integrations/tgrelay/off", async (req: any) => { await dropRelay(req.user.workspace_id); return { ok: true }; });
+app.post("/api/integrations/tgrelay/ideas-now", async (req: any, reply) => {
+  try { const r = await chatIdeasNow(req.user.workspace_id); return { ok: true, notes: r.notes, ideas: r.ideas }; }
+  catch (e: any) { return reply.code(400).send({ error: e.message }); }
+});
 // 🎨 Стиль відео бренду: субтитри, колір, гачок, фінальна картка, вирізання пауз - типові для всіх монтажів
 app.get("/api/montage/style", async (req: any) => {
   const ws = req.user.workspace_id, style = await montageStyle(ws);
@@ -2642,6 +2661,16 @@ app.put("/api/integrations/telegram", async (req: any, reply) => {
       return reply.code(400).send({ error: "Це не схоже на токен бота. Він виглядає так: 123456789:AAH… - скопіюй його з @BotFather цілком." });
     try { await tg.getMe(token); }
     catch (e: any) { return reply.code(400).send({ error: "Telegram не прийняв цей токен: " + String(e.message).slice(0, 160) }); }
+    // Власний бот = Holos забирає йому ВСІ апдейти (вебхук на себе). Бот, що вже працює деінде (напр.
+    // відповідає людям через Telegram Business), від цього замовк би - тож не мовчки: свій бот без
+    // перехоплення стоїть окремо, а чужий вебхук забираємо лише після «забрати все одно».
+    if (await one(`select 1 from tg_relay where bot_id=$1`, [token.split(":")[0]]))
+      return reply.code(400).send({ error: "Цей бот підключено як «свій бот без перехоплення» (Канали → Telegram → «📲 Сторіс у профілі»): Holos його вебхук не чіпає. Щоб зробити його власним ботом кабінету, спершу відʼєднай його там." });
+    if (req.body?.force !== true) {
+      const away = await foreignHookOf(token).catch(() => "");
+      if (away) return reply.code(409).send({ conflict: true, host: away,
+        error: `Цей бот уже працює на ${away}. Власним ботом Holos забирає йому всі повідомлення - там він замовкне. Якщо бот має працювати й далі (наприклад, відповідає людям через Telegram Business), підключи його як «свій бот без перехоплення»: Канали → Telegram → «📲 Сторіс у профілі».` });
+    }
   }
   const channel = String(req.body?.channelChatId ?? "").trim() || null;
   const group = String(req.body?.groupChatId ?? "").trim() || null;
@@ -4103,6 +4132,15 @@ app.post("/api/transcription/import", async (req: any, reply) => {
 // ВЛАСНИЙ бот: у шляху лише id бота, секрет (свій для кожного бота) - тільки в заголовку, бо адресу
 // вебхука власник бота бачить (getWebhookInfo), а заголовок ні. Раніше всі боти ділили один секрет
 // у шляху, тож власник будь-якого бота міг підробляти апдейти від імені інших людей.
+// 🤖 Апдейти, які пересилає СВІЙ бот людини (tg_relay): у шляху id бота, секрет - лише в заголовку (адресу
+// людина вставляє у .env свого бота). Відповідаємо одразу; handled завжди 0 - чатів людини ми не ведемо.
+app.post("/api/webhooks/telegram/relay/:botId", async (req: any, reply) => {
+  const botId = String(req.params.botId || "");
+  if (!/^\d{3,20}$/.test(botId)) return reply.code(404).send({ error: "not found" });
+  if (!sameSecret(req.headers["x-telegram-bot-api-secret-token"], relaySecret(botId))) return reply.code(401).send({ error: "bad secret" });
+  try { const r = await onRelayUpdate(botId, req.body || {}); return { ok: true, received: 1, handled: 0, did: r.did }; }
+  catch (e: any) { await logEvent("warn", "tgrelay", "апдейт від свого бота не оброблено: " + String(e.message).slice(0, 160)); return reply.code(500).send({ ok: false }); }
+});
 app.post("/api/webhooks/telegram/bot/:botId", async (req: any, reply) => {
   const botId = String(req.params.botId || "");
   if (!/^\d{3,20}$/.test(botId)) return reply.code(404).send({ error: "not found" });
@@ -5140,6 +5178,7 @@ app.listen({ port: env.port, host: "0.0.0.0" }).then(async (addr) => {
   startCommentNotify(); // 💬 нові коментарі людей - у бот (раз на 20 хв, без нічних сповіщень)
   startTikTokWatch(); // 🎬 TikTok обробляє відео асинхронно: посилання на пост або причина відмови
   startEvergreen();     // ♻️ вічнозелена черга (працює лише в кабінетах, де її увімкнули)
+  startChatIdeas();     // 💡 ідеї з власних повідомлень (свій бот людини пересилає лише її повідомлення)
   startMeetingPull();   // погодинна звірка з хмарою власного транскрибатора
   startAlerts().catch((e: any) => app.log.error("startAlerts: " + e.message));   // 🔔 сповіщення адміну про збої
   // 🔎 дати lastmod за відбитками сторінок і IndexNow про змінене (лише прод; бета закрита). Через

@@ -524,7 +524,7 @@ create table if not exists idea_bank (
   text         text not null,
   angle        text,
   rubric       text,
-  origin       text not null default 'manual', -- manual|ai|bot|plan|material
+  origin       text not null default 'manual', -- manual|ai|bot|plan|material|chat (з власних повідомлень у Telegram)
   status       text not null default 'new',    -- new|used|archived
   used_post_id uuid references post(id) on delete set null,
   created_at   timestamptz not null default now()
@@ -1241,6 +1241,33 @@ create table if not exists whatsapp_publish (
   created_at  timestamptz not null default now()
 );
 create unique index if not exists uq_wapub_post on whatsapp_publish(post_id);
+
+-- 🤖 Свій бот людини, що вже працює деінде (Telegram Business зайнятий ним, бот сам забирає апдейти):
+-- Holos його вебхук не чіпає, а бот сам пересилає сюди підключення Business і (за бажанням) власні
+-- повідомлення людини. Токен - лише щоб ставити сторіс (postStory) і звіряти підключення з Telegram.
+create table if not exists tg_relay (
+  bot_id       text primary key,           -- id бота (перша частина токена)
+  workspace_id uuid not null references workspace(id) on delete cascade,
+  token        text not null,
+  username     text,
+  ideas        boolean not null default false, -- брати ідеї для постів із власних повідомлень людини
+  added_by     uuid references app_user(id) on delete set null,
+  last_seen_at timestamptz,                -- коли бот востаннє щось переслав
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+create index if not exists idx_tg_relay_ws on tg_relay(workspace_id);
+-- власні повідомлення людини до вечірнього проходу «ідеї з переписок»: лише текст, без того, кому й
+-- куди (ключ - відбиток підключення, чату й повідомлення); після проходу стираються, і не пізніше 48 год
+create table if not exists tg_chat_note (
+  id           bigserial primary key,
+  workspace_id uuid not null references workspace(id) on delete cascade,
+  key          text not null unique,
+  text         text not null,
+  msg_at       timestamptz not null default now(),
+  created_at   timestamptz not null default now()
+);
+create index if not exists idx_tg_chat_note_ws on tg_chat_note(workspace_id, msg_at);
 
 -- 📤 Усі публікації поста одним списком: мережа, акаунт (id; '' - мережа з одним акаунтом), посилання, коли.
 -- Нова мережа додається сюди, а не в пʼятнадцять union по коду (так YouTube і TikTok уже були пропущені

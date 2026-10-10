@@ -194,6 +194,12 @@ export const ALLOWED_UPDATES = ["message", "channel_post", "my_chat_member", "ca
 export const setWebhook = (token: string, url: string, secretToken?: string) =>
   tg(token, "setWebhook", { url, allowed_updates: ALLOWED_UPDATES, ...(secretToken ? { secret_token: secretToken } : {}) });
 
+// Підключення Telegram Business за id: людина, права (can_manage_stories…), чи ввімкнено. Ним звіряємо те,
+// що переслав бот людини (🤖 свій бот): правда - відповідь Telegram, а не тіло запиту.
+export const getBusinessConnection = (token: string, businessConnectionId: string) =>
+  tg<{ id: string; user: { id: number; first_name?: string; last_name?: string; username?: string }; user_chat_id?: number; date?: number;
+    rights?: Record<string, boolean>; can_reply?: boolean; is_enabled?: boolean }>(token, "getBusinessConnection", { business_connection_id: businessConnectionId });
+
 // 📲 Сторіс від імені бізнес-акаунта (Telegram Business, право can_manage_stories). Файл - лише новим
 // завантаженням (attach://story): за адресою Telegram сторіс не бере.
 export async function postStory(token: string, businessConnectionId: string, content: Record<string, unknown>, file: Buffer, name: string,
