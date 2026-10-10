@@ -82,7 +82,7 @@ const READ_PLUS: Record<string, Cap> = {
 const DRAFT = [
   "POST /api/sources", "POST /api/generate/from-brand", "POST /api/generate/topic", "POST /api/montage",
   "POST /api/brand/context-check",
-  "POST /api/media", "PUT /api/media/chunk", "PUT /api/media/:id/alt",
+  "POST /api/media", "PUT /api/media/chunk", "PUT /api/media/:id/alt", "PUT /api/media/:id", "POST /api/media/archive",
   "POST /api/posts/blank", "PUT /api/posts/:postId", "DELETE /api/posts/:postId", "POST /api/posts/:postId/submit",
   "POST /api/posts/:postId/cover", "POST /api/posts/:postId/subtitles", "POST /api/posts/:postId/media", "POST /api/posts/:postId/slides",
   "PUT /api/posts/:postId/slides", "DELETE /api/posts/:postId/slides/:mediaId", "PUT /api/posts/:postId/video",
@@ -111,7 +111,7 @@ const PUBLISH = [
   // PRO-конвеєр перезбирає пости прогону: крок «де-AI» замінює його готові пости новими - для автора це
   // було б видалення чужої роботи, тож лише з редактора
   "POST /api/runs/:id/steps/:step/run", "POST /api/runs/:id/run-from/:step", "POST /api/runs/:id/autopilot",
-  "DELETE /api/media/:id", "POST /api/media/bulk-delete",
+  "DELETE /api/media/:id", "POST /api/media/bulk-delete", "PUT /api/media/settings",
   "POST /api/schedule", "PUT /api/schedule/:id", "DELETE /api/schedule/:id", "POST /api/schedule/auto",
 ];
 const TEAM = [
@@ -201,7 +201,7 @@ const TOOL_CAP: Record<string, Cap> = {
   list_comments: "read", analytics: "read",
   add_material: "draft", add_idea: "draft", create_draft: "draft", update_post: "draft", attach_media: "draft",
   video_frames: "draft", montage_video: "draft", edit_post_media: "draft", render_carousel: "draft",
-  media_upload_link: "draft", find_stock_photos: "draft", attach_stock_photo: "draft", generate_image: "draft",
+  media_upload_link: "draft", update_media: "draft", find_stock_photos: "draft", attach_stock_photo: "draft", generate_image: "draft",
   generate_posts: "draft", upload_media: "draft", delete_post: "draft", submit_for_review: "draft",
   publish_post: "publish", schedule_post: "publish", unschedule_post: "publish", send_first_comment: "publish",
   reply_to_comment: "publish",

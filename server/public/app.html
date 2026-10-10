@@ -623,6 +623,63 @@
 .slide-th .sa.on{background:var(--brand)}
   .pv-video{position:relative;background:#000}.pv-video video{width:100%;display:block;max-height:440px;background:#000}.pv-video.reel video{aspect-ratio:9/16;object-fit:cover;max-height:520px}
   .vbadge{position:absolute;left:4px;bottom:4px;background:rgba(0,0,0,.62);color:#fff;font-size:10.5px;font-weight:700;border-radius:6px;padding:1px 6px;pointer-events:none}
+  /* 🖼 медіатека: таблиця з назвами, станом, мережами й архівом; на телефоні рядок стає карткою */
+  .mlstats{font-size:12.5px;color:var(--muted);line-height:1.7;text-align:right}
+  .mlstats b{color:var(--ink)}
+  .mlarch{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:13px}
+  .mlarch select{width:auto;max-width:100%;padding:5px 8px;font-size:13px}
+  .mlfilters{display:flex;flex-direction:column;gap:8px}
+  .mlfilters .ftabs{flex-wrap:wrap}
+  .mlctl{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .mlctl select{width:auto;max-width:100%;padding:7px 9px;font-size:13px}
+  .mlctl .txt{flex:1;min-width:180px;padding:7px 10px}
+  .mlview{display:flex;gap:4px;margin-left:auto}
+  .mlview button{padding:6px 10px;font-size:12.5px}
+  .mlview button.on{border-color:var(--brand);color:var(--brand);background:var(--brand-soft)}
+  .mlbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+  .mlsub{font-size:11.5px;color:var(--muted);margin-top:3px;line-height:1.4}
+  .mltwrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+  .mltab{width:100%;border-collapse:collapse;font-size:13px}
+  .mltab th{text-align:left;font-size:11.5px;font-weight:600;color:var(--muted);padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+  .mltab td{padding:8px 10px;border-top:1px solid var(--line);vertical-align:top}
+  .mltab tbody tr:first-child td{border-top:none}
+  .mltab tr.on{background:var(--brand-soft)}
+  .mltab tr.arch td{opacity:.72}
+  .mltab .mlc{width:30px;text-align:center}
+  .mltab .mlc input{width:16px;height:16px;cursor:pointer}
+  .mlord{display:block;margin:4px auto 0;min-width:18px;height:18px;border-radius:9px;background:var(--brand);color:#fff;font-size:11px;line-height:18px;text-align:center}
+  .mltab .mlpic{position:relative;width:74px}
+  .mltab .mlname{min-width:220px}
+  .mltab .mlname .txt{padding:6px 9px;font-size:13px;width:100%}
+  .mltab .mlname .txt.saved{border-color:var(--ok,#22a06b);box-shadow:0 0 0 2px color-mix(in srgb,var(--ok,#22a06b) 20%,transparent)}
+  .mltab .mlname .mlsub{max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mltab .mladd{white-space:nowrap}
+  .mltab .mlact{white-space:nowrap;text-align:right}
+  .mltab .mlact button{padding:5px 8px;font-size:12px;min-width:34px;margin-left:4px}
+  .mlst{display:inline-block;font-size:12px;font-weight:600;padding:2px 8px;border-radius:8px;background:var(--surface2);white-space:nowrap}
+  .mlst.st-done{background:color-mix(in srgb,var(--ok,#22a06b) 14%,transparent);color:var(--ok,#22a06b)}
+  .mlst.st-planned{background:var(--amber-soft);color:var(--amber)}
+  .mlst.st-published{background:var(--brand-soft);color:var(--brand)}
+  .mlst.arch{background:var(--surface2);color:var(--muted)}
+  .mlpost{color:var(--brand);text-decoration:none;font-weight:600}
+  .mlnet{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:var(--c);border:1px solid color-mix(in srgb,var(--c) 45%,transparent);border-radius:8px;padding:1px 7px;margin:0 4px 4px 0;white-space:nowrap}
+  .mltiles{display:flex;flex-wrap:wrap;gap:8px}
+  .mltstate{position:absolute;right:4px;bottom:4px;font-size:12px;background:rgba(0,0,0,.55);border-radius:6px;padding:0 4px;pointer-events:none}
+  @media (max-width:760px){
+    .mlstats{text-align:left}
+    .mlview{margin-left:0}
+    .mltwrap{border:none;background:transparent;overflow:visible}
+    .mltab thead{display:none}
+    .mltab,.mltab tbody{display:block}
+    .mltab tr{display:grid;grid-template-columns:28px 64px 1fr;gap:4px 10px;border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px;background:var(--surface)}
+    .mltab td{border:none;padding:0}
+    .mltab .mlc{grid-row:1/span 2}
+    .mltab .mlpic{grid-row:1/span 2;width:auto}
+    .mltab .mlname{grid-column:3;min-width:0}
+    .mltab .mladd,.mltab .mluse,.mltab .mlnets{grid-column:2/4}
+    .mltab .mlact{grid-column:1/4;text-align:left}
+    .mltab .mlname .mlsub{max-width:100%}
+  }
 .slide-add{width:78px;height:98px;border:1.5px dashed var(--line2);border-radius:9px;background:transparent;color:var(--muted);font-size:12px;font-weight:700;cursor:pointer;line-height:1.3}
   .slide-add:hover{border-color:var(--brand);color:var(--brand)}
   .slide-pick{position:relative;cursor:pointer}
@@ -822,6 +879,7 @@ html.review-on #owl{display:none!important}
             <div class="tab" data-ctab="materials">📥 Матеріали <span class="badge" id="matCount" style="margin-left:5px"></span></div>
             <div class="tab on" data-ctab="posts">📝 Чорновики <span class="badge" id="postCount" style="margin-left:5px"></span></div>
             <div class="tab" data-ctab="ideas">💡 Ідеї <span class="badge" id="ideaTabCount" style="margin-left:5px"></span></div>
+            <div class="tab" data-ctab="media">🖼 Медіатека <span class="badge" id="mediaTabCount" style="margin-left:5px"></span></div>
           </div>
           <!-- Конвеєр (PRO-кишка) переїхав у аватар-меню «🧰 Інструменти» - вкладки більше не шумлять -->
           <div class="tabs proonly" id="layoutTabs" style="display:none">
@@ -844,6 +902,22 @@ html.review-on #owl{display:none!important}
         <!-- IDEAS: Банк ідей (одна адреса для ідей з бота, AI-продовжень і власних) -->
         <div id="layIdeas" style="display:none">
           <div class="panel" style="padding:0;overflow:hidden"><div id="ideaBankFeed"><div class="empty" style="padding:20px">Завантажую ідеї…</div></div></div>
+        </div>
+
+        <!-- 🖼 МЕДІАТЕКА: усі фото й відео бренду - таблиця з фільтрами, назвами, мережами й архівом -->
+        <div id="layMedia" style="display:none">
+          <div class="panel" style="margin-bottom:12px">
+            <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+              <div style="flex:1;min-width:240px">
+                <div class="hint" style="margin:0">Фото, відео й записи голосу для постів. Завантажуй одразу пачкою - Claude у конекторі бачить їх, сам підбирає до постів і може назвати. З Claude Code чи Cowork просто скажи «залий фото з папки …».</div>
+                <div class="btnrow need-draft" style="margin-top:10px"><input type="file" id="mediaFile" accept="image/*,video/*,audio/*" multiple style="font-size:13px"><button class="primary" id="mediaUpload">Завантажити</button><span id="mediaMsg" style="font-size:12px;color:var(--muted)"></span></div>
+              </div>
+              <div id="mlStats" class="mlstats"></div>
+            </div>
+            <div id="mlArchiveRow" class="mlarch"></div>
+          </div>
+          <div id="mlFilters" class="mlfilters"></div>
+          <div id="mediaGrid" style="margin-top:10px"></div>
         </div>
 
         <!-- PLAN: скелет + ритм у дві колонки (компактно), довгі пояснення - у «?»-підказках -->
@@ -1405,10 +1479,9 @@ html.review-on #owl{display:none!important}
         </div>
         <div class="grid2">
           <div class="panel" style="margin:0">
-            <div class="ph">🖼️ Медіа-бібліотека</div>
-            <div class="hint">Фото для постів. Можна завантажити одразу пачкою: Claude у конекторі бачить їх і сам підбирає до постів. А в Claude Code чи Cowork можна просто сказати «залий фото з папки …» - він зробить це сам, повтори не задвоюються.</div>
-            <div class="btnrow need-draft"><input type="file" id="mediaFile" accept="image/*,video/*" multiple style="font-size:13px"><button class="primary" id="mediaUpload">Завантажити</button><span id="mediaMsg" style="font-size:12px;color:var(--muted)"></span></div>
-            <div id="mediaGrid" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"></div>
+            <div class="ph">🖼️ Медіатека</div>
+            <div class="hint">Фото й відео для постів тепер живуть окремою сторінкою - таблиця з фільтрами, назвами, мережами, куди файл уже вийшов, і архівом.</div>
+            <div class="btnrow"><button class="primary" id="mediaGoLib">🖼 Відкрити медіатеку →</button></div>
           </div>
           <div class="panel" style="margin:0">
             <div class="ph">📁 Google Drive</div>

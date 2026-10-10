@@ -52,6 +52,8 @@ import * as gdrive from "./gdrive.js";
 import { publishPostToChannels, alreadySentNetworks, startReelPublishJob, reelSentNetworks, closeSlotsIfDone, enabledNets, beginShutdown, publishesInFlight, unschedulePost, isPublishingNow, PUB_NETS } from "./publisher.js";
 import { ttCreator, canDirect, startTikTokWatch } from "./vidpub.js";
 import { startLifecycleWorker } from "./lifecycle.js";
+import { LIB_HIDDEN, libraryItems, libraryStats, archiveDays, setArchiveDays, archiveSweepWorkspace, setArchived, setTitle, diskSpace } from "./medialib.js";
+import { cleanTitle } from "./medialib-plan.js";
 import { startDigest } from "./digest.js";
 import { startCommentNotify, notifyOn, setNotify } from "./tgcomments.js";
 import { startAlerts, alertsView, saveAlertSettings, sendTestAlert, sendDigest, resolveAlert, runProbes, probeBuddy } from "./alerts.js";
@@ -1158,9 +1160,41 @@ app.put("/api/media/chunk", async (req: any, reply) => {
 // технічні копії (ig-safe: JPEG-версія для Instagram API) в бібліотеці не показуємо -
 // вони дублювали кожне опубліковане фото і засмічували медіатеку. Так само обкладинки рілсів (cover):
 // це кадр змонтованого відео, він живе в композері поста, а не серед фото автора
+// Кропи під формат поста (crop) - теж копії: кожне прикріплення фото плодило б дубль у медіатеці.
+// Відкладене в архів у виборі фото не показується (?archived=1 - і його).
 app.get("/api/media", async (req: any) =>
-  q(`select id, kind, mime, original_name, filename, size, source, created_at, duration, width, height from media_asset
-     where workspace_id=$1 and source not in ('ig-safe','ai-base','slide','cover','montage-lang') order by created_at desc limit 200`, [req.user.workspace_id]));
+  q(`select id, kind, mime, original_name, title, filename, size, source, created_at, duration, width, height from media_asset
+     where workspace_id=$1 and source <> all($2::text[])${String(req.query?.archived || "") === "1" ? "" : " and archived_at is null"}
+     order by created_at desc limit 200`, [req.user.workspace_id, LIB_HIDDEN]));
+
+// 🖼 Сторінка «Медіатека»: кожен файл зі станом (вільний / у чернетці / у розкладі / вийшов), мережами,
+// куди вже вийшов, постами, назвою й архівом + скільки місця займає. Фільтрує й шукає сам кабінет.
+app.get("/api/media/library", async (req: any) => {
+  const ws = req.user.workspace_id;
+  const admin = env.adminEmails.includes(String(req.user.email || "").toLowerCase());
+  const [items, stats, days] = await Promise.all([libraryItems(ws), libraryStats(ws), archiveDays(ws)]);
+  return { items, stats, archiveDays: days, ...(admin ? { disk: await diskSpace() } : {}) };
+});
+app.put("/api/media/settings", async (req: any) => {
+  const days = await setArchiveDays(req.user.workspace_id, req.body?.archive_days);
+  const r = await archiveSweepWorkspace(req.user.workspace_id);   // нове правило - одразу, а не через 6 год
+  return { ok: true, archiveDays: days, ...r };
+});
+// назва файлу: людина чи Claude називає фото «Фасад до ремонту», щоб потім знаходити його пошуком
+app.put("/api/media/:id", async (req: any, reply) => {
+  if (req.body?.title === undefined) return reply.code(400).send({ error: "нема що змінити - передай title" });
+  const title = cleanTitle(req.body.title);
+  if (!(await setTitle(req.user.workspace_id, req.params.id, title))) return reply.code(404).send({ error: "медіа не знайдено" });
+  return { ok: true, title: title || null };
+});
+// 📦 відкласти в архів / повернути. Архів лише ховає файл зі списку й вибору фото: пости, публікації,
+// статистика й повтори хітів не змінюються
+app.post("/api/media/archive", async (req: any, reply) => {
+  const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(String).filter((x: string) => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 500);
+  if (!ids.length) return reply.code(400).send({ error: "обери файли" });
+  const archive = req.body?.archive !== false;
+  return { ok: true, archive, changed: await setArchived(req.user.workspace_id, ids, archive) };
+});
 
 // 📸 alt-текст фото (опис для незрячих і пошуку): іде в Instagram (фото й кадри каруселі) і LinkedIn.
 // Порожній рядок прибирає опис.
@@ -3688,7 +3722,7 @@ app.get("/api/tasks", async (req: any) => {
     { id: "chan2", section: "settings", points: 5, label: "Підключити другий канал (той самий пост - ширше охоплення)", done: chanCnt >= 2 },
     { id: "bot", section: "settings", points: 10, label: "Підключити бот-асистент у Telegram (ідеї, щоденник, дайджест)", done: (botOwner?.n || 0) > 0 },
     { id: "source", section: "sources", points: 5, label: "Додати джерело контенту (тема новин, Telegram-канал, RSS)", done: (src?.n || 0) > 0 },
-    { id: "media", section: "sources", points: 5, label: "Завантажити або згенерувати фото", done: (med?.n || 0) > 0 },
+    { id: "media", section: "create", points: 5, label: "Завантажити фото чи відео в медіатеку", done: (med?.n || 0) > 0 },
     { id: "gen10", section: "create", points: 10, label: "Згенерувати перші 10 постів", done: (posts?.n || 0) >= 10 },
     { id: "approve", section: "create", points: 5, label: "Затвердити перший пост", done: (appr?.n || 0) > 0 },
     { id: "schedule", section: "publish", points: 5, label: "Запланувати пост у календарі (AI-розподіл)", done: (sched?.n || 0) > 0 },

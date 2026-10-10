@@ -12,6 +12,7 @@ import { MEDIA_DIR, deleteMediaFile } from "./media.js";
 import { sendInactivityWarningEmail } from "./email.js";
 import { backfillDigests } from "./memory.js";
 import { purgeWorkspace, soleOwnedBrands } from "./workspaces.js";
+import { archiveSweep } from "./medialib.js";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -102,6 +103,9 @@ async function tick(): Promise<void> {
   // 4) осиротілі файли медіа
   try { await sweepOrphanMedia(); } catch { /* ignore */ }
   try { await sweepLegacyIgSafe(); } catch { /* ignore */ }
+  // 📦 медіатека: відпрацьоване (усі пости з файлом вийшли) - в архів через N днів, знову потрібне - назад.
+  // Файли не чіпаються: архів лише ховає їх зі списку
+  try { await archiveSweep(); } catch { /* ignore */ }
   // журнал подій ріс без обмежень (спіймано аудитом): 30 днів історії достатньо і для розбору
   // інцидентів, і для звіту оператора; info-шум - 7 днів, попередження й помилки - 30
   try {

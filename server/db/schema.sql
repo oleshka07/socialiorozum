@@ -1206,6 +1206,19 @@ alter table media_asset add column if not exists sub_lang text;
 alter table media_asset add column if not exists variant_of uuid references media_asset(id) on delete cascade;
 create index if not exists idx_media_variant on media_asset(variant_of) where variant_of is not null;
 
+-- 🖼 Медіатека як окрема сторінка (10.10, запит Олега): своя назва файлу (людина чи Claude) поруч з іменем,
+-- з яким його завантажили; мʼякий архів - файл лише не показується в списку й виборі фото, а пости,
+-- публікації, статистика й повтори хітів лишаються як були. archived_by: auto - відклав сам автоархів
+-- (і сам поверне, коли файл знову знадобиться), manual - людина. archive_keep - людина повернула файл з
+-- архіву: більше не ховати автоматично. made_from - змонтоване відео знає свої кліпи, голос і музику:
+-- кліп, що пішов у рілс, - «використаний», і в архів іде разом із рілсом.
+alter table media_asset add column if not exists title text;
+alter table media_asset add column if not exists archived_at timestamptz;
+alter table media_asset add column if not exists archived_by text;
+alter table media_asset add column if not exists archive_keep boolean not null default false;
+alter table media_asset add column if not exists made_from uuid[];
+create index if not exists idx_media_archived on media_asset(workspace_id) where archived_at is not null;
+
 -- 📲 Сторіс у профілі Telegram через Telegram Business: людина підключає бот (Telegram → Налаштування →
 -- Telegram Business → Чат-боти), і бот через business_connection_id ставить сторіс від її імені. Рядок -
 -- одне підключення (людина × бот); з яким брендом воно працює - tg_story_brand.

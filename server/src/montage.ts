@@ -842,6 +842,9 @@ export async function buildMontage(ws: string, o: MontageOpts): Promise<MontageR
       return out;
     };
     const videos = await saveParts(files, "montage", "");
+    // 🖼 ролик знає, з чого зібраний: кліпи, голос і музика в медіатеці стають «використаними» разом із ним
+    const madeFrom = [...new Set([...srcs.map((s) => s.id), o.voice === "audio" ? o.audio : null, o.music].filter((x): x is string => !!x))];
+    if (madeFrom.length) await q(`update media_asset set made_from=$2::uuid[] where id = any($1::uuid[])`, [videos.map((v) => v.id), madeFrom]);
     // 🔤 мова субтитрів оригіналу (публікація порівнює її з мовою, яку хоче мережа)
     if (hasText) await q(`update media_asset set sub_lang=$2 where id = any($1::uuid[])`, [videos.map((v) => v.id), lang]);
     const variants: MontageVariant[] = [];

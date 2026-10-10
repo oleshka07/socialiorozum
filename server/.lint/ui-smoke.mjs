@@ -82,6 +82,9 @@ const TT_CREATOR = { ok: true, direct: true, nickname: "Holos", username: "holos
 const FC9 = { comments: [{ network: "instagram", status: "sent" }, { network: "linkedin", status: "failed", error: "LinkedIn не дав застосунку дозволу коментувати від імені профілю." }] };
 const fcSends = [];   // POST /posts/:id/first-comment/send
 const altPuts = [];   // PUT /media/:id/alt - опис фото
+// 🖼 медіатека: таблиця зі станом, мережами й архівом (GET /media/library), назви, архів, автоархів
+const mlTitles = [], mlArch = [], mlDays = [];
+let ML_DAYS_NOW = 30;
 const postPuts = [];  // PUT /posts/:id - що композер зберіг (текст, перший коментар)
 // заливка частинами: сервер-заглушка тримає «скільки вже прийшло» на кожен uid, як справжній
 const CHUNKS = new Map();
@@ -577,6 +580,20 @@ function handleLinks(method, path, body) {
   return null;
 }
 
+const MLIB = [
+  { id: "mv1", filename: "lib.mp4", kind: "video", source: "upload", original_name: "VID_0042.MOV", title: null, duration: 75, width: 720, height: 1280, size: 12000000, created_at: iso(0, 9),
+    state: "done", posts: ["p-ml1"], sent: ["instagram", "facebook"], lastPub: iso(-5, 18), nextAt: null, waiting: [], archive_due: iso(25, 18), archived_at: null, archived_by: null, archive_keep: false },
+  { id: "md1", filename: "pic.jpg", kind: "image", source: "upload", original_name: "IMG_0001.jpg", title: "Фасад до ремонту", width: 1080, height: 1350, size: 2400000, created_at: iso(0, 8),
+    state: "planned", posts: ["p-ml2"], sent: ["telegram"], lastPub: iso(-1, 10), nextAt: iso(1, 18), waiting: ["instagram"], archive_due: null, archived_at: null, archived_by: null, archive_keep: false },
+  { id: "md2", filename: "pic2.jpg", kind: "image", source: "upload", original_name: "IMG_0002.jpg", title: null, width: 1080, height: 1350, size: 2100000, created_at: iso(0, 7),
+    state: "free", posts: [], sent: [], lastPub: null, nextAt: null, waiting: [], archive_due: null, archived_at: null, archived_by: null, archive_keep: false },
+  { id: "md3", filename: "pic3.jpg", kind: "image", source: "gdrive", original_name: "IMG_0003.jpg", title: null, width: 1080, height: 1080, size: 1900000, created_at: iso(0, 6),
+    state: "draft", posts: ["p-ml3"], sent: [], lastPub: null, nextAt: null, waiting: [], archive_due: null, archived_at: null, archived_by: null, archive_keep: false },
+  { id: "ma1", filename: "hlas.ogg", kind: "audio", source: "bot", original_name: "voice.ogg", title: null, duration: 35, size: 300000, created_at: iso(0, 5),
+    state: "free", posts: [], sent: [], lastPub: null, nextAt: null, waiting: [], archive_due: null, archived_at: null, archived_by: null, archive_keep: false },
+  { id: "mz1", filename: "old.jpg", kind: "image", source: "upload", original_name: "IMG_0900.jpg", title: "Старий кейс", width: 1080, height: 1350, size: 2000000, created_at: iso(-60, 9),
+    state: "done", posts: ["p-ml4"], sent: ["threads"], lastPub: iso(-45, 9), nextAt: null, waiting: [], archive_due: null, archived_at: iso(-15, 3), archived_by: "auto", archive_keep: false },
+];
 function handleApi(method, path, body) {
   if (method === "GET" && path.startsWith("/analytics/posts")) {
     const qp = new URL(path, "http://x").searchParams;
@@ -730,6 +747,19 @@ function handleApi(method, path, body) {
   if (method === "POST" && m) { tgOps.push({ op: m[1] ? "remove" : "add", body }); return { ok: true, result: m[1] ? "extra" : "added", posts: 2, chat: { id: "-1003", name: "Новий канал" }, chats: [] }; }
   m = /^\/integrations\/(threads|meta)\/accounts(?:\/(main|remove))?$/.exec(path);
   if (method === "POST" && m) { accOps.push({ net: m[1], op: m[2] || "add", body }); return { ok: true, result: "extra", posts: 0 }; }
+  if (method === "GET" && path.split("?")[0] === "/media/library") {
+    const live = MLIB.filter((x) => !x.archived_at);
+    return { items: MLIB, stats: { files: MLIB.length, bytes: MLIB.reduce((a, x) => a + (x.size || 0), 0), archived: MLIB.length - live.length, archivedBytes: MLIB.filter((x) => x.archived_at).reduce((a, x) => a + x.size, 0) },
+      archiveDays: ML_DAYS_NOW, disk: { free: 38 * 1073741824, total: 75 * 1073741824 } };
+  }
+  if (method === "PUT" && path === "/media/settings") { mlDays.push(body && body.archive_days); ML_DAYS_NOW = Number(body && body.archive_days) || 0; return { ok: true, archiveDays: ML_DAYS_NOW, archived: 0, restored: 0 }; }
+  if (method === "POST" && path === "/media/archive") {
+    mlArch.push(body); let changed = 0;
+    for (const x of MLIB) if ((body.ids || []).includes(x.id)) { if (body.archive !== false && !x.archived_at) { x.archived_at = iso(0, 12); x.archived_by = "manual"; changed++; } else if (body.archive === false && x.archived_at) { x.archived_at = null; x.archived_by = null; x.archive_keep = true; changed++; } }
+    return { ok: true, archive: body.archive !== false, changed };
+  }
+  m = /^\/media\/([\w-]+)$/.exec(path);
+  if (method === "PUT" && m) { mlTitles.push({ id: m[1], title: body && body.title }); const x = MLIB.find((i) => i.id === m[1]); const t = String((body && body.title) || "").replace(/\s+/g, " ").trim(); if (x) x.title = t || null; return { ok: true, title: t || null }; }
   m = /^\/media\/([\w-]+)\/alt$/.exec(path);
   if (method === "PUT" && m) { altPuts.push({ id: m[1], alt: body && body.alt_text }); const a = String((body && body.alt_text) || "").replace(/\s+/g, " ").trim(); return { ok: true, alt_text: a || null }; }
   m = /^\/posts\/([0-9a-f-]+)\/first-comment\/send$/.exec(path);
@@ -830,7 +860,7 @@ const server = createServer((req, res) => {
         return send(200, { ok: true, done: true, received: got, size, saved: { id: "nv" + chunkPuts.length, kind: video ? "video" : "image", filename: "new" + (video ? ".mp4" : ".jpg"), url: "/media/new.mp4", dup: false } });
       }
       // завантаження в медіатеку: рахуємо файли в запиті - так перевірка бачить, чи кабінет ділить пачку
-      if (req.method === "POST" && url.startsWith("/api/media")) {
+      if (req.method === "POST" && (url === "/api/media" || url.startsWith("/api/media?"))) {
         const names = [...raw.matchAll(/filename="([^"]*)"/g)].map((m) => m[1]);
         mediaPosts.push(names.length);
         mediaBytes.push(rawBuf.length);
@@ -2441,7 +2471,7 @@ const run = async () => {
     // з «reach files limit» - і людина не дізналась би навіть про збережені
     mediaPosts.length = 0;
     const msg = await page.evaluate(async () => {
-      selectView("settings"); setSTab("sources");
+      selectView("create", "media");
       const dt = new DataTransfer();
       // два файли сервер «уже мав» - людина має побачити, що копій не зроблено
       for (let i = 0; i < 23; i++) dt.items.add(new File([new Uint8Array(64)], (i < 2 ? "dup" : "p") + i + ".jpg", { type: "image/jpeg" }));
@@ -2480,12 +2510,89 @@ const run = async () => {
 
   await check("videoLibrary", async () => {
     // відео в медіатеці - кадр-мініатюра з тривалістю, а не <video>, що тягнув би весь файл
-    await page.evaluate(() => { selectView("settings"); setSTab("sources"); return loadMedia(); });
+    await page.evaluate(() => { ML.view = "table"; ML.state = "all"; selectView("create", "media"); return loadMedia(); });
     await page.waitForSelector('#mediaGrid [data-id="mv1"] .vbadge', { timeout: 5000 });
     const st = await page.evaluate(() => ({ badge: document.querySelector('#mediaGrid [data-id="mv1"] .vbadge').textContent,
       src: document.querySelector('#mediaGrid [data-id="mv1"] img').getAttribute("src"), videos: document.querySelectorAll("#mediaGrid video").length }));
     if (!(st.badge === "▶ 1:15" && st.src === "/thumb/lib.mp4" && st.videos === 0)) console.log("   ↳ videoLibrary:", JSON.stringify(st));
     return st.badge === "▶ 1:15" && st.src === "/thumb/lib.mp4" && st.videos === 0;
+  });
+
+  await check("mediaLibPage", async () => {
+    // 🖼 медіатека окремою сторінкою: таблиця зі станом, мережами й постами, лічильники фільтрів,
+    // назва файлу йде на сервер, архів (і повернення), вибір кількох → «В архів», автоархів, плитки,
+    // а з Налаштувань → Джерела кнопка веде сюди
+    mlTitles.length = 0; mlArch.length = 0; mlDays.length = 0;
+    await page.evaluate(() => { MediaSel = null; ML.view = "table"; ML.state = "all"; ML.q = ""; ML.kind = "all"; ML.net = ""; selectView("settings"); setSTab("sources"); });
+    await page.evaluate(() => document.getElementById("mediaGoLib").click());
+    await page.waitForSelector('.mltab tr[data-id="mv1"]', { timeout: 5000 });
+    const where = await page.evaluate(() => ({ view: curView, tab: cTab, hash: location.hash, badge: document.getElementById("mediaTabCount").textContent }));
+    if (process.env.SMOKE_SHOTS) { await page.screenshot({ path: join(HERE, "media-lib.png"), fullPage: false }); await page.evaluate(() => setTheme("dark")); await page.screenshot({ path: join(HERE, "media-lib-dark.png") }); await page.evaluate(() => setTheme("light")); }
+    const st = await page.evaluate(() => {
+      const row = (id) => document.querySelector('.mltab tr[data-id="' + id + '"]');
+      const chips = [...document.querySelectorAll("#mlState .ftab")].map((x) => x.dataset.f + ":" + x.querySelector(".badge").textContent);
+      return { chips, rows: [...document.querySelectorAll(".mltab tbody tr")].map((r) => r.dataset.id),
+        mv1: row("mv1").innerText, md1: row("md1").innerText, md1Title: row("md1").querySelector(".mlTitle").value,
+        md2ph: row("md2").querySelector(".mlTitle").placeholder, nets: [...row("mv1").querySelectorAll(".mlnet")].map((x) => x.textContent),
+        link: row("mv1").querySelector(".mlpost")?.getAttribute("href"), stats: document.getElementById("mlStats").innerText,
+        arch: document.getElementById("mlArchiveRow").innerText, sel: document.getElementById("mlArchDays")?.value };
+    });
+    // назва: Enter зберігає, на сервер іде те, що набрано
+    await page.fill('.mltab tr[data-id="md2"] .mlTitle', "Дах після ремонту");
+    await page.press('.mltab tr[data-id="md2"] .mlTitle', "Enter");
+    await page.waitForFunction(() => document.querySelector('.mltab tr[data-id="md2"] .mlTitle').classList.contains("saved"), undefined, { timeout: 4000 });
+    // фільтри: невикористані, пошук за іменем файлу, мережа
+    await page.click('#mlState .ftab[data-f="free"]');
+    const free = await page.$$eval(".mltab tbody tr", (r) => r.map((x) => x.dataset.id));
+    await page.click('#mlState .ftab[data-f="all"]');
+    await page.fill("#mlSearch", "vid_0042");
+    const found = await page.$$eval(".mltab tbody tr", (r) => r.map((x) => x.dataset.id));
+    await page.fill("#mlSearch", "");
+    await page.selectOption("#mlNetSel", "instagram");
+    const byNet = await page.$$eval(".mltab tbody tr", (r) => r.map((x) => x.dataset.id));
+    await page.selectOption("#mlNetSel", "");
+    // архів: там лише відкладене; ↩ повертає
+    await page.click('#mlState .ftab[data-f="archived"]');
+    const archRows = await page.$$eval(".mltab tbody tr", (r) => r.map((x) => x.dataset.id + ":" + x.querySelector(".mlst").textContent));
+    await page.click('.mltab tr[data-id="mz1"] .mlArch');
+    await page.waitForFunction(() => !document.querySelector('.mltab tr[data-id="mz1"]'), undefined, { timeout: 4000 });
+    await page.click('#mlState .ftab[data-f="all"]');
+    // вибір кількох галочками → «📦 В архів (2)»
+    await page.check('.mltab tr[data-id="md2"] .mlChk');
+    await page.check('.mltab tr[data-id="md3"] .mlChk');
+    const archBtn = await page.$eval("#mSelArch", (b) => b.textContent);
+    await page.click("#mSelArch");
+    await page.waitForFunction(() => !document.querySelector('.mltab tr[data-id="md3"]'), undefined, { timeout: 4000 });
+    // автоархів
+    await page.selectOption("#mlArchDays", "15");
+    await page.waitForFunction(() => document.getElementById("mlArchDays")?.value === "15", undefined, { timeout: 4000 });
+    // плитки й назад
+    await page.click('.mlview button[data-v="tiles"]');
+    const tiles = await page.evaluate(() => ({ n: document.querySelectorAll(".mltiles [data-id]").length, saved: localStorage.getItem("kg_mlview") }));
+    await page.click('.mlview button[data-v="table"]');
+    // телефон: таблиця стає картками, горизонтального скролу нема
+    const vp = page.viewportSize();
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.waitForTimeout(200);
+    const mob = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, head: getComputedStyle(document.querySelector(".mltab thead")).display }));
+    if (process.env.SMOKE_SHOTS) await page.screenshot({ path: join(HERE, "media-lib-mobile.png"), fullPage: true });
+    await page.setViewportSize(vp);
+    // повертаємо стан заглушки для решти перевірок
+    await page.evaluate(() => { MediaSel = null; ML.state = "all"; ML.q = ""; ML.net = ""; });
+    for (const x of MLIB) if (x.id === "md2" || x.id === "md3") { x.archived_at = null; x.archived_by = null; }
+    const good = where.view === "create" && where.tab === "media" && where.hash === "#/create/media" && where.badge === "5"
+      && st.chips.join(",") === "all:5,free:2,used:3,sent:2,archived:1" && st.rows.join(",") === "mv1,md1,md2,md3,ma1"
+      && /Відпрацьоване/.test(st.mv1) && /в архів через 2[456] дн\./.test(st.mv1) && st.nets.join(",") === "Instagram,Facebook" && st.link === "#/post/p-ml1"
+      && /У розкладі/.test(st.md1) && /ще: Instagram/.test(st.md1) && st.md1Title === "Фасад до ремонту" && /IMG_0002\.jpg/.test(st.md2ph)
+      && /6 файлів/.test(st.stats) && /в архіві 1/.test(st.stats) && /диск сервера/.test(st.stats) && st.sel === "30" && /файл, пости, публікації, статистика/.test(st.arch)
+      && mlTitles.length === 1 && mlTitles[0].id === "md2" && mlTitles[0].title === "Дах після ремонту"
+      && free.join(",") === "md2,ma1" && found.join(",") === "mv1" && byNet.join(",") === "mv1"
+      && archRows.length === 1 && /mz1:📦 В архіві/.test(archRows[0]) && /\(сам\)/.test(archRows[0])
+      && mlArch[0] && mlArch[0].archive === false && JSON.stringify(mlArch[0].ids) === '["mz1"]'
+      && archBtn === "📦 В архів (2)" && mlArch[1] && mlArch[1].archive === true && JSON.stringify(mlArch[1].ids) === '["md2","md3"]'
+      && mlDays.join(",") === "15" && tiles.n === 4 && tiles.saved === "tiles" && mob.sw <= 391 && mob.head === "none";
+    if (!good) console.log("   ↳ mediaLibPage:", JSON.stringify({ where, st, mlTitles, free, found, byNet, archRows, mlArch, archBtn, mlDays, tiles, mob }));
+    return good;
   });
 
   await check("cfProvider", async () => {
@@ -3257,7 +3364,7 @@ const run = async () => {
   await check("montageLib", async () => {
     // 🎬 медіатека: запис голосу - плиткою 🎙, у режимі вибору - «Змонтувати» з порядком вибору, вікно
     // з варіантами тексту; свій текст іде на сервер, готовий пост відкривається в композері
-    await page.evaluate(() => { MediaSel = null; selectView("settings"); setSTab("sources"); return loadMedia(); });
+    await page.evaluate(() => { MediaSel = null; ML.view = "tiles"; ML.state = "all"; selectView("create", "media"); return loadMedia(); });
     await page.waitForSelector('#mediaGrid [data-id="ma1"] .audtile', { timeout: 5000 });
     const tile = await page.$eval('#mediaGrid [data-id="ma1"] .audtile', (el) => el.textContent);
     await page.evaluate(() => { MediaSel = new Set(); return loadMedia(); });
@@ -3298,7 +3405,7 @@ const run = async () => {
   await check("montageV3", async () => {
     // 🧩 шаблони в діалозі монтажу: «до / після» з розподілом кліпів, свій гачок, без фінальної картки,
     // субтитри на плашці, «лишити паузи» - і все це йде на сервер
-    await page.evaluate(() => { MediaSel = new Set(); selectView("settings"); setSTab("sources"); return loadMedia(); });
+    await page.evaluate(() => { MediaSel = new Set(); ML.view = "tiles"; ML.state = "all"; selectView("create", "media"); return loadMedia(); });
     await page.waitForSelector("#mSelMont", { timeout: 5000 });
     for (const id of ["md2", "mv1"]) { await page.click(`#mediaGrid [data-id="${id}"]`); await page.waitForTimeout(150); }
     await page.click("#mSelMont");

@@ -62,6 +62,8 @@ import { styleSubLangs } from "./sublang.js";
 import { ttsReady, musicReady } from "./tts.js";
 import { mergeTt, mergeYt, ttOpts, ytOpts, ttLine, ytLine, VIDEO_NETS } from "./vidnets.js";
 import { titleFrom } from "./youtube.js";
+import { libraryItems, setArchived, setTitle, LIB_HIDDEN } from "./medialib.js";
+import { cleanTitle } from "./medialib-plan.js";
 import { normTransition, normMood, TRANSITIONS, normTemplate, normSubPreset, normSubPos, normHex, TEMPLATES, normSubLang, SUB_NETS, SUB_LANGS } from "./montage-plan.js";
 
 // ============================================================================
@@ -719,7 +721,8 @@ const MEDIA_SRC: Record<string, string> = { upload: "завантажено", gd
 // Де фото вже стоїть: напряму (post.media_id) або через кроп-копію під формат поста, яку
 // attachCroppedImage позначає external_id = id оригіналу. Кропи, зроблені до цієї позначки,
 // відстежити нема як - такі фото просто виглядають вільними.
-// Кадр каруселі (post_slide) рахується так само: фото, що стоїть третім кадром, «уже в пості».
+// Кадр каруселі (post_slide) рахується так само: фото, що стоїть третім кадром, «уже в пості». І кліп,
+// із якого змонтовано відео поста (made_from), - теж.
 const USED_IN = `(select string_agg(left(u.pid::text, 8), ',' order by u.created_at desc) from (
                     select distinct p.id as pid, p.created_at
                       from post p
@@ -728,7 +731,8 @@ const USED_IN = `(select string_agg(left(u.pid::text, 8), ',' order by u.created
                       left join media_asset cs on cs.id = ps.media_id
                      where p.media_id = a.id or ps.media_id = a.id
                         or (c.source = 'crop' and c.external_id = a.id::text)
-                        or (cs.source = 'crop' and cs.external_id = a.id::text)) u)`;
+                        or (cs.source = 'crop' and cs.external_id = a.id::text)
+                        or a.id = any(c.made_from)) u)`;
 export const usedList = (usedIn: string | null | undefined): string =>
   String(usedIn || "").split(",").filter(Boolean).map((x) => "#" + x).join(", ");
 
@@ -1485,10 +1489,12 @@ export const TOOLS: ToolDef[] = [
   {
     name: "list_media",
     title: "Медіатека кабінету",
-    description: "БЕЗКОШТОВНО: власні фото (або з kind: \"video\" - відео) автора з медіатеки кабінету (завантажені в кабінет, із Google Drive, надіслані боту) - з мініатюрами, щоб ти обирав очима; у відео мініатюра - кадр із ролика, плюс тривалість і розмір. Позначено, в яких постах файл уже стоїть. Обране прикріпи через attach_media. Власне фото чи відео автора майже завжди краще за сток і генерацію - дивись сюди першим. По 12 на сторінку, новіші перші.",
+    description: "БЕЗКОШТОВНО: власні фото (або з kind: \"video\" - відео) автора з медіатеки кабінету (завантажені в кабінет, із Google Drive, надіслані боту) - з мініатюрами, щоб ти обирав очима; у відео мініатюра - кадр із ролика, плюс тривалість і розмір. Позначено назву файлу (якщо є), в яких постах він уже стоїть і в які мережі вже вийшов. Обране прикріпи через attach_media; назвати файл чи відкласти в архів - update_media. Власне фото чи відео автора майже завжди краще за сток і генерацію - дивись сюди першим. По 12 на сторінку, новіші перші; відкладене в архів не показується (archived: true - лише архів).",
     properties: {
       kind: { type: "string", enum: ["image", "video", "audio"], description: "image (типово) - фото; video - відео (Reels, відео-пости, кліпи для монтажу); audio - записи голосу (озвучка для montage_video)." },
       unused_only: { type: "boolean", description: "true - лише фото, яких ще немає в жодному пості (щоб не повторюватись)." },
+      search: S("Пошук за назвою файлу чи іменем, з яким його завантажили (напр. «фасад»)."),
+      archived: { type: "boolean", description: "true - лише файли з архіву (відпрацьоване, яке автоархів чи людина відклали)." },
       include_generated: { type: "boolean", description: "true - показати й згенеровані AI та стокові зображення, не лише власні фото автора." },
       page: N("Сторінка (типово 1).", { minimum: 1 }),
     },
@@ -1500,24 +1506,34 @@ export const TOOLS: ToolDef[] = [
       // власні відео автора - це й b-roll для рілсів (завантажені ним самим)
       const sources = video ? [...OWN_MEDIA, "broll"] : a.include_generated === true ? [...OWN_MEDIA, ...GEN_MEDIA] : OWN_MEDIA;
       const unused = a.unused_only === true;
-      const where = `a.workspace_id=$1 and a.kind='${video ? "video" : "image"}' and a.source = any($2::text[])${unused ? ` and ${USED_IN} is null` : ""}`;
+      const archived = a.archived === true;
+      const search = String(a.search || "").trim().slice(0, 80);
+      const where = `a.workspace_id=$1 and a.kind='${video ? "video" : "image"}' and a.source = any($2::text[])`
+        + ` and a.archived_at is ${archived ? "not null" : "null"}`
+        + (search ? ` and (coalesce(a.title,'') ilike $4 or coalesce(a.original_name,'') ilike $4)` : "")
+        + (unused ? ` and ${USED_IN} is null` : "");
+      const like = "%" + search.replace(/[\\%_]/g, (c) => "\\" + c) + "%";
       const noun = video ? "відео" : "фото";
-      const total = (await one<{ n: number }>(`select count(*)::int as n from media_asset a where ${where}`, [ws, sources]))?.n || 0;
+      const total = (await one<{ n: number }>(`select count(*)::int as n from media_asset a where ${where.replace(/\$4/g, () => "$3")}`, search ? [ws, sources, like] : [ws, sources]))?.n || 0;
       if (!total) {
+        if (archived) return `В архіві ${noun} немає${search ? ` за «${search}»` : ""}.`;
+        if (search) return `${video ? "Відео" : "Фото"} за «${search}» не знайдено${unused ? " серед вільних" : ""}. Пошук іде за назвою файлу й іменем, з яким його завантажили; без search - уся медіатека.`;
         if (video) return unused
-          ? "Вільних відео в медіатеці немає: усі вже стоять у постах. Нові - media_upload_link (заллє папку з комп'ютера) або кабінет: Налаштування → Джерела → Медіа-бібліотека."
-          : "Відео в медіатеці ще немає. Залити з комп'ютера - media_upload_link (великі файли йдуть частинами), або автор завантажить у кабінеті: Налаштування → Джерела → Медіа-бібліотека.";
+          ? "Вільних відео в медіатеці немає: усі вже стоять у постах. Нові - media_upload_link (заллє папку з комп'ютера) або кабінет: Створення → 🖼 Медіатека."
+          : "Відео в медіатеці ще немає. Залити з комп'ютера - media_upload_link (великі файли йдуть частинами), або автор завантажить у кабінеті: Створення → 🖼 Медіатека.";
         return unused
-          ? "Вільних фото в медіатеці немає: усі вже стоять у постах. Можна повторити фото (без unused_only), взяти сток (find_stock_photos) або попросити автора завантажити нові: Налаштування → Джерела → Медіа-бібліотека."
-          : "Медіатека порожня. Автор може завантажити фото в кабінеті (Налаштування → Джерела → Медіа-бібліотека, можна одразу пачкою) або підключити там же папку Google Drive. Поки що - сток (find_stock_photos).";
+          ? "Вільних фото в медіатеці немає: усі вже стоять у постах. Можна повторити фото (без unused_only), взяти сток (find_stock_photos) або попросити автора завантажити нові: Створення → 🖼 Медіатека."
+          : "Медіатека порожня. Автор може завантажити фото в кабінеті (Створення → 🖼 Медіатека, можна одразу пачкою) або підключити папку Google Drive (Інструменти). Поки що - сток (find_stock_photos).";
       }
       const pages = Math.ceil(total / MEDIA_PAGE);
       const page = Math.min(int(a.page, 1, 1, 100000), pages);
-      const rows = await q<{ id: string; original_name: string | null; filename: string; source: string; created_at: string; used_in: string | null; duration: number | null; width: number | null; height: number | null; size: number | null }>(
-        `select a.id, a.original_name, a.filename, a.source, a.created_at, ${USED_IN} as used_in, a.duration, a.width, a.height, a.size
+      const rows = await q<{ id: string; original_name: string | null; title: string | null; filename: string; source: string; created_at: string; used_in: string | null; duration: number | null; width: number | null; height: number | null; size: number | null }>(
+        `select a.id, a.original_name, a.title, a.filename, a.source, a.created_at, ${USED_IN} as used_in, a.duration, a.width, a.height, a.size
            from media_asset a where ${where} order by a.created_at desc limit ${MEDIA_PAGE} offset $3`,
-        [ws, sources, (page - 1) * MEDIA_PAGE]);
+        search ? [ws, sources, (page - 1) * MEDIA_PAGE, like] : [ws, sources, (page - 1) * MEDIA_PAGE]);
       const tz = await wsTz(ws);
+      // куди файл уже вийшов (мережі публікацій його постів) - щоб не ставити те саме фото в ту саму мережу вдруге
+      const usage = new Map((await libraryItems(ws, { ids: rows.map((r) => r.id) })).map((it) => [it.id, it]));
       const thumbs = await Promise.all(rows.map((r) => smallThumb(r.filename)));
       // номер у тексті мусить збігатися з порядком мініатюр - тож фото без мініатюри (файл не
       // читається) нумеруємо окремо, а не «пропускаємо», інакше модель прикріпила б не те фото
@@ -1527,12 +1543,13 @@ export const TOOLS: ToolDef[] = [
         [fmtDur(r.duration), r.width && r.height ? `${r.width}×${r.height}${r.height > r.width ? " вертикальне" : ""}` : "", r.size ? `${Math.round(r.size / 1048576)} МБ` : ""]
           .filter(Boolean).map((x) => ` · ${x}`).join("");
       const line = (r: typeof rows[number], n: number) =>
-        `${n}. ${short(r.id)} · ${fmtWhen(r.created_at, tz)} · ${MEDIA_SRC[r.source] || r.source}` + vmeta(r) +
+        `${n}. ${short(r.id)}${r.title ? ` «${oneLine(r.title, 60)}»` : ""} · ${fmtWhen(r.created_at, tz)} · ${MEDIA_SRC[r.source] || r.source}` + vmeta(r) +
         (r.original_name ? ` · ${oneLine(r.original_name, 40)}` : "") +
-        (r.used_in ? ` · ✓ уже в пості ${usedList(r.used_in)}` : "");
+        (r.used_in ? ` · ✓ уже в пості ${usedList(r.used_in)}` : "") +
+        (usage.get(r.id)?.sent.length ? ` · ✈️ вийшло: ${netList(usage.get(r.id)!.sent)}` : "");
       return {
         text: [
-          `Медіатека: ${total} ${noun}${unused ? " без поста" : ""} · сторінка ${page} з ${pages}.`,
+          `Медіатека${archived ? " (архів)" : ""}: ${total} ${noun}${unused ? " без поста" : ""}${search ? ` за «${search}»` : ""} · сторінка ${page} з ${pages}.`,
           ...shown.map((x, i) => line(x.r, i + 1)),
           broken.length ? `Без мініатюри (файл не читається): ${broken.map((r) => short(r.id)).join(", ")}.` : "",
           shown.length ? `Мініатюри нижче, по черзі: ${shown.map((_, i) => i + 1).join(", ")}.` : "",
@@ -1542,6 +1559,57 @@ export const TOOLS: ToolDef[] = [
         ].filter(Boolean).join("\n"),
         images: shown.map((x) => x.t as ToolImage),
       };
+    },
+  },
+  {
+    name: "update_media",
+    title: "Назвати файли медіатеки, описати або відкласти в архів",
+    description: "БЕЗКОШТОВНО: дати файлам медіатеки зрозумілі назви (людина бачить їх у таблиці «🖼 Медіатека» поруч з іменем, з яким файл завантажили, а ти потім знаходиш їх через list_media з search), записати опис фото (alt-текст) або відкласти файли в архів чи повернути. Ти бачиш мініатюри в list_media - назви за тим, що на кадрі: «Фасад до ремонту, Карлові Вари», «Ріжемо бетон - крупний план». Архів лише ховає файл зі списку й вибору фото: пости, публікації, статистика й повтори хітів не змінюються; повернути - archive: false.",
+    properties: {
+      media: { type: "array", items: { type: "string" }, description: "Id файлів з list_media (#a1b2c3d4)." },
+      titles: { type: "array", items: { type: "string" }, description: "Назви в тому ж порядку, що й media (до 120 знаків); порожній рядок прибирає назву. Один рядок на всі файли не дублюй - кожному свою." },
+      alt_texts: { type: "array", items: { type: "string" }, description: "Опис кожного фото (alt-текст) у тому ж порядку: 1-2 речення, що на фото. Іде в Instagram і LinkedIn; порожній рядок прибирає опис." },
+      archive: { type: "boolean", description: "true - відкласти в архів, false - повернути з архіву (тоді файл більше не ховається автоматично)." },
+    },
+    required: ["media"],
+    run: async (ws, a) => {
+      const raw = (Array.isArray(a.media) ? a.media : [a.media]).filter((x: unknown) => x !== undefined && x !== null && String(x).trim()).slice(0, 60);
+      if (!raw.length) throw new ToolError("Вкажи id файлів з list_media (#a1b2c3d4).");
+      const titles = Array.isArray(a.titles) ? a.titles : a.titles !== undefined ? [a.titles] : null;
+      const alts = Array.isArray(a.alt_texts) ? a.alt_texts : a.alt_texts !== undefined ? [a.alt_texts] : null;
+      if (!titles && !alts && typeof a.archive !== "boolean") throw new ToolError("Нічого не змінено - передай titles, alt_texts або archive.");
+      if (titles && titles.length !== raw.length) throw new ToolError(`titles - по одній назві на кожен файл: файлів ${raw.length}, назв ${titles.length}.`);
+      if (alts && alts.length !== raw.length) throw new ToolError(`alt_texts - по одному опису на кожен файл: файлів ${raw.length}, описів ${alts.length}.`);
+      const lines: string[] = [];
+      const ids: string[] = [];
+      for (let i = 0; i < raw.length; i++) {
+        const m = await libraryMediaId(ws, raw[i]);
+        const hidden = await one<{ source: string }>(`select source from media_asset where id=$1 and source = any($2::text[])`, [m.id, LIB_HIDDEN]);
+        if (hidden) { lines.push(`${short(m.id)}: це технічна копія (кроп чи версія), а не файл медіатеки - назви оригінал.`); continue; }
+        ids.push(m.id);
+        const did: string[] = [];
+        if (titles && typeof titles[i] === "string") {
+          const t = cleanTitle(titles[i]);
+          await setTitle(ws, m.id, t);
+          did.push(t ? `назва «${t}»` : "назву прибрано");
+        }
+        if (alts && typeof alts[i] === "string") {
+          if (m.kind !== "image") did.push("опис - лише для фото, у відео мережі його не приймають");
+          else {
+            const alt = cleanAlt(alts[i]);
+            await q(`update media_asset set alt_text=nullif($2,'') where id=$1`, [m.id, alt]);
+            did.push(alt ? "опис записано" : "опис прибрано");
+          }
+        }
+        if (did.length) lines.push(`${short(m.id)}: ${did.join(", ")}.`);
+      }
+      if (typeof a.archive === "boolean" && ids.length) {
+        const n = await setArchived(ws, ids, a.archive);
+        lines.push(a.archive
+          ? (n ? `📦 У архіві: ${n}. Пости й публікації з ними не змінились; повернути - update_media з archive: false.` : "📦 Ці файли вже в архіві.")
+          : (n ? `↩ Повернуто з архіву: ${n} - більше не ховаються автоматично.` : "Ці файли й так не в архіві."));
+      }
+      return lines.join("\n") || "Нічого не змінено.";
     },
   },
   {
@@ -2616,7 +2684,7 @@ export const SERVER_INSTRUCTIONS = [
   "Робочий порядок: 1) brand_voice - прочитай голос бренду; 2) напиши текст САМ у цьому голосі;",
   "3) create_draft - збережи; 4) publish_post або schedule_post. Так генерація нічого не коштує власнику.",
   "generate_posts викликай лише коли тебе прямо просять «згенеруй силами Holos» - він витрачає AI-кредити кабінету.",
-  "Зображення: спершу медіатека кабінету (list_media → attach_media) - власні фото автора, вони найкращі й безкоштовні (фото лежать у автора на комп'ютері, а в тебе є термінал - media_upload_link дасть команду, що заллє папку в медіатеку без проходу через чат); далі сток - find_stock_photos з конкретним англійським query і attach_stock_photo, теж безкоштовно; generate_image платний (крім provider cloudflare - безкоштовний денний ліміт ~100 зображень, якщо його підключено), бери його, коли ні медіатека, ні сток не підходять або коли людина просить саме генерацію.",
+  "Зображення: спершу медіатека кабінету (list_media → attach_media) - власні фото автора, вони найкращі й безкоштовні (фото лежать у автора на комп'ютері, а в тебе є термінал - media_upload_link дасть команду, що заллє папку в медіатеку без проходу через чат); далі сток - find_stock_photos з конкретним англійським query і attach_stock_photo, теж безкоштовно; generate_image платний (крім provider cloudflare - безкоштовний денний ліміт ~100 зображень, якщо його підключено), бери його, коли ні медіатека, ні сток не підходять або коли людина просить саме генерацію. Безіменним файлам медіатеки, які ти переглянув, давай назви за тим, що на кадрі (update_media з titles) - людина бачить їх у таблиці, а ти знаходиш потім через list_media з search.",
   `Карусель: кілька фото в одному пості (до ${MAX_SLIDES}) - attach_media масивом id або append: true у attach_media / attach_stock_photo / generate_image; кадри-картинки зі сценарію «Слайд 1: …» малює render_carousel (безкоштовно), і тоді текст поста - це короткий підпис під каруселлю, не сценарій.`,
   "Відео: власні відео автора - list_media з kind: \"video\" → attach_media з одним id; публікується як Reels в Instagram, відео у Facebook, Threads, Telegram (до 50 МБ), LinkedIn, YouTube (вертикальне до 3 хв - Shorts) і TikTok, а текст поста - підпис. Відео з комп'ютера заливає та сама media_upload_link (великі файли - частинами).",
   "YouTube і TikTok - лише для поста з відео (channels з youtube/tiktok). YouTube: назва (youtube.title, інакше перший рядок), хто бачить, «для дітей» і позначка AI. TikTok: перед прямою публікацією СПИТАЙ людину, хто бачитиме відео (tiktok.privacy: public / friends / followers / private) - TikTok забороняє обирати це за неї; коментарі, Duet і Stitch вимкнені, поки людина не дозволить; реклама власного бренду чи оплачена співпраця - your_brand / branded_content; AI-голос чи згенеровані кадри - ai_generated. Без privacy (чи з mode: draft) відео піде в чернетки TikTok, і людина опублікує його в застосунку. Публікуючи в TikTok, людина погоджується з Music Usage Confirmation TikTok - скажи їй про це. Після монтажу рілса одразу в усі мережі - montage_video з all_networks: true.",

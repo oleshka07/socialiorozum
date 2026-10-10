@@ -198,7 +198,7 @@ try{ setBankFold(localStorage.getItem('kg_bankfold')==='1'); }catch(e){}
 // застосунку, а поділитись посиланням на конкретний екран було ніяк. Хеш-маршрути (а не History API)
 // свідомо: не треба ні нового роуту на сервері, ні правок nginx, ні змін у OAuth-редіректах на /app.
 const ROUTE_TABS={
-  create:  { keys:['materials','posts','ideas'], set:(t)=>setCTab(t), get:()=>cTab },
+  create:  { keys:['materials','posts','ideas','media'], set:(t)=>setCTab(t), get:()=>cTab },
   publish: { keys:['cal','plan'],                set:(t)=>setPTab(t), get:()=>pTab },
   brand:   { keys:['voice','visual','strat'],    set:(t)=>setBTab(t), get:()=>bTab },
   settings:{ keys:['profile','channels','sources','team'], set:(t)=>setSTab(t), get:()=>sTab },
@@ -326,14 +326,14 @@ function openTasksModal(){ const tasks=window._tasks||[]; const SECN={create:'С
     +'<span style="font-size:15px">🔴</span><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13.5px">Червона точка: у базі бренду '+ctx.critical+' суперечність(і)</div>'
     +'<div style="font-size:12.5px;color:var(--ink2);margin-top:2px">Поля, з яких збирається промт, заперечують одне одному - через це пости виходять слабкішими, скільки б задач ти не виконав.</div></div>'
     +'<button class="primary" id="tkCtx" style="padding:6px 12px;font-size:12.5px;flex:none">Перевірити</button></div>';
-  order.concat(Object.keys(bySec).filter(s=>!order.includes(s))).forEach(sec=>{ const list=bySec[sec]; if(!list) return; html+='<div style="font-weight:700;font-size:12.5px;color:var(--muted);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.03em">'+(SECN[sec]||sec)+'</div>'; list.forEach(t=>{ html+='<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)"><span style="width:22px;height:22px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:12px;'+(t.done?'background:var(--brand);color:#fff':'border:2px solid var(--line2);color:var(--faint)')+'">'+(t.done?'✓':'')+'</span><div style="flex:1;font-size:13.5px;'+(t.done?'color:var(--faint);text-decoration:line-through':'')+'">'+esc(t.label)+'</div><span style="font-size:12px;color:var(--muted)">+'+t.points+'</span>'+(t.done?'':(t.id==='plans'?'<button class="ghost tkAck" data-key="seen_plans" style="padding:5px 10px;font-size:12px">Зрозуміло</button>':'<button class="ghost tkGo" data-sec="'+(t.id==='transcriber'||t.id==='gdrive'?'tools':t.section)+'" style="padding:5px 10px;font-size:12px">Перейти</button>'))+'</div>'; }); });
+  order.concat(Object.keys(bySec).filter(s=>!order.includes(s))).forEach(sec=>{ const list=bySec[sec]; if(!list) return; html+='<div style="font-weight:700;font-size:12.5px;color:var(--muted);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.03em">'+(SECN[sec]||sec)+'</div>'; list.forEach(t=>{ html+='<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)"><span style="width:22px;height:22px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:12px;'+(t.done?'background:var(--brand);color:#fff':'border:2px solid var(--line2);color:var(--faint)')+'">'+(t.done?'✓':'')+'</span><div style="flex:1;font-size:13.5px;'+(t.done?'color:var(--faint);text-decoration:line-through':'')+'">'+esc(t.label)+'</div><span style="font-size:12px;color:var(--muted)">+'+t.points+'</span>'+(t.done?'':(t.id==='plans'?'<button class="ghost tkAck" data-key="seen_plans" style="padding:5px 10px;font-size:12px">Зрозуміло</button>':'<button class="ghost tkGo" data-sec="'+(t.id==='transcriber'||t.id==='gdrive'?'tools':t.id==='media'?'create/media':t.section)+'" style="padding:5px 10px;font-size:12px">Перейти</button>'))+'</div>'; }); });
   html+='</div>'; const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='75'; ov.innerHTML=html; document.body.appendChild(ov); const close=()=>ov.remove(); ov.addEventListener('click',e=>{ if(e.target===ov) close(); }); ov.querySelector('#tkX').onclick=close;
   const ctxBtn=ov.querySelector('#tkCtx'); if(ctxBtn) ctxBtn.onclick=()=>{ close(); selectView('brand'); setBTab('voice');
-    setTimeout(()=>{ const p=$('ctxPanel'); if(p) p.scrollIntoView({behavior:'smooth',block:'center'}); const r=$('ctxRun'); if(r) r.click(); },300); }; ov.querySelectorAll('.tkGo').forEach(b=>b.onclick=()=>{ close(); go(b.dataset.sec); }); ov.querySelectorAll('.tkAck').forEach(b=>b.onclick=async()=>{ try{ await api('/tasks/ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:b.dataset.key})}); close(); loadTasks(); }catch(e){} }); }
+    setTimeout(()=>{ const p=$('ctxPanel'); if(p) p.scrollIntoView({behavior:'smooth',block:'center'}); const r=$('ctxRun'); if(r) r.click(); },300); }; ov.querySelectorAll('.tkGo').forEach(b=>b.onclick=()=>{ close(); const [v,tb]=b.dataset.sec.split('/'); selectView(v,tb); }); ov.querySelectorAll('.tkAck').forEach(b=>b.onclick=async()=>{ try{ await api('/tasks/ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:b.dataset.key})}); close(); loadTasks(); }catch(e){} }); }
 if($('scorePill')) $('scorePill').onclick=openTasksModal;
 const TASK_TARGET={brand:'#mkt',voice:'#tov',pains:'#painPoints',goal:'#goalChips',plan:'#planGenBtn',chan1:'#tgSharedBox',chan2:'#mtConnect',bot:'#tgSharedBox',transcriber:'#ffKey',plans:'#planPro',gdrive:'#gdConnect',source:'#rssUrl',media:'#mediaFile',strategy:'#genStrat',gen10:'#genPostsBtn',approve:'#genPostsBtn',schedule:'#bank',publish:'#bank'};
 const _tdismiss=new Set(); const _tidx={};
-function highlightTarget(sel){ const el=sel&&document.querySelector(sel); if(!el||!el.offsetParent) return; el.scrollIntoView({behavior:'smooth',block:'center'}); el.classList.add('thl'); setTimeout(()=>el.classList.remove('thl'),2200); }
+function highlightTarget(sel){ if(sel==='#mediaFile'&&curView==='create'&&cTab!=='media') setCTab('media'); const el=sel&&document.querySelector(sel); if(!el||!el.offsetParent) return; el.scrollIntoView({behavior:'smooth',block:'center'}); el.classList.add('thl'); setTimeout(()=>el.classList.remove('thl'),2200); }
 // стан контексту поруч зі шкалою налаштування: детермінований шар безкоштовний, тож критичні
 // суперечності видно ще до того, як людина здогадається натиснути «Перевірити»
 function renderCtxBadge(c){
@@ -366,12 +366,14 @@ function setCTab(t){
   const show=(id,on)=>{ const el=$(id); if(el) el.style.display=on?'':'none'; };
   show('layMaterials',t==='materials');
   show('layIdeas',t==='ideas');
+  show('layMedia',t==='media');
   const posts=t==='posts';
   show('layStudio',posts&&curLayout==='studio'); show('layPipeline',posts&&curLayout==='pipeline');
-  const H={materials:'Стрічка сировини - все, з чого можна зробити пост',posts:'Переглянь, відредагуй, затвердь',ideas:'Банк ідей: з бота, AI-продовжень і твої власні - пост у 1 тап'};
+  const H={materials:'Стрічка сировини - все, з чого можна зробити пост',posts:'Переглянь, відредагуй, затвердь',ideas:'Банк ідей: з бота, AI-продовжень і твої власні - пост у 1 тап',media:'Фото й відео бренду: що вже вийшло й куди, назви, архів'};
   $('layoutHint').textContent=H[t]||''; if($('pageSub')) $('pageSub').textContent=H[t]||'';
   if(t==='materials') loadMaterials();
   if(t==='ideas') loadIdeasTab();
+  if(t==='media') loadMedia();
 }
 // ---- вкладки Публікації: Календар | План і ритм (layPlan фізично переїздить сюди при старті) ----
 function setPTab(t){
@@ -2451,7 +2453,7 @@ function chooseMedia(){ return new Promise(async resolve=>{
   let media=[]; try{ media=await api('/media'); }catch(e){ flash('Не вдалося завантажити бібліотеку'); resolve(undefined); return; }
   const imgs=media.filter(m=>m.kind==='image');
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='96'; // понад фото-редактором (90) і композером (80)
-  const grid=imgs.length?imgs.map(m=>'<img loading="lazy" src="/thumb/'+esc(m.filename)+'" data-id="'+m.id+'" data-fn="'+esc(m.filename)+'" onerror="this.style.opacity=.3" style="height:84px;border-radius:8px;cursor:pointer;background:var(--surface2)">').join(''):'<div class="empty">Бібліотека порожня - завантаж фото у «Джерела».</div>';
+  const grid=imgs.length?imgs.map(m=>'<img loading="lazy" src="/thumb/'+esc(m.filename)+'" title="'+esc(m.title||m.original_name||'')+'" data-id="'+m.id+'" data-fn="'+esc(m.filename)+'" onerror="this.style.opacity=.3" style="height:84px;border-radius:8px;cursor:pointer;background:var(--surface2)">').join(''):'<div class="empty">Бібліотека порожня - завантаж фото у «Джерела».</div>';
   ov.innerHTML='<div class="modal-card" style="max-width:620px;padding:20px"><b>Обери фото</b><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">'+grid+'</div><div class="btnrow"><button class="ghost" id="cmClose">Скасувати</button><button id="cmDetach">Без фото</button></div></div>';
   document.body.appendChild(ov); const close=()=>ov.remove();
   ov.addEventListener('click',e=>{ if(e.target===ov){ close(); resolve(undefined); } });
@@ -2467,7 +2469,7 @@ function pickSlides(room){ return new Promise(async resolve=>{
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='96';
   ov.innerHTML='<div class="modal-card" style="max-width:660px;padding:20px"><b>＋ Кадри каруселі</b> <span style="font-size:12px;color:var(--muted)">можна ще '+room+' · номер = порядок у каруселі</span>'
     +'<div style="margin:10px 0"><label class="dashbtn" style="cursor:pointer">⬆ Завантажити з компʼютера<input type="file" id="psFiles" accept="image/*" multiple style="display:none"></label> <span id="psMsg" style="font-size:12px;color:var(--muted)"></span></div>'
-    +'<div id="psGrid" style="display:flex;flex-wrap:wrap;gap:8px;max-height:52vh;overflow:auto">'+(lib.length?lib.map(m=>'<div class="slide-pick" data-id="'+m.id+'"><img loading="lazy" src="/thumb/'+esc(m.filename)+'" onerror="this.style.opacity=.3"></div>').join(''):'<div class="empty">Медіатека порожня - завантаж фото кнопкою вище.</div>')+'</div>'
+    +'<div id="psGrid" style="display:flex;flex-wrap:wrap;gap:8px;max-height:52vh;overflow:auto">'+(lib.length?lib.map(m=>'<div class="slide-pick" data-id="'+m.id+'" title="'+esc(m.title||m.original_name||'')+'"><img loading="lazy" src="/thumb/'+esc(m.filename)+'" onerror="this.style.opacity=.3"></div>').join(''):'<div class="empty">Медіатека порожня - завантаж фото кнопкою вище.</div>')+'</div>'
     +'<div class="btnrow"><button class="ghost" id="psClose">Скасувати</button><button class="primary" id="psOk" disabled>Додати</button></div></div>';
   document.body.appendChild(ov);
   const done=(v)=>{ ov.remove(); resolve(v); };
@@ -2493,7 +2495,7 @@ function pickVideo(){ return new Promise(async resolve=>{
   const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='96';
   ov.innerHTML='<div class="modal-card" style="max-width:660px;padding:20px"><b>'+L('🎬 Відео для поста','🎬 Video for the post')+'</b> <span style="font-size:12px;color:var(--muted)">'+L('Instagram - Reels, Facebook - відео, Threads, Telegram (до 50 МБ), LinkedIn, YouTube, TikTok','Instagram - Reels, Facebook - video, Threads, Telegram (up to 50 MB), LinkedIn, YouTube, TikTok')+'</span>'
     +'<div style="margin:10px 0"><label class="dashbtn" style="cursor:pointer">⬆ Завантажити з компʼютера<input type="file" id="pvFile" accept="video/*" style="display:none"></label> <span id="pvMsg" style="font-size:12px;color:var(--muted)"></span></div>'
-    +'<div id="pvGrid" style="display:flex;flex-wrap:wrap;gap:8px;max-height:52vh;overflow:auto">'+(lib.length?lib.map(m=>'<div class="slide-pick" data-id="'+m.id+'"><img loading="lazy" src="/thumb/'+esc(m.filename)+'" onerror="this.style.opacity=.3"><span class="vbadge">▶ '+(fmtDur(m.duration)||L('відео','video'))+'</span></div>').join(''):'<div class="empty">Відео в медіатеці ще нема - завантаж кнопкою вище.</div>')+'</div>'
+    +'<div id="pvGrid" style="display:flex;flex-wrap:wrap;gap:8px;max-height:52vh;overflow:auto">'+(lib.length?lib.map(m=>'<div class="slide-pick" data-id="'+m.id+'" title="'+esc(m.title||m.original_name||'')+'"><img loading="lazy" src="/thumb/'+esc(m.filename)+'" onerror="this.style.opacity=.3"><span class="vbadge">▶ '+(fmtDur(m.duration)||L('відео','video'))+'</span></div>').join(''):'<div class="empty">Відео в медіатеці ще нема - завантаж кнопкою вище.</div>')+'</div>'
     +'<div class="btnrow"><button class="ghost" id="pvClose">Скасувати</button></div></div>';
   document.body.appendChild(ov);
   const done=(v)=>{ ov.remove(); resolve(v); };
@@ -4339,44 +4341,178 @@ async function loadRecent(){
 }
 $('recReload').onclick=()=>loadRecent();
 
-// ---------- медіа ----------
-let MediaSel=null; // null = звичайний режим; Set(id) = режим виділення для масового видалення
+// ---------- 🖼 медіатека ----------
+// Окрема сторінка (Створення → 🖼 Медіатека, запит Олега 10.10): таблиця чи плитки, фільтри, своя назва
+// файлу, мережі, куди він уже вийшов, і мʼякий архів. Дані - одним запитом (/media/library), фільтри й
+// пошук рахує сам кабінет. Архів лише ховає файл зі списку й вибору фото: пости, публікації, статистика
+// й повтори хітів лишаються як були.
+let MediaSel=null; // null = звичайний режим; Set(id) = вибрані файли (порядок вибору = порядок монтажу)
+let MediaLib=null; // {items, stats, archiveDays, disk}
+const ML={state:'all',kind:'all',net:'',q:'',limit:150,
+  view:(()=>{ try{ return localStorage.getItem('kg_mlview')||'table'; }catch(e){ return 'table'; } })()};
+const ML_STATE={free:['🆓','Вільне','ще ні в якому пості'],montage:['🎬','У монтажі','пішло в змонтоване відео, яке ще ні в якому пості'],draft:['📝','У чернетці','стоїть у пості, який ще ніде не вийшов'],planned:['🗓','У розкладі','стоїть у запланованому пості'],published:['✈️','Вийшло','уже опубліковано, і ще стоїть у чернетці'],done:['✅','Відпрацьоване','усі пости з ним уже вийшли, далі нічого не заплановано']};
+const ML_SRC={upload:'завантажено',gdrive:'Google Drive',diary:'щоденник',bot:'з бота',ai:'AI',pexels:'сток',broll:'b-roll',montage:'змонтовано'};
+const ML_KIND={image:'Фото',video:'Відео',audio:'Голос'};
+const ML_FILTERS=[['all','Усі'],['free','🆓 Невикористані'],['used','🧩 Використані'],['sent','✈️ Опубліковані'],['archived','📦 Архів']];
+const ML_DAYS=[[0,'вимкнено'],[10,'через 10 днів'],[15,'через 15 днів'],[30,'через 30 днів'],[60,'через 60 днів']];
+function fmtBytes(n){ n=Number(n)||0; if(n<1048576) return Math.max(1,Math.round(n/1024))+' КБ'; if(n<1073741824) return (n/1048576).toFixed(n<10485760?1:0).replace('.',',')+' МБ'; return (n/1073741824).toFixed(1).replace('.',',')+' ГБ'; }
+const mlNetName=(k)=>(NETS.find(n=>n[0]===k)||[k,k])[1];
+function mlNet(k,t){ return '<span class="mlnet" style="--c:var('+(NETVAR[k]||'--muted')+')" title="'+esc(t||mlNetName(k))+'"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="'+(NETICON[k]||'')+'"></path></svg>'+esc(mlNetName(k))+'</span>'; }
+function mlMatch(x,f){ const arch=!!x.archived_at;
+  if(f==='archived') return arch; if(arch) return false;
+  if(f==='free') return x.state==='free'; if(f==='used') return x.state!=='free'; if(f==='sent') return (x.sent||[]).length>0; return true; }
+function mlVisible(){ const qq=ML.q.trim().toLowerCase();
+  return ((MediaLib&&MediaLib.items)||[]).filter(x=>mlMatch(x,ML.state)&&(ML.kind==='all'||x.kind===ML.kind)&&(!ML.net||(x.sent||[]).includes(ML.net))
+    &&(!qq||String(x.title||'').toLowerCase().includes(qq)||String(x.original_name||'').toLowerCase().includes(qq))); }
+function mlDays(iso){ const d=Math.ceil((Date.parse(iso)-Date.now())/86400000); return d<=0?'сьогодні':d===1?'завтра':'через '+d+' дн.'; }
+function mlDate(iso){ return iso?new Date(iso).toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit',year:'2-digit'}):''; }
+function mlNoun(n,a,b,c){ const m=n%10, h=n%100; return n+' '+(m===1&&h!==11?a:m>=2&&m<=4&&(h<12||h>14)?b:c); }
+function mlState(x){ const s=ML_STATE[x.state]||ML_STATE.free;
+  if(x.archived_at) return '<span class="mlst arch" title="Лише сховано зі списку й вибору фото: пости, публікації й статистика не змінились">📦 В архіві з '+mlDate(x.archived_at)+(x.archived_by==='auto'?' (сам)':'')+'</span>';
+  let h='<span class="mlst st-'+x.state+'" title="'+esc(s[2])+'">'+s[0]+' '+s[1]+'</span>';
+  if(x.state==='planned'&&x.nextAt) h+='<div class="mlsub">⏳ '+esc(new Date(x.nextAt).toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+'</div>';
+  if(x.state==='done'&&(x.archive_keep||x.archive_due)) h+='<div class="mlsub">'+(x.archive_keep?'📌 не ховати':'📦 в архів '+mlDays(x.archive_due))+'</div>';
+  return h; }
+function mlPosts(x){ const p=x.posts||[]; if(!p.length) return '';
+  return '<div class="mlsub">'+mlNoun(p.length,'пост','пости','постів')+': '+p.slice(0,3).map(id=>'<a href="#/post/'+esc(id)+'" class="mlpost" title="Відкрити пост">#'+esc(String(id).slice(0,8))+'</a>').join(' ')+(p.length>3?' +'+(p.length-3):'')+'</div>'; }
+function mlNets(x){ const sent=x.sent||[];
+  const s=sent.map(k=>mlNet(k,'Вийшло в '+mlNetName(k)+(x.lastPub?' · востаннє '+mlDate(x.lastPub):''))).join('');
+  const w=(x.waiting||[]).filter(k=>!sent.includes(k));
+  return s+(w.length?'<div class="mlsub">⏳ ще: '+w.map(k=>esc(mlNetName(k))).join(', ')+'</div>':'')+(!s&&!w.length?'<span class="mlsub">-</span>':''); }
+function mlMeta(x){ return [ML_KIND[x.kind]||x.kind, x.width&&x.height?x.width+'×'+x.height:'', x.duration?fmtDur(x.duration):'', x.size?fmtBytes(x.size):''].filter(Boolean).join(' · '); }
+function mlPic(x,on,h){ return x.kind==='audio'
+  ?'<div class="audtile" title="Запис голосу - озвучка й музика для монтажу" style="height:'+h+'px;width:'+h+'px;border-radius:8px;background:var(--surface2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:'+Math.round(h/3.4)+'px'+(on?';outline:3px solid var(--brand)':'')+'">🎙<span style="font-size:12px;color:var(--muted)">'+(fmtDur(x.duration)||'голос')+'</span></div>'
+  :'<img loading="lazy" src="/thumb/'+esc(x.filename)+'" alt="'+esc(x.title||x.original_name||'')+'" onerror="this.style.opacity=.3" style="height:'+h+'px;min-width:'+Math.round(h*0.66)+'px;max-width:'+Math.round(h*1.8)+'px;object-fit:cover;border-radius:8px;background:var(--surface2)'+(on?';outline:3px solid var(--brand)':'')+'">'; }
 async function loadMedia(){
   const o=$('mediaGrid'); if(!o) return;
-  try{ const m=await api('/media');
-    if(!m.length){ MediaSel=null; o.innerHTML='<div class="empty">Порожньо.</div>'; return; }
-    const sel=MediaSel;
-    // вибір кількох - для монтажу (автор і вище) і масового видалення (редактор і вище); перегляд лише дивиться
-    const bar=!canDo('draft')?'':'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%;margin-bottom:8px">'
-      +(sel
-        ?(()=>{ const clips=m.filter(x=>sel.has(x.id)&&x.kind!=='audio').length;
-            return '<button class="ghost" id="mSelAll">Вибрати всі</button><button id="mSelMont"'+(clips?'':' disabled')+' title="Склеїти обрані відео й фото (у порядку, як обирав) у сторіс чи рілс 9:16 із субтитрами">🎬 Змонтувати ('+clips+')</button><button class="danger need-publish" id="mSelDel"'+(sel.size?'':' disabled')+'>🗑 Видалити обрані ('+sel.size+')</button><button class="ghost" id="mSelOff">Скасувати</button>'; })()
-        :'<button class="ghost" id="mSelOn">☑️ Вибрати кілька</button><span style="font-size:12px;color:var(--muted)">змонтувати відео чи видалити</span>')
-      +'</div>';
-    o.innerHTML=bar+m.map(x=>{ const on=sel&&sel.has(x.id);
-      const ord=sel&&on?[...sel].indexOf(x.id)+1:0;
-      return '<div style="position:relative;cursor:'+(sel?'pointer':'default')+'" data-id="'+x.id+'">'
-        +(x.kind==='audio'
-          ?'<div class="audtile" title="Запис голосу - озвучка для монтажу" style="height:90px;width:90px;border-radius:8px;background:var(--surface2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:26px'+(on?';outline:3px solid var(--brand)':'')+'">🎙<span style="font-size:12px;color:var(--muted)">'+(fmtDur(x.duration)||'голос')+'</span></div>'
-          :'<img loading="lazy" src="/thumb/'+esc(x.filename)+'" onerror="this.style.opacity=.3" style="height:90px;min-width:60px;border-radius:8px;background:var(--surface2)'+(on?';outline:3px solid var(--brand)':'')+'">')
+  try{ MediaLib=await api('/media/library'); }
+  catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; return; }
+  const n=(MediaLib.items||[]).filter(x=>!x.archived_at).length;
+  const b=$('mediaTabCount'); if(b) b.textContent=n?String(n):'';
+  if(MediaSel){ const ids=new Set((MediaLib.items||[]).map(x=>x.id)); [...MediaSel].forEach(id=>{ if(!ids.has(id)) MediaSel.delete(id); }); }
+  renderMlHead(); renderMlFilters(); renderMlList();
+}
+function renderMlHead(){
+  const s=MediaLib.stats||{}, d=MediaLib.disk, st=$('mlStats'), ar=$('mlArchiveRow');
+  if(st) st.innerHTML='<div><b>'+mlNoun(s.files||0,'файл','файли','файлів')+'</b> · '+fmtBytes(s.bytes)+' на сервері</div>'
+    +(s.archived?'<div>📦 в архіві '+s.archived+' ('+fmtBytes(s.archivedBytes)+')</div>':'')
+    +(d?'<div title="Бачить лише адмін сервісу">💽 диск сервера: вільно '+fmtBytes(d.free)+' з '+fmtBytes(d.total)+'</div>':'');
+  if(!ar) return;
+  const days=Number(MediaLib.archiveDays)||0;
+  ar.innerHTML='<span style="font-weight:700">📦 Автоархів</span> '
+    +(canDo('publish')?'<select id="mlArchDays">'+ML_DAYS.map(([v,l])=>'<option value="'+v+'"'+(v===days?' selected':'')+'>'+l+'</option>').join('')+'</select>':'<b>'+esc((ML_DAYS.find(x=>x[0]===days)||[0,'вимкнено'])[1])+'</b>')
+    +' <span class="mlsub" style="display:inline">після останньої публікації. Відпрацьоване - усі пости з файлом уже вийшли й далі нічого не заплановано - саме йде в Архів. Це лише прибирає його зі списку й вибору фото: файл, пости, публікації, статистика й повтори хітів лишаються. Знадобиться знову - повернеться саме.</span>';
+  const sel=$('mlArchDays'); if(sel) sel.onchange=async()=>{ sel.disabled=true;
+    try{ const r=await api('/media/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({archive_days:Number(sel.value)})});
+      flash('📦 Автоархів: '+(r.archiveDays?'через '+r.archiveDays+' днів':'вимкнено')+(r.archived?' · відкладено '+r.archived:'')+(r.restored?' · повернуто '+r.restored:''));
+      await loadMedia(); }catch(e){ flash('⚠ '+e.message); sel.disabled=false; } };
+}
+function renderMlFilters(){
+  const box=$('mlFilters'); if(!box) return;
+  const all=(MediaLib&&MediaLib.items)||[];
+  const cnt=f=>all.filter(x=>mlMatch(x,f)).length;
+  const nets=[...new Set(all.flatMap(x=>x.sent||[]))];
+  box.innerHTML='<div class="ftabs" id="mlState">'+ML_FILTERS.map(([k,l])=>'<div class="ftab'+(ML.state===k?' on':'')+'" data-f="'+k+'">'+l+' <span class="badge">'+cnt(k)+'</span></div>').join('')+'</div>'
+    +'<div class="mlctl">'
+    +'<select id="mlKind" title="Тип файлу"><option value="all">Усі типи</option>'+Object.entries(ML_KIND).map(([k,l])=>'<option value="'+k+'"'+(ML.kind===k?' selected':'')+'>'+l+'</option>').join('')+'</select>'
+    +'<select id="mlNetSel" title="Куди вже вийшло"><option value="">Вийшло: будь-куди</option>'+NETS.filter(n=>nets.includes(n[0])||ML.net===n[0]).map(n=>'<option value="'+n[0]+'"'+(ML.net===n[0]?' selected':'')+'>✈️ '+n[1]+'</option>').join('')+'</select>'
+    +'<input id="mlSearch" class="txt" type="search" placeholder="🔍 Пошук за назвою чи файлом" value="'+esc(ML.q)+'">'
+    +'<div class="mlview"><button class="ghost'+(ML.view==='table'?' on':'')+'" data-v="table" title="Таблиця">☰ Таблиця</button><button class="ghost'+(ML.view==='tiles'?' on':'')+'" data-v="tiles" title="Плитки">▦ Плитки</button></div>'
+    +'</div>';
+  box.querySelectorAll('#mlState .ftab').forEach(t=>t.onclick=()=>{ ML.state=t.dataset.f; ML.limit=150; renderMlFilters(); renderMlList(); });
+  $('mlKind').onchange=(e)=>{ ML.kind=e.target.value; ML.limit=150; renderMlList(); };
+  $('mlNetSel').onchange=(e)=>{ ML.net=e.target.value; ML.limit=150; renderMlList(); };
+  $('mlSearch').oninput=(e)=>{ ML.q=e.target.value; ML.limit=150; renderMlList(); };
+  box.querySelectorAll('.mlview button').forEach(b=>b.onclick=()=>{ ML.view=b.dataset.v; try{ localStorage.setItem('kg_mlview',ML.view); }catch(e){} renderMlFilters(); renderMlList(); });
+}
+function mlSelBar(vis){
+  if(!canDo('draft')) return '';
+  const sel=MediaSel, inArch=ML.state==='archived';
+  if(!sel) return '<div class="mlbar"><button class="ghost" id="mSelOn">☑️ Вибрати кілька</button><span class="mlsub" style="display:inline">змонтувати відео, відкласти в архів чи видалити</span></div>';
+  const lib=(MediaLib&&MediaLib.items)||[];
+  const clips=[...sel].filter(id=>{ const it=lib.find(x=>x.id===id); return it&&it.kind!=='audio'; }).length;
+  return '<div class="mlbar"><button class="ghost" id="mSelAll">Вибрати всі ('+vis.length+')</button>'
+    +'<button id="mSelMont"'+(clips?'':' disabled')+' title="Склеїти обрані відео й фото (у порядку, як обирав) у сторіс чи рілс 9:16 із субтитрами">🎬 Змонтувати ('+clips+')</button>'
+    +'<button class="ghost" id="mSelArch"'+(sel.size?'':' disabled')+'>'+(inArch?'↩ Повернути з архіву':'📦 В архів')+' ('+sel.size+')</button>'
+    +'<button class="danger need-publish" id="mSelDel"'+(sel.size?'':' disabled')+'>🗑 Видалити обрані ('+sel.size+')</button>'
+    +'<button class="ghost" id="mSelOff">Скасувати</button></div>';
+}
+function renderMlList(){
+  const o=$('mediaGrid'); if(!o||!MediaLib) return;
+  const all=MediaLib.items||[];
+  if(!all.length){ MediaSel=null; o.innerHTML='<div class="empty">Порожньо. Завантаж фото чи відео кнопкою вище, надішли боту або підключи папку Google Drive (Інструменти).</div>'; return; }
+  const vis=mlVisible(), shown=vis.slice(0,ML.limit), sel=MediaSel;
+  const ord=(id)=>sel&&sel.has(id)?[...sel].indexOf(id)+1:0;
+  const more=vis.length>shown.length?'<div class="btnrow"><button class="ghost" id="mlMore">Показати ще ('+(vis.length-shown.length)+')</button></div>':'';
+  const empty=!vis.length?'<div class="empty">'+(ML.state==='archived'?'В архіві порожньо.':'Нічого не знайдено - зміни фільтр чи пошук.')+'</div>':'';
+  if(ML.view==='tiles'){
+    o.innerHTML=mlSelBar(vis)+empty+'<div class="mltiles">'+shown.map(x=>{ const on=sel&&sel.has(x.id), n=ord(x.id), s=ML_STATE[x.state]||ML_STATE.free;
+      return '<div class="mltile" style="position:relative;cursor:'+(sel?'pointer':'default')+'" data-id="'+x.id+'" title="'+esc((x.title||x.original_name||'')+' · '+(x.archived_at?'в архіві':s[1]))+'">'
+        +mlPic(x,on,90)
         +(x.kind==='video'?'<span class="vbadge">▶ '+fmtDur(x.duration)+'</span>':'')
-        +(ord&&x.kind!=='audio'?'<span style="position:absolute;bottom:4px;left:4px;min-width:20px;height:20px;border-radius:10px;background:var(--brand);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;padding:0 5px">'+ord+'</span>':'')
+        +(n&&x.kind!=='audio'?'<span style="position:absolute;bottom:4px;left:4px;min-width:20px;height:20px;border-radius:10px;background:var(--brand);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;padding:0 5px">'+n+'</span>':'')
         +(sel?'<span style="position:absolute;top:4px;left:4px;width:20px;height:20px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;background:'+(on?'var(--brand)':'rgba(0,0,0,.55)')+';color:#fff">'+(on?'✓':'')+'</span>'
-             :!canDo('publish')?'':'<button class="mediaDel" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;padding:1px 6px">✕</button>')
-        +'</div>'; }).join('');
-    if(sel){
-      o.querySelectorAll('[data-id]').forEach(c=>{ c.onclick=()=>{ const id=c.dataset.id; if(sel.has(id)) sel.delete(id); else sel.add(id); loadMedia(); }; });
-      const all=$('mSelAll'); if(all) all.onclick=(e)=>{ e.stopPropagation(); m.forEach(x=>sel.add(x.id)); loadMedia(); };
-      const off=$('mSelOff'); if(off) off.onclick=(e)=>{ e.stopPropagation(); MediaSel=null; loadMedia(); };
-      const mont=$('mSelMont'); if(mont) mont.onclick=(e)=>{ e.stopPropagation(); const ids=[...sel].filter(id=>{ const it=m.find(x=>x.id===id); return it&&it.kind!=='audio'; }); if(ids.length) openMontage(ids,m); };
-      const del=$('mSelDel'); if(del) del.onclick=async(e)=>{ e.stopPropagation(); if(!sel.size) return;
-        if(!confirm('Видалити '+sel.size+' файл(ів) назавжди? Пости не зламаються - фото просто відкріпиться.')) return;
-        del.disabled=true; try{ const r=await api('/media/bulk-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[...sel]})}); flash('🗑 Видалено: '+r.deleted); MediaSel=null; await loadMedia(); }catch(err){ flash('⚠ '+err.message); del.disabled=false; } };
-    } else {
-      const on=$('mSelOn'); if(on) on.onclick=()=>{ MediaSel=new Set(); loadMedia(); };
-      o.querySelectorAll('[data-id]').forEach(c=>{ const d=c.querySelector('.mediaDel'); if(d) d.onclick=async()=>{ if(!confirm('Видалити фото?'))return; try{ await api('/media/'+c.dataset.id,{method:'DELETE'}); await loadMedia(); }catch(e){ flash(e.message); } }; });
-    }
-  }catch(e){ o.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
+             :!canDo('publish')?'':'<button class="mediaDel" title="Видалити файл" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;padding:1px 6px">✕</button>')
+        +'<span class="mltstate" title="'+esc(x.archived_at?'в архіві':s[1])+'">'+(x.archived_at?'📦':s[0])+'</span>'
+        +'</div>'; }).join('')+'</div>'+more;
+  } else {
+    const ro=!canDo('draft');
+    o.innerHTML=mlSelBar(vis)+empty+(shown.length?'<div class="mltwrap"><table class="mltab"><thead><tr>'+(ro?'':'<th class="mlc"></th>')+'<th></th><th>Назва і файл</th><th>Додано</th><th>Стан і пости</th><th>Вийшло в</th><th></th></tr></thead><tbody>'
+      +shown.map(x=>{ const on=sel&&sel.has(x.id), n=ord(x.id);
+        return '<tr data-id="'+x.id+'" class="'+(on?'on':'')+(x.archived_at?' arch':'')+'">'
+          +(ro?'':'<td class="mlc"><input type="checkbox" class="mlChk"'+(on?' checked':'')+' aria-label="Вибрати">'+(n&&x.kind!=='audio'?'<b class="mlord">'+n+'</b>':'')+'</td>')
+          +'<td class="mlpic">'+(x.kind==='audio'?mlPic(x,on,56):'<a href="/media/'+esc(x.filename)+'" target="_blank" rel="noopener" title="Відкрити файл">'+mlPic(x,on,56)+'</a>')+(x.kind==='video'?'<span class="vbadge">▶ '+fmtDur(x.duration)+'</span>':'')+'</td>'
+          +'<td class="mlname"><input class="txt mlTitle" maxlength="120" value="'+esc(x.title||'')+'" placeholder="'+esc(x.original_name||'Без назви')+' - назви файл"'+(ro?' readonly':'')+'>'
+            +'<div class="mlsub" title="'+esc(x.original_name||x.filename)+'">'+esc(x.original_name||x.filename)+' · '+esc(mlMeta(x))+(x.kind==='image'&&x.alt_text?' · ALT ✓':'')+'</div></td>'
+          +'<td class="mladd">'+mlDate(x.created_at)+'<div class="mlsub">'+esc(ML_SRC[x.source]||x.source)+'</div></td>'
+          +'<td class="mluse">'+mlState(x)+mlPosts(x)+'</td>'
+          +'<td class="mlnets">'+mlNets(x)+'</td>'
+          +'<td class="mlact">'
+            +(!ro&&x.kind==='image'?'<button class="ghost mlAlt" title="Опис фото для незрячих і пошуку (іде в Instagram і LinkedIn)">ALT'+(x.alt_text?' ✓':'')+'</button>':'')
+            +(!ro?'<button class="ghost mlArch" title="'+(x.archived_at?'Повернути в медіатеку':'Відкласти в архів: файл, пости й статистика лишаються')+'">'+(x.archived_at?'↩':'📦')+'</button>':'')
+            +(canDo('publish')?'<button class="ghost mediaDel" title="Видалити файл назавжди">🗑</button>':'')
+          +'</td></tr>'; }).join('')+'</tbody></table></div>':'')+more;
+  }
+  // події
+  const m=$('mlMore'); if(m) m.onclick=()=>{ ML.limit+=150; renderMlList(); };
+  const toggle=(id)=>{ if(!MediaSel) MediaSel=new Set(); if(MediaSel.has(id)) MediaSel.delete(id); else MediaSel.add(id); renderMlList(); };
+  const on=$('mSelOn'); if(on) on.onclick=()=>{ MediaSel=new Set(); renderMlList(); };
+  const off=$('mSelOff'); if(off) off.onclick=(e)=>{ e.stopPropagation(); MediaSel=null; renderMlList(); };
+  const allB=$('mSelAll'); if(allB) allB.onclick=(e)=>{ e.stopPropagation(); vis.forEach(x=>MediaSel.add(x.id)); renderMlList(); };
+  const mont=$('mSelMont'); if(mont) mont.onclick=(e)=>{ e.stopPropagation(); const lib=MediaLib.items||[]; const ids=[...MediaSel].filter(id=>{ const it=lib.find(x=>x.id===id); return it&&it.kind!=='audio'; }); if(ids.length) openMontage(ids,lib); };
+  const arch=$('mSelArch'); if(arch) arch.onclick=async(e)=>{ e.stopPropagation(); if(!MediaSel.size) return; arch.disabled=true;
+    const back=ML.state==='archived';
+    try{ const r=await api('/media/archive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[...MediaSel],archive:!back})});
+      flash(back?'↩ Повернуто: '+r.changed:'📦 В архіві: '+r.changed+' (пости й статистика не змінились)'); MediaSel=null; await loadMedia(); }catch(err){ flash('⚠ '+err.message); arch.disabled=false; } };
+  const del=$('mSelDel'); if(del) del.onclick=async(e)=>{ e.stopPropagation(); if(!MediaSel.size) return;
+    const used=[...MediaSel].filter(id=>{ const it=(MediaLib.items||[]).find(x=>x.id===id); return it&&(it.posts||[]).length; }).length;
+    if(!confirm('Видалити '+MediaSel.size+' файл(ів) назавжди?'+(used?' '+used+' з них стоять у постах - там вони відкріпляться, і повтор хіта вийде без них. Щоб лише прибрати зі списку, краще 📦 В архів.':' Пости не зламаються.'))) return;
+    del.disabled=true; try{ const r=await api('/media/bulk-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[...MediaSel]})}); flash('🗑 Видалено: '+r.deleted); MediaSel=null; await loadMedia(); }catch(err){ flash('⚠ '+err.message); del.disabled=false; } };
+  o.querySelectorAll('[data-id]').forEach(c=>{ const id=c.dataset.id, x=(MediaLib.items||[]).find(i=>i.id===id); if(!x) return;
+    // у режиму вибору клік по плитці чи рядку (не по полю й кнопці) - вибрати
+    c.onclick=(e)=>{ if(!MediaSel) return; if(e.target.closest('input,button,a,select,textarea')) return; toggle(id); };
+    const chk=c.querySelector('.mlChk'); if(chk) chk.onchange=()=>toggle(id);
+    const t=c.querySelector('.mlTitle'); if(t&&!t.readOnly){
+      t.onkeydown=(e)=>{ if(e.key==='Enter'){ e.preventDefault(); t.blur(); } if(e.key==='Escape'){ t.value=x.title||''; t.blur(); } };
+      t.onchange=async()=>{ try{ const r=await api('/media/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:t.value})}); x.title=r.title; t.value=r.title||''; t.classList.add('saved'); setTimeout(()=>t.classList.remove('saved'),1200); }catch(e){ flash('⚠ '+e.message); } }; }
+    const alt=c.querySelector('.mlAlt'); if(alt) alt.onclick=()=>mlAltEdit(x);
+    const ab=c.querySelector('.mlArch'); if(ab) ab.onclick=async()=>{ ab.disabled=true;
+      try{ await api('/media/archive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[id],archive:!x.archived_at})});
+        flash(x.archived_at?'↩ Повернуто в медіатеку':'📦 В архіві: файл, пости й статистика лишились'); await loadMedia(); }catch(e){ flash('⚠ '+e.message); ab.disabled=false; } };
+    const d=c.querySelector('.mediaDel'); if(d) d.onclick=async(e)=>{ e.stopPropagation(); const np=(x.posts||[]).length;
+      if(!confirm(np?'Файл стоїть у '+mlNoun(np,'пості','постах','постах')+': там він відкріпиться, і повтор хіта вийде без нього. Видалити назавжди? (Щоб лише прибрати зі списку - 📦 В архів.)':'Видалити файл назавжди?')) return;
+      try{ await api('/media/'+id,{method:'DELETE'}); await loadMedia(); }catch(err){ flash(err.message); } };
+  });
+}
+// ALT: опис фото для незрячих і пошуку - іде в Instagram і LinkedIn
+function mlAltEdit(x){
+  const ov=document.createElement('div'); ov.className='modal'; ov.style.zIndex='95';
+  ov.innerHTML='<div class="modal-card" style="max-width:460px;padding:20px"><b>Опис фото (ALT)</b><div style="display:flex;gap:12px;margin:12px 0"><img src="/thumb/'+esc(x.filename)+'" style="height:90px;border-radius:8px"><textarea id="mlAltT" rows="4" maxlength="1000" placeholder="1-2 речення: що на фото. Для незрячих і пошуку; іде в Instagram і LinkedIn." style="flex:1">'+esc(x.alt_text||'')+'</textarea></div><div class="btnrow"><button class="ghost" id="mlAltC">Скасувати</button><button class="primary" id="mlAltS">Зберегти</button></div></div>';
+  document.body.appendChild(ov); const close=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
+  ov.querySelector('#mlAltC').onclick=close;
+  ov.querySelector('#mlAltS').onclick=async()=>{ try{ const r=await api('/media/'+x.id+'/alt',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({alt_text:ov.querySelector('#mlAltT').value})}); x.alt_text=r.alt_text; close(); renderMlList(); flash(r.alt_text?'✓ Опис збережено':'Опис прибрано'); }catch(e){ flash('⚠ '+e.message); } };
+  setTimeout(()=>{ const t=ov.querySelector('#mlAltT'); if(t) t.focus(); },50);
 }
 // 🎬 Монтаж: обрані кліпи й фото (у порядку вибору) → сторіс чи рілс 9:16 із субтитрами. Робота йде на
 // сервері 1-2 хв (runAiJob полить), результат - нове відео в медіатеці й затверджений пост у композері.
@@ -4542,6 +4678,8 @@ function uploadReport(r){ const dup=r.saved.filter(x=>x.dup).length, dupTxt=dup?
   return r.failed.length
   ? '⚠ завантажено '+r.saved.length+' з '+r.total+dupTxt+'. Не вдалось: '+r.failed.slice(0,3).map(x=>(x.name?x.name+' - ':'')+x.error).join('; ')+(r.failed.length>3?' …':'')
   : 'завантажено: '+r.saved.length+dupTxt; }
+// 🖼 медіатека переїхала з Налаштувань у Створення - у Джерелах лишилась кнопка туди
+if($('mediaGoLib')) $('mediaGoLib').onclick=()=>selectView('create','media');
 $('mediaUpload').onclick=async()=>{
   const f=$('mediaFile').files; const m=$('mediaMsg'); if(!f||!f.length){ m.style.color='var(--danger)'; m.textContent='Обери файл(и)'; return; }
   m.style.color='var(--muted)'; m.textContent='завантаження…';
