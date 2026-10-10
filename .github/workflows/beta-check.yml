@@ -98,13 +98,17 @@ on:
         description: "Разове посилання для заливки (https://…/mcp/upload/…)"
         required: false
         default: ""
+# 10.10 (вечір) - бета після медіатеки окремою сторінкою (6e2339c): версія, здоров'я, код у контейнері, нові колонки
+# media_asset, скільки файлів у якому стані й скільки відклав автоархів (по кабінетах, без назв), журнал medialib. І скільки
+# місця реально займають медіа: прод і бета (за типом і джерелом, томи, бекапи, диск) - під питання Олега про Telegram як сховище.
+# Нічого не пише (автоархів робить сам застосунок беті - це його звичайна робота).
 
 jobs:
   beta:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: prod after promotion 45c126e (server, read-only)
+      - name: beta after media library (server, read-only) + media disk usage prod and beta
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
@@ -112,54 +116,59 @@ jobs:
           key: ${{ secrets.HETZNER_SSH_KEY }}
           command_timeout: 8m
           script: |
-            cd "${{ secrets.APP_DIR }}/server"
-            for i in $(seq 1 36); do
+            cd /opt/socialio-beta/server
+            for i in $(seq 1 48); do
               up=$(( $(date +%s) - $(date -d "$(docker inspect -f '{{.State.StartedAt}}' $(docker compose ps -q app))" +%s) ))
-              [ "$up" -ge 120 ] && break; sleep 5
+              [ "$up" -ge 150 ] && break; sleep 5
             done
-            echo "зараз $(date -u +%d.%m\ %H:%M) UTC · контейнер живе ${up} с"
-            echo "HEAD прод $(git -C .. rev-parse --short HEAD) · бета $(git -C /opt/socialio-beta rev-parse --short HEAD)"
+            echo "зараз $(date -u +%d.%m\ %H:%M) UTC · контейнер беті живе ${up} с"
+            echo "HEAD бета $(git -C .. rev-parse --short HEAD) · прод $(git -C /opt/socialio rev-parse --short HEAD)"
             docker compose ps --format '{{.Name}} {{.Status}}'
-            curl -s -o /dev/null -w "health %{http_code}\n" http://127.0.0.1:8080/health
-            for u in / /app /login /register /privacy /terms /data-deletion /tgapp /robots.txt /llms.txt /sitemap.xml; do curl -s -o /dev/null -w "$u %{http_code}\n" "https://holos.rozum.one$u"; done
-            curl -s -o /dev/null -w "стара адреса / → %{http_code} %{redirect_url}\n" https://socialio.rozum.one/
-            curl -s -o /dev/null -w "beta health %{http_code}\n" https://beta.holos.rozum.one/health
-            echo "privacy: розділ 3b $(curl -s https://holos.rozum.one/privacy | grep -c '3b. Telegram')"
-            echo "вхід relay: чужий секрет $(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -H 'x-telegram-bot-api-secret-token: wrong' -d '{}' http://127.0.0.1:8080/api/webhooks/telegram/relay/1234567) · кривий id $(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{}' http://127.0.0.1:8080/api/webhooks/telegram/relay/abc) · ззовні чужий секрет $(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -H 'x-telegram-bot-api-secret-token: wrong' -d '{}' https://holos.rozum.one/api/webhooks/telegram/relay/1234567)"
-            echo "команда без входу: $(curl -s -o /dev/null -w '%{http_code}' https://holos.rozum.one/api/workspaces/members)"
-            docker compose exec -T app sh -c 'for m in dist/roles.js:routeCap dist/team.js:addToTeam dist/actor.js:runAs dist/tgstory.js:postTgStories dist/wastatus.js:deliverWhatsApp dist/sublang.js:subPicker dist/tgrelay.js:scrubPersonal dist/tgrelay.js:quoteFromOwn dist/mcp.js:slotPlan dist/mcp.js:channels_add dist/publisher.js:pruneSlots public/app.js:relayClients public/app.js:teamTab; do f=${m%%:*}; k=${m#*:}; echo "   $f $k: $(grep -c "$k" $f 2>/dev/null || echo 0)"; done; echo "   libx265: $(ffmpeg -hide_banner -encoders 2>/dev/null | grep -c libx265)"'
+            P=$(grep -E '^APP_PORT=' .env | cut -d= -f2); P=${P:-8081}
+            curl -s -o /dev/null -w "health %{http_code}\n" http://127.0.0.1:$P/health
+            echo "медіатека без входу: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$P/api/media/library)"
+            docker compose exec -T app sh -c 'for m in dist/medialib.js:archiveSweepWorkspace dist/medialib-plan.js:mediaUsage dist/mcp.js:update_media dist/montage.js:made_from dist/lifecycle.js:archiveSweep public/app.js:renderMlList public/app.js:mlArchDays public/app.html:layMedia; do f=${m%%:*}; k=${m#*:}; echo "   $f $k: $(grep -c "$k" $f 2>/dev/null || echo 0)"; done'
             JS=$(cat <<'EOF'
             const { q } = await import('/app/dist/db.js');
-            const mask = (s) => String(s ?? '').replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g, '***').replace(/\d{6,}:[A-Za-z0-9_-]{20,}/g, '<token>');
-            const t = await q("select string_agg(n, ',') ok from unnest($1::text[]) n where to_regclass(n) is not null", [["workspace_invite", "tg_business", "tg_story_brand", "whatsapp_publish", "tg_relay", "tg_chat_note", "post_published"]]);
-            console.log('таблиці й view: ' + t[0].ok);
-            const roles = await q("select role, count(*)::int n from workspace_member group by 1 order by 1");
-            console.log('ролі учасників: ' + roles.map((r) => r.role + ' ' + r.n).join(' · '));
-            const def = await q("select column_default d from information_schema.columns where table_name='workspace_member' and column_name='role'");
-            console.log('типова роль: ' + def[0]?.d);
-            const cols = await q("select count(*)::int n from information_schema.columns where (table_name='post' and column_name in ('created_by','submitted_by','submitted_at','review_note')) or (table_name='media_asset' and column_name in ('sub_lang','variant_of')) or (table_name='telegram_publish' and column_name='story_ids') or (table_name='tg_relay' and column_name='client_ideas') or (table_name='tg_chat_note' and column_name='who') or (table_name='workspace_member' and column_name='added_by')");
-            console.log('нові колонки: ' + cols[0].n + ' з 11');
-            const vw = await q("select position('whatsapp_publish' in pg_get_viewdef('post_published'::regclass))>0 ok");
-            console.log('post_published бачить WhatsApp: ' + vw[0].ok);
-            const pp = await q("select net, count(*)::int n from post_published group by 1 order by 1");
-            console.log('post_published: ' + pp.map((x) => x.net + ' ' + x.n).join(' · '));
-            const tok = (await q("select value from app_secret where name='TELEGRAM_BOT_TOKEN'"))[0]?.value || process.env.TELEGRAM_BOT_TOKEN || '';
-            const me = await fetch('https://api.telegram.org/bot' + tok + '/getMe').then((x) => x.json()).catch(() => ({}));
-            const wh = await fetch('https://api.telegram.org/bot' + tok + '/getWebhookInfo').then((x) => x.json()).catch(() => ({}));
-            let host = '?'; try { host = new URL(wh.result?.url || '').host; } catch { /* */ }
-            console.log('бот: @' + (me.result?.username || '?') + ' · Business Mode ' + (me.result?.can_connect_to_business ? 'так' : 'ні') + ' · вебхук: ' + host + ', черга ' + (wh.result?.pending_update_count ?? '?') + ' · business_connection у вебхуку: ' + ((wh.result?.allowed_updates || []).includes('business_connection') || !wh.result?.allowed_updates ? 'так' : 'ні') + (wh.result?.last_error_message ? ' · остання помилка: ' + mask(wh.result.last_error_message).slice(0, 80) : ''));
-            const bz = await q("select (select count(*)::int from tg_business) b, (select count(*)::int from tg_relay) r, (select count(*)::int from workspace_invite) i, (select count(*)::int from whatsapp_publish) w");
-            console.log('Business ' + bz[0].b + ' · свої боти ' + bz[0].r + ' · запрошень ' + bz[0].i + ' · WhatsApp ' + bz[0].w);
-            const d = await q("select (select count(*) from post)::int p, (select count(*) from workspace)::int w, (select count(*) from app_user)::int u, (select count(*) from schedule_slot where status='planned')::int s");
-            console.log('дані: ' + JSON.stringify(d[0]));
-            const lg = await q("select level, scope, left(message,170) m, to_char(created_at at time zone 'UTC','HH24:MI') c from app_log where created_at > now() - interval '25 minutes' and level in ('warn','error') order by created_at desc limit 12");
-            for (const l of lg) console.log('  ' + l.c + ' ' + l.level[0] + ' ' + l.scope + ': ' + mask(l.m));
-            if (!lg.length) console.log('warn/error за 25 хв: нічого');
+            const cols = await q("select string_agg(column_name, ',' order by column_name) c from information_schema.columns where table_name='media_asset' and column_name in ('title','archived_at','archived_by','archive_keep','made_from')");
+            console.log('нові колонки media_asset: ' + cols[0].c);
+            const hid = ['ig-safe','ai-base','slide','cover','montage-lang','crop'];
+            const k = await q("select kind, count(*) filter (where source <> all($1::text[]))::int lib, count(*)::int alls, round(coalesce(sum(size),0)/1048576.0)::int mb from media_asset group by 1 order by 1", [hid]);
+            console.log('бета медіа (у медіатеці / усього з копіями / МБ): ' + k.map((x) => x.kind + ' ' + x.lib + '/' + x.alls + '/' + x.mb).join(' · '));
+            const s = await q("select source, count(*)::int n, round(coalesce(sum(size),0)/1048576.0)::int mb from media_asset group by 1 order by 3 desc");
+            console.log('бета за джерелом (шт / МБ): ' + s.map((x) => x.source + ' ' + x.n + '/' + x.mb).join(' · '));
+            const a = await q("select coalesce(archived_by,'-') b, count(*)::int n from media_asset where archived_at is not null group by 1");
+            console.log('в архіві: ' + (a.map((x) => x.b + ' ' + x.n).join(' · ') || '0'));
+            const ml = await import('/app/dist/medialib.js');
+            const wss = await q("select distinct workspace_id w from media_asset");
+            for (const w of wss) {
+              const it = await ml.libraryItems(w.w); const st = {};
+              for (const x of it) { const key = x.archived_at ? 'archived' : x.state; st[key] = (st[key] || 0) + 1; }
+              console.log('  кабінет …' + String(w.w).slice(-4) + ': ' + it.length + ' файлів · ' + Object.entries(st).map(([a, b]) => a + ' ' + b).join(' · ') + ' · автоархів ' + (await ml.archiveDays(w.w)) + ' дн.');
+            }
+            const lg = await q("select level, scope, left(message,170) m, to_char(created_at at time zone 'UTC','HH24:MI') c from app_log where created_at > now() - interval '20 minutes' and (scope='medialib' or level in ('warn','error')) order by created_at desc limit 12");
+            for (const l of lg) console.log('  ' + l.c + ' ' + l.level[0] + ' ' + l.scope + ': ' + String(l.m).replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g, '***'));
+            if (!lg.length) console.log('журнал за 20 хв: нічого');
             process.exit(0);
             EOF
             )
-            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -40
-            docker compose logs --since 15m app 2>&1 | grep -aE "TypeError|ReferenceError|Unhandled|migrate|міграц|tgbot|initTelegram" | grep -avE "DeprecationWarning" | sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/***/g; s/[0-9]{6,}:[A-Za-z0-9_-]{20,}/<token>/g' | tail -12 || true
+            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -30
+            echo "--- прод (лише читання): скільки займають медіа"
+            cd /opt/socialio/server
+            PJS=$(cat <<'EOF'
+            const { q } = await import('/app/dist/db.js');
+            const k = await q("select kind, count(*)::int n, round(coalesce(sum(size),0)/1048576.0)::int mb from media_asset group by 1 order by 1");
+            console.log('прод медіа (шт / МБ): ' + k.map((x) => x.kind + ' ' + x.n + '/' + x.mb).join(' · '));
+            const s = await q("select source, count(*)::int n, round(coalesce(sum(size),0)/1048576.0)::int mb from media_asset group by 1 order by 3 desc");
+            console.log('прод за джерелом: ' + s.map((x) => x.source + ' ' + x.n + '/' + x.mb).join(' · '));
+            process.exit(0);
+            EOF
+            )
+            docker compose exec -T app node --input-type=module -e "$PJS" 2>&1 | tail -5
+            echo "--- диск"
+            for v in socialio_media socialio-beta_media socialio_pgdata socialio-beta_pgdata; do d=$(docker volume inspect -f '{{.Mountpoint}}' $v 2>/dev/null); [ -n "$d" ] && echo "   том $v: $(du -sh "$d" 2>/dev/null | cut -f1)"; done
+            echo "   бекапи: $(du -sh /opt/socialio-backups 2>/dev/null | cut -f1)"
+            df -h / | tail -1 | awk '{print "   диск /: усього " $2 ", зайнято " $3 " (" $5 "), вільно " $4}'
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
