@@ -118,7 +118,7 @@ jobs:
               sed -i 's/^            //' /opt/socialio-backup.sh
               chmod +x /opt/socialio-backup.sh
               ( crontab -l 2>/dev/null | grep -v socialio-backup ; echo "20 3 * * * /opt/socialio-backup.sh >> /opt/socialio-backup.log 2>&1" ) | crontab - \
-                && echo "💾 backup-cron на місці (щоночі 03:20 UTC → /opt/socialio-backups; бази й медіа проду - 15 днів, медіа беті - 3 архіви)" || echo "⚠️ не вдалося поставити backup-cron"
+                && echo "💾 backup-cron на місці (щоночі 03:20 за часом сервера → /opt/socialio-backups; бази й медіа проду - 15 днів, медіа беті - 3 архіви)" || echo "⚠️ не вдалося поставити backup-cron"
               # нові правила ротації - одразу, не чекаючи ночі (лише видаляє зайве, нового бекапу не робить)
               /opt/socialio-backup.sh prune || echo "⚠️ ротація бекапів не вдалась"
               echo "--- останні бекапи ---"; ls -lh /opt/socialio-backups 2>/dev/null | tail -8 || echo "(ще жодного)"
