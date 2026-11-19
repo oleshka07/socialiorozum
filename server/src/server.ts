@@ -45,7 +45,7 @@ import { waReady } from "./wastatus.js";
 import { styleSubLangs } from "./sublang.js";
 import { spreadText, normTransition, normMood, normTemplate, normSubPreset, normSubPos, normHex, normMontageStyle, TEMPLATES, TEMPLATE_ORDER, templatePlan, SUB_PRESETS, SUB_ORDER } from "./montage-plan.js";
 import { ttsReady, musicReady } from "./tts.js";
-import { readdir, stat } from "node:fs/promises";
+import { readdir, stat, statfs } from "node:fs/promises";
 import { startMeetingPull, testPull, pullOnce } from "./meetings-pull.js";
 import { startGdrivePoller, pullGdriveFolder } from "./gdrive-poller.js";
 import * as gdrive from "./gdrive.js";
@@ -54,7 +54,8 @@ import { ttCreator, canDirect, startTikTokWatch } from "./vidpub.js";
 import { startLifecycleWorker } from "./lifecycle.js";
 import { startDigest } from "./digest.js";
 import { startCommentNotify, notifyOn, setNotify } from "./tgcomments.js";
-import { startAlerts, alertsView, saveAlertSettings, sendTestAlert, sendDigest, resolveAlert, runProbes, probeBuddy } from "./alerts.js";
+import { startAlerts, alertsView, saveAlertSettings, sendTestAlert, sendDigest, resolveAlert, runProbes, probeBuddy, backupSpace } from "./alerts.js";
+import { BACKUPS_MAX_BYTES, DISK_FREE_MIN_BYTES } from "./alerts-plan.js";
 import { botBrands, setBotBrand, homeIfLost } from "./tgbrand.js";
 import { moveMtSession } from "./tgmontage.js";
 import { startMetrics, networkBenchmarks, collectWorkspace, analyticsFor, bestTimesFor, bestTimeAuto } from "./metrics.js";
@@ -710,8 +711,14 @@ app.get("/api/admin/health", async (req: any, reply) => {
     const files = (await readdir(dir)).filter((f) => f.endsWith(".dump")).sort();
     if (files.length) { const f = files[files.length - 1]; const st = await stat(join(dir, f)); lastBackup = `${f} (${Math.round(st.size / 1024)}K)`; }
   } catch { /* теки нема - покажемо «не видно» */ }
+  // 💾 місце: скільки важить тека бекапів і скільки вільно на диску (ті самі пороги, що й у сповіщеннях)
+  const [bk, disk] = await Promise.all([backupSpace().catch(() => null), statfs(MEDIA_DIR).catch(() => null)]);
+  const space = {
+    backups: bk ? { bytes: bk.bytes, files: bk.files, groups: bk.groups.slice(0, 6), limit: BACKUPS_MAX_BYTES } : null,
+    disk: disk ? { free: Number(disk.bavail) * Number(disk.bsize), total: Number(disk.blocks) * Number(disk.bsize), min: DISK_FREE_MIN_BYTES } : null,
+  };
   return { errorCount: counts?.errors || 0, warnCount: counts?.warns || 0, spendToday: spend?.usd || 0,
-           runningJobs: jobs?.running || 0, lostJobs: jobs?.lost || 0, lastBackup, errors, seo: seoView() };
+           runningJobs: jobs?.running || 0, lostJobs: jobs?.lost || 0, lastBackup, space, errors, seo: seoView() };
 });
 
 // ---- адмін: 🔔 сповіщення про збої (alerts.ts) ----

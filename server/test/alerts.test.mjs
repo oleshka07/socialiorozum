@@ -146,3 +146,48 @@ test("hintFor: куди йти й що буде з запасним маршру
   assert.match(hintFor({ kind: "ai_key", provider: "Deepgram" }), /Whisper/);
   assert.match(hintFor({ kind: "ai_funds", provider: "fal.ai" }), /fal\.ai\/dashboard\/billing.*Бренд → Візуал/);
 });
+
+test("місце: тека бекапів понад 8 ГБ - попередження з тим, що найважче; диск - менше 15 ГБ чи майже повний", async () => {
+  const P = await import("../dist/alerts-plan.js");
+  const G = P.GB;
+  // 19.11: 15 архівів медіа беті по 1,4 ГБ - саме те, що забило теку
+  const day = (i) => `202611${String(19 - i).padStart(2, "0")}-0320`;
+  const heavy = [];
+  for (let i = 0; i < 15; i++) {
+    heavy.push({ name: `socialio-beta-media-${day(i)}.tgz`, size: 1.4 * G });
+    heavy.push({ name: `socialio-db-${day(i)}.dump`, size: 30 * 1024 ** 2 });
+  }
+  heavy.push({ name: "manual-copy.tar", size: 0.5 * G });
+  const v = P.backupsVerdict(heavy);
+  assert.equal(v.severity, "warning");
+  assert.ok(v.title.includes("21,9 ГБ") && v.title.includes("межа 8 ГБ"), v.title);
+  assert.ok(v.detail.startsWith("Найбільше: socialio-beta-media: 15 шт., 21 ГБ"), v.detail);
+  assert.ok(v.detail.includes("інше: 1 шт., 0,5 ГБ"), v.detail);
+  // за новими правилами: 3 архіви беті + 15 дампів - тихо
+  const ok = heavy.filter((f) => !f.name.startsWith("socialio-beta-media") || /-(19|18|17)-0320/.test(f.name.replace(/202611(\d\d)/, "-$1")));
+  assert.equal(ok.filter((f) => f.name.startsWith("socialio-beta-media")).length, 3);
+  assert.equal(P.backupsVerdict(ok), null);
+  // рівно на межі - ще ні, трохи понад - так
+  assert.equal(P.backupsVerdict([{ name: "x-db-20261119-0320.dump", size: 8 * G }]), null);
+  assert.ok(P.backupsVerdict([{ name: "x-db-20261119-0320.dump", size: 8 * G + 1 }]));
+  assert.equal(P.backupsVerdict([]), null);
+
+  const T = 75 * G;
+  assert.equal(P.diskVerdict(25 * G, T), null);
+  const w = P.diskVerdict(14.6 * G, T);
+  assert.equal(w.severity, "warning");
+  assert.ok(w.title.includes("14,6 ГБ") && w.title.includes("менше 15 ГБ"), w.title);
+  assert.equal(P.diskVerdict(15 * G, T), null);
+  assert.equal(P.diskVerdict(5.5 * G, T).severity, "critical");    // < 8% від 75 ГБ
+  assert.equal(P.diskVerdict(2 * G, 2000 * G).severity, "critical"); // великий диск: < 3 ГБ - теж критично
+  assert.equal(P.diskVerdict(10 * G, 0), null);
+  assert.equal(P.fmtGb(1.44 * G), "1,4 ГБ");
+  assert.equal(P.fmtGb(21.3 * G), "21,3 ГБ");
+  assert.equal(P.fmtGb(75 * G), "75 ГБ");
+  assert.equal(P.fmtGb(30 * 1024 ** 2), "<0,1 ГБ");
+  assert.equal(P.fmtGb(0), "0 ГБ");
+  assert.equal(P.fmtGb(150.4 * G), "150 ГБ");
+  // підказки кажуть, де дивитись і як прибрати за правилами
+  assert.ok(P.hintFor({ kind: "backup_size" }).includes("/opt/socialio-backup.sh prune"));
+  assert.ok(P.hintFor({ kind: "disk" }).includes("3 архіви") && !P.hintFor({ kind: "disk" }).includes("14 днів"));
+});

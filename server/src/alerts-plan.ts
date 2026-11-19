@@ -213,7 +213,8 @@ export function hintFor(v: Pick<Verdict, "kind" | "provider">, ctx: { failover?:
     case "tg_shared": return "Випусти новий токен у @BotFather (/mybots → бот → API Token → Revoke) і встав його: Налаштування → Профіль → 🔑 Ключі провайдерів → 🤖 Telegram-бот.";
     case "tg_hook": return "Telegram не може достукатись до сервера. Зазвичай минає саме; якщо ні - Налаштування → Профіль → 🔑 Ключі провайдерів → 🤖 Telegram-бот → Зберегти (перереєструє вебхук).";
     case "backup": return "Нічний бекап не створився. На сервері: tail /opt/socialio-backup.log - там причина (зазвичай місце на диску або зупинена база).";
-    case "disk": return "Місця на диску сервера мало. Найбільше займають медіа (відео) і бекапи: /opt/socialio-backups тримає 14 днів.";
+    case "disk": return "Місця на диску сервера мало. Що займає: df -h / і du -sh /opt/socialio-backups /var/lib/docker. Бекапи: медіа беті - 3 архіви, решта - 15 днів; /opt/socialio-backup.sh prune чистить за цими правилами одразу.";
+    case "backup_size": return "Тека бекапів більша, ніж має бути за правилами (медіа беті - 3 архіви, медіа проду й бази - 15 днів). На сервері: du -sh /opt/socialio-backups/* | sort -h | tail - що найбільше; /opt/socialio-backup.sh prune - прибрати зайве за правилами. Лишилось велике - копія не за правилами (ручна?) або медіа виросли: тоді прибрати руками чи зменшити строк.";
     case "buddy": return "Відкрий адресу в браузері. Не відкривається - GitHub → Actions → останній деплой (червоний?) або на сервері: docker compose ps і docker compose logs --tail=50 app.";
     case "jobs": return "Фонова задача (монтаж, публікація, генерація) висить понад пів години. Зазвичай допомагає повторити дію; якщо висить знову - журнал сервісу.";
     case "balance": return `Поповни рахунок ${p}${url ? `: ${url}` : ""}, поки не скінчилось зовсім.`;
@@ -229,6 +230,50 @@ export function buddyUrl(appBaseUrl: string, override?: string): string {
   try { host = new URL(appBaseUrl).host; } catch { return ""; }
   if (!host || !host.includes(".") || /^(localhost|127\.|0\.0\.0\.0|\[)/.test(host)) return "";
   return host.startsWith("beta.") ? `https://${host.slice(5)}/health` : `https://beta.${host}/health`;
+}
+
+// ---------------- місце: тека бекапів і диск сервера ----------------
+// 19.11 /opt/socialio-backups виросла до 21 ГБ (архіви медіа беті по 1,4 ГБ щоночі жили 15 днів), і диск
+// ледь не заповнився. Пороги - рішення Олега: тека понад 8 ГБ або вільно на диску менше 15 ГБ.
+export const GB = 1024 ** 3;   // як у df -h / du -h
+export const BACKUPS_MAX_BYTES = 8 * GB;
+export const DISK_FREE_MIN_BYTES = 15 * GB;
+/** «1,4 ГБ», «14,6 ГБ», «75 ГБ» - як людина пише, з комою (до 100 ГБ - з десятими, щоб «14,6» не стало «15»). */
+export const fmtGb = (b: number): string => {
+  const g = Math.max(0, b) / GB;
+  if (g > 0 && g < 0.05) return "<0,1 ГБ";   // дампи баз по кілька МБ - не «0 ГБ»
+  return (g >= 100 ? String(Math.round(g)) : String(Math.round(g * 10) / 10).replace(".", ",")) + " ГБ";
+};
+
+export type BackupFile = { name: string; size: number };
+export type BackupGroup = { group: string; files: number; bytes: number };
+/** Файли теки бекапів купками «стек + що» (socialio-beta-media, socialio-db…), найважчі першими. */
+export function backupGroups(files: BackupFile[]): BackupGroup[] {
+  const m = new Map<string, BackupGroup>();
+  for (const f of files) {
+    const g = /^(.+)-\d{8}-\d{4}\.(dump|tgz)$/i.exec(f.name)?.[1] || "інше";
+    const x = m.get(g) || { group: g, files: 0, bytes: 0 };
+    x.files++; x.bytes += Math.max(0, Number(f.size) || 0); m.set(g, x);
+  }
+  return [...m.values()].sort((a, b) => b.bytes - a.bytes || a.group.localeCompare(b.group));
+}
+
+export type SpaceAlert = { severity: Severity; title: string; detail: string } | null;
+/** Тека бекапів понад межу - попередження з тим, що саме важить найбільше. */
+export function backupsVerdict(files: BackupFile[], limit = BACKUPS_MAX_BYTES): SpaceAlert {
+  const total = files.reduce((s, f) => s + Math.max(0, Number(f.size) || 0), 0);
+  if (total <= limit) return null;
+  const top = backupGroups(files).slice(0, 4).map((g) => `${g.group}: ${g.files} шт., ${fmtGb(g.bytes)}`).join("; ");
+  return { severity: "warning", title: `Тека бекапів: ${fmtGb(total)} (межа ${fmtGb(limit)})`, detail: `Найбільше: ${top}.` };
+}
+/** Вільне місце: менше 3 ГБ чи 8% - критично; менше 15 ГБ - попередження. */
+export function diskVerdict(free: number, total: number, minFree = DISK_FREE_MIN_BYTES): SpaceAlert {
+  if (!(total > 0) || !(free >= 0)) return null;
+  const pct = (free / total) * 100;
+  const detail = `Вільно ${fmtGb(free)} (${pct.toFixed(0)}%) із ${fmtGb(total)}.`;
+  if (free < 3 * GB || pct < 8) return { severity: "critical", title: `Диск сервера майже повний: вільно ${fmtGb(free)}`, detail };
+  if (free < minFree) return { severity: "warning", title: `Диск сервера: вільно ${fmtGb(free)} (менше ${fmtGb(minFree)})`, detail };
+  return null;
 }
 
 /** Чи час нагадати ще раз: уперше - одразу; далі - лише якщо повторилось і минув проміжок. */

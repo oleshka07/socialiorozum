@@ -404,11 +404,33 @@ async function probeDisk(): Promise<void> {
     const s = await statfs(MEDIA_DIR);
     const free = Number(s.bavail) * Number(s.bsize), total = Number(s.blocks) * Number(s.bsize);
     if (!(total > 0)) return;
-    const pct = (free / total) * 100, gb = free / 1024 ** 3;
-    if (gb < 3 || pct < 8) await probeRaise("disk", "disk", "critical", `Диск сервера майже повний: вільно ${gb.toFixed(1)} ГБ`, `Вільно ${pct.toFixed(0)}% із ${(total / 1024 ** 3).toFixed(0)} ГБ.`);
-    else if (pct < 15) await probeRaise("disk", "disk", "warning", `Диск сервера: вільно ${gb.toFixed(1)} ГБ`, `Вільно ${pct.toFixed(0)}% із ${(total / 1024 ** 3).toFixed(0)} ГБ.`);
-    else await probeResolve("disk", `Вільно ${gb.toFixed(1)} ГБ.`);
+    const v = P.diskVerdict(free, total);
+    if (v) await probeRaise("disk", "disk", v.severity, v.title, v.detail);
+    else await probeResolve("disk", `Вільно ${P.fmtGb(free)}.`);
   } catch { /* statfs нема - пропускаємо */ }
+}
+
+/** Скільки важить тека бекапів (змонтована з хоста лише для читання, compose: /opt/socialio-backups:/backups:ro).
+ *  null - теки не видно (локально чи не змонтована). Тека пласка: скрипт кладе файли прямо в неї. */
+export async function backupSpace(): Promise<{ dir: string; bytes: number; files: number; groups: P.BackupGroup[]; list: P.BackupFile[] } | null> {
+  const dir = process.env.BACKUP_DIR || "/backups";
+  let names: string[];
+  try { names = await readdir(dir); } catch { return null; }
+  const list: P.BackupFile[] = [];
+  for (const n of names) {
+    const st = await stat(join(dir, n)).catch(() => null);
+    if (st?.isFile()) list.push({ name: n, size: st.size });
+  }
+  return { dir, bytes: list.reduce((a, f) => a + f.size, 0), files: list.length, groups: P.backupGroups(list), list };
+}
+
+async function probeBackupSpace(): Promise<void> {
+  if (isBeta()) return;   // тека спільна для проду й беті - стереже прод, як і диск
+  const b = await backupSpace();
+  if (!b) return;
+  const v = P.backupsVerdict(b.list);
+  if (v) await probeRaise("backup_size", "backup_size", v.severity, v.title, v.detail);
+  else await probeResolve("backup_size", `Тека бекапів: ${P.fmtGb(b.bytes)}.`);
 }
 
 async function probeJobs(): Promise<void> {
@@ -557,7 +579,7 @@ export async function runProbes(): Promise<void> {
   if (ticking) return;
   ticking = true;
   try {
-    for (const f of [probeOpenRouter, probeElevenLabs, probeSharedBot, probeBackups, probeDisk, probeJobs, autoResolve])
+    for (const f of [probeOpenRouter, probeElevenLabs, probeSharedBot, probeBackups, probeBackupSpace, probeDisk, probeJobs, autoResolve])
       await f().catch((e: any) => console.warn("[alerts] проба:", e?.message));
     await flush();
     await maybeDigest().catch((e: any) => console.warn("[alerts] звіт:", e?.message));
