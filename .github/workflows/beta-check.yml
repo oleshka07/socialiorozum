@@ -98,77 +98,69 @@ on:
         description: "Разове посилання для заливки (https://…/mcp/upload/…)"
         required: false
         default: ""
-# 10.10 (вечір) - бета після медіатеки окремою сторінкою (6e2339c): версія, здоров'я, код у контейнері, нові колонки
-# media_asset, скільки файлів у якому стані й скільки відклав автоархів (по кабінетах, без назв), журнал medialib. І скільки
-# місця реально займають медіа: прод і бета (за типом і джерелом, томи, бекапи, диск) - під питання Олега про Telegram як сховище.
-# Нічого не пише (автоархів робить сам застосунок беті - це його звичайна робота).
+# 19.11 - після хотфіксу бекапів (0100348 прод, 03ebf30 бета): який скрипт стоїть на хості (строки, prune), крон, що лежить
+# у теці бекапів купками, лог бекапу, що бачать застосунки (тека й диск - ті самі пороги, що в сповіщеннях), тривоги disk і
+# backup_size у базі проду, warn/error журналу. І хто о ~20:23 UTC зупинив контейнери беті (події docker, входи ssh). Нічого
+# не пише: ні проб зі сповіщеннями, ні ротації.
 
 jobs:
   beta:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: beta after media library (server, read-only) + media disk usage prod and beta
+      - name: backups hotfix check (server, read-only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 8m
+          command_timeout: 6m
           script: |
-            cd /opt/socialio-beta/server
-            for i in $(seq 1 48); do
-              up=$(( $(date +%s) - $(date -d "$(docker inspect -f '{{.State.StartedAt}}' $(docker compose ps -q app))" +%s) ))
-              [ "$up" -ge 150 ] && break; sleep 5
-            done
-            echo "зараз $(date -u +%d.%m\ %H:%M) UTC · контейнер беті живе ${up} с"
-            echo "HEAD бета $(git -C .. rev-parse --short HEAD) · прод $(git -C /opt/socialio rev-parse --short HEAD)"
-            docker compose ps --format '{{.Name}} {{.Status}}'
-            P=$(grep -E '^APP_PORT=' .env | cut -d= -f2); P=${P:-8081}
-            curl -s -o /dev/null -w "health %{http_code}\n" http://127.0.0.1:$P/health
-            echo "медіатека без входу: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$P/api/media/library)"
-            docker compose exec -T app sh -c 'for m in dist/medialib.js:archiveSweepWorkspace dist/medialib-plan.js:mediaUsage dist/mcp.js:update_media dist/montage.js:made_from dist/lifecycle.js:archiveSweep public/app.js:renderMlList public/app.js:mlArchDays public/app.html:layMedia; do f=${m%%:*}; k=${m#*:}; echo "   $f $k: $(grep -c "$k" $f 2>/dev/null || echo 0)"; done'
-            JS=$(cat <<'EOF'
-            const { q } = await import('/app/dist/db.js');
-            const cols = await q("select string_agg(column_name, ',' order by column_name) c from information_schema.columns where table_name='media_asset' and column_name in ('title','archived_at','archived_by','archive_keep','made_from')");
-            console.log('нові колонки media_asset: ' + cols[0].c);
-            const hid = ['ig-safe','ai-base','slide','cover','montage-lang','crop'];
-            const k = await q("select kind, count(*) filter (where source <> all($1::text[]))::int lib, count(*)::int alls, round(coalesce(sum(size),0)/1048576.0)::int mb from media_asset group by 1 order by 1", [hid]);
-            console.log('бета медіа (у медіатеці / усього з копіями / МБ): ' + k.map((x) => x.kind + ' ' + x.lib + '/' + x.alls + '/' + x.mb).join(' · '));
-            const s = await q("select source, count(*)::int n, round(coalesce(sum(size),0)/1048576.0)::int mb from media_asset group by 1 order by 3 desc");
-            console.log('бета за джерелом (шт / МБ): ' + s.map((x) => x.source + ' ' + x.n + '/' + x.mb).join(' · '));
-            const a = await q("select coalesce(archived_by,'-') b, count(*)::int n from media_asset where archived_at is not null group by 1");
-            console.log('в архіві: ' + (a.map((x) => x.b + ' ' + x.n).join(' · ') || '0'));
-            const ml = await import('/app/dist/medialib.js');
-            const wss = await q("select distinct workspace_id w from media_asset");
-            for (const w of wss) {
-              const it = await ml.libraryItems(w.w); const st = {};
-              for (const x of it) { const key = x.archived_at ? 'archived' : x.state; st[key] = (st[key] || 0) + 1; }
-              console.log('  кабінет …' + String(w.w).slice(-4) + ': ' + it.length + ' файлів · ' + Object.entries(st).map(([a, b]) => a + ' ' + b).join(' · ') + ' · автоархів ' + (await ml.archiveDays(w.w)) + ' дн.');
-            }
-            const lg = await q("select level, scope, left(message,170) m, to_char(created_at at time zone 'UTC','HH24:MI') c from app_log where created_at > now() - interval '20 minutes' and (scope='medialib' or level in ('warn','error')) order by created_at desc limit 12");
-            for (const l of lg) console.log('  ' + l.c + ' ' + l.level[0] + ' ' + l.scope + ': ' + String(l.m).replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g, '***'));
-            if (!lg.length) console.log('журнал за 20 хв: нічого');
-            process.exit(0);
-            EOF
-            )
-            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -30
-            echo "--- прод (лише читання): скільки займають медіа"
+            echo "зараз $(date -u +%d.%m\ %H:%M) UTC (час сервера $(date +%H:%M\ %Z))"
+            echo "HEAD прод $(git -C /opt/socialio rev-parse --short HEAD) · бета $(git -C /opt/socialio-beta rev-parse --short HEAD)"
+            curl -s -o /dev/null -w "health прод %{http_code}\n" http://127.0.0.1:8080/health
+            curl -s -o /dev/null -w "health бета %{http_code}\n" http://127.0.0.1:8081/health
+            echo "--- скрипт бекапу на хості"
+            grep -nE "KEEP_DAYS=|BETA_MEDIA_KEEP=|prune|mtime" /opt/socialio-backup.sh
+            crontab -l 2>/dev/null | grep socialio-backup
+            echo "--- тека бекапів купками"
+            ls -l /opt/socialio-backups | awk 'NR>1{n=$NF; g=n; sub(/-[0-9]+-[0-9]+\.(dump|tgz)$/,"",g); c[g]++; s[g]+=$5} END{for(g in c) printf "   %s: %d шт., %.2f ГБ\n", g, c[g], s[g]/1073741824}' | sort
+            echo "   архіви медіа беті:"; ls -l --time-style=+%d.%m\ %H:%M /opt/socialio-backups | grep beta-media | awk '{print "     " $6, $7, $5, $8}'
+            echo "   найстаріший і найновіший дамп проду: $(ls /opt/socialio-backups | grep '^socialio-db-' | sort | sed -n '1p;$p' | tr '\n' ' ')"
+            echo "   разом: $(du -sh /opt/socialio-backups | cut -f1)"; df -h / | tail -1 | awk '{print "   диск /: усього " $2 ", зайнято " $3 " (" $5 "), вільно " $4}'
+            echo "--- лог бекапу (останні рядки)"; tail -12 /opt/socialio-backup.log 2>/dev/null
+            echo "--- що бачить застосунок проду (ті самі пороги, що в сповіщеннях; проб не запускаємо)"
             cd /opt/socialio/server
-            PJS=$(cat <<'EOF'
+            JS=$(cat <<'EOF'
+            const A = await import('/app/dist/alerts.js');
+            const P = await import('/app/dist/alerts-plan.js');
+            const { statfs } = await import('node:fs/promises');
+            const { MEDIA_DIR } = await import('/app/dist/media.js');
             const { q } = await import('/app/dist/db.js');
-            const k = await q("select kind, count(*)::int n, round(coalesce(sum(size),0)/1048576.0)::int mb from media_asset group by 1 order by 1");
-            console.log('прод медіа (шт / МБ): ' + k.map((x) => x.kind + ' ' + x.n + '/' + x.mb).join(' · '));
-            const s = await q("select source, count(*)::int n, round(coalesce(sum(size),0)/1048576.0)::int mb from media_asset group by 1 order by 3 desc");
-            console.log('прод за джерелом: ' + s.map((x) => x.source + ' ' + x.n + '/' + x.mb).join(' · '));
+            const b = await A.backupSpace();
+            console.log('тека: ' + (b ? P.fmtGb(b.bytes) + ', ' + b.files + ' файлів; ' + b.groups.map((g) => g.group + ' ' + g.files + ' шт. ' + P.fmtGb(g.bytes)).join(' · ') : 'не видно'));
+            console.log('проба теки вирішила б: ' + (b ? (P.backupsVerdict(b.list)?.title || 'норма') : '-'));
+            const s = await statfs(MEDIA_DIR); const free = Number(s.bavail) * Number(s.bsize), total = Number(s.blocks) * Number(s.bsize);
+            console.log('диск: вільно ' + P.fmtGb(free) + ' із ' + P.fmtGb(total) + '; проба диска вирішила б: ' + (P.diskVerdict(free, total)?.title || 'норма'));
+            const al = await q("select fp, severity, left(title,90) t, to_char(last_at at time zone 'UTC','DD.MM HH24:MI') l, resolved_at is not null r from ops_alert where fp in ('disk','backup_size','backup') order by last_at desc");
+            for (const x of al) console.log('  тривога ' + x.fp + ' ' + x.severity + ' ' + (x.r ? 'закрита' : 'ВІДКРИТА') + ' · ' + x.l + ' · ' + x.t);
+            if (!al.length) console.log('  тривог disk / backup_size / backup немає');
+            const lg = await q("select level, scope, left(message,160) m, to_char(created_at at time zone 'UTC','HH24:MI') c from app_log where created_at > now() - interval '25 minutes' and level in ('warn','error') order by created_at desc limit 10");
+            for (const l of lg) console.log('  ' + l.c + ' ' + l.level[0] + ' ' + l.scope + ': ' + String(l.m).replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g, '***'));
+            if (!lg.length) console.log('  журнал проду за 25 хв: warn/error немає');
             process.exit(0);
             EOF
             )
-            docker compose exec -T app node --input-type=module -e "$PJS" 2>&1 | tail -5
-            echo "--- диск"
-            for v in socialio_media socialio-beta_media socialio_pgdata socialio-beta_pgdata; do d=$(docker volume inspect -f '{{.Mountpoint}}' $v 2>/dev/null); [ -n "$d" ] && echo "   том $v: $(du -sh "$d" 2>/dev/null | cut -f1)"; done
-            echo "   бекапи: $(du -sh /opt/socialio-backups 2>/dev/null | cut -f1)"
-            df -h / | tail -1 | awk '{print "   диск /: усього " $2 ", зайнято " $3 " (" $5 "), вільно " $4}'
+            docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -14
+            echo "--- бета бачить теку? (проби там не стережуть місце - це робить прод)"
+            cd /opt/socialio-beta/server && docker compose exec -T app sh -c 'ls /backups | wc -l' 2>&1 | tail -1
+            echo "--- хто зупинив бету ~20:23 UTC: події docker 20:15-20:27"
+            docker events --since "2026-11-19T20:15:00Z" --until "2026-11-19T20:27:00Z" --filter type=container --format '{{.Time}} {{.Action}} {{.Actor.Attributes.name}}' 2>/dev/null \
+              | grep -vE " exec_|health_status" | awk '{ cmd="date -u -d @"$1" +%H:%M:%S"; cmd | getline t; close(cmd); $1=t; print "   " $0 }' | head -60
+            echo "--- входи ssh 20:10-20:27 UTC (лише час, користувач і звідки - маска)"
+            since=$(date -d "2026-11-19 20:10 UTC" "+%Y-%m-%d %H:%M:%S"); until=$(date -d "2026-11-19 20:27 UTC" "+%Y-%m-%d %H:%M:%S")
+            journalctl -u ssh -u sshd --since "$since" --until "$until" --no-pager -o short-iso 2>/dev/null | grep -i "accepted" | sed -E 's/from ([0-9]+\.[0-9]+)\.[0-9]+\.[0-9]+/from \1.x.x/' | head -20
+            echo "--- keepalive"; tail -4 /opt/socialio-keepalive.log 2>/dev/null; ls -l /opt/socialio-keepalive.sh 2>/dev/null
 
   drop:
     if: github.event_name == 'workflow_dispatch' && inputs.link != ''
