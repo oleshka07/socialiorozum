@@ -101,7 +101,8 @@ on:
 # 19.11 - після хотфіксу бекапів (0100348 прод, 03ebf30 бета): який скрипт стоїть на хості (строки, prune), крон, що лежить
 # у теці бекапів купками, лог бекапу, що бачать застосунки (тека й диск - ті самі пороги, що в сповіщеннях), тривоги disk і
 # backup_size у базі проду, warn/error журналу. І хто о ~20:23 UTC зупинив контейнери беті (події docker, входи ssh). Нічого
-# не пише: ні проб зі сповіщеннями, ні ротації.
+# не пише: ні проб зі сповіщеннями, ні ротації. Другий прохід - точніше, хто зупинив бету: події docker лише stop/kill/die
+# і проєкт compose, журнал системи (cron, docker, oom) і рядки крону.
 
 jobs:
   beta:
@@ -154,12 +155,17 @@ jobs:
             docker compose exec -T app node --input-type=module -e "$JS" 2>&1 | tail -14
             echo "--- бета бачить теку? (проби там не стережуть місце - це робить прод)"
             cd /opt/socialio-beta/server && docker compose exec -T app sh -c 'ls /backups | wc -l' 2>&1 | tail -1
-            echo "--- хто зупинив бету ~20:23 UTC: події docker 20:15-20:27"
-            docker events --since "2026-11-19T20:15:00Z" --until "2026-11-19T20:27:00Z" --filter type=container --format '{{.Time}} {{.Action}} {{.Actor.Attributes.name}}' 2>/dev/null \
-              | grep -vE " exec_|health_status" | awk '{ cmd="date -u -d @"$1" +%H:%M:%S"; cmd | getline t; close(cmd); $1=t; print "   " $0 }' | head -60
-            echo "--- входи ssh 20:10-20:27 UTC (лише час, користувач і звідки - маска)"
-            since=$(date -d "2026-11-19 20:10 UTC" "+%Y-%m-%d %H:%M:%S"); until=$(date -d "2026-11-19 20:27 UTC" "+%Y-%m-%d %H:%M:%S")
-            journalctl -u ssh -u sshd --since "$since" --until "$until" --no-pager -o short-iso 2>/dev/null | grep -i "accepted" | sed -E 's/from ([0-9]+\.[0-9]+)\.[0-9]+\.[0-9]+/from \1.x.x/' | head -20
+            echo "--- хто зупинив бету ~20:23 UTC: події docker 20:18-20:24 (лише stop/kill/die/destroy/create/start)"
+            docker events --since "2026-11-19T20:18:00Z" --until "2026-11-19T20:24:00Z" --filter type=container \
+              --filter event=stop --filter event=kill --filter event=die --filter event=destroy --filter event=create --filter event=start \
+              --format '{{.TimeNano}} {{.Action}} {{.Actor.Attributes.name}} {{.Actor.Attributes.exitCode}} {{index .Actor.Attributes "com.docker.compose.project"}}' 2>/dev/null \
+              | while read -r t act name code proj; do echo "   $(date -u -d @$((t / 1000000000)) +%H:%M:%S) $act $name ${code} ${proj}"; done | head -40
+            echo "--- журнал системи 22:20-22:24 за часом сервера (cron, systemd, docker; без ssh)"
+            journalctl --since "2026-11-19 22:20:00" --until "2026-11-19 22:24:00" --no-pager -o short-iso 2>/dev/null \
+              | grep -viE "sshd|session-|pam_unix" | grep -iE "cron|CMD|docker|systemd|oom|killed" | cut -c1-200 | head -25
+            echo "--- рядки крону root (лише команди, без секретів) і /etc/cron.d"
+            crontab -l 2>/dev/null | grep -v "^#" | sed -E 's/(token|key|secret|password)=[^ ]+/\1=***/Ig' | cut -c1-160
+            ls /etc/cron.d 2>/dev/null | tr '\n' ' '; echo
             echo "--- keepalive"; tail -4 /opt/socialio-keepalive.log 2>/dev/null; ls -l /opt/socialio-keepalive.sh 2>/dev/null
 
   drop:
