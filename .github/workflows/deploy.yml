@@ -64,16 +64,32 @@ jobs:
             docker compose up -d --build
             docker image prune -f
             # 💾 БЕКАП на цьому ж боксі (блокер ④ з аудиту). Щоночі pg_dump бази + tar медіа-тому
-            # в /opt/socialio-backups, ротація 14 днів. Це захист від помилкової міграції, кривого
-            # деплою чи випадкового видалення - НЕ від втрати диска: копія поза сервером лишається
-            # окремою задачею (CLAUDE.md §7). Ставиться через деплой, бо це єдиний наш канал до хоста.
+            # в /opt/socialio-backups. Ротація: бази обох стеків і медіа проду - 15 днів, медіа беті - лише
+            # 3 найновіші архіви (19.11 тека виросла до 21 ГБ: архів медіа беті ~1,4 ГБ щоночі × 15 днів).
+            # Це захист від помилкової міграції, кривого деплою чи випадкового видалення - НЕ від втрати
+            # диска: копія поза сервером лишається окремою задачею (CLAUDE.md §7). Ставиться через деплой,
+            # бо це єдиний наш канал до хоста. ⚠️ Прод і бета пишуть ТОЙ САМИЙ скрипт: змінюєш тут - зміни
+            # і в другому воркфлоу (deploy.yml / deploy-beta.yml), інакше наступний деплой поверне стару версію.
             if command -v crontab >/dev/null 2>&1; then
               cat > /opt/socialio-backup.sh <<'BKSH'
             #!/bin/sh
             # Бекап обох стеків socialio. Дамп береться ЗСЕРЕДИНИ контейнера БД тим самим користувачем,
             # що задано в .env (нам не треба знати пароль - він уже в середовищі контейнера).
+            # `socialio-backup.sh prune` - лише ротація, без нового бекапу (деплой кличе її одразу).
             set -u
             OUT=/opt/socialio-backups; mkdir -p "$OUT"; chmod 700 "$OUT"
+            KEEP_DAYS=14          # find -mtime +14: файл живе 15 днів (бази обох стеків і медіа проду)
+            BETA_MEDIA_KEEP=3     # медіа беті: лише 3 найновіші архіви (кожен ~1,4 ГБ)
+            prune() {
+              # медіа беті рахуємо ШТУКАМИ, а не днями: якщо архів кілька ночей не вдавався, лишаються
+              # останні вдалі, а не нуль. Нічний прохід кличе це ПІСЛЯ нового архіву, тож старий іде лише тоді
+              b=$(grep -E '^COMPOSE_PROJECT_NAME=' /opt/socialio-beta/server/.env 2>/dev/null | cut -d= -f2)
+              case "$b" in ""|socialio) b=socialio-beta ;; esac   # медіа проду цим правилом не чіпаємо ніколи
+              ls -1t "$OUT/$b"-media-*.tgz 2>/dev/null | tail -n +$((BETA_MEDIA_KEEP + 1)) | xargs -r rm -f
+              find "$OUT" -type f \( -name '*.dump' -o -name '*.tgz' \) -mtime +$KEEP_DAYS -delete
+              echo "backups $(du -sh "$OUT" | cut -f1), disk $(df -h /opt | tail -1 | awk '{print $4}') free"
+            }
+            if [ "${1:-}" = "prune" ]; then prune; exit 0; fi
             STAMP=$(date -u +%Y%m%d-%H%M)
             for d in /opt/socialio/server /opt/socialio-beta/server; do
               [ -d "$d" ] || continue
@@ -88,15 +104,15 @@ jobs:
                 echo "$STAMP $name media ok $(du -h "$OUT/$name-media-$STAMP.tgz" | cut -f1)"
               else echo "$STAMP $name media FAILED"; rm -f "$OUT/$name-media-$STAMP.tgz"; fi
             done
-            # ротація: старше 14 днів - геть
-            find "$OUT" -type f \( -name '*.dump' -o -name '*.tgz' \) -mtime +14 -delete
-            df -h /opt | tail -1 | awk '{print "disk", $4, "free"}'
+            prune
             BKSH
               sed -i 's/^            //' /opt/socialio-backup.sh
               chmod +x /opt/socialio-backup.sh
               ( crontab -l 2>/dev/null | grep -v socialio-backup ; echo "20 3 * * * /opt/socialio-backup.sh >> /opt/socialio-backup.log 2>&1" ) | crontab - \
-                && echo "💾 backup-cron на місці (щоночі 03:20 UTC → /opt/socialio-backups, 14 днів)" || echo "⚠️ не вдалося поставити backup-cron"
-              echo "--- останні бекапи ---"; ls -lh /opt/socialio-backups 2>/dev/null | tail -6 || echo "(ще жодного)"
+                && echo "💾 backup-cron на місці (щоночі 03:20 UTC → /opt/socialio-backups; бази й медіа проду - 15 днів, медіа беті - 3 архіви)" || echo "⚠️ не вдалося поставити backup-cron"
+              # нові правила ротації - одразу, не чекаючи ночі (лише видаляє зайве, нового бекапу не робить)
+              /opt/socialio-backup.sh prune || echo "⚠️ ротація бекапів не вдалась"
+              echo "--- останні бекапи ---"; ls -lh /opt/socialio-backups 2>/dev/null | tail -8 || echo "(ще жодного)"
             fi
             # 📋 Інвентар хоста. Бокс один на всі сервіси, тож коли щось «зникає» (28.07 контейнери
             # socialio знесло цілком - compose створював їх з нуля), треба бачити, ЩО саме лишилось.

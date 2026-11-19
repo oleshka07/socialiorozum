@@ -252,6 +252,8 @@ const API = {
     cap: { spentDay: 2.55, spentMonth: 7.1, capDay: 3, capMonth: 30 },
   },
   "GET /admin/health": { errorCount: 2, warnCount: 5, spendToday: 1.23, runningJobs: 1, lostJobs: 0, lastBackup: "socialio-db-20260902-0320.dump (164K)",
+    space: { backups: { bytes: 9.5 * 1024 ** 3, files: 33, limit: 8 * 1024 ** 3, groups: [{ group: "socialio-beta-media", files: 3, bytes: 4.3 * 1024 ** 3 }, { group: "<b>x</b>", files: 1, bytes: 4.6 * 1024 ** 3 }] },
+      disk: { free: 14.6 * 1024 ** 3, total: 75 * 1024 ** 3, min: 15 * 1024 ** 3 } },
     errors: [{ level: "error", scope: "publish", message: "Telegram відмовив у доступі (403)", n: 2 }, { level: "warn", scope: "meeting", message: "хеш транскрипта не збігся", n: 5 }],
     seo: { indexNow: true, keyFile: "https://holos.rozum.one/0123456789abcdef0123456789abcdef.txt",
       ping: { at: "2026-10-03T19:20:00.000Z", status: 422, urls: ["https://holos.rozum.one/"], error: "URLs <b>do not</b> belong to host" },
@@ -2425,7 +2427,12 @@ const run = async () => {
     // відповіді чужого сервера - як текст, не розмітка
     const seoOk = t.includes("Пошуковики") && t.includes("4 стор. (зміни від 03.10)") && t.includes("IndexNow не прийняв (422")
       && t.includes("Чекає: /.") && t.includes("Search Console") && t.includes("URLs <b>do not</b> belong");
-    return t.includes("помилок за добу") && t.includes("$1.23") && t.includes("Telegram відмовив") && t.includes("20260902-0320") && seoOk;
+    // 💾 місце: тека бекапів понад межу і мало вільного на диску - видно цифри й жовтим; назва купки - як текст
+    const space = await page.evaluate(() => { const b = [...document.querySelectorAll("#admHealth b")].find((x) => x.textContent.includes("Місце")); const d = b?.parentElement;
+      return d ? { t: d.textContent, amber: [...d.querySelectorAll("span")].filter((s) => s.style.color.includes("amber")).length } : null; });
+    const spaceOk = !!space && space.t.includes("тека бекапів 9,5 ГБ (межа 8 ГБ)") && space.t.includes("socialio-beta-media 3 шт. 4,3 ГБ")
+      && space.t.includes("<b>x</b>") && space.t.includes("вільно 14,6 ГБ із 75 ГБ (менше 15 ГБ)") && space.amber === 2;
+    return t.includes("помилок за добу") && t.includes("$1.23") && t.includes("Telegram відмовив") && t.includes("20260902-0320") && seoOk && spaceOk;
   });
 
   await check("adminAlerts", async () => {

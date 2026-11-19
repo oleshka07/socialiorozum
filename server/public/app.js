@@ -5137,10 +5137,28 @@ async function loadAdminHealth(){
       +'<div class="card"><b style="font-size:14px">'+(h.lastBackup?esc(h.lastBackup):'не видно')+'</b><div class="hint">останній бекап'+(h.lastBackup?'':' - тека не змонтована або ще жодного')+'</div></div></div>';
     if(errs.length) out+='<div style="font-size:12.5px">'+errs.map(e=>'<div style="display:flex;gap:8px;padding:3px 0;border-top:1px solid var(--line2)"><span style="color:'+(e.level==='error'?'var(--danger)':'var(--amber)')+';min-width:44px">'+esc(e.level)+'</span><span style="min-width:90px;color:var(--muted)">'+esc(e.scope)+'</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(e.message)+'">'+esc(e.message)+'</span><span style="color:var(--faint)">×'+e.n+'</span></div>').join('')+'</div>';
     else out+='<div class="hint">За добу - жодної помилки в журналі.</div>';
+    out+=spaceHealthLine(h.space);
     out+=seoHealthLine(h.seo);
     out+='<div class="hint" style="margin-top:8px">Прод і бета стежать один за одним (див. «🔔 Сповіщення про збої»). Якщо ляже весь сервер разом - сказати буде нікому: для цього зовнішня перевірка (UptimeRobot / Better Stack на <code>/health</code>), одна дія в їхньому кабінеті.</div>';
     box.innerHTML=out;
   }catch(e){ box.innerHTML='<div class="empty">⚠ '+esc(e.message)+'</div>'; }
+}
+// 💾 Місце: тека бекапів і диск (ті самі пороги, що й у сповіщеннях: тека понад 8 ГБ, вільно менше 15 ГБ).
+// 19.11 тека бекапів виросла до 21 ГБ непомітно - тепер видно тут і приходить сповіщенням.
+function fmtGb(b){ const g=Math.max(0,Number(b)||0)/1073741824; if(g>0&&g<0.05) return '<0,1 ГБ'; return (g>=100?String(Math.round(g)):String(Math.round(g*10)/10).replace('.',','))+' ГБ'; }
+function spaceHealthLine(sp){
+  if(!sp||(!sp.backups&&!sp.disk)) return '';
+  const parts=[];
+  if(sp.backups){
+    const b=sp.backups, over=b.bytes>b.limit;
+    const top=(b.groups||[]).slice(0,3).map(g=>esc(g.group)+' '+g.files+' шт. '+fmtGb(g.bytes)).join(', ');
+    parts.push('<span'+(over?' style="color:var(--amber)"':'')+'>тека бекапів '+fmtGb(b.bytes)+' (межа '+fmtGb(b.limit)+')'+(top?': '+top:'')+'</span>');
+  }
+  if(sp.disk){
+    const d=sp.disk, low=d.free<d.min;
+    parts.push('<span'+(low?' style="color:var(--amber)"':'')+'>на диску вільно '+fmtGb(d.free)+' із '+fmtGb(d.total)+(low?' (менше '+fmtGb(d.min)+')':'')+'</span>');
+  }
+  return '<div class="hint" style="margin-top:8px"><b>💾 Місце.</b> '+parts.join(' · ')+'. Медіа беті - 3 останні архіви, медіа проду й бази - 15 днів.</div>';
 }
 // 🔎 Пошуковики (seo.ts): дати сторінок у sitemap і чи прийняв IndexNow. Google - окремо, у Search Console.
 function seoHealthLine(seo){
